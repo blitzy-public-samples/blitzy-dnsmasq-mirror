@@ -14,6 +14,107 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file dnsmasq.c
+ * @brief Main daemon entry point, initialization, and event loop orchestration
+ * 
+ * DETAILED PURPOSE:
+ * 
+ * This file implements the core daemon functionality for dnsmasq, a lightweight DNS forwarder,
+ * DHCP server, and network boot server. It contains the main() entry point which handles
+ * initialization, privilege management, and enters the primary event loop that coordinates
+ * all network services.
+ * 
+ * The daemon implements a single-process, cooperative multitasking architecture using poll()-based
+ * event multiplexing. After parsing configuration and creating all necessary sockets, the daemon
+ * drops privileges (setuid/setgid to configured --user, Linux capabilities reduced from
+ * CAP_NET_ADMIN → CAP_NET_BIND_SERVICE → CAP_NET_RAW for DHCP functionality), optionally forks
+ * to background (unless --no-daemon), writes PID file, and installs signal handlers using the
+ * self-pipe pattern for async-signal-safe operation.
+ * 
+ * The main event loop (lines 1056-1287) polls file descriptors for all enabled services including:
+ * DNS (port 53), DHCP (ports 67/68), DHCPv6 (ports 547/546), TFTP (port 69), netlink/routing
+ * sockets for interface changes, D-Bus/ubus for IPC, and a self-pipe for signal handling. When
+ * events occur, they are dispatched to the appropriate subsystem handlers: check_dns_listeners()
+ * dispatches DNS packets to forward.c receive_query(), check_dhcp_listeners() dispatches DHCP
+ * packets to dhcp.c dhcp_packet(), etc.
+ * 
+ * KEY RESPONSIBILITIES:
+ * 
+ * - main() - Daemon initialization sequence, configuration parsing, socket creation, privilege
+ *   management, daemonization, signal handler installation, and entering main event loop
+ * - check_dns_listeners() - Dispatches incoming DNS queries from network sockets to forward.c
+ *   receive_query() for processing
+ * - sig_handler() - POSIX signal handler implementing self-pipe pattern for async-signal-safe
+ *   signal queueing to main loop
+ * - async_event() - Processes queued signals in main loop context including SIGHUP (reload config),
+ *   SIGUSR1 (dump cache stats), SIGUSR2 (rotate logs), SIGTERM/SIGINT (graceful shutdown)
+ * - clear_cache_and_reload() - Flushes DNS cache and reloads configuration files (hosts, resolv.conf)
+ *   in response to SIGHUP signal
+ * 
+ * DEPENDENCIES:
+ * 
+ * Includes: dnsmasq.h (primary type definitions including struct daemon), config.h (compile-time
+ * configuration constants and feature macros), locale.h (for IDN/i18n support)
+ * 
+ * Called by: Operating system (program entry point), signal handlers (async context)
+ * 
+ * Calls: option.c read_opts() for configuration parsing, network.c create_bound_listeners() for
+ * socket setup, forward.c receive_query() for DNS query processing, dhcp.c dhcp_packet() for DHCP
+ * request processing, helper.c create_helper() for privilege-separated script execution, poll.c
+ * do_poll() for event multiplexing
+ * 
+ * DATA STRUCTURES:
+ * 
+ * - struct daemon *daemon (global, line 27) - Central daemon state container holding all
+ *   configuration, runtime state, socket file descriptors, and pointers to data structures for
+ *   DNS cache, DHCP leases, upstream servers, etc. (defined in dnsmasq.h ~line 800-1100)
+ * - struct sigaction sigact (main(), line 43) - POSIX signal handler configuration structure
+ * - struct event_desc (async_event(), line 1451) - Event descriptor for self-pipe signal delivery
+ * 
+ * COMPILE-TIME OPTIONS:
+ * 
+ * This file's behavior is controlled by numerous feature macros tested throughout:
+ * - HAVE_DHCP - Enables DHCPv4 server functionality (affects socket creation, event dispatch)
+ * - HAVE_DHCP6 - Enables DHCPv6 server and Router Advertisement (affects socket creation)
+ * - HAVE_TFTP - Enables TFTP server functionality
+ * - HAVE_DBUS - Enables D-Bus IPC interface for runtime configuration
+ * - HAVE_UBUS - Enables ubus IPC interface (OpenWrt)
+ * - HAVE_SCRIPT - Enables lease-change script execution via helper process
+ * - HAVE_LUASCRIPT - Enables Lua scripting support (implies HAVE_SCRIPT)
+ * - HAVE_DNSSEC - Enables DNSSEC validation (affects cache and forwarding behavior)
+ * - HAVE_AUTH - Enables authoritative DNS server functionality
+ * - HAVE_INOTIFY - Uses Linux inotify for automatic config file reload detection
+ * - HAVE_LINUX_NETWORK - Linux-specific networking (capabilities, netlink, SO_BINDTODEVICE)
+ * - HAVE_BSD_NETWORK - BSD-specific networking (routing socket, interface enumeration)
+ * - HAVE_SOLARIS_NETWORK - Solaris-specific networking
+ * - HAVE_IDN, HAVE_LIBIDN2 - Internationalized Domain Name support
+ * - LOCALEDIR - Enables gettext localization
+ * 
+ * See config.h for full list of compile-time configuration options.
+ * 
+ * THREADING/CONCURRENCY MODEL:
+ * 
+ * dnsmasq uses a single-process, single-threaded, cooperative multitasking model based on poll()-
+ * based event multiplexing. It is NOT thread-safe and MUST NOT be used in multithreaded contexts.
+ * Signal handlers use the self-pipe pattern to avoid race conditions: async-signal-safe write()
+ * to pipe in signal context, with actual signal processing deferred to main loop via async_event().
+ * 
+ * For TCP DNS queries, child processes are forked (up to MAX_PROCS=20) to handle long-lived
+ * connections without blocking the main event loop. Child processes are tracked in daemon->tcp_pids[]
+ * array and reaped via SIGCHLD handler.
+ * 
+ * For script execution, a single helper process is forked before dropping root privileges,
+ * communicating via pipe with privilege-separated script invocation (see helper.c).
+ * 
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/ARCHITECTURE.md for system architecture overview and event loop details
+ * @see forward.c for DNS query forwarding implementation
+ * @see dhcp.c for DHCP server implementation
+ * @see poll.c for poll() wrapper and event multiplexing
+ */
+
 /* Declare static char *compiler_opts  in config.h */
 #define DNSMASQ_COMPILE_OPTS
 
@@ -37,6 +138,86 @@ static void fatal_event(struct event_desc *ev, char *msg);
 static int read_event(int fd, struct event_desc *evp, char **msg);
 static void poll_resolv(int force, int do_reload, time_t now);
 
+/**
+ * @brief Initialize dnsmasq daemon and enter main event loop
+ * 
+ * @detailed
+ * This is the main entry point for the dnsmasq daemon. It performs complete initialization sequence:
+ * parses command-line arguments and configuration files via read_opts(), allocates and initializes
+ * the global daemon state structure, creates all necessary network sockets (DNS, DHCP, TFTP, netlink),
+ * optionally forks a helper process for privilege-separated script execution, drops privileges to
+ * configured user/group (default "nobody"), optionally daemonizes to background, writes PID file,
+ * installs signal handlers, and enters the main event loop which polls sockets and dispatches events
+ * to subsystem handlers until termination signal received (SIGTERM/SIGINT).
+ * 
+ * Initialization order is critical for security: sockets requiring CAP_NET_BIND_SERVICE (ports <1024)
+ * or CAP_NET_ADMIN (DHCP raw sockets) are created before dropping privileges. On Linux, capabilities
+ * are carefully managed: starts with full root, reduces to CAP_NET_ADMIN | CAP_NET_BIND_SERVICE |
+ * CAP_NET_RAW after socket creation, then drops CAP_NET_ADMIN unless needed for DHCP, finally drops
+ * to minimum required set (CAP_NET_BIND_SERVICE for DNS, CAP_NET_RAW for DHCP ping checks).
+ * 
+ * The main event loop (lines 1056-1287) implements cooperative multitasking via poll(): sets up file
+ * descriptor listeners for all enabled services, calls do_poll() with calculated timeout, then
+ * dispatches any ready events to appropriate handlers (check_dns_listeners for DNS, dhcp_packet for
+ * DHCP, check_tftp_listeners for TFTP, etc.). Loop continues until EVENT_TERM received via signal pipe.
+ * 
+ * @param argc Argument count from command line
+ * @param argv Argument vector containing command-line options and config file paths
+ * @return 0 on clean shutdown, or error code from EC_* constants (see dnsmasq.h) on fatal errors:
+ *         EC_BADCONF (1) for configuration errors, EC_BADNET (2) for network setup failures,
+ *         EC_FILE (3) for file access errors, EC_NOMEM (4) for memory allocation failures,
+ *         EC_INIT (5) for initialization failures, EC_MISC (6) for other errors
+ * 
+ * @note Drops privileges after socket creation: setuid/setgid to --user option (default "nobody").
+ *       On Linux, also manages capabilities via prctl() and capset() to minimize attack surface.
+ * @note Forks helper process via create_helper() before dropping root privileges to enable
+ *       execution of lease-change scripts and external commands in controlled environment.
+ * @note Daemonizes to background unless --no-daemon or --debug options specified, closing stdin/
+ *       stdout/stderr and detaching from controlling terminal.
+ * @note Signal handlers installed for: SIGHUP (reload config), SIGUSR1 (dump cache stats),
+ *       SIGUSR2 (rotate log files), SIGTERM/SIGINT (graceful shutdown with lease file flush),
+ *       SIGCHLD (reap TCP child processes), SIGALRM (timer events), SIGPIPE (ignored).
+ * 
+ * @warning Must be invoked with sufficient privileges to bind privileged ports (<1024) and create
+ *          raw sockets for DHCP. Typically requires root or appropriate capabilities on Linux.
+ * @warning Never returns under normal operation - runs until killed by signal or fatal error occurs.
+ * @warning Modifies global state including daemon pointer, signal handlers, umask, locale settings.
+ * 
+ * @see read_opts() in option.c for configuration parsing
+ * @see create_bound_listeners() in network.c for socket creation
+ * @see create_helper() in helper.c for helper process fork
+ * @see do_poll() in poll.c for event multiplexing
+ * @see docs/ARCHITECTURE.md for detailed initialization sequence and event loop architecture
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Typical invocation by init system or manual startup:
+ * // ./dnsmasq --conf-file=/etc/dnsmasq.conf --user=dnsmasq --pid-file=/var/run/dnsmasq.pid
+ * int main(int argc, char **argv) {
+ *     // Called by OS - performs full initialization and never returns
+ *     return 0; // Unreachable under normal operation
+ * }
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Implements daemon behavior per Unix conventions and LSB. Respects POSIX signal semantics.
+ * 
+ * SIDE EFFECTS:
+ * - Allocates global daemon structure and modifies daemon pointer
+ * - Creates network sockets bound to configured addresses/ports
+ * - Optionally forks to background (daemonizes) unless --no-daemon specified
+ * - Writes PID file to configured location (default /var/run/dnsmasq.pid)
+ * - Installs signal handlers for SIGHUP, SIGUSR1, SIGUSR2, SIGTERM, SIGINT, SIGCHLD, SIGALRM
+ * - Modifies umask to 022 for predictable file permissions
+ * - Drops privileges via setuid/setgid and Linux capability management
+ * - Sets locale for internationalization if LOCALEDIR defined
+ * - Forks helper process for script execution if HAVE_SCRIPT enabled
+ * - Creates self-pipe for async-signal-safe signal delivery to event loop
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. dnsmasq is strictly single-threaded (though may fork child processes for TCP
+ * connections and helper scripts). MUST NOT be called from multiple threads.
+ */
 int main (int argc, char **argv)
 {
   time_t now;
@@ -1286,6 +1467,72 @@ int main (int argc, char **argv)
     }
 }
 
+/**
+ * @brief POSIX signal handler using self-pipe pattern for async-signal-safe event delivery
+ * 
+ * @detailed
+ * Async-signal-safe signal handler invoked when POSIX signals (SIGHUP, SIGTERM, SIGINT, SIGUSR1, SIGUSR2,
+ * SIGCHLD, SIGALRM) are delivered to dnsmasq process. Implements self-pipe pattern to safely defer signal
+ * processing to main event loop: translates signal number to internal event code, calls send_event() to
+ * write event descriptor to non-blocking pipe, then returns immediately. Main loop's async_event() reads
+ * pipe and processes events in non-signal context where full API is available.
+ * 
+ * Handles three cases based on global pid variable state:
+ * 1. pid == 0: Startup or helper process - ignore all signals except TERM/INT which exit immediately
+ * 2. pid != getpid(): TCP child process - only handles SIGALRM for connection timeout (exits)
+ * 3. pid == getpid(): Master process - translates all signals to events and queues via self-pipe
+ * 
+ * Signal to event mapping: SIGHUP→EVENT_RELOAD (reload config), SIGCHLD→EVENT_CHILD (reap children),
+ * SIGALRM→EVENT_ALARM (timer expiry), SIGTERM→EVENT_TERM (graceful shutdown), SIGUSR1→EVENT_DUMP
+ * (cache dump), SIGUSR2→EVENT_REOPEN (log rotation), SIGINT→EVENT_TIME (DNSSEC time check) unless
+ * debug mode then exits.
+ * 
+ * @param sig Signal number from POSIX signal delivery (SIGHUP=1, SIGINT=2, SIGTERM=15, SIGCHLD=17,
+ *            SIGALRM=14, SIGUSR1=10, SIGUSR2=12)
+ * 
+ * @note Only uses async-signal-safe functions: send_event() with NULL msg, errno save/restore
+ * @note Preserves and restores errno to avoid interfering with interrupted system calls
+ * @note Returns immediately after queueing event - actual processing deferred to async_event()
+ * @note Installed via sigaction() in main() with SA_RESTART for automatic syscall restart
+ * 
+ * @warning MUST NOT call non-async-signal-safe functions (malloc, printf, most library functions)
+ * @warning Only send_event() with NULL message is async-signal-safe (no malloc in msg path)
+ * @warning Race condition possible if signal delivered during critical section - use self-pipe to defer
+ * @warning In debug mode (--debug option), SIGINT causes immediate exit bypassing self-pipe for ^C responsiveness
+ * 
+ * @see async_event() for event processing in main loop context
+ * @see send_event() for self-pipe event writing (async-signal-safe)
+ * @see main() for signal handler installation via sigaction()
+ * @see signal(7) and signal-safety(7) man pages for async-signal-safe function restrictions
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Signal handler installed in main():
+ * struct sigaction sigact;
+ * sigact.sa_handler = sig_handler;
+ * sigact.sa_flags = 0;
+ * sigemptyset(&sigact.sa_mask);
+ * sigaction(SIGHUP, &sigact, NULL);  // Install handler for config reload
+ * 
+ * // When user sends "kill -HUP <pid>":
+ * // 1. OS delivers SIGHUP to process
+ * // 2. sig_handler(SIGHUP) executes in signal context
+ * // 3. Translates to EVENT_RELOAD and writes to self-pipe
+ * // 4. Returns immediately
+ * // 5. Main loop poll() wakes on pipe readable
+ * // 6. async_event() reads EVENT_RELOAD and calls clear_cache_and_reload()
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Writes event descriptor to self-pipe via send_event()
+ * - TCP children exit immediately on SIGALRM
+ * - Preserves and restores errno
+ * - In debug mode, SIGINT causes immediate daemon exit
+ * 
+ * THREAD SAFETY:
+ * Async-signal-safe (can be invoked during any non-atomic operation). Uses only write() system call
+ * via send_event() with NULL message parameter.
+ */
 static void sig_handler(int sig)
 {
   if (pid == 0)
@@ -1335,7 +1582,53 @@ static void sig_handler(int sig)
     }
 }
 
-/* now == 0 -> queue immediate callback */
+/**
+ * @brief Schedule alarm signal for future event or queue immediate callback
+ * 
+ * @detailed
+ * Schedules a SIGALRM signal to be delivered at the specified event time using alarm() system call.
+ * If the event is immediate (now == 0) or event time has already passed, queues an immediate
+ * EVENT_ALARM via send_event() to the self-pipe instead of using alarm(). This function is primarily
+ * used for DHCP lease expiry timers, Router Advertisement periodic transmission, and cache TTL
+ * expiration timeouts that need to be checked at specific future times.
+ * 
+ * The alarm() call sets a timer that will deliver SIGALRM after the calculated number of seconds
+ * (difftime(event, now)). The signal handler sig_handler() will then send EVENT_ALARM through the
+ * self-pipe, which async_event() will process in the main loop context.
+ * 
+ * @param event Absolute time_t when alarm should fire (seconds since epoch), or 0 to disable pending alarm
+ * @param now Current time_t (seconds since epoch), or 0 to force immediate EVENT_ALARM delivery
+ * 
+ * @note Special case handling: alarm(0) cancels pending alarm, alarm(-ve) is undefined, so we avoid
+ *       calling alarm() with invalid values and use send_event() directly for immediate callbacks
+ * @note Only one alarm() can be pending system-wide per process - calling send_alarm() replaces
+ *       any previously scheduled alarm
+ * 
+ * @warning Not thread-safe - modifies process-wide alarm() state
+ * @warning Relies on sig_handler() being installed for SIGALRM signal
+ * 
+ * @see sig_handler() for SIGALRM signal handling
+ * @see async_event() for EVENT_ALARM processing in main loop
+ * @see send_event() for immediate event queueing
+ * @see alarm(2) man page for POSIX alarm() semantics
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * time_t now = dnsmasq_time();
+ * time_t lease_expiry = now + 3600; // Lease expires in 1 hour
+ * send_alarm(lease_expiry, now); // Schedule SIGALRM in 3600 seconds
+ * 
+ * // For immediate callback:
+ * send_alarm(0, 0); // Queues immediate EVENT_ALARM via self-pipe
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Modifies process alarm() timer (only one alarm can be pending)
+ * - May write EVENT_ALARM to self-pipe if event is immediate or overdue
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Uses process-global alarm() state and writes to self-pipe.
+ */
 void send_alarm(time_t event, time_t now)
 {
   if (now == 0 || event != 0)
@@ -1348,11 +1641,112 @@ void send_alarm(time_t event, time_t now)
     }
 }
 
+/**
+ * @brief Queue an event to the main loop via self-pipe
+ * 
+ * @detailed
+ * Convenience wrapper around send_event() that queues an event with no associated data or message
+ * to the self-pipe for processing by async_event() in the main event loop. This function is used
+ * by subsystems to trigger asynchronous event processing without going through signal handlers.
+ * The event is written to the non-blocking pipe and will be read by the main loop on next poll() iteration.
+ * 
+ * Common event types: EVENT_RELOAD (config reload), EVENT_DUMP (cache dump), EVENT_TERM (shutdown),
+ * EVENT_ALARM (timer expiry), EVENT_NEWADDR (interface address change), EVENT_NEWROUTE (routing change).
+ * 
+ * @param event Event code from event type enum (see dnsmasq.h event definitions)
+ * 
+ * @note No return value - writes to non-blocking pipe which either succeeds immediately or fails silently
+ * @note The pipe is sized >= PIPE_BUF so atomic writes of struct event_desc are guaranteed on Linux
+ * 
+ * @warning Must be called with pipewrite file descriptor initialized (set up during daemon startup)
+ * @warning Event data and msg fields will be 0/NULL - use send_event() directly for events with payloads
+ * 
+ * @see send_event() for full event queuing with data and message
+ * @see async_event() for event processing in main loop context
+ * @see sig_handler() for signal-triggered event queuing
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Trigger cache dump from diagnostic code
+ * queue_event(EVENT_DUMP);
+ * 
+ * // Request configuration reload from monitoring code
+ * queue_event(EVENT_RELOAD);
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Writes struct event_desc to self-pipe (non-blocking write)
+ * - Main loop will process event on next poll() wake-up
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Writes to process-global self-pipe without synchronization.
+ */
 void queue_event(int event)
 {
   send_event(pipewrite, event, 0, NULL);
 }
 
+/**
+ * @brief Send event with optional data and message to file descriptor
+ * 
+ * @detailed
+ * Constructs a struct event_desc with specified event code, data payload, and optional message string,
+ * then atomically writes it to the given file descriptor using writev(). Typically writes to the self-pipe
+ * (pipewrite fd) for delivery to main loop via async_event(), or to error pipe (err_pipe) for fatal errors
+ * during initialization. The pipe write is non-blocking and struct event_desc is smaller than PIPE_BUF
+ * (4096 bytes on Linux) ensuring atomic writes that either succeed completely or fail without partial writes.
+ * 
+ * Uses scatter-gather I/O (writev) with two iovec buffers: first contains struct event_desc header with
+ * event/data/msg_sz fields, second contains optional message string. This allows kernel to write both
+ * atomically in single system call. Retries write on EINTR (interrupted by signal).
+ * 
+ * Special case: if fd == -1, calls fatal_event() directly for synchronous fatal error handling during
+ * daemon initialization before self-pipe is available.
+ * 
+ * @param fd File descriptor to write event to (typically pipewrite for self-pipe, or err_pipe for errors,
+ *           or -1 for direct fatal_event() call)
+ * @param event Event code from event type enum (EVENT_RELOAD, EVENT_TERM, EVENT_ALARM, EVENT_DIE, etc.)
+ * @param data Integer data payload associated with event (e.g., signal number, errno value, child PID)
+ * @param msg Optional null-terminated message string providing details (e.g., error description), or NULL
+ *            if no message. WARNING: message memory is leaked after read_event() - only use for fatal errors
+ * 
+ * @note Uses writev() for atomic scatter-gather write of header + message in single system call
+ * @note Retries on EINTR but not on other errors - non-blocking pipe either succeeds or drops event
+ * @note struct event_desc is < PIPE_BUF so writes are atomic on POSIX systems
+ * 
+ * @warning Message memory passed via msg parameter is leaked after read_event() consumes it - only use
+ *          for fatal error messages where daemon will exit immediately
+ * @warning If fd is non-blocking (as self-pipe should be), write may fail with EAGAIN/EWOULDBLOCK if pipe
+ *          full - event will be silently dropped
+ * @warning Never pass untrusted input as msg parameter - no bounds checking on message length
+ * 
+ * @see queue_event() for convenient wrapper with no data/message
+ * @see async_event() for event consumption in main loop
+ * @see read_event() for reading event from pipe
+ * @see fatal_event() for fatal error event processing
+ * @see writev(2) man page for scatter-gather I/O semantics
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Send reload event from signal handler (async-signal-safe)
+ * send_event(pipewrite, EVENT_RELOAD, 0, NULL);
+ * 
+ * // Send error event with errno and message
+ * send_event(err_pipe, EVENT_FORK_ERR, errno, "Failed to fork helper");
+ * 
+ * // Send child exit event with exit status
+ * send_event(pipewrite, EVENT_EXITED, exit_status, NULL);
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Writes struct event_desc (and optional message) to file descriptor using writev()
+ * - If fd == -1, calls fatal_event() which may terminate daemon
+ * - Retries write if interrupted by signal (EINTR)
+ * 
+ * THREAD SAFETY:
+ * Async-signal-safe when msg is NULL and fd is valid (no malloc, no mutex, only writev system call).
+ * Can be safely called from signal handlers with NULL message parameter.
+ */
 void send_event(int fd, int event, int data, char *msg)
 {
   struct event_desc ev;
@@ -1376,6 +1770,65 @@ void send_event(int fd, int event, int data, char *msg)
     while (writev(fd, iov, msg ? 2 : 1) == -1 && errno == EINTR);
 }
 
+/**
+ * @brief Read event descriptor and optional message from pipe file descriptor
+ * 
+ * @detailed
+ * Reads a struct event_desc from the given file descriptor (typically the self-pipe piperead), followed
+ * by optional message string if ev.msg_sz > 0. Uses read_write() utility for reliable read with retry on
+ * EINTR. Allocates memory for message string via malloc() if message present - this memory is intentionally
+ * leaked after use (only safe for fatal error messages where daemon exits immediately).
+ * 
+ * Returns 1 on success with evp populated and *msg set to allocated string (or NULL if no message),
+ * returns 0 on read failure (pipe closed or error). Caller is responsible for checking event type and
+ * processing via switch statement in async_event().
+ * 
+ * @param fd File descriptor to read from (typically piperead from self-pipe setup in main())
+ * @param evp Pointer to struct event_desc to populate with event/data/msg_sz fields read from pipe
+ * @param msg Pointer to char* which will be set to malloc'd message string if msg_sz > 0, or NULL if no message
+ * 
+ * @return 1 on successful read of event descriptor (with or without message), 0 on read failure
+ * @retval 1 Event successfully read into evp, message (if any) allocated and assigned to *msg
+ * @retval 0 Failed to read event descriptor (pipe closed, error, or partial read) - evp/msg undefined
+ * 
+ * @note Message memory is intentionally leaked - only use for fatal error messages where daemon exits
+ * @note Uses read_write() utility which retries on EINTR for robust signal-safe reading
+ * @note Message buffer is null-terminated (extra byte allocated beyond msg_sz)
+ * 
+ * @warning Memory leak: allocated message buffer via malloc() is never freed - only use for fatal errors
+ * @warning Partial reads fail silently - read_write() ensures atomic read of struct or fails completely
+ * @warning No bounds checking on msg_sz - attacker controlling pipe could cause large malloc()
+ * 
+ * @see send_event() for writing events to pipe
+ * @see async_event() for event processing after read_event() succeeds
+ * @see read_write() in util.c for reliable read with EINTR retry
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * struct event_desc ev;
+ * char *msg = NULL;
+ * 
+ * if (read_event(piperead, &ev, &msg)) {
+ *     switch (ev.event) {
+ *         case EVENT_RELOAD:
+ *             clear_cache_and_reload(now);
+ *             break;
+ *         case EVENT_DIE:
+ *             fatal_event(&ev, msg); // exits, msg memory leak acceptable
+ *             break;
+ *     }
+ * }
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Reads sizeof(struct event_desc) bytes from file descriptor
+ * - May allocate memory via malloc() for message string (intentionally leaked)
+ * - Consumes one event from pipe (pipe is drained by each read_event() call)
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Reads from shared file descriptor without synchronization. Calls malloc() which
+ * is not async-signal-safe.
+ */
 /* NOTE: the memory used to return msg is leaked: use msgs in events only
    to describe fatal errors. */
 static int read_event(int fd, struct event_desc *evp, char **msg)
@@ -1398,6 +1851,49 @@ static int read_event(int fd, struct event_desc *evp, char **msg)
   return 1;
 }
     
+/**
+ * @brief Handle fatal error events requiring daemon termination or critical logging
+ * 
+ * @detailed
+ * Processes fatal events queued by send_event() for main-context handling. Handles EVENT_DIE
+ * (clean shutdown), EVENT_FORK_ERR (helper process fork failure), EVENT_PIPE_ERR (helper pipe
+ * communication failure), EVENT_USER_ERR (setuid/setgid failure), EVENT_CAP_ERR (Linux capability
+ * manipulation failure), and EVENT_PIDFILE (PID file write failure). All errors logged via die()
+ * which terminates daemon with appropriate error message.
+ * 
+ * Event types: EVENT_DIE exits cleanly with code 0. All other events restore errno from ev->data,
+ * log error message with die(), and terminate. Used for unrecoverable initialization errors that
+ * cannot be handled in signal context or helper process.
+ * 
+ * @param ev Event descriptor containing event type and associated errno
+ * @param msg Optional custom error message string (may be NULL for standard messages)
+ * 
+ * @note Called only from async_event() after read_event() delivers fatal events
+ * @note Always terminates daemon (via exit(0) or die()) except for events removed from codebase
+ * @warning No return - function always exits process
+ * 
+ * @see send_event() for fatal event queuing mechanism
+ * @see async_event() for event dispatch
+ * @see die() in dnsmasq.c for error logging and exit
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Helper process fork failure:
+ * if (fork() == -1) {
+ *   send_event(event_fd, EVENT_FORK_ERR, errno, NULL);
+ *   // → async_event → read_event → fatal_event
+ *   // → die("cannot fork helper: %s", strerror(errno))
+ * }
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Logs fatal error message to syslog
+ * - Terminates daemon process (exit() or die())
+ * - May delete PID file on clean shutdown
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Terminates process, so concurrency irrelevant.
+ */
 static void fatal_event(struct event_desc *ev, char *msg)
 {
   errno = ev->data;
@@ -1446,8 +1942,62 @@ static void fatal_event(struct event_desc *ev, char *msg)
     case EVENT_TIME_ERR:
       die(_("cannot create timestamp file %s: %s" ), msg, EC_BADCONF);
     }
-}	
-      
+}
+
+/**
+ * @brief Process queued events from self-pipe in main loop context
+ * 
+ * @detailed
+ * Reads and processes events from the self-pipe that were queued by sig_handler() (for signals) or
+ * queue_event() (for async subsystem events). Provides safe signal processing by deferring signal
+ * handling from async-signal-unsafe signal context to main event loop where full API is available.
+ * 
+ * Handles events: EVENT_RELOAD/EVENT_INIT (config reload via clear_cache_and_reload), EVENT_DUMP
+ * (cache dump to syslog), EVENT_ALARM (DHCP lease expiry, RA periodic sending), EVENT_CHILD (reap
+ * TCP children via waitpid), EVENT_KILLED/EVENT_EXITED/EVENT_EXEC_ERR (helper script errors),
+ * EVENT_REOPEN (log rotation), EVENT_NEWADDR (interface address change via newaddress()), EVENT_NEWROUTE
+ * (routing table change), EVENT_TIME (DNSSEC time check), EVENT_TERM (graceful shutdown with lease flush),
+ * EVENT_DIE/EVENT_USER_ERR/EVENT_LUA_ERR (fatal errors via fatal_event()).
+ * 
+ * Uses read_event() to atomically read struct event_desc from pipe, then large switch statement to
+ * dispatch to appropriate handler. Some events like EVENT_ALARM trigger DHCP lease pruning and file
+ * updates, EVENT_CHILD reaps zombie processes from daemon->tcp_pids[] array.
+ * 
+ * @param pipe File descriptor for reading events (typically piperead from self-pipe setup in main())
+ * @param now Current time from dnsmasq_time() for timestamp-dependent operations (lease expiry, TTL)
+ * 
+ * @note Called from main event loop when poll() indicates pipe is readable
+ * @note Message memory from read_event() is intentionally leaked except for fatal error messages
+ * @note Multiple events may be queued - main loop calls repeatedly while pipe readable
+ * 
+ * @warning Must be called from main loop context, not signal handlers or child processes
+ * @warning EVENT_TERM never returns - flushes leases, kills children, and exits daemon
+ * 
+ * @see sig_handler() for signal-triggered event queuing
+ * @see read_event() for reading events from pipe
+ * @see clear_cache_and_reload() for EVENT_RELOAD/EVENT_INIT processing
+ * @see newaddress() in network.c for EVENT_NEWADDR interface change handling
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // In main event loop after poll() returns:
+ * if (poll_check(piperead, POLLIN))
+ *     async_event(piperead, now);  // Process all queued events
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - EVENT_RELOAD: Clears DNS cache, reloads hosts/resolv files, bumps SOA serial
+ * - EVENT_DUMP: Writes cache statistics to syslog
+ * - EVENT_ALARM: Prunes expired DHCP leases, updates lease file, sends periodic RA
+ * - EVENT_CHILD: Reaps terminated TCP child processes from tcp_pids array
+ * - EVENT_TERM: Kills all TCP children, flushes lease file, exits daemon
+ * - EVENT_REOPEN: Closes and reopens log file for rotation
+ * - EVENT_NEWADDR: Updates interface address list via newaddress()
+ * - EVENT_NEWROUTE: Resends queued queries, re-reads resolv file
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global daemon state including tcp_pids, cache, lease database.
+ */	
 static void async_event(int pipe, time_t now)
 {
   pid_t p;
@@ -1629,6 +2179,47 @@ static void async_event(int pipe, time_t now)
       }
 }
 
+/**
+ * @brief Check resolv.conf for changes and reload upstream DNS servers if modified
+ * 
+ * @detailed
+ * Monitors /etc/resolv.conf (or custom resolv file via --resolv-file) for modifications by comparing
+ * file mtime against daemon->last_resolv timestamp. If file changed (or force==1), rereads nameserver
+ * entries and updates daemon->servers list. Called periodically from main loop (every ~1 second) or
+ * immediately via EVENT_NEWROUTE/inotify. If do_reload==1, also triggers cache clear and hosts reload.
+ * 
+ * Handles multiple resolv files if configured, iterating through daemon->resolv_files list. Skips
+ * reload if --no-poll option set. Updates daemon->last_resolv timestamp after successful check.
+ * 
+ * @param force If 1, force reload even if mtime unchanged (used on startup and explicit triggers)
+ * @param do_reload If 1, also clear cache and reload hosts files via clear_cache_and_reload()
+ * @param now Current time from dnsmasq_time() for timestamp comparisons
+ * 
+ * @note Only reloads if file mtime changed or force==1
+ * @note Multiple resolv files supported via --resolv-file option repeated
+ * @note Respects --no-poll option to disable automatic reload checks
+ * 
+ * @see clear_cache_and_reload() for full configuration reload
+ * @see check_servers() in option.c for upstream server list validation
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Periodic check in main loop:
+ * if (difftime(now, daemon->last_resolv) > 1.0)
+ *     poll_resolv(0, 0, now);  // Check for changes, no forced reload
+ * 
+ * // Force reload on network change:
+ * poll_resolv(1, 1, now);  // Force reload with cache clear
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Rereads resolv.conf and updates daemon->servers list
+ * - If do_reload==1, clears DNS cache and reloads hosts files
+ * - Updates daemon->last_resolv timestamp
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global daemon->servers list without synchronization.
+ */
 static void poll_resolv(int force, int do_reload, time_t now)
 {
   struct resolvc *res, *latest;
@@ -1705,6 +2296,49 @@ static void poll_resolv(int force, int do_reload, time_t now)
     }
 }       
 
+/**
+ * @brief Clear DNS cache and reload all configuration files
+ * 
+ * @detailed
+ * Comprehensive configuration reload triggered by SIGHUP signal or explicit API call. Clears entire
+ * DNS cache via cache_start_insert()/cache_end_insert(), reloads /etc/hosts and additional hosts files,
+ * reloads /etc/resolv.conf for upstream servers, reloads DHCP host configuration, and logs reload
+ * completion. Used for dynamic configuration updates without daemon restart.
+ * 
+ * Operations performed: (1) Clear DNS cache completely, (2) reload hosts files via read_hosts(),
+ * (3) reload resolv.conf via poll_resolv(), (4) reload DHCP hosts if HAVE_DHCP, (5) recheck
+ * upstream servers via check_servers(), (6) log "cleared cache" message.
+ * 
+ * @param now Current time from dnsmasq_time() for timestamp operations
+ * 
+ * @note Called from async_event() for EVENT_RELOAD and EVENT_INIT
+ * @note Preserves daemon state except cached data and file-sourced configuration
+ * @note Does NOT reload command-line options or main config file (requires restart)
+ * 
+ * @see async_event() for EVENT_RELOAD handling
+ * @see poll_resolv() for resolv.conf reload
+ * @see read_hosts() in cache.c for hosts file reload
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Triggered by user sending SIGHUP:
+ * // kill -HUP <dnsmasq_pid>
+ * // → sig_handler → EVENT_RELOAD → async_event → clear_cache_and_reload
+ * 
+ * // Programmatic reload:
+ * clear_cache_and_reload(dnsmasq_time());
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Clears entire DNS cache (all cached RRs deleted)
+ * - Reloads /etc/hosts and --addn-hosts files
+ * - Reloads /etc/resolv.conf upstream server list
+ * - Reloads DHCP static host configurations
+ * - Logs "cleared cache" message to syslog
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global cache and configuration state.
+ */
 void clear_cache_and_reload(time_t now)
 {
   (void)now;
@@ -1732,6 +2366,43 @@ void clear_cache_and_reload(time_t now)
 #endif
 }
 
+/**
+ * @brief Register all DNS listener sockets with poll system
+ * 
+ * @detailed
+ * Iterates through all configured DNS listener sockets and registers each with poll_listen() for
+ * read event monitoring. Covers wildcard listeners (0.0.0.0, ::) and interface-specific listeners.
+ * Called during daemon initialization and after interface changes (EVENT_NEWADDR). Enables DNS
+ * query reception on UDP port 53 (and TCP 53 if configured).
+ * 
+ * Walks daemon->listeners linked list of struct listener, calling poll_listen(fd, POLLIN) for each
+ * socket file descriptor. TCP listeners registered separately with poll_accept().
+ * 
+ * @note Called from main() during startup and from async_event() on interface changes
+ * @note TCP DNS listeners handled separately via poll_accept() for connection-oriented protocol
+ * 
+ * @see poll_listen() in poll.c for registration mechanism
+ * @see check_dns_listeners() for processing ready DNS sockets
+ * @see create_bound_listeners() in network.c for listener creation
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // During daemon startup in main():
+ * create_bound_listeners(0);  // Create listener sockets
+ * set_dns_listeners();        // Register with poll
+ * 
+ * // After interface address change:
+ * // netlink notification → EVENT_NEWADDR → async_event
+ * set_dns_listeners();        // Re-register updated listeners
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Registers file descriptors with poll system (modifies global poll state)
+ * - Does NOT create sockets (assumes pre-existing listeners)
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global poll registration state.
+ */
 static void set_dns_listeners(void)
 {
   struct serverfd *serverfdp;
@@ -1791,6 +2462,48 @@ static void set_dns_listeners(void)
 	poll_listen(daemon->tcp_pipes[i], POLLIN);
 }
 
+/**
+ * @brief Process ready DNS listener sockets and dispatch queries
+ * 
+ * @detailed
+ * Checks all DNS listener sockets for pending data via poll_check(), reads DNS queries from ready
+ * UDP sockets, and dispatches to forward.c receive_query() for processing. Handles both IPv4 and
+ * IPv6 listeners. Also checks TCP listener sockets for new connections and existing TCP connections
+ * for query data. Core DNS query ingestion point called from main event loop.
+ * 
+ * For each listener: (1) poll_check(fd, POLLIN) tests readiness, (2) recvmsg() reads UDP datagram,
+ * (3) extract source address and interface index from ancillary data, (4) call receive_query() in
+ * forward.c with query packet. TCP queries handled via poll_accept() and TCP state machine.
+ * 
+ * @param now Current time from dnsmasq_time() for query timestamp
+ * 
+ * @note Called from main event loop while(1) after do_poll() returns
+ * @note Handles ancillary data (IP_PKTINFO/IPV6_PKTINFO) for source interface tracking
+ * @note UDP queries dispatched immediately, TCP queries buffered until complete
+ * 
+ * @see receive_query() in forward.c for query processing entry point
+ * @see set_dns_listeners() for listener registration
+ * @see poll_check() in poll.c for readiness testing
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Main event loop in main():
+ * while (1) {
+ *   do_poll(timeout);           // Wait for events
+ *   check_dns_listeners(now);   // Process ready DNS sockets
+ *   // ... check other service listeners
+ * }
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Reads from DNS listener sockets
+ * - Allocates forward records (frec) via receive_query()
+ * - May send DNS responses immediately for cached queries
+ * - Logs query reception if --log-queries enabled
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global forward record state.
+ */
 static void check_dns_listeners(time_t now)
 {
   struct serverfd *serverfdp;
@@ -2039,6 +2752,52 @@ static void check_dns_listeners(time_t now)
 }
 
 #ifdef HAVE_DHCP
+/**
+ * @brief Create raw ICMP socket for ping-before-offer DHCP address testing
+ * 
+ * @detailed
+ * Creates AF_INET raw socket with IPPROTO_ICMP for sending ICMP ECHO_REQUEST and receiving
+ * ECHO_REPLY messages. Used by DHCP server to test if an IP address is already in use before
+ * offering it in DHCPOFFER (ping-before-offer feature). Socket configured with SO_DONTROUTE to
+ * avoid routing table lookup (local network only) and fixed via fix_fd() for close-on-exec.
+ * 
+ * Requires root/CAP_NET_RAW capability. Socket creation may fail if capabilities dropped too early
+ * or on systems without raw socket support.
+ * 
+ * @return Socket file descriptor on success, -1 on failure
+ * 
+ * @retval >=0 Valid ICMP raw socket file descriptor
+ * @retval -1 Socket creation failed (insufficient privileges or system error)
+ * 
+ * @note Called from icmp_ping() for each DHCP address conflict check
+ * @note Socket typically opened/closed per ping operation, not persistent
+ * @warning Requires CAP_NET_RAW capability on Linux or root on other systems
+ * 
+ * @see icmp_ping() for ICMP ECHO_REQUEST transmission using this socket
+ * @see fix_fd() for close-on-exec flag setting
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // DHCP server checking address before offer:
+ * int icmp_fd = make_icmp_sock();
+ * if (icmp_fd != -1) {
+ *   if (icmp_ping(proposed_addr) == 1) {
+ *     // Address in use, skip this IP
+ *   }
+ *   close(icmp_fd);
+ * }
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Implements ping-before-offer per RFC 2131 Section 3.1 paragraph 2 recommendation.
+ * 
+ * SIDE EFFECTS:
+ * - Creates system file descriptor (consumes fd slot)
+ * - Requires elevated privileges (CAP_NET_RAW or root)
+ * 
+ * THREAD SAFETY:
+ * Thread-safe. Creates independent socket per call.
+ */
 int make_icmp_sock(void)
 {
   int fd;
@@ -2057,6 +2816,60 @@ int make_icmp_sock(void)
   return fd;
 }
 
+/**
+ * @brief Send ICMP ECHO_REQUEST and wait for reply to detect address conflicts
+ * 
+ * @detailed
+ * Implements DHCP ping-before-offer by sending ICMP ECHO_REQUEST to proposed IP address and
+ * waiting PING_WAIT seconds (default 3) for ECHO_REPLY. Returns 1 if reply received (address in
+ * use), 0 if no reply (address available). Constructs raw ICMP packet with random ID, calculates
+ * checksum, sends via sendto(), then waits in delay_dhcp() servicing DNS/TFTP but ignoring DHCP.
+ * 
+ * Platform-specific: Linux/Solaris create ephemeral socket via make_icmp_sock(), BSD uses
+ * persistent daemon->dhcp_icmp_fd. Checksum computed as 16-bit one's complement sum per RFC 792.
+ * 
+ * @param addr IPv4 address to test (proposed DHCP lease address)
+ * 
+ * @return 1 if address responded (in use), 0 if no response (available) or error
+ * 
+ * @retval 1 ICMP ECHO_REPLY received within PING_WAIT seconds (address conflict detected)
+ * @retval 0 No reply received, address available for DHCP offer OR socket creation failed
+ * 
+ * @note Wait duration controlled by PING_WAIT constant (default 3 seconds in config.h)
+ * @note Random ICMP ID (rand16()) prevents confusion with other ping processes
+ * @warning Blocks DHCP processing during wait (by design - prevents race conditions)
+ * 
+ * @see make_icmp_sock() for socket creation
+ * @see delay_dhcp() for timeout implementation with DNS/TFTP servicing
+ * @see dhcp_reply() in rfc2131.c for caller context
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // DHCP server before sending OFFER:
+ * struct in_addr proposed_ip;
+ * proposed_ip.s_addr = htonl(0xC0A80164);  // 192.168.1.100
+ * 
+ * if (icmp_ping(proposed_ip)) {
+ *   // Address in use, try next from pool
+ * } else {
+ *   // Address available, send DHCPOFFER
+ * }
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Implements RFC 2131 Section 3.1 paragraph 2: "The server SHOULD probe the reused address
+ * before allocating the address, e.g., with an ICMP echo request."
+ * 
+ * SIDE EFFECTS:
+ * - Sends ICMP ECHO_REQUEST packet on network
+ * - Blocks for up to PING_WAIT seconds
+ * - Services DNS and TFTP requests during wait (via delay_dhcp)
+ * - Creates/closes socket on Linux/Solaris
+ * - Updates dnsmasq_time() for clock tracking
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Uses global daemon->dhcp_icmp_fd on BSD.
+ */
 int icmp_ping(struct in_addr addr)
 {
   /* Try and get an ICMP echo from a machine. */
@@ -2111,6 +2924,64 @@ int icmp_ping(struct in_addr addr)
   return gotreply;
 }
 
+/**
+ * @brief Delay DHCP processing while waiting for ICMP reply or timeout
+ * 
+ * @detailed
+ * Implements timed wait for ICMP ECHO_REPLY during ping-before-offer address testing. Loops for
+ * specified duration (typically PING_WAIT=3 seconds) while servicing DNS and TFTP requests but
+ * ignoring DHCP packets and signals. Returns early (1) if ICMP reply from target address received,
+ * or after timeout (0). Uses poll() with 250ms timeout to avoid dnsmasq_time() non-monotonic clock
+ * issues. Timeout counted via iteration fallback (sec * 4 quarter-second polls).
+ * 
+ * While waiting: (1) Polls ICMP socket (fd != -1) for ECHO_REPLY, (2) polls DNS listeners via
+ * set_dns_listeners(), (3) polls TFTP listeners if HAVE_TFTP, (4) dispatches ready sockets,
+ * (5) ignores DHCP listeners to prevent re-entrancy. Clock skew protection: timeout_count fallback
+ * prevents infinite loop if system time adjusted backward.
+ * 
+ * @param start Wait start time from dnsmasq_time() (reference timestamp)
+ * @param sec Duration to wait in seconds (typically PING_WAIT=3)
+ * @param fd ICMP socket file descriptor to monitor, or -1 for timeout-only wait
+ * @param addr Expected source IPv4 address (host byte order) for ICMP reply filtering
+ * @param id Expected ICMP ID in ECHO_REPLY for matching specific ping
+ * 
+ * @return 1 if ICMP reply matched, 0 on timeout or no match
+ * 
+ * @retval 1 ICMP ECHO_REPLY received from addr with matching id before timeout
+ * @retval 0 Timeout reached without matching reply, or fd == -1 (timeout-only mode)
+ * 
+ * @note DNS and TFTP requests serviced during wait (dnsmasq remains responsive)
+ * @note DHCP requests deliberately ignored during wait (prevents re-entrant address checks)
+ * @note Signals not processed during wait (deferred until wait completes)
+ * @warning Blocks DHCP processing for up to sec seconds (typically 3s)
+ * 
+ * @see icmp_ping() for caller context
+ * @see check_dns_listeners() for DNS processing during wait
+ * @see poll_listen() for file descriptor monitoring
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // Called from icmp_ping() after sending ECHO_REQUEST:
+ * int gotreply = delay_dhcp(dnsmasq_time(), PING_WAIT, icmp_fd, 
+ *                           addr.s_addr, icmp_id);
+ * if (gotreply) {
+ *   // Address in use, conflict detected
+ * }
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Supports RFC 2131 Section 3.1 ping-before-offer mechanism.
+ * 
+ * SIDE EFFECTS:
+ * - Blocks for up to sec seconds
+ * - Services DNS and TFTP during wait (modifies global state)
+ * - Ignores DHCP and signals during wait
+ * - Advances dnsmasq_time() clock
+ * - Timeout fallback protects against system clock adjustments
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global event processing state.
+ */
 int delay_dhcp(time_t start, int sec, int fd, uint32_t addr, unsigned short id)
 {
   /* Delay processing DHCP packets for "sec" seconds counting from "start".
