@@ -14,6 +14,83 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file helper.c
+ * @brief Privileged helper process for lease-change scripts and Lua integration
+ * 
+ * DETAILED PURPOSE:
+ * This file implements a privilege separation architecture where the main dnsmasq daemon
+ * drops root privileges for security, but forks a separate helper process that retains
+ * root privileges to execute external lease-change scripts. The helper process runs 
+ * continuously, receiving lease events via a Unix domain socket from the main process,
+ * and invoking configured scripts (--dhcp-script) or Lua functions (--dhcp-luascript)
+ * with appropriate environment variables containing lease information.
+ * 
+ * The privilege separation model ensures that even if the main daemon is compromised,
+ * an attacker cannot easily gain root access, as the helper process validates all data
+ * received from the main process and only executes the pre-configured script path that
+ * was set before forking. The helper supports DHCPv4, DHCPv6, TFTP, and ARP events,
+ * passing detailed information via DNSMASQ_* environment variables to scripts or Lua
+ * table fields for programmatic access.
+ * 
+ * Communication is two-way: the main process sends event data to the helper, and the
+ * helper sends back script output, error conditions, and completion status for logging
+ * by the main daemon. The helper can operate in both script mode (executes external
+ * programs) and Lua mode (calls Lua functions), with Lua providing more efficient
+ * in-process event handling.
+ * 
+ * KEY RESPONSIBILITIES:
+ * - create_helper() - Fork privileged helper process and establish communication pipe
+ * - Helper main loop (lines 182-688) - Receive events and dispatch to scripts or Lua
+ * - queue_script() - Serialize DHCP lease events for transmission to helper
+ * - queue_tftp() - Serialize TFTP transfer events for transmission to helper
+ * - queue_arp() - Serialize ARP detection events for transmission to helper
+ * - helper_write() - Write queued events to helper process via socket
+ * - my_setenv() - Set environment variables for script execution
+ * - grab_extradata() - Extract DHCP option data into environment variables
+ * 
+ * DEPENDENCIES:
+ * Includes: dnsmasq.h (all daemon structures and prototypes)
+ * Called by: Main daemon during initialization (create_helper) and event processing
+ *           (queue_script, queue_tftp, queue_arp, helper_write)
+ * Calls: System functions (fork, pipe, setuid, setgid, execl, setenv)
+ *        Lua functions (if HAVE_LUASCRIPT) - lua_getglobal, lua_call, lua_pushstring
+ *        Network functions (inet_ntop)
+ *        IPC functions (read_write, send_event)
+ * 
+ * DATA STRUCTURES:
+ * - struct script_data (lines 52-74) - Wire format for event data sent to helper
+ * - Static buffer: buf, bytes_in_buf, buf_size (line 76) - Queued event buffer
+ * - lua_State *lua (line 46, HAVE_LUASCRIPT) - Lua interpreter state
+ * 
+ * COMPILE-TIME OPTIONS:
+ * - HAVE_SCRIPT - Required for entire module, enables helper process functionality
+ * - HAVE_LUASCRIPT - Adds Lua script integration (lines 36-49, 136-175, 319-496, 732-752)
+ * - HAVE_TFTP - Enables TFTP transfer event notifications (lines 64-66, 313-318, 868-895)
+ * - HAVE_DHCP6 - Enables DHCPv6 lease events and relay snooping (lines 68-71, 272-285, etc.)
+ * - HAVE_BROKEN_RTC - Uses lease length instead of expiry time for embedded systems (lines 59-63)
+ * 
+ * THREADING/CONCURRENCY:
+ * Single-process event-driven model with fork for helper process. The helper process runs
+ * independently in a separate address space, communicating with main process via Unix socket.
+ * Scripts are executed synchronously (helper waits for completion) via additional fork,
+ * with stdout/stderr captured and returned to main process for logging. No threading used.
+ * Helper process ignores SIGTERM, SIGINT, SIGALRM to prevent premature termination during
+ * script execution.
+ * 
+ * SECURITY:
+ * Helper process maintains root privileges while main daemon drops to --user. Helper is
+ * paranoid about data received from main process, validating buffer sizes and never allowing
+ * script path to be altered after fork. Environment variable injection is controlled via
+ * validated data structures. This architecture protects against compromised main process
+ * attempting to gain root access via helper.
+ * 
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/DHCP_V4.md for DHCP lease lifecycle
+ * @see docs/ARCHITECTURE.md for privilege separation architecture
+ */
+
 #include "dnsmasq.h"
 
 #ifdef HAVE_SCRIPT
@@ -48,7 +125,29 @@ lua_State *lua;
 static unsigned char *grab_extradata_lua(unsigned char *buf, unsigned char *end, char *field);
 #endif
 
-
+/**
+ * @struct script_data
+ * @brief Wire format for event data transmitted to helper process
+ * 
+ * @detailed
+ * Defines the binary protocol structure sent from main daemon to helper process over
+ * the Unix domain socket. Contains all information needed by helper to invoke scripts
+ * with appropriate environment variables or Lua function arguments. Structure is followed
+ * by variable-length data: client ID, hostname, and extra DHCP options (concatenated
+ * null-terminated strings). Supports DHCPv4, DHCPv6, TFTP, ARP, and relay snoop events.
+ * 
+ * LIFECYCLE:
+ * Allocated via buff_alloc() into static buffer, populated by queue_*() functions,
+ * transmitted by helper_write(), and parsed by helper process main loop (lines 182-688).
+ * 
+ * MEMORY LAYOUT:
+ * Fixed-size structure (sizeof varies by compile-time options) followed by variable data.
+ * Total size: sizeof(struct script_data) + clid_len + hostname_len + ed_len.
+ * 
+ * USAGE PATTERNS:
+ * 1. Main process: buff_alloc() -> populate fields -> queue in buffer -> helper_write()
+ * 2. Helper process: read() full structure -> read() variable data -> parse and execute
+ */
 struct script_data
 {
   int flags;
@@ -73,9 +172,92 @@ struct script_data
   char interface[IF_NAMESIZE];
 };
 
+/**
+ * @var buf
+ * @brief Global buffer for queuing events to helper process
+ * 
+ * Static buffer holding struct script_data and variable-length data for transmission
+ * to helper. Grown as needed by buff_alloc(), reused across multiple events to minimize
+ * allocations. NULL if never allocated or allocation failed.
+ */
 static struct script_data *buf = NULL;
-static size_t bytes_in_buf = 0, buf_size = 0;
 
+/**
+ * @var bytes_in_buf
+ * @brief Number of bytes currently queued in buf awaiting transmission
+ * 
+ * Tracks amount of data in buf that needs to be written to helper process via
+ * helper_write(). Zero means buffer is empty. Decremented on partial writes,
+ * cleared on errors.
+ */
+static size_t bytes_in_buf = 0;
+
+/**
+ * @var buf_size
+ * @brief Allocated size of buf in bytes
+ * 
+ * Total allocated capacity of buf. Only grows, never shrinks. Used by buff_alloc()
+ * to determine if reallocation needed. Zero if buf never allocated.
+ */
+static size_t buf_size = 0;
+
+/**
+ * @brief Fork privileged helper process for executing lease-change scripts
+ * 
+ * @detailed
+ * Creates a helper process that retains root privileges to execute external scripts
+ * (--dhcp-script) or Lua functions (--dhcp-luascript) when DHCP lease events occur.
+ * The function creates a pipe for communication, forks a child process, and returns
+ * the write end of the pipe to the parent (main daemon) while the child enters an
+ * event loop waiting for lease data. The child process optionally drops to specified
+ * uid/gid if provided and not in debug mode. If Lua scripting is enabled, the child
+ * initializes the Lua interpreter and loads the configured script file before entering
+ * the main loop.
+ * 
+ * @param event_fd File descriptor for sending events back to main daemon
+ * @param err_fd File descriptor for sending error events during initialization
+ * @param uid User ID to drop privileges to (0 means stay as root)
+ * @param gid Group ID to drop privileges to
+ * @param max_fd Maximum file descriptor number for closing unneeded descriptors
+ * 
+ * @return In parent: write end of pipe for sending events to helper
+ * @return In child: does not return, enters helper main loop and exits with _exit(0)
+ * 
+ * @note Called after configuration parsing but before main daemon drops privileges
+ * @note Child process ignores SIGTERM, SIGINT, SIGALRM to allow clean script execution
+ * @note If fork fails, sends EVENT_PIPE_ERR to err_fd and calls _exit(0)
+ * 
+ * @warning Child process retains root privileges if uid is 0, security-sensitive
+ * @warning Lua initialization failures kill daemon if not in debug/no-fork mode
+ * 
+ * @see queue_script() for formatting lease event data
+ * @see helper_write() for sending queued events to helper
+ * @see send_event() in dnsmasq.c for event signaling mechanism
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * int helper_fd = create_helper(daemon->event_fd, daemon->err_fd, 
+ *                               daemon->scriptuser_uid, daemon->scriptuser_gid, max_fd);
+ * daemon->helperfd = helper_fd;
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Not directly RFC-related, but supports RFC 2131 (DHCPv4) and RFC 3315 (DHCPv6)
+ * lease notification requirements.
+ * 
+ * SIDE EFFECTS:
+ * - Forks a child process that runs until daemon shutdown
+ * - Creates a pipe for IPC between parent and child
+ * - Child closes all file descriptors except pipe, event_fd, and err_fd initially
+ * - Child may drop privileges via setuid/setgid
+ * - Initializes Lua interpreter in child if HAVE_LUASCRIPT enabled
+ * - Sends error events to event_fd or err_fd on failures
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, calls fork() which has undefined behavior in multi-threaded programs.
+ * Safe in dnsmasq's single-threaded event-driven architecture. Child process is completely
+ * separate after fork.
+ */
 int create_helper(int event_fd, int err_fd, uid_t uid, gid_t gid, long max_fd)
 {
   pid_t pid;
@@ -687,6 +869,46 @@ int create_helper(int event_fd, int err_fd, uid_t uid, gid_t gid, long max_fd)
     }
 }
 
+/**
+ * @brief Set or unset environment variable for script execution
+ * 
+ * @detailed
+ * Wrapper around setenv/unsetenv that tracks errors via an error flag. If value is NULL,
+ * the environment variable is removed; otherwise it is set to the given value. Once an
+ * error occurs (*error != 0), subsequent calls do nothing to prevent cascading failures.
+ * This allows batch setting of environment variables with single error check at the end.
+ * 
+ * @param name Environment variable name (e.g., "DNSMASQ_LEASE_EXPIRES")
+ * @param value Value to set, or NULL to unset the variable
+ * @param error Pointer to error flag, set to errno if setenv fails
+ * 
+ * @return void (errors reported via error parameter)
+ * 
+ * @note If *error is already non-zero, function returns immediately without action
+ * @note Used to set DNSMASQ_* environment variables before execl() of script
+ * 
+ * @warning Does not validate name or value parameters, caller must ensure validity
+ * 
+ * @see grab_extradata() which uses this to set DHCP option data
+ * @see execl() call at line 678 which executes script with these environment variables
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * int err = 0;
+ * my_setenv("DNSMASQ_LEASE_EXPIRES", "1234567890", &err);
+ * my_setenv("DNSMASQ_DOMAIN", "example.com", &err);
+ * if (err != 0) {
+ *   send_event(event_fd, EVENT_EXEC_ERR, err, NULL);
+ * }
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * Modifies process environment via setenv() or unsetenv(), affecting subsequent execl().
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe due to environment modification. Safe in helper's single-threaded context
+ * during script setup phase before exec.
+ */
 static void my_setenv(const char *name, const char *value, int *error)
 {
   if (*error == 0)
@@ -697,7 +919,52 @@ static void my_setenv(const char *name, const char *value, int *error)
 	*error = errno;
     }
 }
- 
+
+/**
+ * @brief Extract null-terminated string from buffer and set as environment variable
+ * 
+ * @detailed
+ * Parses a null-terminated string from a buffer containing concatenated DHCP option data,
+ * removes any '=' characters (to prevent environment variable injection attacks), and sets
+ * the specified environment variable to the extracted value. Returns pointer to next data
+ * in buffer or NULL if end reached. Used to extract vendor class, client ID, circuit ID,
+ * and other DHCP options from lease extradata for script access.
+ * 
+ * @param buf Pointer to current position in extradata buffer
+ * @param end Pointer to end of extradata buffer (one past last valid byte)
+ * @param env Environment variable name to set (e.g., "DNSMASQ_VENDOR_CLASS")
+ * @param err Pointer to error flag for my_setenv
+ * 
+ * @return Pointer to next string in buffer (after null terminator), or NULL if end reached
+ * @retval NULL No more data available in buffer
+ * @retval non-NULL Pointer to start of next string in buffer
+ * 
+ * @note Strips '=' characters from extracted value for security (prevents env injection)
+ * @note If buf equals end, returns NULL immediately without processing
+ * 
+ * @warning Assumes buf points to valid null-terminated string within bounds
+ * @warning Modifies buffer content by overwriting '=' with null terminators
+ * 
+ * @see queue_script() which packs extradata into the buffer
+ * @see my_setenv() which performs actual environment variable setting
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char *p = extradata;
+ * int err = 0;
+ * p = grab_extradata(p, extradata + ed_len, "DNSMASQ_VENDOR_CLASS", &err);
+ * p = grab_extradata(p, extradata + ed_len, "DNSMASQ_CIRCUIT_ID", &err);
+ * // p is now NULL if all data consumed
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Modifies buffer by replacing '=' with null terminator if found
+ * - Sets environment variable via my_setenv()
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe due to buffer modification and environment changes. Safe in helper's
+ * single-threaded context before script execution.
+ */
 static unsigned char *grab_extradata(unsigned char *buf, unsigned char *end,  char *env, int *err)
 {
   unsigned char *next = NULL;
@@ -730,6 +997,49 @@ static unsigned char *grab_extradata(unsigned char *buf, unsigned char *end,  ch
 }
 
 #ifdef HAVE_LUASCRIPT
+/**
+ * @brief Extract null-terminated string from buffer and add to Lua table
+ * 
+ * @detailed
+ * Similar to grab_extradata() but for Lua integration. Parses a null-terminated string
+ * from extradata buffer and adds it as a field to the Lua table currently on top of the
+ * Lua stack. Used to populate the data table passed to Lua lease() function with DHCP
+ * option values. Does not modify buffer content or strip characters like grab_extradata().
+ * 
+ * @param buf Pointer to current position in extradata buffer
+ * @param end Pointer to end of extradata buffer
+ * @param field Lua table field name (e.g., "vendor_class", "circuit_id")
+ * 
+ * @return Pointer to next string in buffer (after null terminator), or NULL if end reached
+ * @retval NULL Buffer exhausted or buf equals end
+ * @retval non-NULL Pointer to start of next string
+ * 
+ * @note Requires Lua table to be on top of stack (index -2 after push operations)
+ * @note Empty strings (buf == next after finding null) are not added to table
+ * 
+ * @warning Assumes buf points within valid buffer bounds
+ * @warning Caller must ensure Lua stack has room for push operations
+ * 
+ * @see grab_extradata() for environment variable version
+ * @see Lua lease() function called at line 493 which receives the populated table
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * lua_newtable(lua);  // Create data table
+ * unsigned char *p = extradata;
+ * p = grab_extradata_lua(p, extradata + ed_len, "vendor_class");
+ * p = grab_extradata_lua(p, extradata + ed_len, "circuit_id");
+ * lua_call(lua, 2, 0);  // Call with action and data table
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * Modifies Lua stack by pushing string and setting table field via lua_pushstring() and
+ * lua_setfield().
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, requires exclusive access to Lua state. Safe in helper's single-threaded
+ * event processing loop.
+ */
 static unsigned char *grab_extradata_lua(unsigned char *buf, unsigned char *end, char *field)
 {
   unsigned char *next;
@@ -751,6 +1061,49 @@ static unsigned char *grab_extradata_lua(unsigned char *buf, unsigned char *end,
 }
 #endif
 
+/**
+ * @brief Allocate or grow global event buffer for helper communication
+ * 
+ * @detailed
+ * Ensures the global static buffer (buf) is at least the requested size, reallocating
+ * if necessary. Uses whine_malloc() which logs allocation failures. Sets minimum size
+ * of sizeof(struct script_data) + 200 bytes for typical small events. The buffer is
+ * reused across multiple events to avoid frequent allocations. Only grows, never shrinks.
+ * 
+ * @param size Minimum required buffer size in bytes
+ * 
+ * @return void (allocation failure is silent, checked by caller via buf != NULL)
+ * 
+ * @note Buffer is never freed, grows to accommodate largest event seen
+ * @note Minimum allocation is sizeof(struct script_data) + 200 bytes
+ * @note Uses static globals: buf, buf_size (both modified by this function)
+ * 
+ * @warning If allocation fails, buf may be NULL and operations will fail
+ * @warning Frees old buffer before allocating new, brief period where buf is invalid
+ * 
+ * @see queue_script() which calls this to ensure buffer space for lease events
+ * @see queue_tftp() which calls this for TFTP events
+ * @see queue_arp() which calls this for ARP events
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * size_t needed = sizeof(struct script_data) + hostname_len + clid_len + ed_len;
+ * buff_alloc(needed);
+ * if (buf != NULL) {
+ *   // Safe to use buf up to buf_size bytes
+ *   buf->action = ACTION_ADD;
+ * }
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * - Modifies global variables: buf (reallocated), buf_size (updated)
+ * - May free previous buffer via free()
+ * - Allocates memory via whine_malloc() which may log to syslog on failure
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe due to modification of static globals. Safe in main daemon's single-
+ * threaded event-driven architecture where queue_* functions are called from main loop.
+ */
 static void buff_alloc(size_t size)
 {
   if (size > buf_size)
@@ -770,7 +1123,54 @@ static void buff_alloc(size_t size)
     }
 }
 
-/* pack up lease data into a buffer */    
+/**
+ * @brief Serialize DHCP lease event data for transmission to helper process
+ * 
+ * @detailed
+ * Packs DHCP lease change information into the global buffer for subsequent transmission
+ * to the helper process via helper_write(). Serializes struct dhcp_lease fields, optional
+ * hostname, client ID, and extradata (DHCP options) into struct script_data wire format.
+ * Handles both DHCPv4 and DHCPv6 leases, including IPv6-specific fields like IAID and
+ * vendorclass_count. Calculates remaining time until lease expiry for script use.
+ * 
+ * @param action Event type: ACTION_ADD, ACTION_DEL, ACTION_OLD, ACTION_OLD_HOSTNAME
+ * @param lease Pointer to DHCP lease structure containing lease details
+ * @param hostname Optional hostname associated with lease, NULL if none
+ * @param now Current time for calculating remaining lease time
+ * 
+ * @return void (queues event in buffer, call helper_write() to transmit)
+ * 
+ * @note Returns immediately if daemon->helperfd == -1 (no helper configured)
+ * @note Uses daemon->dhcpfd or daemon->dhcp6fd to determine interface names
+ * @note For DHCPv6 leases, copies addr6 and IAID; for DHCPv4, uses addr
+ * 
+ * @warning Assumes lease pointer is valid and points to initialized dhcp_lease
+ * @warning Buffer overflow possible if hostname + clid + extradata exceed buffer
+ * 
+ * @see helper_write() to transmit queued event to helper process
+ * @see struct dhcp_lease in dnsmasq.h for lease structure definition
+ * @see ACTION_* constants in dnsmasq.h for event types
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_lease *lease = lease_find_by_client(...);
+ * queue_script(ACTION_ADD, lease, "client-hostname", time(NULL));
+ * helper_write();  // Flush to helper process
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Implements lease notification mechanism supporting RFC 2131 (DHCPv4) state changes
+ * and RFC 3315 (DHCPv6) binding lifecycle events.
+ * 
+ * SIDE EFFECTS:
+ * - Modifies global buffer (buf) via buff_alloc() and direct writes
+ * - Updates bytes_in_buf to reflect queued data size
+ * - May allocate/reallocate global buffer if current size insufficient
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, modifies static global buffer. Safe in single-threaded event-driven
+ * main loop where DHCP events are processed sequentially.
+ */
 void queue_script(int action, struct dhcp_lease *lease, char *hostname, time_t now)
 {
   unsigned char *p;
@@ -843,6 +1243,54 @@ void queue_script(int action, struct dhcp_lease *lease, char *hostname, time_t n
 }
 
 #ifdef HAVE_DHCP6
+/**
+ * @brief Queue DHCPv6 relay snooping event for helper notification
+ * 
+ * @detailed
+ * Serializes DHCPv6 relay agent snooping information for transmission to helper process.
+ * Used when dnsmasq observes DHCPv6 messages relayed through it, allowing scripts to
+ * track client prefixes and delegations. Formats prefix in CIDR notation (e.g., 
+ * "2001:db8::/64") and includes client address and interface information. This enables
+ * external scripts to perform actions based on prefix delegation events.
+ * 
+ * @param client IPv6 address of DHCPv6 client
+ * @param if_index Interface index where relay message was received
+ * @param prefix IPv6 prefix being delegated or assigned
+ * @param prefix_len Prefix length in bits (e.g., 64 for /64)
+ * 
+ * @return void (queues event, call helper_write() to transmit)
+ * 
+ * @note Returns immediately if daemon->helperfd == -1 (no helper process)
+ * @note Uses ACTION_RELAY_SNOOP action type
+ * @note Prefix formatted as "address/length" string in hostname field
+ * 
+ * @warning Requires HAVE_DHCP6 compile-time option
+ * @warning Assumes prefix points to valid in6_addr structure
+ * 
+ * @see helper_write() to flush queued event
+ * @see Lua snoop() function which receives this event (lines 340-357)
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * struct in6_addr client_addr, delegated_prefix;
+ * // ... extract from relay message ...
+ * queue_relay_snoop(&client_addr, if_index, &delegated_prefix, 64);
+ * helper_write();
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Supports RFC 3315 Section 20 relay agent behavior monitoring for prefix delegation
+ * tracking and external logging.
+ * 
+ * SIDE EFFECTS:
+ * - Modifies global buffer via buff_alloc() and direct writes
+ * - Updates bytes_in_buf
+ * - Uses daemon->addrbuff for prefix formatting
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, modifies static global buffer. Safe in single-threaded DHCPv6
+ * packet processing context.
+ */
 void queue_relay_snoop(struct in6_addr *client, int if_index, struct in6_addr *prefix, int prefix_len)
 {
   /* no script */
@@ -866,7 +1314,55 @@ void queue_relay_snoop(struct in6_addr *client, int if_index, struct in6_addr *p
 #endif
 
 #ifdef HAVE_TFTP
-/* This nastily re-uses DHCP-fields for TFTP stuff */
+/**
+ * @brief Queue TFTP file transfer event for helper notification
+ * 
+ * @detailed
+ * Serializes TFTP file transfer completion information for transmission to helper process.
+ * Notifies scripts when TFTP files are successfully transferred, providing filename, peer
+ * address (IPv4 or IPv6), and file size. Reuses DHCP wire format fields for efficiency:
+ * hostname field contains filename, file_len contains transfer size, addr/addr6 contains
+ * peer address. This allows monitoring of PXE boot activity and file distribution.
+ * 
+ * @param file_len Size of transferred file in bytes (off_t for large file support)
+ * @param filename Name of file transferred (relative to TFTP root)
+ * @param peer Socket address of TFTP client (IPv4 or IPv6)
+ * 
+ * @return void (queues event, call helper_write() to transmit)
+ * 
+ * @note Returns immediately if daemon->helperfd == -1 (no helper)
+ * @note Uses ACTION_TFTP action type
+ * @note Supports both AF_INET and AF_INET6 peer addresses
+ * @note Comment line 869 notes "nasty reuse" of DHCP fields for TFTP data
+ * 
+ * @warning Requires HAVE_TFTP compile-time option
+ * @warning Assumes filename is null-terminated and peer is valid sockaddr union
+ * 
+ * @see helper_write() to flush event
+ * @see Lua tftp() function (lines 322-338) which receives this event
+ * @see tftp.c for TFTP server implementation
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * union mysockaddr client_addr;
+ * off_t size = 1024;
+ * queue_tftp(size, "pxelinux.0", &client_addr);
+ * helper_write();
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Provides notification mechanism for RFC 1350 (TFTP) file transfers, enabling external
+ * logging and monitoring of boot file distribution.
+ * 
+ * SIDE EFFECTS:
+ * - Modifies global buffer via buff_alloc() and direct writes
+ * - Updates bytes_in_buf
+ * - Repurposes struct script_data fields for TFTP-specific data
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, modifies static buffer. Safe in single-threaded TFTP transfer
+ * completion context.
+ */
 void queue_tftp(off_t file_len, char *filename, union mysockaddr *peer)
 {
   unsigned int filename_len;
@@ -894,6 +1390,57 @@ void queue_tftp(off_t file_len, char *filename, union mysockaddr *peer)
 }
 #endif
 
+/**
+ * @brief Queue ARP or NDP detection event for helper notification
+ * 
+ * @detailed
+ * Serializes ARP (IPv4) or NDP (IPv6 Neighbor Discovery) address detection events for
+ * transmission to helper process. Used to notify scripts when addresses are detected via
+ * ARP or NDP, even without DHCP lease. Supports both ACTION_ARP (add) and ACTION_ARP_DEL
+ * (delete) events. Allows external tracking of network topology and address usage beyond
+ * DHCP-managed addresses.
+ * 
+ * @param action Event type: ACTION_ARP for add, ACTION_ARP_DEL for delete
+ * @param mac MAC address of detected device
+ * @param maclen Length of MAC address in bytes (typically 6 for Ethernet)
+ * @param family Address family: AF_INET for IPv4, AF_INET6 for IPv6
+ * @param addr IP address detected via ARP/NDP
+ * 
+ * @return void (queues event, call helper_write() to transmit)
+ * 
+ * @note Returns immediately if daemon->helperfd == -1 (no helper)
+ * @note MAC address type always set to ARPHRD_ETHER (Ethernet)
+ * @note Both IPv4 (ARP) and IPv6 (NDP) addresses supported via family parameter
+ * 
+ * @warning Assumes mac buffer contains at least maclen valid bytes
+ * @warning Assumes addr points to valid all_addr union
+ * 
+ * @see helper_write() to flush event
+ * @see Lua arp() function (lines 358-373) which receives this event
+ * @see arp.c for ARP table monitoring implementation
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char hwaddr[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+ * union all_addr ip_addr;
+ * ip_addr.addr4.s_addr = inet_addr("192.168.1.100");
+ * queue_arp(ACTION_ARP, hwaddr, 6, AF_INET, &ip_addr);
+ * helper_write();
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Supports monitoring of RFC 826 (ARP) and RFC 4861 (NDP) address resolution for
+ * network topology tracking.
+ * 
+ * SIDE EFFECTS:
+ * - Modifies global buffer via buff_alloc() and direct writes
+ * - Updates bytes_in_buf
+ * - Sets buffer size to sizeof(struct script_data)
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, modifies static buffer. Safe in single-threaded ARP/NDP event
+ * processing context.
+ */
 void queue_arp(int action, unsigned char *mac, int maclen, int family, union all_addr *addr)
 {
   /* no script */
@@ -916,11 +1463,92 @@ void queue_arp(int action, unsigned char *mac, int maclen, int family, union all
   bytes_in_buf = sizeof(struct script_data);
 }
 
+/**
+ * @brief Check if helper event buffer is empty
+ * 
+ * @detailed
+ * Returns whether the global event buffer has any pending data to transmit to the helper
+ * process. Used by main daemon to determine if helper_write() needs to be called, typically
+ * checked after queuing events or when helper socket becomes writable. Zero bytes indicates
+ * no events queued, non-zero indicates data waiting for transmission.
+ * 
+ * @return Boolean indicating buffer empty state
+ * @retval 1 (true) Buffer is empty, no events queued
+ * @retval 0 (false) Buffer contains event data awaiting transmission
+ * 
+ * @note Thread-safe read of bytes_in_buf counter (single value read)
+ * @note Typically called before select/poll on helper fd to determine write monitoring
+ * 
+ * @see helper_write() which transmits buffered events
+ * @see queue_script(), queue_tftp(), queue_arp() which populate buffer
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * queue_script(ACTION_ADD, lease, hostname, now);
+ * if (!helper_buf_empty()) {
+ *   helper_write();  // Flush pending events
+ * }
+ * @endcode
+ * 
+ * SIDE EFFECTS:
+ * None, read-only check of global variable bytes_in_buf.
+ * 
+ * THREAD SAFETY:
+ * Thread-safe for read (single integer read is atomic on most architectures). Safe in
+ * single-threaded event loop where it's used.
+ */
 int helper_buf_empty(void)
 {
   return bytes_in_buf == 0;
 }
 
+/**
+ * @brief Transmit queued event data to helper process
+ * 
+ * @detailed
+ * Writes buffered event data to helper process via daemon->helperfd socket. Performs
+ * non-blocking write, handling partial writes by moving remaining data to buffer start.
+ * Called from main event loop when helper socket is writable and buffer contains data.
+ * Handles EAGAIN/EINTR gracefully for non-blocking I/O, clears buffer on other errors
+ * (likely helper process terminated).
+ * 
+ * @return void (errors clear buffer, caller should check helper_buf_empty())
+ * 
+ * @note Returns immediately if bytes_in_buf is 0 (no data to send)
+ * @note Uses write() system call which may return partial write
+ * @note On partial write, memmove() shifts remaining data to buffer start
+ * @note On EAGAIN/EINTR, preserves buffer for retry on next writable event
+ * @note On other errors, clears buffer (assumes helper dead, event lost)
+ * 
+ * @warning Assumes daemon->helperfd is valid and open
+ * @warning Data loss possible if helper terminates (bytes_in_buf set to 0)
+ * 
+ * @see helper_buf_empty() to check if data remains after write
+ * @see queue_script(), queue_tftp(), queue_arp() which populate buffer
+ * @see create_helper() which creates daemon->helperfd socket
+ * 
+ * EXAMPLE USAGE:
+ * @code
+ * // In main event loop when helper fd is writable
+ * if (poll_check(daemon->helperfd, POLLOUT) && !helper_buf_empty()) {
+ *   helper_write();
+ * }
+ * @endcode
+ * 
+ * RFC COMPLIANCE:
+ * Transport mechanism for RFC 2131 (DHCPv4) and RFC 3315 (DHCPv6) lease event
+ * notifications to external scripts.
+ * 
+ * SIDE EFFECTS:
+ * - Writes data to daemon->helperfd socket
+ * - Modifies global buffer via memmove() on partial write
+ * - Updates bytes_in_buf to reflect remaining data
+ * - May clear buffer (set bytes_in_buf = 0) on write errors
+ * 
+ * THREAD SAFETY:
+ * Not thread-safe, modifies static buffer and performs I/O. Safe in single-threaded
+ * event loop where called from main daemon.
+ */
 void helper_write(void)
 {
   ssize_t rc;
