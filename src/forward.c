@@ -14,6 +14,62 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file forward.c
+ * @brief DNS query forwarding and upstream server management
+ *
+ * DETAILED PURPOSE:
+ * This module implements the complete DNS query forwarding pipeline for dnsmasq,
+ * handling query reception from network listeners, cache integration, upstream 
+ * server selection with health tracking, and response processing. It manages the
+ * lifecycle of forward records (frec) that track DNS transaction state from query
+ * reception through upstream transmission to response delivery. The module implements
+ * critical security features including query ID and source port randomization to
+ * prevent cache poisoning attacks, EDNS0 extension handling, DNSSEC DO bit propagation,
+ * and TCP fallback on truncation. Query retry logic with exponential backoff and
+ * server rotation ensures reliability when upstream servers fail or timeout.
+ *
+ * KEY RESPONSIBILITIES:
+ * - receive_query() - Main DNS query entry point from network layer listeners
+ * - forward_query() - Upstream server selection and query transmission with randomization
+ * - reply_query() - Process upstream responses, cache results, forward to clients
+ * - retry_send() - Implement query retry with server rotation on failures
+ * - get_new_frec() - Allocate forward records from freelist for transaction tracking
+ * - free_frec() - Return forward records to freelist after transaction completion
+ * - tcp_request() - Handle TCP-based DNS queries for responses exceeding UDP limits
+ * - send_from() - Send UDP packets with explicit source address for multi-homed hosts
+ *
+ * DEPENDENCIES:
+ * - Includes: dnsmasq.h (core type definitions: struct frec, struct server, struct dns_header)
+ * - Called by: Event loop in dnsmasq.c when DNS socket becomes readable
+ * - Calls: cache.c (cache_lookup, cache_insert), rfc1035.c (extract_request, setup_reply),
+ *          network.c (socket management), dnssec.c (dnssec_validate when HAVE_DNSSEC)
+ *
+ * DATA STRUCTURES:
+ * - struct frec (dnsmasq.h:~350-400) - Forward record tracking transaction state: source/dest
+ *   addresses, original/randomized query IDs, upstream server pointer, DNSSEC flags, hash
+ * - struct server (dnsmasq.h:~400-450) - Upstream DNS server with address, query counters,
+ *   failure tracking, health metrics for server selection
+ * - struct randfd_list - Random file descriptor pool for source port randomization
+ *
+ * COMPILE-TIME OPTIONS:
+ * - HAVE_DNSSEC: Enables dependent query handling for DNSSEC validation, trust anchor
+ *   validation, DS record lookups (affects forward_query, dnssec_validate functions)
+ * - HAVE_CONNTRACK: Enables connection mark propagation for netfilter integration
+ * - HAVE_IPSET/HAVE_NFTSET: Enables domain-based ipset/nftables set population on response
+ *
+ * THREADING/CONCURRENCY:
+ * Single-process event-driven architecture using poll(). All DNS query processing occurs
+ * in the main event loop thread. No multi-threading or concurrent access to forward records.
+ * Forward record allocation is not thread-safe but this is acceptable in single-threaded
+ * model. Signal handlers use self-pipe pattern to queue events safely.
+ *
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/DNS_FORWARDING.md for complete DNS forwarding pipeline documentation
+ * @see docs/ARCHITECTURE.md for event-driven architecture explanation
+ */
+
 #include "dnsmasq.h"
 
 static struct frec *get_new_frec(time_t now, struct server *serv, int force);
@@ -29,6 +85,47 @@ static void query_full(time_t now, char *domain);
 
 static void return_reply(time_t now, struct frec *forward, struct dns_header *header, ssize_t n, int status);
 
+/**
+ * @brief Send UDP packet with explicit source address for multi-homed hosts
+ *
+ * @detailed Transmits a UDP packet using sendmsg() with ancillary data to specify
+ * the source IP address, enabling dnsmasq to respond from the same address that
+ * received the query on multi-homed systems. Platform-specific handling for Linux
+ * (IP_PKTINFO), BSD (IP_SENDSRCADDR), and IPv6 (IPV6_PKTINFO). Implements retry
+ * logic for EINTR via retry_send() macro.
+ *
+ * @param fd File descriptor of UDP socket to send on
+ * @param nowild If true, use kernel default source address; if false, set explicit source
+ * @param packet Pointer to DNS packet buffer to transmit
+ * @param len Length of packet data in bytes
+ * @param to Destination socket address (includes IP and port)
+ * @param source Source IP address to use (union all_addr with addr4/addr6)
+ * @param iface Interface index for IPv6 link-local addresses (0 for IPv4)
+ *
+ * @return 1 on successful transmission, 0 on error
+ *
+ * @note Uses platform-specific control message formats: Linux IP_PKTINFO with
+ * ipi_spec_dst, BSD IP_SENDSRCADDR, IPv6 IPV6_PKTINFO with ipi6_addr and ipi6_ifindex
+ * @warning On Linux, EINVAL errors during interface DAD (Duplicate Address Detection)
+ * are suppressed; other sendmsg errors are logged
+ * @see receive_query() which determines source address from listener configuration
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * union mysockaddr dest;
+ * union all_addr src_addr;
+ * char dns_packet[512];
+ * int sent = send_from(udp_fd, 0, dns_packet, packet_len, &dest, &src_addr, 0);
+ * if (!sent) handle_send_error();
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Modifies errno on sendmsg() failure
+ * - Logs error messages via my_syslog() on non-EINVAL errors (Linux only)
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies shared errno). Safe in single-threaded event loop.
+ */
 /* Send a UDP packet with its source address set as "source" 
    unless nowild is true, when we just send it with the kernel default */
 int send_from(int fd, int nowild, char *packet, size_t len, 
@@ -113,6 +210,36 @@ int send_from(int fd, int nowild, char *packet, size_t len,
 }
           
 #ifdef HAVE_CONNTRACK
+/**
+ * @brief Copy netfilter connection mark from incoming query to outgoing connection
+ *
+ * @detailed Propagates connection tracking marks from client queries to upstream
+ * server connections, enabling firewall rules and traffic shaping policies to apply
+ * consistently through the DNS forwarding path. Only compiled when HAVE_CONNTRACK
+ * is defined for Linux netfilter integration.
+ *
+ * @param forward Forward record containing source/dest addresses of original query
+ * @param fd File descriptor of socket for outgoing upstream query
+ *
+ * @note Requires CAP_NET_ADMIN capability to set SO_MARK socket option
+ * @note Silent failure if get_incoming_mark() returns false (no mark found)
+ * @warning Linux-specific, depends on netfilter conntrack kernel module
+ * @see allocate_rfd() where this is called during socket setup for upstream queries
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int upstream_fd = socket(AF_INET, SOCK_DGRAM, 0);
+ * set_outgoing_mark(forward, upstream_fd);
+ * // Now upstream_fd inherits connection mark from client query
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Modifies socket option SO_MARK on fd (persistent until socket close)
+ * - No effect if get_incoming_mark() fails to retrieve mark
+ *
+ * THREAD SAFETY:
+ * Thread-safe (no shared state modified), safe in single-threaded model.
+ */
 static void set_outgoing_mark(struct frec *forward, int fd)
 {
   /* Copy connection mark of incoming query to outgoing connection. */
@@ -122,6 +249,39 @@ static void set_outgoing_mark(struct frec *forward, int fd)
 }
 #endif
 
+/**
+ * @brief Log DNS query or response with socket address extraction
+ *
+ * @detailed Wrapper around log_query() that extracts IP address and port from
+ * union mysockaddr, handling both IPv4 and IPv6 address families. Automatically
+ * sets F_IPV4 or F_IPV6 flag based on sa_family. For server logging (F_SERVER flag),
+ * extracts port number and uses as type parameter for server identification.
+ *
+ * @param flags Logging flags (F_SERVER, F_FORWARD, F_REVERSE, etc.)
+ * @param name Domain name being queried (null-terminated string)
+ * @param addr Socket address containing IP and port (AF_INET or AF_INET6)
+ * @param arg Additional argument string for logging context (may be NULL)
+ * @param type DNS query type (A, AAAA, etc.) or port if flags & F_SERVER
+ *
+ * @note For F_SERVER logging, type parameter is replaced with port from addr
+ * @note Automatically adds F_IPV4 or F_IPV6 to flags based on address family
+ * @see log_query() in log.c for actual logging implementation
+ * @see forward_query() which uses this to log upstream server selection
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * union mysockaddr upstream_addr;
+ * log_query_mysockaddr(F_SERVER | F_FORWARD, "example.com", &upstream_addr, NULL, T_A);
+ * // Logs query forwarded to server at upstream_addr
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Writes to query log if query logging enabled
+ * - No state modifications
+ *
+ * THREAD SAFETY:
+ * Thread-safe (read-only access to addr), safe in single-threaded model.
+ */
 static void log_query_mysockaddr(unsigned int flags, char *name, union mysockaddr *addr, char *arg, unsigned short type)
 {
   if (addr->sa.sa_family == AF_INET)
@@ -138,6 +298,40 @@ static void log_query_mysockaddr(unsigned int flags, char *name, union mysockadd
     }
 }
 
+/**
+ * @brief Send DNS query packet to upstream server with retry on EINTR
+ *
+ * @detailed Transmits DNS packet to upstream server using sendto() with automatic
+ * retry on EINTR (interrupted system call). Wrapper function providing consistent
+ * transmission interface for upstream server communication. Uses server's configured
+ * address from struct server.
+ *
+ * @param server Upstream DNS server containing destination address
+ * @param fd Socket file descriptor to send on (UDP or TCP)
+ * @param header Pointer to DNS packet header and data
+ * @param plen Packet length in bytes including DNS header
+ * @param flags sendto() flags parameter (typically 0 for UDP, MSG_NOSIGNAL for TCP)
+ *
+ * @note Blocks until sendto() succeeds or fails with non-EINTR error
+ * @note Does not check return value; assumes sendto() will eventually succeed
+ * @warning Silent on sendto() errors other than EINTR; caller should check errno
+ * @see retry_send() macro which implements EINTR retry logic
+ * @see forward_query() which calls this for upstream transmission
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct server *upstream = select_server();
+ * struct dns_header *header = build_query();
+ * server_send(upstream, udp_fd, header, query_len, 0);
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Transmits packet on network (UDP datagram or TCP segment)
+ * - Modifies errno on sendto() failure
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (uses errno). Safe in single-threaded event loop.
+ */
 static void server_send(struct server *server, int fd,
 			const void *header, size_t plen, int flags)
 {
@@ -146,6 +340,42 @@ static void server_send(struct server *server, int fd,
 			   sa_len(&server->addr))));
 }
 
+/**
+ * @brief Check if domain is exempt from DNS rebinding protection
+ *
+ * @detailed Tests whether a domain name matches any entry in the no-rebind exception
+ * list (--rebind-domain-ok configuration option). DNS rebinding protection blocks
+ * responses containing private IP addresses to prevent rebinding attacks. This function
+ * identifies domains that should bypass this protection. Matches whole DNS labels only
+ * using suffix comparison. Empty domain in list matches any single-label name (no dots).
+ *
+ * @param domain Null-terminated domain name to check (e.g., "example.com")
+ *
+ * @return 1 if domain is exempt from rebinding protection, 0 otherwise
+ *
+ * @note Matches domain suffixes: "example.com" matches "www.example.com" and "example.com"
+ * @note Empty domain in list matches single-label names like "localhost" or "router"
+ * @note Uses case-insensitive comparison via hostname_isequal()
+ * @see process_reply() which calls this to check rebinding protection applicability
+ * @see struct rebind_domain in daemon->no_rebind list
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (is_private_address(&reply_addr) && !domain_no_rebind("internal.example.com"))
+ *   block_response(); // Apply rebinding protection
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * Implements DNS rebinding attack mitigation, not defined by specific RFC but
+ * widely recognized security practice for DNS forwarders.
+ *
+ * SIDE EFFECTS:
+ * - Read-only access to daemon->no_rebind list
+ * - No modifications to state
+ *
+ * THREAD SAFETY:
+ * Thread-safe (read-only), safe in single-threaded model.
+ */
 static int domain_no_rebind(char *domain)
 {
   struct rebind_domain *rbd;
@@ -167,6 +397,72 @@ static int domain_no_rebind(char *domain)
   return 0;
 }
 
+/**
+ * @brief Forward DNS query to upstream server with server selection and randomization
+ *
+ * @detailed Core DNS forwarding function implementing upstream server selection algorithm,
+ * query ID randomization for cache poisoning prevention, source port randomization, EDNS0
+ * handling, and DNSSEC DO bit propagation. Manages forward record (frec) allocation or
+ * reuse for existing queries, handles duplicate queries from multiple clients, implements
+ * server filtering based on domain rules, and supports TCP fallback. Integrates with cache
+ * to check for local answers before forwarding. Implements retry detection and query
+ * aggregation where multiple clients asking same question share single upstream query.
+ *
+ * @param udpfd UDP socket file descriptor for sending to upstream
+ * @param udpaddr Socket address of client that sent query
+ * @param dst_addr Destination address where query was received (for multi-homed)
+ * @param dst_iface Interface index where query was received
+ * @param header DNS packet header containing query
+ * @param plen Packet length in bytes
+ * @param limit Pointer to end of packet buffer (for bounds checking)
+ * @param now Current time for timestamp tracking
+ * @param forward Existing forward record if retry, NULL for new query
+ * @param ad_reqd Client requested Authenticated Data (AD bit)
+ * @param do_bit Client set DNSSEC OK (DO bit) in EDNS0
+ *
+ * @return 1 if query was forwarded or answered locally, 0 on error
+ *
+ * @retval 1 Query forwarded to upstream or answered from cache/local
+ * @retval 0 Forward record allocation failed or query should be dropped
+ *
+ * @note Randomizes query ID (original stored in frec->orig_id) to prevent cache poisoning
+ * @note Aggregates duplicate queries: multiple clients with same question wait for one upstream query
+ * @note Applies server selection filters based on --server=domain configuration
+ * @note Preserves CD (Checking Disabled) and AD (Authentic Data) request flags
+ * @warning Silently drops queries when forward record table exhausted (logs "Maximum number of concurrent DNS queries reached")
+ * @warning Blocks private IP responses unless domain in rebind exception list
+ *
+ * @see receive_query() which calls this after cache miss
+ * @see reply_query() which processes upstream responses
+ * @see get_new_frec() for forward record allocation
+ * @see lookup_frec_by_query() for duplicate query detection
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dns_header *header = (struct dns_header *)packet;
+ * int result = forward_query(udp_fd, &client_addr, &listen_addr, if_index,
+ *                            header, packet_len, packet + packet_len, time(NULL),
+ *                            NULL, ad_requested, do_bit_set);
+ * if (result) query_forwarded_successfully();
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 1035: DNS query forwarding with ID randomization
+ * - RFC 2671: EDNS0 extension handling (OPT record preservation)
+ * - RFC 3225: DO bit (DNSSEC OK) propagation when HAVE_DNSSEC enabled
+ * - RFC 6891: EDNS0 extensions including client subnet
+ *
+ * SIDE EFFECTS:
+ * - Allocates forward record from freelist via get_new_frec()
+ * - Randomizes query ID in header (modifies header->id)
+ * - May send REFUSED response directly to client if table full
+ * - Updates server query statistics (server->queries_sent)
+ * - Logs query forwarding via log_query()
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies shared daemon state, forward record table).
+ * Safe in single-threaded event loop model.
+ */
 static int forward_query(int udpfd, union mysockaddr *udpaddr,
 			 union all_addr *dst_addr, unsigned int dst_iface,
 			 struct dns_header *header, size_t plen,  char *limit, time_t now, 
@@ -584,6 +880,39 @@ static int forward_query(int udpfd, union mysockaddr *udpaddr,
   return 0;
 }
 
+/**
+ * @brief Find longest matching ipset/nftset configuration for domain
+ *
+ * @detailed Searches ipset/nftset configuration list for most specific domain match
+ * using suffix matching algorithm. Returns ipset entry with longest matching domain
+ * suffix, enabling resolved IP addresses to be added to Linux ipset or nftables sets
+ * for firewall rules. Empty domain (domainlen==0) matches all domains. Algorithm
+ * matches whole DNS labels only (checks for dot separator).
+ *
+ * @param setlist Head of ipset configuration list to search
+ * @param domain Domain name to match (null-terminated, e.g., "www.example.com")
+ *
+ * @return Pointer to matching struct ipsets with longest suffix match, NULL if no match
+ *
+ * @note Matches domain suffixes: "example.com" in config matches "www.example.com"
+ * @note Uses case-insensitive comparison via hostname_isequal()
+ * @note Returns most specific match when multiple entries match
+ * @see process_reply() which calls this to determine ipset population on response
+ * @see struct ipsets in dnsmasq.h for ipset configuration structure
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct ipsets *matched = domain_find_sets(daemon->ipsets, "www.example.com");
+ * if (matched) add_to_ipset(matched->sets, &resolved_addr);
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Read-only traversal of setlist
+ * - No state modifications
+ *
+ * THREAD SAFETY:
+ * Thread-safe (read-only), safe in single-threaded model.
+ */
 static struct ipsets *domain_find_sets(struct ipsets *setlist, const char *domain) {
   /* Similar algorithm to search_servers. */
   struct ipsets *ipset_pos, *ret = NULL;
@@ -605,6 +934,70 @@ static struct ipsets *domain_find_sets(struct ipsets *setlist, const char *domai
   return ret;
 }
 
+/**
+ * @brief Process upstream DNS response for caching and client forwarding
+ *
+ * @detailed Complex response processing pipeline handling EDNS0 stripping/preservation,
+ * DNS rebinding protection (blocks private IPs unless domain exempt), ipset/nftset
+ * population with resolved addresses, cache insertion with security status, DNSSEC
+ * validation integration, response munging (CNAME rewriting), and EDE (Extended DNS
+ * Error) code handling. Validates EDNS0 client subnet options match query. Applies
+ * filters for bogus responses, truncation, and security status.
+ *
+ * @param header DNS response packet header
+ * @param now Current timestamp for cache TTL calculation
+ * @param server Upstream server that provided response
+ * @param n Response packet size in bytes
+ * @param check_rebind If true, apply DNS rebinding protection to response addresses
+ * @param no_cache If true, do not cache this response
+ * @param cache_secure Mark cached entry as DNSSEC-validated secure
+ * @param bogusanswer Response failed DNSSEC validation (mark as bogus)
+ * @param ad_reqd Client requested Authenticated Data bit
+ * @param do_bit Client set DNSSEC OK bit in EDNS0
+ * @param added_pheader dnsmasq added EDNS0 OPT record not in original query
+ * @param query_source Original query source address for EDNS0 client subnet validation
+ * @param limit Pointer to end of packet buffer for bounds checking
+ * @param ede Extended DNS Error code to add to response (EDE_UNSET if none)
+ *
+ * @return Modified packet size after processing, 0 if response should be dropped
+ *
+ * @retval 0 Response invalid or should be dropped (rebinding block, subnet mismatch, munging failed)
+ * @retval >0 Processed packet size ready for forwarding to client
+ *
+ * @note Strips EDNS0 if added_pheader is true and client didn't send EDNS0
+ * @note Blocks responses with private IP addresses unless domain in rebind exception list
+ * @note Populates Linux ipset/nftables sets with resolved addresses if configured
+ * @warning Drops responses with mismatched EDNS0 client subnet options (security)
+ * @warning May modify packet (munge CNAMEs, strip EDNS0, add EDE codes)
+ *
+ * @see reply_query() which calls this to process upstream server responses
+ * @see cache_insert() called to cache processed responses
+ * @see domain_find_sets() to find ipset/nftset configuration
+ * @see domain_no_rebind() to check rebinding protection exemptions
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * size_t reply_len = process_reply(header, time(NULL), upstream_server, packet_len,
+ *                                  1, 0, 0, 0, ad_req, do_bit, added_edns0,
+ *                                  &client_addr, packet + packet_len, EDE_UNSET);
+ * if (reply_len > 0) forward_to_client(header, reply_len);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 1918: Private address detection for rebinding protection
+ * - RFC 6891: EDNS0 extension handling
+ * - RFC 8914: Extended DNS Error codes
+ * - RFC 7871: EDNS0 client subnet option validation
+ *
+ * SIDE EFFECTS:
+ * - Modifies packet (may strip EDNS0, add EDE, munge CNAMEs)
+ * - Inserts entries into DNS cache via cache_insert()
+ * - Populates ipset/nftables sets with resolved addresses
+ * - Logs warnings for subnet option mismatches and rebinding blocks
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies packet, cache, logs). Safe in single-threaded model.
+ */
 static size_t process_reply(struct dns_header *header, time_t now, struct server *server, size_t n, int check_rebind, 
 			    int no_cache, int cache_secure, int bogusanswer, int ad_reqd, int do_bit, int added_pheader, 
 			    union mysockaddr *query_source, unsigned char *limit, int ede)
@@ -803,6 +1196,59 @@ static size_t process_reply(struct dns_header *header, time_t now, struct server
 }
 
 #ifdef HAVE_DNSSEC
+/**
+ * @brief Perform DNSSEC validation on DNS response and handle dependent queries
+ *
+ * @detailed
+ * Orchestrates DNSSEC validation for DNS responses, handling the complete validation
+ * chain including DNSKEY and DS record lookups when needed. Validates responses using
+ * dnssec_validate_reply(), dnssec_validate_by_ds(), or dnssec_validate_ds() depending
+ * on query type. When validation requires additional key data (STAT_NEED_DS or STAT_NEED_KEY),
+ * creates dependent queries and stashes the current response using blockdata. Detects and
+ * breaks validation dependency cycles to prevent infinite loops. Handles truncated answers
+ * by forcing TCP retry, and abandons validation on REFUSED responses.
+ *
+ * @param forward Forward record for the query being validated
+ * @param header DNS response header to validate
+ * @param plen Length of DNS response packet in bytes
+ * @param status Initial validation status (STAT_SECURE, STAT_BOGUS, STAT_NEED_DS, etc.)
+ * @param now Current time for cache operations and logging
+ * @return void (updates forward->blocking_query and validation chain)
+ *
+ * @note Sets daemon->log_display_id for consistent logging across validation chain
+ * @note Stashes response in blockdata when awaiting key data (prevents response loss)
+ * @note Only available when compiled with HAVE_DNSSEC
+ * @warning Ignores duplicate responses when forward->blocking_query already set
+ * @warning Returns immediately if validation already in progress (avoids re-entrancy)
+ * @warning Detects and breaks dependency cycles to prevent infinite validation loops
+ *
+ * @see dnssec_validate_reply() in dnssec.c for main validation logic
+ * @see dnssec_validate_by_ds() in dnssec.c for DNSKEY validation
+ * @see dnssec_validate_ds() in dnssec.c for DS record validation
+ * @see blockdata_alloc() in blockdata.c for response stashing
+ * @see lookup_frec_dnssec() for finding existing dependent queries
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int status = STAT_OK;
+ * struct frec *forward = lookup_frec(header->id, fd, NULL, NULL, NULL);
+ * if (forward && (forward->flags & (FREC_DNSKEY_QUERY | FREC_DS_QUERY)))
+ *   dnssec_validate(forward, header, n, status, now);
+ * @endcode
+ *
+ * RFC COMPLIANCE: Implements DNSSEC validation per RFC 4033-4035 (DNSSEC introduction,
+ * resource records, and protocol modifications)
+ *
+ * SIDE EFFECTS:
+ * - Sets daemon->log_display_id for logging context
+ * - May allocate blockdata stash via blockdata_alloc()
+ * - May create new dependent forward records via get_new_frec()
+ * - Modifies forward->blocking_query, forward->dependent chains
+ * - May free blockdata via blockdata_free() if stash already exists
+ * - Sends dependent DNSKEY/DS queries via server_send()
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static void dnssec_validate(struct frec *forward, struct dns_header *header,
 			    ssize_t plen, int status, time_t now)
 {
@@ -994,6 +1440,58 @@ static void dnssec_validate(struct frec *forward, struct dns_header *header,
 #endif
 
 /* sets new last_server */
+/**
+ * @brief Process DNS response from upstream server and forward to client
+ *
+ * @detailed Main upstream response handler called when upstream DNS server socket
+ * becomes readable in event loop. Receives response packet, validates it matches a
+ * pending forward record, verifies response came from expected server (spoof protection),
+ * updates server health metrics, processes response through caching pipeline, and
+ * forwards to all clients waiting for this query. Implements server selection learning
+ * by tracking which servers respond successfully vs REFUSED. Handles DNSSEC validation
+ * when enabled. Manages forward record cleanup after response delivery.
+ *
+ * @param fd File descriptor of socket that received response (UDP or TCP)
+ * @param now Current timestamp for cache TTL and server health tracking
+ *
+ * @note Called from event loop when upstream server socket readable
+ * @note Handles responses for both regular queries and DNSSEC-related queries (DNSKEY, DS)
+ * @note Updates server->last_server for intelligent server selection on future queries
+ * @note Silently drops invalid responses (too small, wrong QR bit, no matching frec, wrong server)
+ * @warning Relies on query ID + hash for frec lookup; randomized IDs prevent spoofing
+ * @warning Validates response source address matches expected server (critical security check)
+ *
+ * @see forward_query() which sends queries to upstream and creates forward records
+ * @see process_reply() which handles response caching and filtering
+ * @see return_reply() which forwards processed response to clients
+ * @see lookup_frec() to find forward record matching response
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Called from event loop when upstream socket readable:
+ * struct pollfd *pfd = &pollfds[upstream_socket_index];
+ * if (pfd->revents & POLLIN)
+ *   reply_query(pfd->fd, time(NULL));
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 1035: DNS response processing and forwarding
+ * - RFC 2181: Response validation and cache behavior
+ * - RFC 4035: DNSSEC response processing when HAVE_DNSSEC enabled
+ *
+ * SIDE EFFECTS:
+ * - Receives packet into daemon->packet buffer (overwrites previous content)
+ * - Updates server health metrics (queries, failed_queries, replyto, last_server)
+ * - Inserts responses into DNS cache via process_reply()
+ * - Forwards responses to clients via return_reply()
+ * - Frees forward record after delivery
+ * - May trigger DNSSEC validation queries
+ * - Logs query responses if query logging enabled
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (uses shared daemon->packet buffer, modifies server state).
+ * Safe in single-threaded event loop model.
+ */
 void reply_query(int fd, time_t now)
 {
   /* packet from peer server, extract data for cache, and send to
@@ -1155,6 +1653,57 @@ void reply_query(int fd, time_t now)
     return_reply(now, forward, header, n, STAT_OK); 
 }
 
+/**
+ * @brief Forward processed DNS response to all waiting clients
+ *
+ * @detailed Sends DNS response to all clients that requested this query (handles query
+ * aggregation where multiple clients share single upstream query). Processes DNSSEC
+ * validation status, applies rebinding protection, invokes process_reply() for caching
+ * and filtering, and transmits response to each client via send_from(). Handles DNSSEC
+ * validation results (SECURE, INSECURE, BOGUS) with appropriate logging and cache flags.
+ * Sets Extended DNS Error (EDE) codes for DNSSEC failures. Manages forward record cleanup.
+ *
+ * @param now Current timestamp for cache insertion
+ * @param forward Forward record containing all clients waiting for this query
+ * @param header DNS response packet header
+ * @param n Response packet size in bytes
+ * @param status DNSSEC validation status (STAT_OK, STAT_SECURE, STAT_INSECURE, STAT_BOGUS, etc.)
+ *
+ * @note Handles CD (Checking Disabled) bit: if set, DNSSEC validation not cached
+ * @note Iterates through forward->frec_src list to deliver response to all waiting clients
+ * @note Applies rebinding protection unless domain is in exception list
+ * @note Logs DNSSEC validation results (SECURE/INSECURE/BOGUS/ABANDONED)
+ * @warning Sets TC (Truncated) bit if DNSSEC validation status is STAT_TRUNCATED
+ * @warning Modifies header to add EDE codes for DNSSEC validation failures
+ *
+ * @see reply_query() which calls this after receiving upstream response
+ * @see process_reply() for response caching and filtering pipeline
+ * @see send_from() to transmit response to each client
+ * @see free_frec() called after all clients receive response
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Internal call from reply_query after upstream response:
+ * return_reply(time(NULL), forward_rec, response_header, response_len, validation_status);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 4035: DNSSEC validation status handling
+ * - RFC 8914: Extended DNS Error (EDE) codes for DNSSEC failures
+ * - RFC 1918: Rebinding protection for private address responses
+ *
+ * SIDE EFFECTS:
+ * - Sends response packets to all clients in forward->frec_src list
+ * - Calls process_reply() which caches response and populates ipsets
+ * - Sets daemon->log_display_id and daemon->log_source_addr for logging context
+ * - Logs DNSSEC validation results
+ * - Modifies header to add EDE codes or TC bit
+ * - Frees forward record after delivery
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies header, uses daemon globals, frees frec).
+ * Safe in single-threaded event loop model.
+ */
 static void return_reply(time_t now, struct frec *forward, struct dns_header *header, ssize_t n, int status)
 {
   int check_rebind = 0, no_cache_dnssec = 0, cache_secure = 0, bogusanswer = 0;
@@ -1281,6 +1830,43 @@ static void return_reply(time_t now, struct frec *forward, struct dns_header *he
 
 
 #ifdef HAVE_CONNTRACK
+/**
+ * @brief Check if DNS query is allowed based on connection mark and allowlist patterns
+ *
+ * @detailed
+ * Implements connection mark-based query filtering by checking if the query's domain name
+ * matches any allowlist pattern associated with the packet's connection mark. Iterates
+ * through daemon->allowlists comparing the masked connection mark, then checks domain name
+ * against patterns in matching allowlists. Wildcard pattern "*" allows all queries for that
+ * mark. Domain name validation is lazy (only performed once if needed) for efficiency. Used
+ * to restrict DNS resolution based on application identity in containerized environments.
+ *
+ * @param mark Connection mark from SO_MARK socket option (netfilter conntrack mark)
+ * @param name Domain name being queried (e.g., "example.com"), or NULL if extraction failed
+ * @return 1 if query allowed (mark matches allowlist with matching pattern), 0 if disallowed
+ *
+ * @note Requires HAVE_CONNTRACK to enable connection mark support
+ * @note Wildcard "*" pattern matches all domains for that mark
+ * @note Domain validation skipped if name is NULL (returns 0 for safety)
+ * @note Mark comparison uses daemon->allowlist_mask and per-allowlist mask for flexibility
+ * @warning Returns 0 (disallowed) if name is NULL or invalid DNS name
+ *
+ * @see answer_disallowed() for generating REFUSED response to disallowed queries
+ * @see is_valid_dns_name() for domain name validation
+ * @see is_dns_name_matching_pattern() for wildcard pattern matching
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * u32 mark = get_connection_mark(fd);
+ * if (!is_query_allowed_for_mark(mark, "example.com")) {
+ *   return answer_disallowed(header, qlen, mark, "example.com");
+ * }
+ * @endcode
+ *
+ * SIDE EFFECTS: None - read-only check operation
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static int is_query_allowed_for_mark(u32 mark, const char *name)
 {
   int is_allowable_name, did_validate_name = 0;
@@ -1304,6 +1890,49 @@ static int is_query_allowed_for_mark(u32 mark, const char *name)
   return 0;
 }
 
+/**
+ * @brief Generate REFUSED response for disallowed query with EDE (Extended DNS Error)
+ *
+ * @detailed
+ * Constructs a DNS REFUSED response for queries blocked by connection mark allowlist filtering,
+ * using Extended DNS Error (EDE) code BLOCKED to inform clients why the query was denied.
+ * Broadcasts ubus event on OpenWrt for logging/monitoring disallowed queries. Sets up response
+ * header with REFUSED rcode and EDE_BLOCKED extended error, skips question section, and returns
+ * response length for transmission. No answer/authority/additional sections added (minimal response).
+ *
+ * @param header DNS query header to be transformed into REFUSED response
+ * @param qlen Original query length in bytes (for question section parsing)
+ * @param mark Connection mark that caused query to be disallowed (for ubus event)
+ * @param name Domain name that was queried (for ubus event), or NULL
+ * @return Length of response packet in bytes, or 0 if question section parsing failed
+ *
+ * @note Requires HAVE_CONNTRACK for connection mark-based filtering
+ * @note Broadcasts ubus event if HAVE_UBUS enabled and name != NULL
+ * @note Sets EDE_BLOCKED (Extended DNS Error for filtered query)
+ * @note Parameters mark and name unused if HAVE_UBUS not defined (hence (void) casts)
+ * @warning Returns 0 if skip_questions() fails (malformed query)
+ *
+ * @see is_query_allowed_for_mark() which determines if answer_disallowed should be called
+ * @see setup_reply() in rfc1035.c for response header construction
+ * @see skip_questions() in rfc1035.c for question section parsing
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * u32 mark = get_connection_mark(fd);
+ * if (!is_query_allowed_for_mark(mark, "example.com")) {
+ *   size_t response_len = answer_disallowed(header, qlen, mark, "example.com");
+ *   sendto(fd, header, response_len, 0, &source, sa_len(&source));
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE: Uses RFC 8914 Extended DNS Errors (EDE) with BLOCKED code
+ *
+ * SIDE EFFECTS:
+ * - Modifies header in-place (transforms query into response)
+ * - Broadcasts ubus event if HAVE_UBUS (external notification)
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static size_t answer_disallowed(struct dns_header *header, size_t qlen, u32 mark, const char *name)
 {
   unsigned char *p;
@@ -1323,6 +1952,60 @@ static size_t answer_disallowed(struct dns_header *header, size_t qlen, u32 mark
 }
 #endif
 
+/**
+ * @brief Main DNS query entry point from network listeners
+ *
+ * @detailed Primary DNS query reception handler called when DNS listener socket becomes
+ * readable. Receives query packet with ancillary data (interface, destination address),
+ * extracts EDNS0 extensions, validates query format, checks connection tracking marks
+ * for filtering, determines if query is for authoritative zone, performs cache lookup,
+ * and either answers from cache/local data or forwards to upstream via forward_query().
+ * Handles CHAOS class queries for version binding. Implements query filtering based on
+ * marks (--filter-A, --filter-AAAA). Routes to authoritative DNS handler if applicable.
+ *
+ * @param listen Listener structure containing socket, interface, and bind address info
+ * @param now Current timestamp for cache lookup and forwarding
+ *
+ * @note Called from main event loop when DNS listener socket readable
+ * @note Handles both UDP and TCP queries (TCP via separate tcp_request path)
+ * @note Extracts destination address from ancillary data for multi-homed response addressing
+ * @note Performs cache lookup before forwarding (cache_find_by_query)
+ * @warning Silently drops malformed queries (too small, invalid format)
+ * @warning Drops queries with disallowed marks if connection tracking filtering enabled
+ * @warning Returns REFUSED for blocked query types (filtered by mark)
+ *
+ * @see forward_query() called when cache miss requires upstream forwarding
+ * @see answer_request() to generate responses from cache or local data
+ * @see extract_addresses() to parse authoritative zone queries
+ * @see tcp_request() for TCP query handling
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Called from event loop when DNS listener socket readable:
+ * struct pollfd *pfd = &pollfds[listener_index];
+ * if (pfd->revents & POLLIN)
+ *   receive_query(listeners[listener_index], time(NULL));
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 1035: DNS query processing, cache lookup, response generation
+ * - RFC 2671: EDNS0 extension parsing (OPT record, UDP size, flags)
+ * - RFC 3225: DNSSEC OK (DO) bit handling in EDNS0
+ * - RFC 4892: CHAOS class queries for version.bind and id.server.bind
+ * - RFC 7871: EDNS0 client subnet option extraction
+ *
+ * SIDE EFFECTS:
+ * - Receives packet into daemon->packet buffer via recvmsg()
+ * - May send response directly to client (cache hit, local answer, REFUSED)
+ * - Creates forward record and sends upstream query on cache miss
+ * - Logs queries if query logging enabled
+ * - Updates cache statistics
+ * - May trigger authoritative DNS processing
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (uses shared daemon->packet buffer, modifies cache).
+ * Safe in single-threaded event loop model.
+ */
 void receive_query(struct listener *listen, time_t now)
 {
   struct dns_header *header = (struct dns_header *)daemon->packet;
@@ -1711,6 +2394,59 @@ void receive_query(struct listener *listen, time_t now)
 
 /* Send query in packet, qsize to a server determined by first,last,start and
    get the reply. return reply size. */
+/**
+ * @brief Send DNS query via TCP to upstream servers with automatic failover
+ *
+ * @detailed
+ * Establishes TCP connections to upstream DNS servers and performs query/response transaction
+ * over TCP (RFC 1035 Section 4.2.2 TCP usage). Iterates through server range [first, last)
+ * starting at 'start' index, trying each server until successful response received. Creates
+ * TCP socket per server (cached in serv->tcpfd), attempts MSG_FASTOPEN when available, validates
+ * response by comparing question section hash to prevent cache poisoning via bogus TCP responses.
+ * Retries same server once if data received then EOF (SERV_GOT_TCP), to avoid DoS from servers
+ * that accept connections then immediately close. Copies connection mark for netfilter integration.
+ *
+ * @param first First index in daemon->serverarray to try
+ * @param last One past last index in daemon->serverarray to try (exclusive upper bound)
+ * @param start Starting index for first attempt (rotates for load balancing)
+ * @param packet Buffer containing 2-byte length prefix + DNS query packet
+ * @param qsize DNS query size in bytes (excluding 2-byte length prefix)
+ * @param have_mark Whether connection mark is valid (HAVE_CONNTRACK)
+ * @param mark Connection mark to propagate to outgoing TCP connection
+ * @param servp Output parameter receiving pointer to server that responded successfully
+ * @return Response size in bytes (excluding length prefix) on success, 0 on all servers failed
+ *
+ * @note Requires TCP for responses exceeding UDP limit or when TC bit set in UDP response
+ * @note Validates response question hash to prevent TCP-based cache poisoning
+ * @note Caches TCP connections in server->tcpfd for connection reuse
+ * @warning Returns 0 if all servers fail or response hash doesn't match query hash
+ * @warning Closes and clears serv->tcpfd on any I/O error (forces reconnect on retry)
+ *
+ * @see read_write() in util.c for reliable TCP I/O with retries
+ * @see hash_questions() for question section hashing
+ * @see tcp_request() which uses tcp_talk for client TCP queries
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char packet[MAXDNAME];
+ * *(u16*)packet = 0; // Length filled by tcp_talk
+ * memcpy(&packet[2], query, query_len);
+ * struct server *server_used;
+ * ssize_t n = tcp_talk(0, daemon->numservers, 0, packet, query_len, 0, 0, &server_used);
+ * @endcode
+ *
+ * RFC COMPLIANCE: Implements TCP transport per RFC 1035 Section 4.2.2 (length-prefixed messages)
+ *
+ * SIDE EFFECTS:
+ * - Opens TCP sockets via socket() and stores in server->tcpfd
+ * - Closes sockets on I/O errors via close()
+ * - Sets SO_MARK on outgoing connections if have_mark (HAVE_CONNTRACK)
+ * - Updates daemon->serverarray[first]->last_server for round-robin
+ * - Sets SERV_GOT_TCP flag on successful data receipt
+ * - Sends/receives data via read_write() and server_send()
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static ssize_t tcp_talk(int first, int last, int start, unsigned char *packet,  size_t qsize,
 			int have_mark, unsigned int mark, struct server **servp)
 {
@@ -1822,7 +2558,61 @@ static ssize_t tcp_talk(int first, int last, int start, unsigned char *packet,  
 }
 		  
 #ifdef HAVE_DNSSEC
-/* Recurse down the key hierarchy */
+/**
+ * @brief Recursively validate DNSSEC chain by fetching needed DNSKEY/DS records via TCP
+ *
+ * @detailed
+ * Implements recursive DNSSEC validation over TCP by traversing the trust chain from the
+ * current response up to trust anchors. When validation returns STAT_NEED_KEY or STAT_NEED_DS,
+ * generates queries for the missing DNSKEY or DS records, sends them via tcp_talk(), and
+ * recursively validates the responses. Limits recursion depth via keycount to prevent infinite
+ * loops on broken DNSSEC. Used by tcp_request() to validate responses when client requests
+ * DNSSEC validation over TCP. Updates keyname with next required key on each iteration.
+ *
+ * @param now Current time for validation and cache operations
+ * @param status Current validation status (STAT_NEED_KEY, STAT_NEED_DS, or STAT_OK)
+ * @param header DNS response header being validated
+ * @param n Length of DNS response in bytes
+ * @param class DNS class (typically C_IN = 1 for Internet)
+ * @param name Domain name being validated (original query target)
+ * @param keyname Buffer receiving name of next required DNSKEY/DS record (updated by validators)
+ * @param server Upstream server used for dependent queries
+ * @param have_mark Whether connection mark is valid for marking outgoing queries
+ * @param mark Connection mark to propagate to dependent TCP queries
+ * @param keycount Pointer to remaining recursion limit counter (decremented each iteration)
+ * @return Final validation status (STAT_OK, STAT_SECURE, STAT_BOGUS, or STAT_ABANDONED)
+ *
+ * @note Only available when compiled with HAVE_DNSSEC
+ * @note Allocates 65536-byte packet buffer for dependent queries (freed on return)
+ * @note Recursion limit enforced via *keycount to prevent DNSSEC validation cycles
+ * @warning Returns STAT_ABANDONED if keycount reaches zero (recursion limit exceeded)
+ * @warning Returns STAT_ABANDONED if packet allocation fails or tcp_talk fails
+ *
+ * @see dnssec_validate_by_ds() in dnssec.c for DNSKEY validation
+ * @see dnssec_validate_ds() in dnssec.c for DS validation
+ * @see dnssec_validate_reply() in dnssec.c for general DNSSEC validation
+ * @see tcp_talk() for sending dependent queries via TCP
+ * @see tcp_request() which initiates tcp_key_recurse for DNSSEC validation
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int keycount = DNSSEC_WORK; // Maximum recursion depth
+ * int status = dnssec_validate_reply(now, header, n, name, keyname, &class, 1, NULL, NULL, NULL);
+ * if (status == STAT_NEED_KEY || status == STAT_NEED_DS)
+ *   status = tcp_key_recurse(now, status, header, n, class, name, keyname, server, 0, 0, &keycount);
+ * @endcode
+ *
+ * RFC COMPLIANCE: Implements DNSSEC trust chain validation per RFC 4033-4035
+ *
+ * SIDE EFFECTS:
+ * - Allocates and frees 65536-byte packet buffer via whine_malloc/free
+ * - Sends dependent DNSKEY/DS queries via tcp_talk()
+ * - Modifies daemon->log_display_id for dependent query logging
+ * - Decrements *keycount on each recursive iteration
+ * - Updates keyname with next required key name (via validation functions)
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static int tcp_key_recurse(time_t now, int status, struct dns_header *header, size_t n, 
 			   int class, char *name, char *keyname, struct server *server, 
 			   int have_mark, unsigned int mark, int *keycount)
@@ -1901,6 +2691,63 @@ static int tcp_key_recurse(time_t now, int status, struct dns_header *header, si
    blocking as necessary, and then return. Note, need to be a bit careful
    about resources for debug mode, when the fork is suppressed: that's
    done by the caller. */
+/**
+ * @brief Handle TCP-based DNS queries from connected client
+ *
+ * @detailed Processes one or more DNS queries over established TCP connection,
+ * handling TCP length-prefixed message format (2-byte length + DNS packet). Supports
+ * query pipelining where multiple queries arrive on same connection. Performs cache
+ * lookup, forwards to upstream via TCP if needed, processes responses, and sends
+ * length-prefixed responses back to client. Handles EDNS0, DNSSEC, authoritative
+ * zones, connection tracking marks, and local service restrictions. Implements
+ * TCP-specific timeout handling and connection cleanup.
+ *
+ * @param confd Connected TCP socket file descriptor
+ * @param now Current timestamp for cache operations
+ * @param local_addr Local address where connection was accepted
+ * @param netmask Network mask for local address (for local service check)
+ * @param auth_dns True if this listener is for authoritative DNS zone
+ *
+ * @return Pointer to allocated packet buffer (caller must free), NULL on allocation failure
+ *
+ * @note TCP DNS uses 2-byte length prefix before each query/response packet
+ * @note Supports query pipelining: processes up to query_count queries per connection
+ * @note Allocates buffer of 65536 + MAXDNAME + RRFIXEDSZ + 2 bytes for maximum TCP packet
+ * @note Connection mark propagation via HAVE_CONNTRACK if enabled
+ * @warning Closes connection and returns NULL on protocol violations or resource exhaustion
+ * @warning Enforces --local-service restriction if enabled (one-hop-away addresses only)
+ *
+ * @see receive_query() which handles UDP queries
+ * @see tcp_talk() helper for upstream TCP communication
+ * @see forward_query() for upstream forwarding logic
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Called from daemon when TCP client connects:
+ * int tcp_fd = accept(listener_fd, &client_addr, &addrlen);
+ * unsigned char *buffer = tcp_request(tcp_fd, time(NULL), &local, netmask, is_auth);
+ * if (buffer) free(buffer);
+ * close(tcp_fd);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 1035 Section 4.2.2: TCP DNS message format with 2-byte length prefix
+ * - RFC 7766: TCP implementation recommendations for DNS
+ * - RFC 7828: EDNS0 TCP keepalive option (if supported)
+ *
+ * SIDE EFFECTS:
+ * - Reads queries from TCP socket confd
+ * - Writes responses to TCP socket confd
+ * - May forward queries to upstream servers via TCP
+ * - Performs cache lookups and insertions
+ * - Logs queries if logging enabled
+ * - Allocates packet buffer via whine_malloc() (caller must free)
+ * - May close connection on errors
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (uses daemon globals, cache operations).
+ * Safe in single-threaded event loop with one connection per call.
+ */
 unsigned char *tcp_request(int confd, time_t now,
 			   union mysockaddr *local_addr, struct in_addr netmask, int auth_dns)
 {
@@ -2252,6 +3099,44 @@ unsigned char *tcp_request(int confd, time_t now,
 
 /* return a UDP socket bound to a random port, have to cope with straying into
    occupied port nos and reserved ones. */
+/**
+ * @brief Create UDP socket bound to server's source address and interface
+ *
+ * @detailed
+ * Allocates a new UDP socket (SOCK_DGRAM) for the address family of the upstream server's
+ * source address, then binds it to the server's configured source address and network interface.
+ * Used for creating randomized source port sockets for DNS queries to prevent cache poisoning.
+ * Logs error and closes socket on bind failure. The bound socket provides explicit source
+ * address control required for multi-homed hosts and policy routing.
+ *
+ * @param s Upstream server containing source_addr, interface, and ifindex for binding
+ * @return File descriptor of bound UDP socket on success, -1 on socket creation or bind failure
+ *
+ * @note Socket family (AF_INET or AF_INET6) determined from s->source_addr.sa.sa_family
+ * @note Binds to specific interface if s->interface is non-empty
+ * @warning Logs error via my_syslog on bind failure (includes interface name or source address)
+ * @warning Returns -1 and does not leak socket fd on bind failure
+ *
+ * @see local_bind() in network.c for interface and address binding
+ * @see allocate_rfd() which uses random_sock to create socket pool
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct server *upstream = daemon->servers;
+ * int fd = random_sock(upstream);
+ * if (fd != -1) {
+ *   sendto(fd, query, query_len, 0, &upstream->addr.sa, sa_len(&upstream->addr));
+ * }
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Creates UDP socket via socket()
+ * - Binds socket to source address and interface via local_bind()
+ * - Logs error via my_syslog on bind failure
+ * - Closes socket via close() on bind failure
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static int random_sock(struct server *s)
 {
   int fd;
@@ -2274,7 +3159,43 @@ static int random_sock(struct server *s)
   return -1;
 }
 
-/* compare source addresses and interface, serv2 can be null. */
+/**
+ * @brief Compare two server records for source address and interface equality
+ *
+ * @detailed
+ * Determines if two upstream server records are equivalent in terms of network binding
+ * (source address, interface index, and interface name). Used by allocate_rfd() to find
+ * existing randomized sockets that can be reused for queries to the same logical upstream
+ * when multiple server records exist for the same destination. Compares interface index
+ * (kernel interface ID), source address (IP and port), and interface name string. Returns
+ * false if serv2 is NULL (allows safe comparison with potentially cleared server pointers).
+ *
+ * @param serv1 First server record to compare (must not be NULL)
+ * @param serv2 Second server record to compare (may be NULL)
+ * @return 1 if servers are equivalent (same source binding), 0 if different or serv2 is NULL
+ *
+ * @note NULL-safe: Returns 0 if serv2 is NULL
+ * @note Compares interface index, source address (via sockaddr_isequal), and interface name
+ * @note Interface name comparison limited to IF_NAMESIZE (typically 16 bytes on Linux)
+ * @warning Does not compare destination address (only source binding parameters)
+ *
+ * @see sockaddr_isequal() for address comparison logic
+ * @see allocate_rfd() which uses server_isequal for socket reuse detection
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct server *serv_a = daemon->servers;
+ * struct server *serv_b = serv_a->next;
+ * if (server_isequal(serv_a, serv_b)) {
+ *   // Can reuse same randomized socket for both servers
+ *   fd = serv_a->sfd->fd;
+ * }
+ * @endcode
+ *
+ * SIDE EFFECTS: None - pure comparison function (read-only)
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static int server_isequal(const struct server *serv1,
 			 const struct server *serv2)
 {
@@ -2293,6 +3214,58 @@ static int server_isequal(const struct server *serv1,
    
    Note that rfd->serv may be NULL, when a server goes away.
 */
+/**
+ * @brief Allocate randomized source port socket for upstream query
+ *
+ * @detailed Manages pool of random source port sockets to prevent DNS cache poisoning
+ * by making source ports unpredictable. Returns existing socket if transaction already
+ * has one for this server, otherwise allocates new socket with random port or reuses
+ * existing socket from pool (with refcount tracking). Prefers server pre-allocated
+ * socket (serv->sfd) if available. Implements round-robin socket reuse when pool
+ * exhausted. Limits total socket count to avoid resource starvation.
+ *
+ * @param fdlp Pointer to list head of randfd_list for this transaction (modified)
+ * @param serv Upstream server for socket allocation (determines AF_INET vs AF_INET6)
+ *
+ * @return File descriptor of allocated socket, -1 on allocation failure
+ *
+ * @retval >=0 Valid file descriptor for upstream query transmission
+ * @retval -1 Resource allocation failed (malloc failure or too many open sockets)
+ *
+ * @note Randomized source ports critical security feature to prevent cache poisoning
+ * @note Reuses sockets when possible to limit resource consumption (daemon->numrrand limit)
+ * @note Reference counting allows socket sharing between multiple transactions
+ * @warning Socket pool size daemon->numrrand limits concurrent queries to same server
+ * @warning Static finger variable maintains round-robin state across calls (not thread-safe)
+ *
+ * @see forward_query() which calls this to get socket for upstream transmission
+ * @see random_sock() which creates new socket with random port binding
+ * @see free_rfds() to release sockets and decrement refcounts after transaction completes
+ * @see server_isequal() for server comparison to enable socket reuse
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct randfd_list *rfd_list = NULL;
+ * int upstream_fd = allocate_rfd(&rfd_list, upstream_server);
+ * if (upstream_fd >= 0)
+ *   sendto(upstream_fd, query, query_len, 0, &server->addr, sizeof(server->addr));
+ * free_rfds(&rfd_list); // Clean up after transaction
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 5452: Source port randomization for DNS poisoning prevention
+ *
+ * SIDE EFFECTS:
+ * - Allocates randfd_list entry via whine_malloc() or daemon->rfl_spare pool
+ * - Creates new socket via random_sock() if pool has capacity
+ * - Increments refcount on reused sockets (daemon->randomsocks[].refcount)
+ * - Modifies *fdlp to prepend allocated randfd_list entry
+ * - May call set_outgoing_mark() if HAVE_CONNTRACK enabled
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies static finger, daemon globals, shared socket pool).
+ * Safe in single-threaded event loop model.
+ */
 int allocate_rfd(struct randfd_list **fdlp, struct server *serv)
 {
   static int finger = 0;
@@ -2399,6 +3372,47 @@ int allocate_rfd(struct randfd_list **fdlp, struct server *serv)
   return rfl->rfd->fd;
 }
 
+/**
+ * @brief Release randomized source port sockets after query completion
+ *
+ * @detailed Decrements reference counts on all random port sockets in transaction list,
+ * closes sockets when refcount reaches zero, and returns randfd_list entries to spare
+ * pool for reuse. Handles special overflow records (refcount 0xffff) which are temporary
+ * allocations needing full cleanup. Iterates through transaction socket list and updates
+ * global daemon socket structures.
+ *
+ * @param fdlp Pointer to head of randfd_list chain (set to NULL on return)
+ *
+ * @note Called after query transaction completes to release socket resources
+ * @note Closes socket only when refcount decrements to zero (may be shared by other transactions)
+ * @note Returns randfd_list entries to daemon->rfl_spare pool for memory efficiency
+ * @note Overflow records (refcount 0xffff) are fully freed including socket and structure
+ * @warning Must be called for every transaction that called allocate_rfd() to prevent socket leaks
+ *
+ * @see allocate_rfd() which allocates sockets and increments refcounts
+ * @see reply_query() which calls this after forwarding response to client
+ * @see forward_query() for transaction lifecycle context
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct randfd_list *rfd_list = NULL;
+ * int fd = allocate_rfd(&rfd_list, server);
+ * // ... use fd for query ...
+ * free_rfds(&rfd_list); // Release after query completes
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Decrements refcount on daemon->randomsocks[] entries
+ * - Closes sockets when refcount reaches zero
+ * - Frees overflow randfd structures (refcount 0xffff)
+ * - Returns randfd_list entries to daemon->rfl_spare pool
+ * - Sets *fdlp to NULL
+ * - Modifies daemon->rfl_poll list for overflow cleanup
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies shared daemon socket pool and freelists).
+ * Safe in single-threaded event loop model.
+ */
 void free_rfds(struct randfd_list **fdlp)
 {
   struct randfd_list *tmp, *rfl, *poll, *next, **up;
@@ -2438,6 +3452,48 @@ void free_rfds(struct randfd_list **fdlp)
   *fdlp = NULL;
 }
 
+/**
+ * @brief Release forward record after query transaction completes
+ *
+ * @detailed Returns forward record to available state for reuse, clearing all transaction
+ * data. Releases random port sockets via free_rfds(), returns frec_src entries (for
+ * multiple clients sharing query) to freelist, clears DNSSEC blockdata and dependency
+ * chains. Implements recursive freeing: if this frec was dependent on blocking DNSSEC
+ * query and was last dependent, frees blocking query too. Does not deallocate frec
+ * structure itself (statically allocated pool).
+ *
+ * @param f Forward record to free (from daemon->frec_list pool)
+ *
+ * @note Forward records are never deallocated, only marked available via sentto=NULL
+ * @note Handles query aggregation: multiple frec_src entries for duplicate client queries
+ * @note DNSSEC support: frees blockdata stash and manages blocking query dependencies
+ * @note Recursive: may free blocking_query if this was last dependent
+ * @warning Must be called for every allocated forward record to prevent resource exhaustion
+ * @warning Recursive calls can free multiple frecs in DNSSEC validation chains
+ *
+ * @see get_new_frec() which allocates forward records from pool
+ * @see return_reply() which calls this after delivering response to clients
+ * @see free_rfds() to release random port sockets
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // After sending response to all clients:
+ * return_reply(now, forward, header, packet_len, status);
+ * free_frec(forward); // Release forward record for reuse
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Releases random port sockets via free_rfds(&f->rfds)
+ * - Returns frec_src entries to daemon->free_frec_src pool
+ * - Frees DNSSEC blockdata via blockdata_free(f->stash) if HAVE_DNSSEC
+ * - Unlinks from blocking_query dependency chain if HAVE_DNSSEC
+ * - May recursively free blocking_query if this was last dependent
+ * - Clears f->sentto, f->flags, f->frec_src.next, f->stash, f->blocking_query, f->dependent
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies shared frec pool and freelists).
+ * Safe in single-threaded event loop model.
+ */
 static void free_frec(struct frec *f)
 {
   struct frec_src *last;
@@ -2490,6 +3546,59 @@ static void free_frec(struct frec *f)
 
 
 
+/**
+ * @brief Allocate forward record from pool for new DNS transaction
+ *
+ * @detailed Finds available forward record from daemon->frec_list pool, implementing
+ * garbage collection of expired records (4*TIMEOUT age limit), per-server-group quotas
+ * to prevent single server monopolizing pool, and resource exhaustion detection. Returns
+ * free record if available, oldest expired record if garbage collection needed, or forces
+ * allocation beyond limits for DNSSEC queries. Logs "Maximum number of concurrent DNS
+ * queries reached" when pool exhausted.
+ *
+ * @param now Current timestamp for age comparison (garbage collection threshold)
+ * @param master Upstream server for this query (used for per-server-group counting)
+ * @param force If true, bypass limits and return record even if pool exhausted (DNSSEC)
+ *
+ * @return Pointer to allocated forward record, NULL if exhausted and force=false
+ *
+ * @retval non-NULL Available forward record ready for transaction use
+ * @retval NULL Pool exhausted, cannot allocate (only if force=false)
+ *
+ * @note Forward record pool size set by --dns-forward-max (default FTABSIZ=150)
+ * @note Garbage collection: records older than 4*TIMEOUT seconds are reclaimed
+ * @note Per-server-group limit: prevents single server consuming entire pool
+ * @note Force mode for DNSSEC: prevents freeing records in active validation chains
+ * @warning Pool exhaustion causes query drops until existing transactions complete
+ * @warning Force mode bypasses safety limits: used only for DNSSEC internal queries
+ *
+ * @see free_frec() to return records to pool after transaction completes
+ * @see forward_query() which calls this to allocate frec for new queries
+ * @see query_full() logging function called when pool exhausted
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct frec *forward = get_new_frec(time(NULL), upstream_server, 0);
+ * if (!forward) {
+ *   // Pool exhausted, cannot forward query
+ *   return send_refused_response(client);
+ * }
+ * forward->sentto = upstream_server;
+ * // ... configure forward record and send query ...
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - No specific RFC, implementation-defined resource management
+ *
+ * SIDE EFFECTS:
+ * - May call free_frec() on expired records (garbage collection)
+ * - Logs warning via query_full() when pool exhausted
+ * - Returns record with cleared state (sentto=NULL becomes non-NULL after allocation)
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (modifies shared daemon->frec_list pool).
+ * Safe in single-threaded event loop model.
+ */
 /* Impose an absolute
    limit of 4*TIMEOUT before we wipe things (for random sockets).
    If force is set, always return a result, even if we have
@@ -2554,6 +3663,39 @@ static struct frec *get_new_frec(time_t now, struct server *master, int force)
   return target;
 }
 
+/**
+ * @brief Log warning when forward record pool exhausted
+ *
+ * @detailed Rate-limited logging function (maximum once per 5 seconds) to warn when
+ * daemon->frec_list pool is exhausted, preventing new queries from being forwarded.
+ * Provides different messages for global exhaustion vs per-domain exhaustion. Static
+ * last_log variable implements rate limiting to avoid log flooding during sustained
+ * overload conditions.
+ *
+ * @param now Current timestamp for rate limiting comparison
+ * @param domain Domain name causing exhaustion (NULL or empty for global limit)
+ *
+ * @note Rate limited to one log message per 5 seconds regardless of call frequency
+ * @note Message includes daemon->ftabsize (max concurrent queries, default 150)
+ * @warning Static last_log makes this function not thread-safe
+ *
+ * @see get_new_frec() which calls this when pool exhausted
+ * @see forward_query() which may trigger this on high query load
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (!get_new_frec(now, server, 0))
+ *   query_full(now, NULL); // Log global pool exhaustion
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Logs warning message via my_syslog(LOG_WARNING)
+ * - Updates static last_log timestamp
+ *
+ * THREAD SAFETY:
+ * Not thread-safe (static last_log variable).
+ * Safe in single-threaded event loop model.
+ */
 static void query_full(time_t now, char *domain)
 {
   static time_t last_log = 0;
@@ -2569,6 +3711,55 @@ static void query_full(time_t now, char *domain)
 }
 
 
+/**
+ * @brief Find forward record matching response ID, hash, and socket
+ *
+ * @detailed Searches daemon->frec_list for forward record matching upstream response,
+ * using query ID (randomized by forward_query), question hash (SHA-256 digest), and
+ * receiving socket file descriptor. Triple-key matching provides spoof protection:
+ * attacker must guess randomized ID, know question hash, and match socket. Handles
+ * both random port sockets (f->rfds list) and server-bound sockets (s->sfd).
+ *
+ * @param id Randomized query ID from DNS response header (f->new_id)
+ * @param fd File descriptor that received response (random port or server socket)
+ * @param hash SHA-256 hash of question section from response (HASH_SIZE bytes)
+ * @param firstp Output: first index in serverarray for matched server group
+ * @param lastp Output: last index in serverarray for matched server group
+ *
+ * @return Pointer to matching forward record, NULL if no match found
+ *
+ * @retval non-NULL Forward record for this query
+ * @retval NULL No matching record (possible spoof attempt or late response)
+ *
+ * @note Requires all three of ID, hash, and socket FD to match for security
+ * @note Populates firstp/lastp via filter_servers() for server group iteration
+ * @note Used by reply_query() to find forward record for upstream response
+ * @warning Returns NULL for spoofed responses with wrong ID, hash, or socket
+ *
+ * @see reply_query() which calls this to match responses to queries
+ * @see hash_questions() which generates question hash
+ * @see forward_query() which sets f->new_id to randomized value
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * void *hash = hash_questions(header, packet_len, namebuff);
+ * int first, last;
+ * struct frec *forward = lookup_frec(ntohs(header->id), recv_fd, hash, &first, &last);
+ * if (forward) process_response(forward); // Legitimate response
+ * else drop_packet(); // Spoof or late response
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 5452: DNS cache poisoning prevention via ID/port randomization
+ *
+ * SIDE EFFECTS:
+ * - Sets *firstp and *lastp via filter_servers() if match found
+ * - Read-only traversal of daemon->frec_list and socket lists
+ *
+ * THREAD SAFETY:
+ * Thread-safe (read-only access).
+ * Safe in single-threaded event loop model.
+ */
 static struct frec *lookup_frec(unsigned short id, int fd, void *hash, int *firstp, int *lastp)
 {
   struct frec *f;
@@ -2602,6 +3793,41 @@ static struct frec *lookup_frec(unsigned short id, int fd, void *hash, int *firs
   return NULL;
 }
 
+/**
+ * @brief Lookup forward record by query hash and flags
+ *
+ * @detailed
+ * Searches the active forward record list for a transaction matching the provided
+ * query hash and flag criteria. Uses the SHA-256 hash of the DNS query question
+ * section for matching, enabling duplicate query detection and coalescing. The
+ * flagmask parameter allows selective flag matching (e.g., match DNSSEC queries only).
+ * Returns NULL if no matching forward record exists or if hash is NULL.
+ *
+ * @param hash Pointer to HASH_SIZE byte SHA-256 digest of query question section, or NULL
+ * @param flags Required flag bits that must be set (after masking)
+ * @param flagmask Mask selecting which flag bits to compare
+ * @return Pointer to matching frec if found, NULL if no match or hash is NULL
+ *
+ * @note Only searches forward records with sentto != NULL (active queries)
+ * @note Hash comparison uses constant-time memcmp for HASH_SIZE bytes
+ * @warning Caller must validate returned frec is still valid before use
+ *
+ * @see lookup_frec() for ID/socket-based lookup
+ * @see lookup_frec_dnssec() for DNSSEC-specific lookup using blockdata stash
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char query_hash[HASH_SIZE];
+ * hash_questions(header, plen, query_hash);
+ * struct frec *existing = lookup_frec_by_query(query_hash, F_DNSSEC, F_DNSSEC);
+ * if (existing)
+ *   return existing; // Coalesce duplicate DNSSEC query
+ * @endcode
+ *
+ * SIDE EFFECTS: None - read-only search operation
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static struct frec *lookup_frec_by_query(void *hash, unsigned int flags, unsigned int flagmask)
 {
   struct frec *f;
@@ -2617,8 +3843,47 @@ static struct frec *lookup_frec_by_query(void *hash, unsigned int flags, unsigne
 }
 
 #ifdef HAVE_DNSSEC
-/* DNSSEC frecs have the complete query in the block stash.
-   Search for an existing query using that. */
+/**
+ * @brief Lookup forward record for DNSSEC query by target name and class
+ *
+ * @detailed
+ * DNSSEC-specific forward record lookup that searches by reconstructing the query
+ * from the blockdata stash and comparing target domain name and class. DNSSEC queries
+ * store the complete original query in f->stash via blockdata_save(), enabling exact
+ * query matching even when query IDs are rewritten. Retrieves the stashed query into
+ * the provided header buffer, extracts the question name, skips the type field (known
+ * from flags), and compares the class field. Used for dependent query coalescing in
+ * DNSSEC validation chains.
+ *
+ * @param target Target domain name buffer to match (e.g., "example.com" for DS lookup)
+ * @param class DNS class to match (typically C_IN = 1 for Internet class)
+ * @param flags Required flag bits (e.g., F_DNSSEC) that must be set
+ * @param header DNS header buffer for temporary query reconstruction from stash
+ * @return Pointer to matching frec if found, NULL if no DNSSEC query matches
+ *
+ * @note Only available when compiled with HAVE_DNSSEC
+ * @note Requires blockdata stash to be populated (f->stash != NULL)
+ * @note Only searches forward records with sentto != NULL (active queries)
+ * @warning blockdata_retrieve modifies header buffer as side effect
+ *
+ * @see lookup_frec() for standard ID-based lookup
+ * @see lookup_frec_by_query() for hash-based lookup
+ * @see blockdata_retrieve() in blockdata.c for stash retrieval
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dns_header *temp_header = whine_malloc(DNSSEC_WORK * sizeof(struct dns_header));
+ * struct frec *existing = lookup_frec_dnssec("example.com", C_IN, F_DNSSEC, temp_header);
+ * if (existing)
+ *   return existing; // Coalesce duplicate DNSSEC dependent query
+ * @endcode
+ *
+ * RFC COMPLIANCE: Supports DNSSEC validation per RFC 4033-4035
+ *
+ * SIDE EFFECTS: Writes to header buffer during blockdata_retrieve and extract_name
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static struct frec *lookup_frec_dnssec(char *target, int class, int flags, struct dns_header *header)
 {
    struct frec *f;
@@ -2647,7 +3912,35 @@ static struct frec *lookup_frec_dnssec(char *target, int class, int flags, struc
 }
 #endif
 
-/* Send query packet again, if we can. */
+/**
+ * @brief Resend last query packet to saved upstream server
+ *
+ * @detailed
+ * Re-transmits the most recently saved DNS query packet to the previously selected
+ * upstream server. Used by DNSSEC validation to resend queries after trust anchor
+ * updates or configuration changes. The query packet and destination server are stored
+ * in daemon->packet, daemon->packet_len, daemon->srv_save, and daemon->fd_save by
+ * previous query operations. No-op if srv_save is NULL (no saved query exists).
+ *
+ * @return void
+ *
+ * @note Requires daemon->srv_save to be set by prior server_send() call
+ * @note Global state dependency: daemon->packet, daemon->packet_len, daemon->fd_save
+ * @warning No validation that saved query is still valid or recent
+ *
+ * @see server_send() which populates daemon->srv_save for resend capability
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // After trust anchor update in DNSSEC validation
+ * reload_trust_anchors();
+ * resend_query(); // Re-validate with updated anchors
+ * @endcode
+ *
+ * SIDE EFFECTS: Sends UDP packet via server_send() if srv_save != NULL
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 void resend_query()
 {
   if (daemon->srv_save)
@@ -2655,7 +3948,44 @@ void resend_query()
 		daemon->packet, daemon->packet_len, 0);
 }
 
-/* A server record is going away, remove references to it */
+/**
+ * @brief Cleanup all references to upstream server being removed
+ *
+ * @detailed
+ * Called when an upstream server record is being deleted (e.g., configuration reload,
+ * server failure threshold exceeded). Iterates through all active forward records and
+ * frees any queries awaiting responses from the departing server. Clears server references
+ * in the random socket pool to prevent use-after-free errors. Nulls the global saved server
+ * pointer if it references the departing server. Ensures clean removal of server without
+ * dangling pointers or resource leaks.
+ *
+ * @param server Pointer to struct server being removed from upstream server list
+ * @return void
+ *
+ * @note Iterates entire forward record list (potentially expensive for many queries)
+ * @note Frees forward records immediately without attempting retry to other servers
+ * @warning Must be called before server struct is deallocated to prevent use-after-free
+ * @warning Drops any queries awaiting responses from this server (clients timeout)
+ *
+ * @see free_frec() for forward record cleanup
+ * @see option.c for server configuration and removal triggers
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct server *failing_server = find_server_by_addr(&addr);
+ * if (failing_server->failed_queries > FAILURE_THRESHOLD) {
+ *   server_gone(failing_server); // Clean references
+ *   free(failing_server); // Safe to deallocate
+ * }
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Frees forward records via free_frec() (returns to freelist)
+ * - Modifies daemon->randomsocks[] array (NULLs server pointers)
+ * - May modify daemon->srv_save (sets to NULL if matches)
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 void server_gone(struct server *server)
 {
   struct frec *f;
@@ -2675,7 +4005,40 @@ void server_gone(struct server *server)
     daemon->srv_save = NULL;
 }
 
-/* return unique random ids. */
+/**
+ * @brief Generate unique random DNS query ID for cache poisoning prevention
+ *
+ * @detailed
+ * Generates a cryptographically random 16-bit DNS query ID using rand16() SURF random
+ * number generator, ensuring uniqueness across all active forward records. Loops until
+ * finding an ID not currently in use by any pending query (checks f->new_id in all frecs
+ * with sentto != NULL). The unique randomized ID prevents DNS cache poisoning attacks by
+ * making query ID prediction infeasible. Combined with source port randomization, this
+ * provides ~32 bits of entropy for query identification.
+ *
+ * @return Unique random 16-bit query ID not in use by any active forward record
+ *
+ * @note Uses rand16() from util.c (SURF RNG from djbdns, cryptographically strong)
+ * @note Loops until unique ID found (worst case ~65536 iterations if all IDs in use)
+ * @note Collision probability increases with number of concurrent queries (birthday paradox)
+ * @warning Infinite loop if all 65536 possible IDs are in use (effectively impossible)
+ *
+ * @see rand16() in util.c for random number generation
+ * @see forward_query() which uses get_id() to randomize outgoing query IDs
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct frec *forward = get_new_frec(now, NULL, 0);
+ * forward->new_id = get_id(); // Randomize ID for cache poisoning prevention
+ * header->id = htons(forward->new_id);
+ * @endcode
+ *
+ * RFC COMPLIANCE: Implements DNS ID randomization per RFC 5452 (cache poisoning prevention)
+ *
+ * SIDE EFFECTS: None - pure function returning random unique value
+ *
+ * THREAD SAFETY: Safe in single-threaded event loop model (not thread-safe for concurrent access)
+ */
 static unsigned short get_id(void)
 {
   unsigned short ret = 0;
