@@ -1,0 +1,405 @@
+# Doxyfile 1.9.1
+#
+# Doxygen configuration file for dnsmasq source code documentation
+#
+# This file configures Doxygen to generate comprehensive API documentation
+# from inline comments in the dnsmasq C source code. It is optimized for
+# C language (non-object-oriented) code with emphasis on:
+# - Static function extraction for internal implementation documentation
+# - Strict warning enforcement to ensure documentation completeness
+# - Source code browsing and cross-referencing capabilities
+# - HTML output without LaTeX/Graphviz dependencies for portability
+#
+# Usage: doxygen Doxyfile
+# Output: docs/html/index.html
+#
+
+#---------------------------------------------------------------------------
+# Project related configuration options
+#---------------------------------------------------------------------------
+
+# The PROJECT_NAME tag is a single word (or a sequence of words surrounded by
+# double-quotes, unless you are using Doxywizard) that should identify the
+# project for which the documentation is generated.
+
+PROJECT_NAME           = "dnsmasq"
+
+# The PROJECT_BRIEF tag is a single line description of your project.
+
+PROJECT_BRIEF          = "Lightweight DNS forwarder and DHCP server"
+
+# The PROJECT_NUMBER tag can be used to enter a project or revision number.
+# This could be handy for archiving the generated documentation or if some
+# version control system is used.
+
+PROJECT_NUMBER         = 
+
+# The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute) path
+# into which the generated documentation will be written. If a relative path
+# is entered, it will be relative to the location where doxygen was started.
+# If left blank the current directory will be used.
+
+OUTPUT_DIRECTORY       = docs
+
+# If the CREATE_SUBDIRS tag is set to YES then doxygen will create 4096 sub-
+# directories (in 2 levels) under the output directory of each output format and
+# will distribute the generated files over these directories.
+
+CREATE_SUBDIRS         = NO
+
+#---------------------------------------------------------------------------
+# Build related configuration options
+#---------------------------------------------------------------------------
+
+# If the EXTRACT_ALL tag is set to YES, doxygen will assume all entities in
+# documentation are documented, even if no documentation was available. Private
+# class members and static file members will be hidden unless the
+# EXTRACT_PRIVATE respectively EXTRACT_STATIC tags are set to YES.
+# Note: This will also disable the warnings about undocumented members.
+
+EXTRACT_ALL            = NO
+
+# If the EXTRACT_PRIVATE tag is set to YES, all private members of a class will
+# be included in the documentation.
+
+EXTRACT_PRIVATE        = NO
+
+# If the EXTRACT_STATIC tag is set to YES, all static members of a file will be
+# included in the documentation. This is CRITICAL for dnsmasq as many internal
+# implementation functions are static.
+
+EXTRACT_STATIC         = YES
+
+# If the EXTRACT_LOCAL_CLASSES tag is set to YES, classes (and structs) defined
+# locally in source files will be included in the documentation.
+
+EXTRACT_LOCAL_CLASSES  = NO
+
+#---------------------------------------------------------------------------
+# Configuration options related to warning and progress messages
+#---------------------------------------------------------------------------
+
+# The QUIET tag can be used to turn on/off the messages that are generated to
+# standard output by doxygen.
+
+QUIET                  = NO
+
+# The WARNINGS tag can be used to turn on/off the warning messages that are
+# generated to standard error (stderr) by doxygen. If WARNINGS is set to YES,
+# this implies that the warnings are on. This is CRITICAL for enforcing
+# documentation completeness.
+
+WARNINGS               = YES
+
+# If the WARN_IF_UNDOCUMENTED tag is set to YES then doxygen will generate
+# warnings for undocumented members. This ensures 100% documentation coverage
+# for non-static functions and 90%+ for static functions per requirements.
+
+WARN_IF_UNDOCUMENTED   = YES
+
+# If the WARN_IF_DOC_ERROR tag is set to YES, doxygen will generate warnings for
+# potential errors in the documentation, such as not documenting some parameters
+# in a documented function, or documenting parameters that don't exist.
+
+WARN_IF_DOC_ERROR      = YES
+
+# If the WARN_NO_PARAMDOC tag is set to YES, doxygen will generate warnings for
+# functions that are documented but have no documentation for their parameters
+# or return values.
+
+WARN_NO_PARAMDOC       = YES
+
+# The WARN_FORMAT tag determines the format of the warning messages that doxygen
+# can produce.
+
+WARN_FORMAT            = "$file:$line: $text"
+
+# The WARN_LOGFILE tag can be used to specify a file to which warning and error
+# messages should be written. If left blank the output is written to standard
+# error (stderr).
+
+WARN_LOGFILE           = doxygen_warnings.log
+
+#---------------------------------------------------------------------------
+# Configuration options related to the input files
+#---------------------------------------------------------------------------
+
+# The INPUT tag is used to specify the files and/or directories that contain
+# documented source files. For dnsmasq, all source code is in src/ directory.
+
+INPUT                  = src/
+
+# If the value of the INPUT tag contains directories, you can use the
+# FILE_PATTERNS tag to specify one or more wildcard patterns to filter files.
+
+FILE_PATTERNS          = *.c \
+                         *.h
+
+# The RECURSIVE tag can be used to specify whether or not subdirectories should
+# be searched for input files as well.
+
+RECURSIVE              = YES
+
+# The EXCLUDE tag can be used to specify files and/or directories that should be
+# excluded from the INPUT source files.
+
+EXCLUDE                = 
+
+# The EXCLUDE_PATTERNS tag can be used to specify one or more wildcard patterns
+# to exclude files or directories.
+
+EXCLUDE_PATTERNS       = */test/* \
+                         */.*
+
+#---------------------------------------------------------------------------
+# Configuration options related to source browsing
+#---------------------------------------------------------------------------
+
+# If the SOURCE_BROWSER tag is set to YES then a list of source files will be
+# generated. This enables navigation from documentation to actual source code.
+
+SOURCE_BROWSER         = YES
+
+# Setting the INLINE_SOURCES tag to YES will include the body of functions,
+# classes and enums directly into the documentation. We set this to NO to keep
+# documentation concise while providing links to source.
+
+INLINE_SOURCES         = NO
+
+# Setting the STRIP_CODE_COMMENTS tag to NO ensures code comments are preserved
+# in source browser output.
+
+STRIP_CODE_COMMENTS    = NO
+
+# If the REFERENCED_BY_RELATION tag is set to YES then for each documented
+# function all documented functions referencing it will be listed.
+
+REFERENCED_BY_RELATION = YES
+
+# If the REFERENCES_RELATION tag is set to YES then for each documented function
+# all documented entities called/used by that function will be listed.
+
+REFERENCES_RELATION    = YES
+
+# If the REFERENCES_LINK_SOURCE tag is set to YES and SOURCE_BROWSER is set to
+# YES then the hyperlinks from functions in REFERENCES_RELATION lists will link
+# to the source code. Otherwise they will link to the documentation.
+
+REFERENCES_LINK_SOURCE = YES
+
+# If the VERBATIM_HEADERS tag is set to YES then doxygen will generate a
+# verbatim copy of the header file for each class for which an include is
+# specified.
+
+VERBATIM_HEADERS       = YES
+
+#---------------------------------------------------------------------------
+# Configuration options related to the alphabetical class index
+#---------------------------------------------------------------------------
+
+# If the ALPHABETICAL_INDEX tag is set to YES, an alphabetical index of all
+# compounds will be generated.
+
+ALPHABETICAL_INDEX     = YES
+
+#---------------------------------------------------------------------------
+# Configuration options related to the HTML output
+#---------------------------------------------------------------------------
+
+# If the GENERATE_HTML tag is set to YES, doxygen will generate HTML output.
+
+GENERATE_HTML          = YES
+
+# The HTML_OUTPUT tag is used to specify where the HTML docs will be put. If a
+# relative path is entered the value of OUTPUT_DIRECTORY will be put in front.
+
+HTML_OUTPUT            = html
+
+# The HTML_FILE_EXTENSION tag can be used to specify the file extension for each
+# generated HTML page.
+
+HTML_FILE_EXTENSION    = .html
+
+# If the GENERATE_TREEVIEW tag is set to YES, a side panel will be generated
+# containing a tree-like index structure.
+
+GENERATE_TREEVIEW      = YES
+
+# The TREEVIEW_WIDTH tag is used to specify the width of the tree view.
+
+TREEVIEW_WIDTH         = 250
+
+#---------------------------------------------------------------------------
+# Configuration options related to the LaTeX output
+#---------------------------------------------------------------------------
+
+# If the GENERATE_LATEX tag is set to YES, doxygen will generate LaTeX output.
+# We disable this to avoid LaTeX toolchain dependency.
+
+GENERATE_LATEX         = NO
+
+#---------------------------------------------------------------------------
+# Configuration options related to the preprocessor
+#---------------------------------------------------------------------------
+
+# If the ENABLE_PREPROCESSING tag is set to YES, doxygen will evaluate all
+# C-preprocessor directives found in the sources and include files.
+
+ENABLE_PREPROCESSING   = YES
+
+# If the MACRO_EXPANSION tag is set to YES, doxygen will expand all macro names
+# in the source code.
+
+MACRO_EXPANSION        = YES
+
+# If the EXPAND_ONLY_PREDEF tag is set to YES, only conditional compilation will
+# be performed.
+
+EXPAND_ONLY_PREDEF     = NO
+
+# If the SKIP_FUNCTION_MACROS tag is set to YES then doxygen's preprocessor will
+# remove all references to function-like macros that are alone on a line.
+
+SKIP_FUNCTION_MACROS   = NO
+
+#---------------------------------------------------------------------------
+# Configuration options related to external references
+#---------------------------------------------------------------------------
+
+# The GENERATE_TAGFILE tag can be used to create a tag file. This tag file can
+# then be used with the TAGFILES option to create links to external documentation.
+
+GENERATE_TAGFILE       = 
+
+#---------------------------------------------------------------------------
+# Configuration options related to the dot tool
+#---------------------------------------------------------------------------
+
+# If the CLASS_DIAGRAMS tag is set to YES, doxygen will generate a class diagram
+# (in HTML and LaTeX) for classes with base or super classes. We use built-in
+# diagrams, not Graphviz.
+
+CLASS_DIAGRAMS         = YES
+
+# If you set the HAVE_DOT tag to YES then doxygen will assume the dot tool is
+# available. We set this to NO to avoid Graphviz dependency.
+
+HAVE_DOT               = NO
+
+#---------------------------------------------------------------------------
+# Configuration options related to the documentation style
+#---------------------------------------------------------------------------
+
+# If the JAVADOC_AUTOBRIEF tag is set to YES then doxygen will interpret the
+# first line (until the first dot) of a Javadoc-style comment as the brief
+# description. This is CRITICAL for proper @brief extraction from /** comments.
+
+JAVADOC_AUTOBRIEF      = YES
+
+# Set the OPTIMIZE_OUTPUT_FOR_C tag to YES if your project consists of C sources
+# only. Doxygen will then generate output that is more tailored for C. This is
+# ABSOLUTELY CRITICAL for dnsmasq as it is pure C code.
+
+OPTIMIZE_OUTPUT_FOR_C  = YES
+
+# If the MARKDOWN_SUPPORT tag is enabled then doxygen pre-processes all comments
+# according to the Markdown format.
+
+MARKDOWN_SUPPORT       = YES
+
+# When enabled doxygen tries to link words that correspond to documented classes,
+# or namespaces to their corresponding documentation.
+
+AUTOLINK_SUPPORT       = YES
+
+# If the INLINE_INHERITED_MEMB tag is set to YES, doxygen will show all
+# inherited members of a class in the documentation of that class.
+
+INLINE_INHERITED_MEMB  = NO
+
+# If the FULL_PATH_NAMES tag is set to YES, doxygen will prepend the full path
+# before files name in the file list and in the header files.
+
+FULL_PATH_NAMES        = YES
+
+# The STRIP_FROM_PATH tag can be used to strip a user-defined part of the path.
+
+STRIP_FROM_PATH        = 
+
+# If the SHORT_NAMES tag is set to YES, doxygen will generate much shorter (but
+# less readable) file names.
+
+SHORT_NAMES            = NO
+
+# If the INHERIT_DOCS tag is set to YES then an undocumented member inherits the
+# documentation from any documented member that it re-implements.
+
+INHERIT_DOCS           = YES
+
+# If the SEPARATE_MEMBER_PAGES tag is set to YES then doxygen will produce a new
+# page for each member.
+
+SEPARATE_MEMBER_PAGES  = NO
+
+# The TAB_SIZE tag can be used to set the number of spaces in a tab. Doxygen
+# uses this value to replace tabs by spaces in code fragments.
+
+TAB_SIZE               = 8
+
+# This tag can be used to specify a number of aliases that act as commands in
+# the documentation.
+
+ALIASES                = 
+
+# Set the TYPEDEF_HIDES_STRUCT tag to NO to ensure typedef'd structs are
+# properly documented.
+
+TYPEDEF_HIDES_STRUCT   = NO
+
+# The MAX_INITIALIZER_LINES tag determines the maximum number of lines that the
+# initial value of a variable or macro/define can have for it to appear in the
+# documentation.
+
+MAX_INITIALIZER_LINES  = 30
+
+# If the SHOW_USED_FILES tag is set to YES then doxygen will show which files
+# were used to generate the documentation for a particular entity.
+
+SHOW_USED_FILES        = YES
+
+# Set the SHOW_FILES tag to YES to include a tab for browsing source files.
+
+SHOW_FILES             = YES
+
+# If the SHOW_NAMESPACES tag is set to YES then doxygen will show the namespace
+# tree.
+
+SHOW_NAMESPACES        = YES
+
+# The FILE_VERSION_FILTER tag can be used to specify a program or script that
+# doxygen should invoke to get the current version for each file.
+
+FILE_VERSION_FILTER    = 
+
+# The LAYOUT_FILE tag can be used to specify a layout file which will be parsed
+# by doxygen.
+
+LAYOUT_FILE            = 
+
+# The CITE_BIB_FILES tag can be used to specify one or more bib files containing
+# the reference definitions.
+
+CITE_BIB_FILES         = 
+
+#---------------------------------------------------------------------------
+# Configuration options related to the search engine
+#---------------------------------------------------------------------------
+
+# The SEARCHENGINE tag specifies whether or not a search engine should be used.
+
+SEARCHENGINE           = YES
+
+# When the SERVER_BASED_SEARCH tag is enabled the search engine will be
+# implemented using a web server instead of a web client using JavaScript.
+
+SERVER_BASED_SEARCH    = NO
