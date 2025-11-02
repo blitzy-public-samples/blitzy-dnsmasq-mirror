@@ -14,6 +14,72 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file dhcp6.c
+ * @brief DHCPv6 server core logic coordinating with RFC 3315 protocol implementation
+ *
+ * DETAILED PURPOSE:
+ * This file implements the DHCPv6 server core functionality for dnsmasq, coordinating
+ * with rfc3315.c which handles the detailed RFC 3315 protocol message processing.
+ * It manages DHCPv6 socket creation, packet reception and dispatching, DUID (DHCP Unique
+ * Identifier) generation, IPv6 address allocation from configured ranges, prefix delegation,
+ * and dynamic context construction based on interface addresses. Unlike DHCPv4 which uses
+ * MAC addresses, DHCPv6 identifies clients using DUIDs. This module handles IA_NA (Identity
+ * Association for Non-temporary Addresses) allocation, integrates with Router Advertisement
+ * (radv.c) for M/O flag coordination, supports stateless INFORMATION-REQUEST handling,
+ * and implements relay agent support for remote subnet allocation.
+ *
+ * KEY RESPONSIBILITIES:
+ * - dhcp6_init(): Creates and binds DHCPv6 server socket on port 547
+ * - dhcp6_packet(): Main packet reception entry point, dispatches to dhcp6_reply() in rfc3315.c
+ * - get_client_mac(): Retrieves client MAC address via neighbor discovery for DUID generation
+ * - address6_allocate(): Allocates free IPv6 addresses from configured ranges using SDBM hashing
+ * - address6_available(): Validates whether address can be dynamically allocated
+ * - address6_valid(): Checks if address is within valid configured context
+ * - make_duid(): Generates DHCPv6 server DUID (DUID-LLT, DUID-LL, or DUID-EN)
+ * - config_find_by_address6(): Finds static configuration by IPv6 address
+ * - dhcp_construct_contexts(): Dynamically creates DHCPv6 contexts from interface addresses
+ * - complete_context6(): Callback for interface enumeration to match contexts with addresses
+ *
+ * DEPENDENCIES:
+ * - Includes: dnsmasq.h (main header with daemon structure, DHCP contexts, configuration)
+ * - Includes: netinet/icmp6.h (ICMPv6 for neighbor discovery)
+ * - Includes: dhcp6-protocol.h (DHCPv6 constants and option codes)
+ * - Called by: Network event loop in dnsmasq.c when DHCPv6 packets arrive
+ * - Calls: dhcp6_reply() in rfc3315.c for detailed protocol message handling
+ * - Calls: relay_reply6(), relay_upstream6() for DHCPv6 relay functionality
+ * - Calls: lease functions in lease.c (lease_prune, lease_update_file, lease_update_dns)
+ * - Calls: ra_start_unsolicited() in radv.c for Router Advertisement coordination
+ *
+ * DATA STRUCTURES:
+ * - struct iface_param (lines 23-27): Parameters for interface enumeration callback
+ * - struct cparam (lines 639-642): Parameters for context construction callback
+ * - struct dhcp_context: DHCPv6 address range configuration (defined in dnsmasq.h)
+ * - struct dhcp_config: Static DHCPv6 host reservations (defined in dnsmasq.h)
+ * - struct neigh_packet (lines 278): Neighbor solicitation packet for MAC address discovery
+ *
+ * COMPILE-TIME OPTIONS:
+ * - HAVE_DHCP6: Mandatory - entire file compiled only if DHCPv6 support enabled
+ * - HAVE_DUMPFILE: Optional - enables packet dumping to pcap file for debugging
+ * - HAVE_BROKEN_RTC: Optional - affects DUID generation (use DUID-LL instead of DUID-LLT)
+ * - HAVE_SOCKADDR_SA_LEN: Platform-specific - BSD-style sockaddr with sa_len field
+ * - SO_REUSEPORT: Optional - allows multiple dnsmasq instances on same port
+ * - IPV6_TCLASS: Optional - sets IPv6 traffic class for QoS
+ *
+ * THREADING/CONCURRENCY:
+ * This module operates within dnsmasq's single-process, event-driven architecture.
+ * All functions are called from the main event loop and are not re-entrant. DHCPv6
+ * socket events trigger dhcp6_packet() which processes one packet per invocation.
+ * No locking is required as there is no concurrent access. State is maintained in
+ * the global daemon structure and DHCPv6 context chains.
+ *
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/DHCP_V6.md for DHCPv6 server architecture and RFC 3315 compliance
+ * @see rfc3315.c for detailed DHCPv6 protocol message handling
+ * @see radv.c for Router Advertisement integration
+ */
+
 #include "dnsmasq.h"
 
 #ifdef HAVE_DHCP6
@@ -32,6 +98,51 @@ static int complete_context6(struct in6_addr *local,  int prefix,
 			     unsigned int preferred, unsigned int valid, void *vparam);
 static int make_duid1(int index, unsigned int type, char *mac, size_t maclen, void *parm); 
 
+/**
+ * @brief Initialize DHCPv6 server socket and bind to port 547
+ *
+ * @detailed Creates a UDP IPv6 socket for DHCPv6 server operations, configures socket options
+ * including IPv6-only mode, traffic class (QoS), and address reuse for bind-interfaces mode,
+ * then binds to the standard DHCPv6 server port (547). The socket is configured with IPV6_V6ONLY
+ * to prevent IPv4-mapped addresses, and IPV6_PKTINFO to receive destination address information.
+ * When bind-interfaces is set, SO_REUSEADDR and SO_REUSEPORT allow multiple dnsmasq instances
+ * to bind the same port on different interfaces. The file descriptor is stored in daemon->dhcp6fd
+ * for use by the main event loop.
+ *
+ * @return void - dies with error message on failure via die()
+ *
+ * @note Called once during daemon initialization from main() in dnsmasq.c
+ * @note Sets IPv6 traffic class to CS6 (0xC0) if IPV6_TCLASS available for QoS marking
+ * @note Configured socket is non-blocking via fix_fd() and has IPV6_PKTINFO enabled
+ *
+ * @warning Dies with EC_BADNET error code if socket creation or binding fails
+ * @warning On bind-interfaces, dies if SO_REUSEADDR/SO_REUSEPORT setting fails
+ *
+ * @see dhcp6_packet() which uses daemon->dhcp6fd to receive DHCPv6 packets
+ * @see fix_fd() in network.c for non-blocking configuration
+ * @see set_ipv6pktinfo() in network.c for IPV6_PKTINFO setup
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Called during daemon startup
+ * if (daemon->doing_dhcp6)
+ *   dhcp6_init();
+ * // Socket now ready for event loop
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 5.2 - DHCPv6 server listens on UDP port 547
+ * RFC 3315 Section 22.1 - Client-Server exchanges on port 547
+ *
+ * SIDE EFFECTS:
+ * - Creates UDP socket and stores file descriptor in daemon->dhcp6fd
+ * - Binds to INADDR_ANY on port 547 (all interfaces)
+ * - Dies and terminates daemon if socket setup fails
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Must be called from main thread during initialization only.
+ * Single-threaded event-driven architecture.
+ */
 void dhcp6_init(void)
 {
   int fd;
@@ -86,6 +197,63 @@ void dhcp6_init(void)
   daemon->dhcp6fd = fd;
 }
 
+/**
+ * @brief Main DHCPv6 packet reception and dispatching entry point
+ *
+ * @detailed Receives DHCPv6 packets from the socket, determines the arrival interface and
+ * destination address using IPV6_PKTINFO ancillary data, checks for relay mode operation,
+ * validates interface configuration against include/exclude lists, enumerates interface
+ * addresses to build DHCPv6 context chains, prunes expired leases, and dispatches to
+ * dhcp6_reply() in rfc3315.c for protocol-specific message handling. This function handles
+ * both direct client requests and relay-forwarded messages. It performs bridge interface
+ * aliasing to allow DHCPv6 on virtualized networks, filters against --dhcp-except interfaces,
+ * and coordinates with Router Advertisement for M/O flag settings. After processing,
+ * responses are sent back to clients or relays via sendto() with appropriate port numbers
+ * (546 for clients, 547 for relays).
+ *
+ * @param now Current time in seconds since epoch for lease expiry checking and timestamp operations
+ *
+ * @return void - processes one packet per invocation, returns silently on errors
+ *
+ * @note Called from main event loop when daemon->dhcp6fd becomes readable
+ * @note Handles both unicast and multicast DHCPv6 traffic (All_DHCP_Relay_Agents_and_Servers FF02::1:2)
+ * @note Bridge interface aliasing via --bridge-interface redirects to aliased interface contexts
+ * @note Ignores packets to ALL_SERVERS multicast when listening for relay to avoid loops
+ *
+ * @warning Returns early without processing if interface index cannot be determined
+ * @warning Returns early if interface is in --if-except or --dhcp-except lists
+ * @warning Returns early if no valid DHCPv6 contexts found for arrival interface
+ *
+ * @see dhcp6_reply() in rfc3315.c for detailed message type handling (SOLICIT, REQUEST, etc.)
+ * @see relay_reply6() for relay agent reply forwarding
+ * @see relay_upstream6() for forwarding client requests to upstream relay
+ * @see complete_context6() callback for interface address enumeration
+ * @see lease_prune() in lease.c for expired lease removal
+ * @see lease_update_file() in lease.c for persistent lease database updates
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Main event loop in dnsmasq.c
+ * if (poll_check(daemon->dhcp6fd, POLLIN))
+ *   dhcp6_packet(time(NULL));
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 15 - DHCPv6 message types and server processing
+ * RFC 3315 Section 20 - Relay agent behavior and message forwarding
+ *
+ * SIDE EFFECTS:
+ * - Reads packet from daemon->dhcp6fd socket
+ * - May send DHCPv6 response via daemon->dhcp6fd
+ * - Calls lease_prune() to remove expired leases
+ * - Calls lease_update_file() and lease_update_dns() after reply
+ * - May dump packets to pcap file if HAVE_DUMPFILE enabled
+ * - May trigger Router Advertisement transmission via lease_update_file()
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Called from single-threaded event loop only.
+ * Re-entrancy not supported - one packet processed per invocation.
+ */
 void dhcp6_packet(time_t now)
 {
   struct dhcp_context *context;
@@ -269,6 +437,59 @@ void dhcp6_packet(time_t now)
     }
 }
 
+/**
+ * @brief Retrieve client MAC address via neighbor discovery for DUID generation
+ *
+ * @detailed Attempts to retrieve the link-layer (MAC) address of an IPv6 client using the
+ * kernel's neighbor cache. Since receiving a packet does not automatically populate the
+ * neighbor cache, this function sends ICMPv6 Neighbor Solicitation messages if the MAC
+ * address is not immediately available. It retries up to 5 times with 100ms delays between
+ * attempts to handle packet loss. The MAC address is essential for generating client-specific
+ * DUID values and for identifying clients across requests. Uses find_mac() to query the
+ * neighbor cache and sendto() on daemon->icmp6fd to transmit neighbor solicitation packets.
+ *
+ * @param client Pointer to IPv6 address of the DHCPv6 client to query
+ * @param iface Interface index (scope_id) on which client is reachable
+ * @param mac Buffer to store retrieved MAC address (minimum 6 bytes for Ethernet)
+ * @param maclenp Pointer to store length of retrieved MAC address (typically 6 for Ethernet)
+ * @param mactypep Pointer to store MAC address type (set to ARPHRD_ETHER for Ethernet)
+ * @param now Current time for neighbor cache queries
+ *
+ * @return void - populates mac buffer and sets maclenp/mactypep output parameters
+ *
+ * @note Sends up to 5 Neighbor Solicitation attempts with 100ms delays
+ * @note MAC address type always set to ARPHRD_ETHER (Ethernet hardware type)
+ * @note If MAC not found after retries, maclenp will be 0
+ *
+ * @warning Requires daemon->icmp6fd to be valid for sending ICMP6 packets
+ * @warning 100ms delays per retry may impact response latency (max 500ms total)
+ *
+ * @see find_mac() in arp.c for neighbor cache lookups
+ * @see daemon->icmp6fd created in icmp6_init()
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char mac[6];
+ * unsigned int maclen, mactype;
+ * struct in6_addr client_addr = {...};
+ * get_client_mac(&client_addr, if_index, mac, &maclen, &mactype, now);
+ * if (maclen == 6)
+ *   printf("Client MAC: %02x:%02x:...\n", mac[0], mac[1]);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 4443 Section 2.3 - ICMPv6 checksum must be zero before calculation
+ * RFC 4861 Section 4.3 - Neighbor Solicitation message format
+ *
+ * SIDE EFFECTS:
+ * - Sends up to 5 ICMPv6 Neighbor Solicitation packets via daemon->icmp6fd
+ * - Sleeps for 100ms between retry attempts (blocking operation)
+ * - Modifies mac buffer, maclenp, and mactypep output parameters
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Blocking nanosleep() calls make this unsuitable for concurrent use.
+ * Must be called from main thread only.
+ */
 void get_client_mac(struct in6_addr *client, int iface, unsigned char *mac, unsigned int *maclenp, unsigned int *mactypep, time_t now)
 {
   /* Receiving a packet from a host does not populate the neighbour
@@ -313,6 +534,70 @@ void get_client_mac(struct in6_addr *client, int iface, unsigned char *mac, unsi
   *mactypep = ARPHRD_ETHER;
 }
     
+/**
+ * @brief Callback to match DHCPv6 contexts with interface IPv6 addresses
+ *
+ * @detailed
+ * This callback function is invoked by iface_enumerate() during interface address enumeration
+ * to associate DHCPv6 contexts with actual interface addresses. It matches configured DHCPv6
+ * address ranges (contexts) with the current IPv6 addresses on network interfaces, establishing
+ * the link between logical address pools and physical network locations. Handles shared networks
+ * (where one physical network uses multiple logical subnets), builds context chains ordered by
+ * preferred lifetime, stores link-local and ULA addresses for later use, and sets up relay
+ * agent mappings. Only processes addresses on the interface specified in param->ind, skipping
+ * loopback, link-local (after storing), and multicast addresses for context matching.
+ *
+ * @param local IPv6 address found on the interface
+ * @param prefix Prefix length of the address (typically 64 for standard IPv6)
+ * @param scope Address scope (global, link-local, etc.) - currently unused
+ * @param if_index Interface index where this address was found
+ * @param flags Interface flags (IFACE_DEPRECATED, IFACE_PERMANENT, etc.)
+ * @param preferred Preferred lifetime for this address in seconds (0xffffffff = infinite)
+ * @param valid Valid lifetime for this address in seconds (0xffffffff = infinite)
+ * @param vparam Void pointer to struct iface_param containing search parameters
+ *
+ * @return Always returns 1 to continue enumeration through all interface addresses
+ *
+ * @note Stores link-local address in param->ll_addr for later use
+ * @note Stores ULA (Unique Local Address) in param->ula_addr
+ * @note Stores global address in param->fallback as default DNS server address
+ * @note Builds context chain ordered by decreasing preferred lifetime
+ * @note Sets context->preferred and context->valid from interface or uses 0xffffffff
+ * @note Honors CONTEXT_DEPRECATE flag to force preferred=0
+ * @note Only matches contexts on the specific interface index in param->ind
+ *
+ * @warning Modifies param structure (ll_addr, ula_addr, fallback, current, addr_match)
+ * @warning Modifies context->current to build linked list (destructive to existing value)
+ * @warning Sets relay->iface_index for relay agents matching local address
+ *
+ * @see dhcp6_packet() which calls iface_enumerate() with this callback
+ * @see struct iface_param definition (lines 23-27) for parameter structure
+ * @see struct dhcp_context for context structure details
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct iface_param parm;
+ * parm.ind = if_index;
+ * parm.current = NULL;
+ * iface_enumerate(AF_INET6, &parm, complete_context6);
+ * // parm.current now contains chain of matching contexts
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315: DHCPv6 address allocation from configured ranges
+ * - RFC 4862: IPv6 address lifetimes (preferred and valid)
+ *
+ * SIDE EFFECTS:
+ * - Chains matching contexts via context->current pointers
+ * - Sets context->local6, context->preferred, context->valid
+ * - Stores link-local, ULA, and fallback addresses in param structure
+ * - Updates relay->iface_index for relay agent configuration
+ * - Marks address match in param->addr_match if --listen-address matches
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Called as callback from iface_enumerate() in single-threaded context.
+ * Modifies shared context and relay structures without synchronization.
+ */
 static int complete_context6(struct in6_addr *local,  int prefix,
 			     int scope, int if_index, int flags, unsigned int preferred, 
 			     unsigned int valid, void *vparam)
@@ -425,6 +710,52 @@ static int complete_context6(struct in6_addr *local,  int prefix,
   return 1;
 }
 
+/**
+ * @brief Find static DHCPv6 host configuration by IPv6 address
+ *
+ * @detailed Searches through linked list of DHCPv6 host configurations to find a static
+ * reservation matching the given IPv6 address. Supports wildcard matching for /64 prefixes
+ * (ADDRLIST_WILDCARD flag) and custom prefix lengths (ADDRLIST_PREFIX flag). Used to prevent
+ * dynamic allocation of addresses that are statically configured for specific hosts, and to
+ * enforce static address assignments configured via dhcp-host directives. Only considers
+ * configurations with CONFIG_ADDR6 flag set indicating IPv6 address assignment.
+ *
+ * @param configs Head of linked list of dhcp_config structures to search
+ * @param net Network prefix to match against, or NULL to skip network matching
+ * @param prefix Prefix length for network matching (typically 64 for standard IPv6)
+ * @param addr Specific IPv6 address to find in configuration
+ *
+ * @return Pointer to matching dhcp_config structure, or NULL if no match found
+ *
+ * @note Handles both exact /128 address matches and prefix-based matches
+ * @note Wildcard flag allows /64 prefix matching regardless of configured prefix
+ * @note Multiple address entries can exist per config (config->addr6 is a linked list)
+ *
+ * @warning Returns first matching config - does not check for multiple matches
+ *
+ * @see address6_allocate() which calls this to avoid allocating static addresses
+ * @see struct dhcp_config in dnsmasq.h for configuration structure
+ * @see struct addrlist for address list entries with flags
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct in6_addr client_addr = {...};
+ * struct in6_addr network = {...};
+ * struct dhcp_config *cfg = config_find_by_address6(daemon->dhcp_conf, 
+ *                                                    &network, 64, &client_addr);
+ * if (cfg)
+ *   printf("Address reserved for host: %s\n", cfg->hostname);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 18 - Static address assignment for specific clients
+ *
+ * SIDE EFFECTS:
+ * None - read-only search operation
+ *
+ * THREAD SAFETY:
+ * Not thread-safe if configs list modified concurrently. Read-only safe for single thread.
+ */
 struct dhcp_config *config_find_by_address6(struct dhcp_config *configs, struct in6_addr *net, int prefix,  struct in6_addr *addr)
 {
   struct dhcp_config *config;
@@ -443,6 +774,69 @@ struct dhcp_config *config_find_by_address6(struct dhcp_config *configs, struct 
   return NULL;
 }
 
+/**
+ * @brief Allocate free IPv6 address from DHCPv6 context range
+ *
+ * @detailed Finds and allocates an available IPv6 address from configured DHCPv6 address ranges.
+ * Uses SDBM hashing algorithm with client ID (CLID) and IAID to generate pseudo-random but
+ * deterministic start address, then searches linearly for free address. For temporary addresses
+ * (IA_TA), generates random start using rand64(). For consecutive addressing mode (OPT_CONSEC_ADDR),
+ * allocates sequentially after largest existing lease to avoid reassigning rejected addresses.
+ * Excludes addresses already leased, configured as static, or in use by server interfaces.
+ * Supports tag-based network matching for conditional address pools. Iterates through context
+ * chain trying netid-matched contexts first, then plain ranges. Assumes /64 or larger prefixes.
+ *
+ * @param context Head of DHCPv6 context chain to search for available addresses
+ * @param clid Client DUID (client identifier) for hash-based address selection
+ * @param clid_len Length of client ID in bytes
+ * @param temp_addr Non-zero for temporary addresses (IA_TA), zero for normal (IA_NA)
+ * @param iaid Identity Association Identifier from client request for hash input
+ * @param serial Number of addresses client has rejected (adds to hash for different selection)
+ * @param netids Network ID tags from client request for matching conditional contexts
+ * @param plain_range Non-zero to allow untagged ranges, zero for tagged-only
+ * @param ans Output pointer to store allocated IPv6 address
+ *
+ * @return Pointer to dhcp_context from which address was allocated, or NULL if no free address
+ *
+ * @note SDBM hash formula: j = clid[i] + (j << 6) + (j << 16) - j
+ * @note For temp_addr, new random address generated each time (no client binding)
+ * @note Consecutive mode uses lease_find_max_addr6() + serial + addr_epoch
+ * @note Linear search wraps from end back to start of range
+ * @note Skips contexts with CONTEXT_DEPRECATE, CONTEXT_STATIC, CONTEXT_RA_STATELESS, CONTEXT_USED flags
+ *
+ * @warning Assumes prefix >= 64 for address manipulation with addr6part()
+ * @warning Returns NULL if all addresses in range exhausted
+ * @warning May return same address to same client if lease expired and hash matches
+ *
+ * @see lease6_find_by_addr() in lease.c for checking address availability
+ * @see config_find_by_address6() for checking static reservations
+ * @see addr6part() and setaddr6part() for 64-bit address manipulation
+ * @see match_netid() for network ID tag matching
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char clid[20] = {...};
+ * unsigned int iaid = 0x12345678;
+ * struct in6_addr allocated_addr;
+ * struct dhcp_context *ctx = address6_allocate(parm.current, clid, 20, 0,
+ *                                               iaid, 0, netids, 1, &allocated_addr);
+ * if (ctx)
+ *   printf("Allocated: %s from context\n", inet_ntop(AF_INET6, &allocated_addr, buf, sizeof(buf)));
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 17.1.2 - Server address allocation policy
+ * RFC 3315 Section 22.4 - IA_NA (non-temporary address) allocation
+ * RFC 3315 Section 22.5 - IA_TA (temporary address) allocation
+ *
+ * SIDE EFFECTS:
+ * - Stores allocated address in *ans output parameter
+ * - Returns matching context pointer (read-only, no state modification)
+ * - May decrement context->addr_epoch if using consecutive addressing
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies context->addr_epoch in consecutive mode. Single-threaded use only.
+ */
 struct dhcp_context *address6_allocate(struct dhcp_context *context,  unsigned char *clid, int clid_len, int temp_addr,
 				       unsigned int iaid, int serial, struct dhcp_netid *netids, int plain_range, struct in6_addr *ans)
 {
@@ -526,7 +920,57 @@ struct dhcp_context *address6_allocate(struct dhcp_context *context,  unsigned c
   return NULL;
 }
 
-/* can dynamically allocate addr */
+/**
+ * @brief Check if IPv6 address can be dynamically allocated from context
+ *
+ * @detailed Validates whether a specific IPv6 address falls within a DHCPv6 context's
+ * dynamic allocation range and can be assigned to clients. Checks that address is within
+ * context start/end bounds, matches network prefix, is not marked static or RA-stateless,
+ * and matches client network ID tags. Used when client requests specific address (SOLICIT
+ * with IAADDR or REQUEST) to determine if requested address is allocatable. Iterates through
+ * context chain checking each for address containment and network ID matching.
+ *
+ * @param context Head of DHCPv6 context chain to check
+ * @param taddr Target IPv6 address to validate for dynamic allocation
+ * @param netids Network ID tags from client request for conditional context matching
+ * @param plain_range Non-zero to allow untagged contexts, zero for tagged-only
+ *
+ * @return Pointer to matching dhcp_context if address is dynamically allocatable, NULL otherwise
+ *
+ * @note Address must be within context->start6 to context->end6 range (inclusive)
+ * @note Rejects addresses from contexts with CONTEXT_STATIC or CONTEXT_RA_STATELESS flags
+ * @note Network prefix must match for both start and end (is_same_net6 checks)
+ * @note Uses 64-bit addr6part() comparison for address range checking
+ *
+ * @warning Returns NULL if address outside any context range
+ * @warning Returns NULL if no contexts match network ID tags
+ * @warning Does not check if address already leased - only checks range membership
+ *
+ * @see address6_allocate() for actual address allocation logic
+ * @see address6_valid() for checking if address is within any configured context
+ * @see match_netid() for network ID tag matching
+ * @see is_same_net6() for IPv6 network prefix comparison
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct in6_addr requested_addr = {...};
+ * struct dhcp_netid *client_tags = {...};
+ * struct dhcp_context *ctx = address6_available(parm.current, &requested_addr,
+ *                                                client_tags, 1);
+ * if (ctx)
+ *   printf("Address can be allocated from context\n");
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 18.2.1 - Server processing of REQUEST with IA containing IAADDR
+ * RFC 3315 Section 17.1.3 - Address validation for client requests
+ *
+ * SIDE EFFECTS:
+ * None - read-only validation operation
+ *
+ * THREAD SAFETY:
+ * Thread-safe for read-only operations. No state modification.
+ */
 struct dhcp_context *address6_available(struct dhcp_context *context, 
 					struct in6_addr *taddr,
 					struct dhcp_netid *netids,
@@ -552,7 +996,59 @@ struct dhcp_context *address6_available(struct dhcp_context *context,
   return NULL;
 }
 
-/* address OK if configured */
+/**
+ * @brief Check if IPv6 address is within any configured DHCPv6 context
+ *
+ * @detailed Validates whether an IPv6 address falls within the network prefix of any
+ * configured DHCPv6 context, regardless of allocation range boundaries. More permissive
+ * than address6_available() - only checks network prefix matching (context->prefix) without
+ * validating against start6/end6 range limits. Used to determine if server should process
+ * requests for addresses outside dynamic allocation ranges but within served networks.
+ * Supports static assignments, on-link verification, and CONFIRM message processing where
+ * clients verify addresses from previous leases.
+ *
+ * @param context Head of DHCPv6 context chain to check
+ * @param taddr Target IPv6 address to validate against context networks
+ * @param netids Network ID tags from client request for conditional context matching
+ * @param plain_range Non-zero to allow untagged contexts, zero for tagged-only
+ *
+ * @return Pointer to matching dhcp_context if address matches a context network, NULL otherwise
+ *
+ * @note Only checks network prefix match (context->prefix bits), not allocation range
+ * @note Does not filter by CONTEXT_STATIC or CONTEXT_RA_STATELESS flags
+ * @note Used for CONFIRM messages to verify addresses are on-link
+ * @note More permissive than address6_available() for static address validation
+ *
+ * @warning Returns NULL if address not in any configured context network
+ * @warning Returns NULL if no contexts match network ID tags
+ * @warning Does not validate if address is actually assigned or available
+ *
+ * @see address6_available() for stricter dynamic allocation range checking
+ * @see address6_allocate() for actual address assignment
+ * @see is_same_net6() for network prefix comparison
+ * @see match_netid() for network ID tag matching
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct in6_addr client_addr = {...};
+ * struct dhcp_netid *tags = {...};
+ * struct dhcp_context *ctx = address6_valid(parm.current, &client_addr, tags, 1);
+ * if (ctx)
+ *   printf("Address on-link for context with prefix /%d\n", ctx->prefix);
+ * else
+ *   send_reply(DHCP6NOTONLINK); // Address not on this link
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 18.2.2 - CONFIRM message processing (on-link verification)
+ * RFC 3315 Section 22.5 - NotOnLink status code when address not valid
+ *
+ * SIDE EFFECTS:
+ * None - read-only validation operation
+ *
+ * THREAD SAFETY:
+ * Thread-safe for read-only operations. No state modification.
+ */
 struct dhcp_context *address6_valid(struct dhcp_context *context, 
 				    struct in6_addr *taddr,
 				    struct dhcp_netid *netids,
@@ -568,6 +1064,57 @@ struct dhcp_context *address6_valid(struct dhcp_context *context,
   return NULL;
 }
 
+/**
+ * @brief Generate DHCPv6 server DUID (DHCP Unique Identifier)
+ *
+ * @detailed Creates the server's unique identifier for DHCPv6 operations. Three DUID types
+ * supported: DUID-EN (Enterprise Number) if --dhcp-duid configured with custom value,
+ * DUID-LLT (Link-layer address plus Time) if RTC available and persistent leases enabled,
+ * or DUID-LL (Link-layer address only) for systems with HAVE_BROKEN_RTC or read-only leases.
+ * DUID-LLT uses time since 2000-01-01 (epoch rebased from 1970) per RFC 3315. DUID-LL/LLT
+ * use MAC address from first non-loopback, non-point-to-point interface with hardware type < 256.
+ * Generated DUID stored in daemon->duid and daemon->duid_len for inclusion in all server messages.
+ *
+ * @param now Current time for DUID-LLT timestamp (unused if HAVE_BROKEN_RTC or configured DUID)
+ *
+ * @return void - dies with error if DUID generation fails
+ *
+ * @note DUID-EN format: type(2) + enterprise(4) + identifier(variable)
+ * @note DUID-LLT format: type(1) + hwtype(2) + time(4) + MAC(variable)
+ * @note DUID-LL format: type(3) + hwtype(2) + MAC(variable)
+ * @note Epoch rebased to 946684800 (2000-01-01) for DUID-LLT per RFC 3315 Section 9.2
+ * @note DUID persists across daemon restarts via lease file (not regenerated each time)
+ *
+ * @warning Dies with EC_MISC if no suitable interface found for DUID-LL/LLT generation
+ * @warning Requires at least one hardware interface with address type < 256
+ * @warning On --dhcp-duid, uses configured value directly without validation
+ *
+ * @see make_duid1() callback for interface enumeration
+ * @see iface_enumerate() in network.c for iterating interfaces
+ * @see daemon->duid_config set by --dhcp-duid option
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Called once during daemon initialization
+ * make_duid(time(NULL));
+ * // daemon->duid and daemon->duid_len now set
+ * // Include in DHCPv6 responses as OPTION6_SERVER_ID
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * RFC 3315 Section 9 - DUID (DHCP Unique Identifier) formats
+ * RFC 3315 Section 9.1 - DUID-LLT structure and timestamp base
+ * RFC 3315 Section 9.2 - DUID-EN for enterprise-assigned identifiers
+ * RFC 3315 Section 9.3 - DUID-LL for systems without stable clock
+ *
+ * SIDE EFFECTS:
+ * - Allocates memory for daemon->duid via safe_malloc()
+ * - Sets daemon->duid_len to length of generated DUID
+ * - Dies with EC_MISC error if generation fails
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global daemon structure. Called from main thread only during init.
+ */
 void make_duid(time_t now)
 {
   (void)now;
@@ -600,6 +1147,55 @@ void make_duid(time_t now)
     }
 }
 
+/**
+ * @brief Callback function to create server DUID from first suitable interface MAC address
+ *
+ * @detailed
+ * This callback is invoked by iface_enumerate() to construct the DHCPv6 server DUID
+ * (DHCP Unique Identifier) as specified in RFC 3315. The function uses the MAC address
+ * of the first suitable network interface found (not loopback, not point-to-point, and
+ * with hardware address type < 256). Creates either DUID-LLT (Link-Layer Time) if a
+ * stable timestamp is available, or DUID-LL (Link-Layer only) if compiled with
+ * HAVE_BROKEN_RTC. Address types >= 256 (tunnels, virtual interfaces) are skipped as
+ * they don't have usable MAC addresses.
+ *
+ * @param index Interface index (unused in this implementation)
+ * @param type Hardware address type (e.g., ARPHRD_ETHER=1 for Ethernet)
+ * @param mac Pointer to MAC address bytes
+ * @param maclen Length of MAC address in bytes (typically 6 for Ethernet)
+ * @param parm Pointer to time_t value: 0 for DUID-LL, non-zero timestamp for DUID-LLT
+ *
+ * @return 0 if DUID created successfully (stops enumeration)
+ * @return 1 to continue enumeration (interface rejected due to type >= 256)
+ *
+ * @note Only processes interface types < 256 (physical network adapters)
+ * @note Allocates daemon->duid and sets daemon->duid_len on first suitable interface
+ * @note DUID format: [Type=1 or 3][HW Type][Time (DUID-LLT only)][MAC Address]
+ *
+ * @warning Modifies global daemon->duid and daemon->duid_len
+ *
+ * @see make_duid() which calls this via iface_enumerate()
+ * @see RFC 3315 Section 9.2 (DUID-LLT) and Section 9.4 (DUID-LL)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * time_t timestamp = time(NULL) - 946684800; // Rebase to 2000-01-01
+ * iface_enumerate(AF_LOCAL, &timestamp, make_duid1);
+ * // daemon->duid now contains DUID-LLT with first interface MAC
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 9.2: DUID-LLT format (type=1, hw_type, time, link-layer-address)
+ * - RFC 3315 Section 9.4: DUID-LL format (type=3, hw_type, link-layer-address)
+ *
+ * SIDE EFFECTS:
+ * - Allocates memory for daemon->duid (4+maclen for DUID-LL, 8+maclen for DUID-LLT)
+ * - Sets daemon->duid_len to length of allocated DUID
+ * - Returns 0 to stop interface enumeration after first suitable interface
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Called from single-threaded event loop context only.
+ */
 static int make_duid1(int index, unsigned int type, char *mac, size_t maclen, void *parm)
 {
   /* create DUID as specified in RFC3315. We use the MAC of the
@@ -636,11 +1232,90 @@ static int make_duid1(int index, unsigned int type, char *mac, size_t maclen, vo
   return 0;
 }
 
+/**
+ * @brief Parameter structure for context construction callback
+ *
+ * Used by dhcp_construct_contexts() to pass state through iface_enumerate()
+ * callback chain and track whether any changes occurred requiring lease file
+ * or Router Advertisement updates.
+ *
+ * @var cparam::now Current time for timestamp operations
+ * @var cparam::newone Flag indicating new context created or context state changed
+ * @var cparam::newname Flag indicating new RA_NAME context requiring SLAAC lease update
+ */
 struct cparam {
   time_t now;
   int newone, newname;
 };
 
+/**
+ * @brief Callback to dynamically construct DHCPv6 contexts from interface addresses
+ *
+ * @detailed
+ * This callback is invoked by iface_enumerate() during periodic context reconstruction
+ * to dynamically create DHCPv6 contexts from template configurations based on actual
+ * interface IPv6 addresses. Implements template expansion where wildcard interface names
+ * (e.g., "eth*") match physical interfaces and context address ranges are instantiated
+ * with the interface's actual prefix. Also fills in if_index and local6 for non-template
+ * (absolute) contexts. When a previously-seen context reappears after being absent, triggers
+ * fast Router Advertisement transmission. Creates new CONTEXT_CONSTRUCTED entries that are
+ * automatically managed (garbage collected when address disappears). This enables dynamic
+ * DHCPv6 configuration that adapts to interface address changes without manual reconfiguration.
+ *
+ * @param local IPv6 address found on the interface
+ * @param prefix Prefix length of the address
+ * @param scope Address scope (unused - marked void)
+ * @param if_index Interface index where address was found
+ * @param flags Interface flags (IFACE_PERMANENT, IFACE_DEPRECATED, etc.)
+ * @param preferred Preferred lifetime (unused - marked void)
+ * @param valid Valid lifetime (unused - marked void)
+ * @param vparam Void pointer to struct cparam for result tracking
+ *
+ * @return Always returns 1 to continue interface enumeration
+ *
+ * @note Skips loopback, link-local, and multicast addresses
+ * @note Requires IFACE_PERMANENT flag - ignores temporary addresses
+ * @note Skips IFACE_DEPRECATED addresses
+ * @note Checks dhcp_except list to exclude interfaces
+ * @note Only processes interfaces passing iface_check()
+ * @note Matches template->template_interface against actual interface name (wildcard matching)
+ * @note Sets param->newone=1 if any context created/reappeared
+ * @note Sets param->newname=1 if RA_NAME context affected (requires SLAAC update)
+ *
+ * @warning Modifies global daemon->dhcp6 context chain (adds new contexts)
+ * @warning Modifies template->if_index and template->local6 for non-template contexts
+ * @warning Clears CONTEXT_GC and CONTEXT_OLD flags on reappearing contexts
+ * @warning Calls ra_start_unsolicited() which may send Router Advertisements
+ *
+ * @see dhcp_construct_contexts() which calls iface_enumerate() with this callback
+ * @see struct cparam for parameter structure (lines 1235-1238)
+ * @see CONTEXT_TEMPLATE flag to identify template vs absolute contexts
+ * @see CONTEXT_CONSTRUCTED flag marking dynamically created contexts
+ * @see CONTEXT_GC flag for garbage collection of disappeared contexts
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct cparam param = {.now = time(NULL), .newone = 0, .newname = 0};
+ * iface_enumerate(AF_INET6, &param, construct_worker);
+ * if (param.newone) lease_update_file(param.now); // contexts changed
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315: Dynamic DHCPv6 context configuration
+ * - RFC 4861: Router Advertisement transmission on context changes
+ *
+ * SIDE EFFECTS:
+ * - May allocate and add new CONTEXT_CONSTRUCTED contexts to daemon->dhcp6
+ * - Updates existing template contexts with if_index and local6
+ * - Clears GC/OLD flags on reappearing contexts
+ * - Triggers fast RA transmission via ra_start_unsolicited()
+ * - Sets newone/newname flags in param for caller action
+ * - Logs context changes via log_context()
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global daemon structure and context chains.
+ * Must be called from main thread only.
+ */
 static int construct_worker(struct in6_addr *local, int prefix, 
 			    int scope, int if_index, int flags, 
 			    int preferred, int valid, void *vparam)
@@ -765,6 +1440,70 @@ static int construct_worker(struct in6_addr *local, int prefix,
   return 1;
 }
 
+/**
+ * @brief Periodically reconstruct DHCPv6 contexts from current interface addresses
+ *
+ * @detailed
+ * This function is called periodically from the main event loop to dynamically maintain DHCPv6
+ * contexts based on current IPv6 interface addresses. It implements garbage collection of
+ * contexts whose interfaces/addresses have disappeared, and instantiates new contexts from
+ * templates when matching interfaces appear. Marks all CONTEXT_CONSTRUCTED contexts with
+ * CONTEXT_GC flag, then calls iface_enumerate() with construct_worker() callback which clears
+ * the GC flag for still-valid contexts. Remaining GC-flagged contexts are either marked OLD
+ * (triggering Router Advertisement with zero lifetime) or freed immediately if RA is disabled.
+ * When contexts change (new/deleted), triggers lease file update and/or Router Advertisement
+ * transmission. Also handles SLAAC address updates when RA_NAME contexts change.
+ *
+ * @param now Current timestamp for lease and RA operations
+ *
+ * @note Called periodically from main event loop (typically via periodic_ra() alarm)
+ * @note Marks constructed contexts with CONTEXT_GC, then clears for still-present contexts
+ * @note Contexts still marked GC after enumeration have disappeared
+ * @note Disappeared contexts with RA enabled marked CONTEXT_OLD (advertise withdrawal)
+ * @note Disappeared contexts without RA are immediately freed
+ * @note OLD contexts retained for 2 hours maximum (RFC 4861 requirement)
+ * @note Sets address_lost_time when context becomes OLD
+ * @note Limits saved_valid to configured lease_time or 7200 seconds maximum
+ *
+ * @warning Modifies global daemon->dhcp6 context chain (may free contexts)
+ * @warning May trigger Router Advertisement transmission (ra_start_unsolicited)
+ * @warning May update lease file (lease_update_file) if contexts changed
+ * @warning May update SLAAC leases (lease_update_slaac) if RA_NAME contexts changed
+ * @warning May set alarm for periodic RA (send_alarm) if only doing RA, not DHCP
+ *
+ * @see construct_worker() callback which actually creates/updates contexts
+ * @see struct cparam for parameter tracking (newone, newname flags)
+ * @see CONTEXT_CONSTRUCTED flag marking dynamically created contexts
+ * @see CONTEXT_GC flag for garbage collection marking
+ * @see CONTEXT_OLD flag for contexts advertising withdrawal
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Called from main event loop alarm handler
+ * dhcp_construct_contexts(time(NULL));
+ * // Contexts now reflect current interface configuration
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315: Dynamic DHCPv6 configuration adapts to network changes
+ * - RFC 4861 Section 6.2.5: Router Advertisement with zero lifetime for withdrawal
+ * - RFC 4861: 2-hour maximum for advertising prefix withdrawal
+ *
+ * SIDE EFFECTS:
+ * - Marks all CONTEXT_CONSTRUCTED contexts with CONTEXT_GC flag
+ * - Calls iface_enumerate() which may create new contexts
+ * - May free contexts no longer matching any interface
+ * - May mark contexts CONTEXT_OLD and set address_lost_time
+ * - May call ra_start_unsolicited() for new/old contexts
+ * - May call lease_update_file() if contexts changed
+ * - May call lease_update_slaac() if RA_NAME contexts changed
+ * - May call send_alarm(periodic_ra()) if only doing RA
+ * - Logs context changes via log_context()
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global daemon structure and context chains.
+ * Must be called from main thread only in single-process event loop.
+ */
 void dhcp_construct_contexts(time_t now)
 { 
   struct dhcp_context *context, *tmp, **up;
