@@ -14,6 +14,112 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file option.c
+ * @brief Configuration parser for command-line options and config files
+ *
+ * DETAILED PURPOSE:
+ * 
+ * This file implements the comprehensive configuration parsing system for dnsmasq, handling
+ * approximately 150+ configuration options from multiple sources. It processes command-line
+ * arguments using getopt_long(), parses configuration files with key=value syntax, and
+ * implements hierarchical configuration loading through --conf-file and --conf-dir directives
+ * with recursive include support. The parser validates all option values including IP addresses,
+ * port numbers, time intervals, file paths, and detects conflicts such as overlapping DHCP
+ * address ranges or duplicate option specifications.
+ *
+ * The configuration system supports runtime reload via SIGHUP signal for a limited subset of
+ * options (new upstream DNS servers, hosts file changes, DHCP options) while requiring daemon
+ * restart for structural changes (listen interfaces, port bindings, feature enables). All
+ * parsed configuration is allocated and stored in the global daemon structure defined in
+ * dnsmasq.h, serving as the central configuration repository for all dnsmasq subsystems.
+ *
+ * Complex functionality includes DHCP option encoding/decoding with special handling for
+ * option 82 (relay agent information), tag-based conditional configuration for per-client
+ * and per-interface settings, DNSSEC trust anchor parsing, and authoritative DNS zone
+ * configuration. Configuration precedence follows: command-line overrides config file
+ * overrides compiled-in defaults from config.h.
+ *
+ * KEY RESPONSIBILITIES:
+ * 
+ * - read_opts() - Main entry point parsing argc/argv and all configuration file sources
+ * - one_opt() - Central dispatcher handling individual option codes via massive switch statement
+ * - parse_dhcp_opt() - Parses complex DHCP option specifications in various formats
+ * - parse_server() - Parses upstream DNS server specifications with optional source addresses
+ * - one_file() - Processes individual configuration files with recursive include support
+ * - mem_recover mode handling for graceful memory exhaustion during configuration parsing
+ *
+ * DEPENDENCIES:
+ * 
+ * Includes:
+ * - dnsmasq.h - Primary header with struct daemon, all subsystem types, and prototypes
+ * - setjmp.h - For mem_recover longjmp-based memory exhaustion handling
+ * - getopt.h - For getopt_long() command-line parsing (via dnsmasq.h)
+ * - System headers via dnsmasq.h: socket headers, network headers, file I/O headers
+ *
+ * Called by:
+ * - main() in dnsmasq.c at startup for initial configuration loading
+ * - Signal handler in dnsmasq.c on SIGHUP for configuration reload
+ *
+ * Calls:
+ * - All dnsmasq subsystems indirectly by populating daemon structure configuration
+ * - Validation functions: canonicalise(), inet_pton(), atoi_check*() family
+ * - Memory allocators: safe_malloc(), opt_malloc(), whine_malloc()
+ * - String utilities: split(), split_chr(), unhide_metas(), opt_string_alloc()
+ *
+ * DATA STRUCTURES:
+ * 
+ * - struct daemon (dnsmasq.h:~800-1100) - Global configuration container, all parsed options stored here
+ * - struct myoption / struct option (lines 56-62, 186-561) - getopt_long() option definitions array
+ * - struct server (dnsmasq.h:~400-450) - Upstream DNS server specification created by --server options
+ * - struct dhcp_context (dnsmasq.h:~550-600) - DHCP address range/pool from --dhcp-range
+ * - struct dhcp_config (dnsmasq.h:~650-700) - Static DHCP host configuration from --dhcp-host
+ * - union mysockaddr (dnsmasq.h) - IPv4/IPv6 socket address union used throughout parsing
+ * - usage[] array (lines 427-561) - Help text descriptions for all configuration options
+ * - facilitynames[] (lines 28-52) - Syslog facility name mappings for Solaris compatibility
+ *
+ * COMPILE-TIME OPTIONS:
+ * 
+ * Every HAVE_* and NO_* macro from config.h is tested in this file to enable/disable option
+ * processing for compile-time optional features:
+ * - HAVE_DHCP - Enables all DHCPv4 options (--dhcp-range, --dhcp-host, --dhcp-option, etc.)
+ * - HAVE_DHCP6 - Enables DHCPv6 options (--dhcp-range for IPv6, --ra, --enable-ra, etc.)
+ * - HAVE_TFTP - Enables TFTP server options (--enable-tftp, --tftp-root, --tftp-secure, etc.)
+ * - HAVE_DNSSEC - Enables DNSSEC options (--dnssec, --trust-anchor, --dnssec-check-unsigned, etc.)
+ * - HAVE_DBUS - Enables D-Bus control interface option (--enable-dbus)
+ * - HAVE_UBUS - Enables ubus control interface option (--enable-ubus) for OpenWrt
+ * - HAVE_SCRIPT - Enables lease-change script options (--dhcp-script, --script-user, etc.)
+ * - HAVE_LUASCRIPT - Enables Lua scripting option (--dhcp-luascript)
+ * - HAVE_AUTH - Enables authoritative DNS options (--auth-zone, --auth-server, --auth-soa, etc.)
+ * - HAVE_IPSET - Enables Linux ipset integration option (--ipset)
+ * - HAVE_NFTSET - Enables nftables set integration option (--nftset)
+ * - HAVE_CONNTRACK - Enables connection tracking option (--conntrack)
+ * - HAVE_LOOP - Enables DNS forwarding loop detection option (--dns-loop-detect)
+ * - HAVE_INOTIFY - Enables inotify-based config file monitoring (--hostsdir, --dhcp-hostsdir, etc.)
+ * - HAVE_DUMPFILE - Enables packet dump option (--dumpfile, --dumpmask) for debugging
+ * - NO_ID - Disables user/group options if not available on platform
+ * - HAVE_SOLARIS_NETWORK - Enables Solaris-specific syslog facility name definitions
+ * - HAVE_GETOPT_LONG - Selects between getopt_long() and custom myoption structure
+ *
+ * The massive one_opt() switch statement (lines 1765+) contains conditional compilation blocks
+ * for each feature, ensuring that options for disabled features return appropriate errors.
+ *
+ * THREADING/CONCURRENCY:
+ * 
+ * This file operates in dnsmasq's single-process, event-driven architecture model. Configuration
+ * parsing occurs synchronously at startup and during SIGHUP reload, blocking all other operations.
+ * The mem_recover mechanism uses setjmp/longjmp for non-local error handling during memory
+ * allocation failures, which is safe in this single-threaded context. No locking or synchronization
+ * primitives are required. The global daemon structure is fully populated before the event loop
+ * begins, and during SIGHUP reload, new configuration is built separately then atomically swapped.
+ *
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/CONFIGURATION.md for complete configuration system documentation
+ * @see dnsmasq.h for struct daemon definition and all configuration data structures
+ * @see config.h for compile-time option definitions and default values
+ */
+
 /* define this to get facilitynames */
 #define SYSLOG_NAMES
 #include "dnsmasq.h"
@@ -576,6 +682,34 @@ static struct {
 
 static const char meta[] = "\000123456 \b\t\n78\r90abcdefABCDE\033F:,.";
 
+/**
+ * @brief Map metacharacter to ASCII control character for hiding in quoted strings
+ *
+ * @detailed
+ * Transforms special metacharacters (space, comma, colon, quotes, backslash sequences) into
+ * ASCII control character space (0-31) to protect them during option parsing. The transformation
+ * is carefully designed so that \0, \t, \b, \r, \033, and \n map to themselves, allowing
+ * repeated application. This encoding prevents option value splitting at commas and spaces
+ * when enclosed in quotes. The transformation is reversed by unhide_meta() after parsing.
+ *
+ * @param c Character to potentially hide if it is a metacharacter
+ * @return ASCII control character (0-31) if c is in meta[], otherwise returns c unchanged
+ *
+ * @note Part of quoted string protection mechanism for options like --dhcp-option=3," string"
+ * @warning Must be paired with unhide_meta() to restore original characters
+ * @see unhide_meta() for reverse transformation
+ * @see unhide_metas() for string-wide unhiding
+ * @see opt_string_alloc() which calls unhide_metas() on allocated strings
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char quoted_comma = hide_meta(',');  // Returns index in meta[] array as char
+ * // quoted_comma can now pass through split() without being treated as delimiter
+ * @endcode
+ *
+ * SIDE EFFECTS: None, pure function
+ * THREAD SAFETY: Thread-safe, uses only local variables and const global meta[]
+ */
 static char hide_meta(char c)
 {
   unsigned int i;
@@ -587,6 +721,33 @@ static char hide_meta(char c)
   return c;
 }
 
+/**
+ * @brief Restore original metacharacter from ASCII control character encoding
+ *
+ * @detailed
+ * Reverses the hide_meta() transformation by mapping ASCII control characters (0-31)
+ * back to their original metacharacters from the meta[] array. Characters outside the
+ * control range (>= 32) are returned unchanged. This function is called after option
+ * parsing to restore spaces, commas, colons, and other special characters that were
+ * protected during parsing by hide_meta().
+ *
+ * @param cr Character to potentially unhide if it is in the control character range
+ * @return Original metacharacter from meta[] if cr < sizeof(meta)-1, otherwise cr unchanged
+ *
+ * @note Inverse operation of hide_meta()
+ * @see hide_meta() for forward transformation
+ * @see unhide_metas() for string-wide application
+ * @see opt_string_alloc() which calls unhide_metas() on all allocated option strings
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char hidden_char = hide_meta(',');
+ * char restored = unhide_meta(hidden_char);  // Returns ',' original character
+ * @endcode
+ *
+ * SIDE EFFECTS: None, pure function
+ * THREAD SAFETY: Thread-safe, uses only local variables and const global meta[]
+ */
 static char unhide_meta(char cr)
 { 
   unsigned int c = cr;
@@ -597,6 +758,32 @@ static char unhide_meta(char cr)
   return cr;
 }
 
+/**
+ * @brief Unhide all metacharacters in a null-terminated string in-place
+ *
+ * @detailed
+ * Iterates through entire string and applies unhide_meta() to each character,
+ * restoring original metacharacters that were hidden during quoted string parsing.
+ * Modifies the string in-place. NULL pointer is safely handled as no-op.
+ *
+ * @param cp String to unhide metacharacters in (modified in-place), or NULL
+ *
+ * @note Called by opt_string_alloc(), canonicalise_opt(), and numeric_check()
+ * @warning Modifies string in-place, do not call on const strings
+ * @see unhide_meta() for single-character unhiding
+ * @see hide_meta() for metacharacter hiding
+ * @see opt_string_alloc() which combines strdup with unhiding
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char option_value[] = "value\x01with\x02hidden\x03chars";  // Hidden meta chars
+ * unhide_metas(option_value);
+ * // option_value now contains original metacharacters restored
+ * @endcode
+ *
+ * SIDE EFFECTS: Modifies string contents in-place
+ * THREAD SAFETY: Safe if caller ensures exclusive access to string during modification
+ */
 static void unhide_metas(char *cp)
 {
   if (cp)
@@ -604,6 +791,38 @@ static void unhide_metas(char *cp)
       *cp = unhide_meta(*cp);
 }
 
+/**
+ * @brief Allocate memory for configuration parsing with mem_recover support
+ *
+ * @detailed
+ * Wrapper around safe_malloc() that integrates with the mem_recover error handling
+ * mechanism. When mem_recover mode is active (during SIGHUP configuration reload),
+ * uses whine_malloc() which logs errors, and performs longjmp() to mem_jmp on allocation
+ * failure to gracefully abort the reload attempt. When mem_recover is inactive (startup),
+ * uses safe_malloc() which terminates the process on allocation failure via die().
+ *
+ * @param size Number of bytes to allocate
+ * @return Pointer to allocated memory block, never returns NULL (longjmp or die on failure)
+ *
+ * @note Never returns NULL - either succeeds or transfers control via longjmp/die
+ * @warning In mem_recover mode, does not return on failure - performs longjmp to mem_jmp
+ * @see opt_string_alloc() which combines allocation with string copying and unhiding
+ * @see safe_malloc() for non-recoverable allocation
+ * @see whine_malloc() for allocation with error logging
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_config *new_config = opt_malloc(sizeof(struct dhcp_config));
+ * // new_config is guaranteed non-NULL here, or execution transferred elsewhere
+ * @endcode
+ *
+ * SIDE EFFECTS: 
+ * - Allocates heap memory
+ * - May log error and longjmp to mem_jmp in mem_recover mode
+ * - May call die() and terminate process if not in mem_recover mode
+ *
+ * THREAD SAFETY: Safe in single-threaded dnsmasq architecture, relies on global mem_recover
+ */
 static void *opt_malloc(size_t size)
 {
   void *ret;
@@ -620,6 +839,38 @@ static void *opt_malloc(size_t size)
   return ret;
 }
 
+/**
+ * @brief Allocate and copy string with metacharacter unhiding
+ *
+ * @detailed
+ * Allocates heap memory for string copy using opt_malloc(), performs memcpy() of the
+ * entire string including null terminator, then calls unhide_metas() to restore any
+ * metacharacters that were hidden during option parsing. Returns NULL for NULL or
+ * empty input strings. This is the standard string duplication function for all
+ * configuration option string values.
+ *
+ * @param cp Source string to allocate and copy, or NULL
+ * @return Newly allocated string copy with metacharacters unhidden, or NULL if cp is NULL/empty
+ *
+ * @note Returns NULL for NULL or zero-length input (differs from strdup behavior)
+ * @warning Caller must not free returned pointer until daemon shutdown (no explicit free path)
+ * @see opt_malloc() for allocation mechanism with mem_recover support
+ * @see unhide_metas() for metacharacter restoration
+ * @see canonicalise_opt() for allocating with filename canonicalization
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char *domain = opt_string_alloc(arg);
+ * if (domain)  // NULL check recommended but allocation guaranteed if non-empty arg
+ *   daemon->domain_suffix = domain;
+ * @endcode
+ *
+ * SIDE EFFECTS: 
+ * - Allocates heap memory via opt_malloc()
+ * - May longjmp in mem_recover mode on allocation failure
+ *
+ * THREAD SAFETY: Safe in single-threaded architecture
+ */
 static char *opt_string_alloc(const char *cp)
 {
   char *ret = NULL;
@@ -638,9 +889,40 @@ static char *opt_string_alloc(const char *cp)
 }
 
 
-/* find next comma, split string with zero and eliminate spaces.
-   return start of string following comma */
-
+/**
+ * @brief Split string on specified character, null-terminate first part, skip spaces
+ *
+ * @detailed
+ * Searches for first occurrence of character c in string s using strchr(). If found,
+ * replaces the delimiter with space, null-terminates the first part by overwriting
+ * trailing spaces, and returns pointer to start of remainder (skipping leading spaces).
+ * This destructive parsing modifies the input string in-place. Used extensively for
+ * parsing comma-separated, colon-separated, and at-sign-separated option values.
+ *
+ * The function implements a three-step process: (1) find delimiter, (2) skip leading
+ * spaces in remainder, (3) null-terminate first part by replacing trailing spaces
+ * with nulls. This produces clean string segments without whitespace padding.
+ *
+ * @param s String to split (modified in-place), or NULL
+ * @param c Delimiter character to split on (typically ',' ':' '@' '#' or '%')
+ * @return Pointer to remainder after delimiter (spaces skipped), or NULL if no delimiter found
+ *
+ * @note Modifies input string in-place by replacing delimiter and trailing spaces with nulls
+ * @warning Do not call on const strings or string literals
+ * @see split() for comma-specific splitting convenience wrapper
+ * @see parse_server() which uses split_chr() with multiple delimiters (@, #, %)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char option[] = "192.168.1.1 , 8.8.8.8";  // Note surrounding spaces
+ * char *remainder = split_chr(option, ',');
+ * // option now contains "192.168.1.1\0" (null-terminated, no trailing space)
+ * // remainder points to "8.8.8.8" (leading space skipped)
+ * @endcode
+ *
+ * SIDE EFFECTS: Modifies string in-place by replacing delimiter and spaces with null bytes
+ * THREAD SAFETY: Safe if caller ensures exclusive access to string during modification
+ */
 static char *split_chr(char *s, char c)
 {
   char *comma, *p;
@@ -659,11 +941,72 @@ static char *split_chr(char *s, char c)
   return comma;
 }
 
+/**
+ * @brief Split string on comma delimiter (convenience wrapper for split_chr)
+ *
+ * @detailed
+ * Convenience wrapper that calls split_chr() with comma as the delimiter character.
+ * Used for parsing comma-separated value lists which are the most common format in
+ * dnsmasq configuration options (--dhcp-option=3,192.168.1.1, --server=1.1.1.1,8.8.8.8).
+ *
+ * @param s String to split on comma (modified in-place), or NULL
+ * @return Pointer to remainder after comma (spaces skipped), or NULL if no comma found
+ *
+ * @note Identical to split_chr(s, ',')
+ * @see split_chr() for detailed splitting behavior
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char dhcp_option[] = "option,value1,value2";
+ * char *value1 = split(dhcp_option);  // dhcp_option now "option\0", value1 -> "value1,value2"
+ * char *value2 = split(value1);       // value1 now "value1\0", value2 -> "value2"
+ * @endcode
+ *
+ * SIDE EFFECTS: Modifies string in-place via split_chr()
+ * THREAD SAFETY: Safe if caller ensures exclusive access to string
+ */
 static char *split(char *s)
 {
   return split_chr(s, ',');
 }
 
+/**
+ * @brief Allocate and canonicalize file/path option with metacharacter unhiding
+ *
+ * @detailed
+ * Unhides metacharacters in the input string, then calls canonicalise() to convert
+ * relative paths to absolute paths and perform tilde expansion. Returns heap-allocated
+ * canonicalized path. For empty string input, returns heap-allocated empty string.
+ * Integrates with mem_recover mechanism - on memory allocation failure, performs
+ * longjmp in mem_recover mode or calls die() otherwise.
+ *
+ * Used for all file and directory path options (--conf-file, --pid-file, --dhcp-leasefile,
+ * --dhcp-hostsfile, --addn-hosts, --dhcp-script, etc.) to ensure absolute paths are
+ * stored in daemon structure.
+ *
+ * @param s Path string to canonicalize (will be modified by unhide_metas), or NULL
+ * @return Heap-allocated canonicalized absolute path, heap-allocated empty string, or NULL
+ *
+ * @note Returns NULL only if input is NULL, otherwise returns allocated string (possibly empty)
+ * @warning On allocation failure, does not return (longjmp or die)
+ * @see opt_string_alloc() for non-path string allocation
+ * @see canonicalise() in util.c for path canonicalization algorithm
+ * @see unhide_metas() for metacharacter restoration
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char *abs_path = canonicalise_opt("~/dnsmasq.conf");
+ * // abs_path now contains "/home/user/dnsmasq.conf" (tilde expanded, absolute)
+ * daemon->conf_file = abs_path;
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Modifies input string via unhide_metas()
+ * - Allocates heap memory
+ * - May longjmp or call die() on allocation failure
+ *
+ * THREAD SAFETY: Safe in single-threaded architecture
+ */
 static char *canonicalise_opt(char *s)
 {
   char *ret;
@@ -687,6 +1030,34 @@ static char *canonicalise_opt(char *s)
   return ret;
 }
 
+/**
+ * @brief Validate string contains only decimal digits
+ *
+ * @detailed
+ * Unhides metacharacters then verifies every character in string is a digit 0-9.
+ * Returns 0 (false) if string is NULL, empty, or contains any non-digit character.
+ * Returns 1 (true) only if string is non-empty and contains only digits. Used for
+ * validating numeric option arguments before passing to atoi() or strtol().
+ *
+ * @param a String to check for numeric content (will be modified by unhide_metas), or NULL
+ * @return 1 if string is non-NULL, non-empty, and all digits; 0 otherwise
+ *
+ * @note Does not validate numeric range, only digit character content
+ * @warning Modifies input string via unhide_metas()
+ * @see atoi_check() family in dnsmasq.h for numeric parsing with range validation
+ * @see unhide_metas() for metacharacter restoration before validation
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (numeric_check(arg))
+ *   daemon->port = atoi(arg);  // Safe to parse, contains only digits
+ * else
+ *   return _("port number expected");
+ * @endcode
+ *
+ * SIDE EFFECTS: Modifies input string via unhide_metas()
+ * THREAD SAFETY: Safe if caller ensures exclusive access to string
+ */
 static int numeric_check(char *a)
 {
   char *p;
@@ -703,6 +1074,33 @@ static int numeric_check(char *a)
   return 1;
 }
 
+/**
+ * @brief Validate and parse decimal integer string with numeric_check
+ *
+ * @detailed
+ * Combines numeric_check() validation with atoi() parsing. Returns success only if string
+ * contains purely decimal digits and fits in int range. Calls unhide_metas() via numeric_check()
+ * before validation. Used for parsing configuration option numeric arguments.
+ *
+ * @param a String to parse as decimal integer (modified by numeric_check), or NULL
+ * @param res Output parameter for parsed integer value
+ * @return 1 if string valid and parsed successfully, 0 if NULL/non-numeric
+ *
+ * @note Does not validate range beyond int limits
+ * @see numeric_check() for digit validation
+ * @see atoi_check16() for 16-bit range validation
+ * @see strtoul_check() for unsigned 32-bit parsing
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int port;
+ * if (atoi_check(arg, &port) && port >= 1 && port <= 65535)
+ *   daemon->port = port;
+ * @endcode
+ *
+ * SIDE EFFECTS: Modifies input string via numeric_check()
+ * THREAD SAFETY: Safe if caller ensures exclusive string access
+ */
 static int atoi_check(char *a, int *res)
 {
   if (!numeric_check(a))
@@ -711,6 +1109,33 @@ static int atoi_check(char *a, int *res)
   return 1;
 }
 
+/**
+ * @brief Validate and parse decimal string as unsigned 32-bit integer
+ *
+ * @detailed
+ * Uses numeric_check() for digit validation then strtoul() for unsigned long parsing.
+ * Validates result fits in 32-bit unsigned range (0 to UINT32_MAX). Clears errno on
+ * range errors to avoid stale error state. Used for large numeric options like cache
+ * sizes and lease counts.
+ *
+ * @param a String to parse as unsigned decimal (modified by numeric_check), or NULL
+ * @param res Output parameter for parsed u32 value
+ * @return 1 if valid and within u32 range, 0 if invalid/out-of-range
+ *
+ * @note Clears errno on overflow to prevent error state propagation
+ * @see numeric_check() for digit validation
+ * @see atoi_check() for signed integer parsing
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * u32 cache_size;
+ * if (strtoul_check(arg, &cache_size))
+ *   daemon->cachesize = cache_size;
+ * @endcode
+ *
+ * SIDE EFFECTS: Modifies input string, clears errno on error
+ * THREAD SAFETY: Safe with exclusive string access
+ */
 static int strtoul_check(char *a, u32 *res)
 {
   unsigned long x;
@@ -726,6 +1151,34 @@ static int strtoul_check(char *a, u32 *res)
   return 1;
 }
 
+/**
+ * @brief Validate and parse 16-bit unsigned integer (port numbers, option codes)
+ *
+ * @detailed
+ * Wraps atoi_check() with additional range validation for 16-bit values (0-65535).
+ * Primary use is port number and DHCP/DNS option code parsing where 16-bit range
+ * is required by protocol specifications.
+ *
+ * @param a String to parse as 16-bit decimal (modified by numeric_check), or NULL
+ * @param res Output parameter for parsed integer (validated to fit in 16 bits)
+ * @return 1 if valid and 0 <= value <= 65535, 0 otherwise
+ *
+ * @note Validates range 0-0xffff (65535) per RFC port number specifications
+ * @see atoi_check() for base integer parsing
+ * @see atoi_check8() for 8-bit range validation
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int port;
+ * if (atoi_check16(arg, &port))
+ *   daemon->port = port;  // Guaranteed to fit in u16
+ * @endcode
+ *
+ * RFC COMPLIANCE: RFC 1035 DNS port range 0-65535
+ *
+ * SIDE EFFECTS: Modifies input string via atoi_check()
+ * THREAD SAFETY: Safe with exclusive string access
+ */
 static int atoi_check16(char *a, int *res)
 {
   if (!(atoi_check(a, res)) ||
@@ -737,6 +1190,27 @@ static int atoi_check16(char *a, int *res)
 }
 
 #ifdef HAVE_DNSSEC
+/**
+ * @brief Validate and parse 8-bit unsigned integer (DNSSEC algorithm codes)
+ *
+ * @detailed
+ * Wraps atoi_check() with 8-bit range validation (0-255). Used specifically for
+ * DNSSEC algorithm codes and other protocol fields requiring single-byte values.
+ * Only compiled when HAVE_DNSSEC is defined.
+ *
+ * @param a String to parse as 8-bit decimal (modified by numeric_check), or NULL
+ * @param res Output parameter for parsed integer (validated to fit in 8 bits)
+ * @return 1 if valid and 0 <= value <= 255, 0 otherwise
+ *
+ * @note DNSSEC-specific, only available with HAVE_DNSSEC compile option
+ * @see atoi_check() for base parsing
+ * @see atoi_check16() for 16-bit validation
+ *
+ * RFC COMPLIANCE: RFC 4034 DNSSEC algorithm numbers (0-255 range)
+ *
+ * SIDE EFFECTS: Modifies input string
+ * THREAD SAFETY: Safe with exclusive string access
+ */
 static int atoi_check8(char *a, int *res)
 {
   if (!(atoi_check(a, res)) ||
@@ -749,6 +1223,42 @@ static int atoi_check8(char *a, int *res)
 #endif
 
 #ifndef NO_ID
+/**
+ * @brief Add TXT record for DNS query statistics (version.bind, cachesize.bind, etc.)
+ *
+ * @detailed
+ * Creates and links TXT record into daemon->rr_txt list for responding to special DNS queries
+ * to .bind domain for server statistics and version information. Supports static text values
+ * (version.bind = "dnsmasq-VERSION") and dynamic statistics (cachesize.bind with TXT_STAT_CACHESIZE
+ * flag queries daemon structure at runtime). Used during read_opts() initialization to populate
+ * RFC 4892-style server identification TXT records.
+ *
+ * @param name DNS name for TXT record (e.g., "version.bind", "authors.bind"), will be allocated
+ * @param txt Static text content for TXT record, or NULL for dynamic statistics (txt allocated via opt_string_alloc)
+ * @param stat Statistic type flag (TXT_STAT_CACHESIZE, TXT_STAT_HITS, etc.) or 0 for static text
+ *
+ * @note Only compiled when NO_ID is not defined (normal builds include server identification)
+ * @note Links record into global daemon->rr_txt list
+ * @see read_opts() which calls add_txt() for all .bind TXT records during initialization
+ * @see struct txt_record in dnsmasq.h for TXT record data structure
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Static text record
+ * add_txt("version.bind", "dnsmasq-" VERSION, 0);
+ * // Dynamic statistic record
+ * add_txt("cachesize.bind", NULL, TXT_STAT_CACHESIZE);
+ * @endcode
+ *
+ * RFC COMPLIANCE: RFC 4892 "Requirements for a Mechanism Identifying Resolver Switches"
+ *
+ * SIDE EFFECTS:
+ * - Allocates struct txt_record via opt_malloc()
+ * - Allocates and copies name and txt strings
+ * - Links into daemon->rr_txt list
+ *
+ * THREAD SAFETY: Safe in single-threaded initialization context
+ */
 static void add_txt(char *name, char *txt, int stat)
 {
   struct txt_record *r = opt_malloc(sizeof(struct txt_record));
@@ -831,6 +1341,37 @@ static void do_usage(void)
 #define ret_err_free(x,m) do { strcpy(errstr, (x)); free((m)); return 0; } while (0)
 #define goto_err(x) do { strcpy(errstr, (x)); goto on_error; } while (0)
 
+/**
+ * @brief Parse IPv4 or IPv6 address string into mysockaddr union
+ *
+ * @detailed
+ * Attempts to parse input string as IPv4 address using inet_pton(AF_INET), then tries
+ * IPv6 with inet_pton(AF_INET6) on failure. Sets sa_family field appropriately for
+ * successful parse. Returns NULL on success or internationalized error message string
+ * on failure. Used throughout option parsing for any IP address arguments (upstream
+ * servers, listen addresses, DHCP ranges, etc.).
+ *
+ * @param arg String containing IPv4 address (dotted quad) or IPv6 address (colon hex notation)
+ * @param addr Output union mysockaddr structure to populate (in.sin_addr or in6.sin6_addr and sa_family)
+ * @return NULL on successful parse, or _("bad address") internationalized error string
+ *
+ * @note Does not validate port or additional address components, only base address
+ * @note Sets addr->sa.sa_family to AF_INET or AF_INET6 on success
+ * @see parse_server() which calls parse_mysockaddr() for upstream server addresses
+ * @see union mysockaddr in dnsmasq.h for structure definition
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * union mysockaddr addr;
+ * char *err = parse_mysockaddr("192.168.1.1", &addr);
+ * if (err)
+ *   die(_("Invalid address: %s"), err, EC_BADCONF);
+ * // addr.in.sin_addr now contains parsed IPv4 address
+ * @endcode
+ *
+ * SIDE EFFECTS: Populates addr structure with parsed address and family
+ * THREAD SAFETY: Safe with exclusive addr structure access
+ */
 static char *parse_mysockaddr(char *arg, union mysockaddr *addr) 
 {
   if (inet_pton(AF_INET, arg, &addr->in.sin_addr) > 0)
@@ -843,6 +1384,58 @@ static char *parse_mysockaddr(char *arg, union mysockaddr *addr)
   return NULL;
 }
 
+/**
+ * @brief Parse upstream DNS server specification with optional source address and interface
+ *
+ * @detailed
+ * Parses --server option argument supporting multiple format variations: plain IP address,
+ * IP#port for non-standard port, IP@source for source address binding, IP@source#sourceport
+ * for source port specification, IP@interface for SO_BINDTODEVICE binding (Linux), and
+ * special "#" value for /etc/resolv.conf. IPv6 addresses support %interface scope ID notation.
+ * Performs full validation with inet_pton() and populates sockaddr unions for both server
+ * address and optional source address. Sets flags SERV_USE_RESOLV or SERV_HAS_SOURCE as appropriate.
+ *
+ * Format examples: "8.8.8.8", "1.1.1.1#5353", "8.8.8.8@192.168.1.1", "8.8.8.8@eth0",
+ * "2001:4860:4860::8888", "2001:4860:4860::8888%eth0", "#" (use /etc/resolv.conf servers).
+ * The function destructively modifies arg string using split_chr() to parse delimiters.
+ *
+ * @param arg Server specification string (modified in-place during parsing)
+ * @param addr Output parameter filled with parsed server address and port
+ * @param source_addr Output parameter filled with source address if @ present, or ANY
+ * @param interface Output parameter filled with interface name if @interface present (IF_NAMESIZE buffer)
+ * @param flags Optional output parameter OR'd with SERV_USE_RESOLV or SERV_HAS_SOURCE, or NULL
+ * @return NULL on success, pointer to error string on parse failure (internationalized via _())
+ *
+ * @note Destructively modifies arg string using split_chr() - caller must copy if needed
+ * @note Sets source_addr to INADDR_ANY or in6addr_any if no source specified
+ * @note Interface binding requires SO_BINDTODEVICE support (Linux), returns error on other platforms
+ * @warning arg string is modified in-place - do not use string literals or const strings
+ * @see split_chr() for delimiter-based parsing that modifies string
+ * @see struct server in dnsmasq.h for upstream server data structure
+ * @see one_opt() case 'S' which calls parse_server() for --server options
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * union mysockaddr addr, source;
+ * char iface[IF_NAMESIZE+1];
+ * u16 flags = 0;
+ * char *err = parse_server("8.8.8.8@192.168.1.1#5353", &addr, &source, iface, &flags);
+ * if (err)
+ *   return err;  // Parse error
+ * // addr now contains 8.8.8.8:5353, source contains 192.168.1.1:0, flags has SERV_HAS_SOURCE
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 1035: DNS port number 53 (NAMESERVER_PORT default)
+ * - RFC 4007: IPv6 scoped address architecture (%interface syntax)
+ *
+ * SIDE EFFECTS:
+ * - Modifies arg string in-place via split_chr()
+ * - Fills addr, source_addr, and interface output parameters
+ * - May set flags bits if flags pointer non-NULL
+ *
+ * THREAD SAFETY: Safe if caller ensures exclusive access to arg string and output parameters
+ */
 char *parse_server(char *arg, union mysockaddr *addr, union mysockaddr *source_addr, char *interface, u16 *flags)
 {
   int source_port = 0, serv_port = NAMESERVER_PORT;
@@ -1076,6 +1669,31 @@ static char *domain_rev6(int from_file, char *server, struct in6_addr *addr6, in
 
 #ifdef HAVE_DHCP
 
+/**
+ * @brief Check if string starts with "tag:" or "net:" prefix
+ *
+ * @detailed
+ * Tests if argument string begins with "tag:" or "net:" prefix used for DHCP tag-based
+ * conditional configuration. Both prefixes are functionally equivalent and mark network
+ * ID tags. Used by dhcp_tags() parser to identify and extract tag names from option
+ * arguments. Returns 0 for NULL input or non-tag strings.
+ *
+ * @param arg String to test for tag prefix, or NULL
+ * @return 1 if starts with "tag:" or "net:", 0 otherwise
+ *
+ * @note "tag:" and "net:" are equivalent tag prefixes
+ * @see dhcp_tags() which calls is_tag_prefix() to parse tag lists
+ * @see set_prefix() for "set:" prefix handling
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (is_tag_prefix("tag:blue,192.168.1.1"))
+ *   // Parse as tagged option
+ * @endcode
+ *
+ * SIDE EFFECTS: None (read-only string test)
+ * THREAD SAFETY: Safe (no state modification)
+ */
 static int is_tag_prefix(char *arg)
 {
   if (arg && (strstr(arg, "net:") == arg || strstr(arg, "tag:") == arg))
@@ -1084,6 +1702,31 @@ static int is_tag_prefix(char *arg)
   return 0;
 }
 
+/**
+ * @brief Skip past "set:" prefix if present, returning tag name
+ *
+ * @detailed
+ * Returns pointer advanced 4 characters past "set:" prefix if arg starts with "set:",
+ * otherwise returns arg unchanged. Used for parsing "set:tag_name" specifications in
+ * DHCP options where tags are being assigned/set rather than matched. The "set:" prefix
+ * indicates the tag should be added to the client's tag set.
+ *
+ * @param arg String potentially starting with "set:" prefix (must not be NULL)
+ * @return Pointer to character after "set:" if prefix present, or original arg
+ *
+ * @note Assumes arg is not NULL (caller must validate)
+ * @see is_tag_prefix() for "tag:" and "net:" prefix checking
+ * @see dhcp_tags() for tag parsing
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char *tag_name = set_prefix("set:router");
+ * // tag_name = "router"
+ * @endcode
+ *
+ * SIDE EFFECTS: None (returns pointer into existing string)
+ * THREAD SAFETY: Safe (no state modification)
+ */
 static char *set_prefix(char *arg)
 {
    if (strstr(arg, "set:") == arg)
@@ -1092,6 +1735,35 @@ static char *set_prefix(char *arg)
    return arg;
 }
 
+/**
+ * @brief Allocate and initialize DHCP network ID (tag) node for linked list
+ *
+ * @detailed
+ * Creates new dhcp_netid structure node with allocated tag name string and links it
+ * to existing list. Used for building tag lists that define conditional DHCP behavior
+ * (e.g., tag:blue,tag:wireless for tag-based option assignment). Allocation via
+ * opt_malloc() uses memory recovery on exhaustion. Tag names are copied not referenced.
+ *
+ * @param net Tag name string (e.g., "blue", "wireless", "router"), will be copied via opt_string_alloc()
+ * @param next Next node in linked list, or NULL for list tail
+ * @return Newly allocated dhcp_netid structure with copied tag name and next pointer
+ *
+ * @note Allocates memory via opt_malloc() and opt_string_alloc()
+ * @see dhcp_netid_free() for deallocating entire tag list
+ * @see dhcp_tags() which parses "tag:name" prefixes and builds lists with this function
+ * @see struct dhcp_netid in dnsmasq.h for structure definition
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_netid *tags = NULL;
+ * tags = dhcp_netid_create("wireless", tags);
+ * tags = dhcp_netid_create("guest", tags);
+ * // tags now contains guest->wireless->NULL
+ * @endcode
+ *
+ * SIDE EFFECTS: Allocates memory for structure and tag name string
+ * THREAD SAFETY: Safe with exclusive list access
+ */
 static struct dhcp_netid *dhcp_netid_create(const char *net, struct dhcp_netid *next)
 {
   struct dhcp_netid *tt;
@@ -1101,6 +1773,33 @@ static struct dhcp_netid *dhcp_netid_create(const char *net, struct dhcp_netid *
   return tt;
 }
 
+/**
+ * @brief Free entire DHCP network ID (tag) linked list
+ *
+ * @detailed
+ * Walks dhcp_netid linked list freeing each node's tag name string and structure.
+ * Handles NULL input gracefully. Used during configuration cleanup, error recovery,
+ * and daemon shutdown to prevent memory leaks from tag lists.
+ *
+ * @param nid Head of dhcp_netid linked list to free, or NULL (no-op if NULL)
+ *
+ * @note Frees both tag name strings and structure nodes
+ * @note Safe to call with NULL argument
+ * @see dhcp_netid_create() for tag list node allocation
+ * @see dhcp_tags() which allocates lists that must be freed with this function
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_netid *tags = dhcp_tags(&arg);
+ * if (error_condition) {
+ *   dhcp_netid_free(tags);  // Clean up on error
+ *   return;
+ * }
+ * @endcode
+ *
+ * SIDE EFFECTS: Frees all memory in tag list
+ * THREAD SAFETY: Safe with exclusive list access
+ */
 static void dhcp_netid_free(struct dhcp_netid *nid)
 {
   while (nid)
@@ -1112,8 +1811,43 @@ static void dhcp_netid_free(struct dhcp_netid *nid)
     }
 }
 
-/* Parse one or more tag:s before parameters.
- * Moves arg to the end of tags. */
+/**
+ * @brief Parse one or more "tag:" prefixes from DHCP option argument string
+ *
+ * @detailed
+ * Extracts comma-separated "tag:name" prefixes from beginning of option argument and
+ * builds linked list of dhcp_netid structures. Advances *arg pointer past all parsed
+ * tags to first non-tag content. Returns NULL if no tags found or if tags exhaust entire
+ * argument (indicating malformed option). Tags enable conditional DHCP options like
+ * "tag:blue,tag:wireless,option:router,192.168.1.1" where option only applies to
+ * clients matching both blue AND wireless tags.
+ *
+ * @param arg Pointer to string pointer containing "tag:name,tag:name,actual_value" format,
+ *            modified to point past tags on success
+ * @return Linked list of parsed dhcp_netid structures, or NULL if no tags or malformed
+ *
+ * @note Modifies *arg to point past all parsed tags
+ * @note Returns NULL and frees partially built list if tags exhaust entire argument
+ * @note Tag names start at character 4 (after "tag:" prefix)
+ * @see dhcp_netid_create() for individual tag node allocation
+ * @see dhcp_netid_free() for cleanup on error
+ * @see is_tag_prefix() macro for "tag:" detection
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char *arg = "tag:blue,tag:wireless,option:router,192.168.1.1";
+ * struct dhcp_netid *tags = dhcp_tags(&arg);
+ * // tags = blue->wireless->NULL
+ * // arg = "option:router,192.168.1.1"
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Modifies *arg pointer to skip past parsed tags
+ * - Allocates dhcp_netid structures via dhcp_netid_create()
+ * - Frees partially built list on malformed input
+ *
+ * THREAD SAFETY: Safe with exclusive arg access
+ */
 static struct dhcp_netid * dhcp_tags(char **arg)
 {
   struct dhcp_netid *id = NULL;
@@ -1132,6 +1866,25 @@ static struct dhcp_netid * dhcp_tags(char **arg)
   return id;
 }
 
+/**
+ * @brief Free DHCP network ID list container linked list
+ *
+ * @detailed
+ * Walks dhcp_netid_list linked list freeing each container's embedded tag list
+ * and container structure. dhcp_netid_list wraps dhcp_netid lists for use in
+ * configurations requiring multiple independent tag lists (e.g., DHCP contexts
+ * with multiple tag sets). Calls dhcp_netid_free() for each embedded list.
+ *
+ * @param netid Head of dhcp_netid_list linked list to free, or NULL (no-op if NULL)
+ *
+ * @note Frees both embedded tag lists and container structures
+ * @note Safe to call with NULL argument
+ * @see dhcp_netid_free() for freeing embedded tag lists
+ * @see struct dhcp_netid_list in dnsmasq.h for container structure
+ *
+ * SIDE EFFECTS: Frees all memory in netid_list chain and embedded tag lists
+ * THREAD SAFETY: Safe with exclusive list access
+ */
 static void dhcp_netid_list_free(struct dhcp_netid_list *netid)
 {
   while (netid)
@@ -1143,6 +1896,40 @@ static void dhcp_netid_list_free(struct dhcp_netid_list *netid)
     }
 }
 
+/**
+ * @brief Free DHCP static host configuration structure and all embedded data
+ *
+ * @detailed
+ * Deallocates dhcp_config structure created by --dhcp-host option, freeing all
+ * dynamically allocated components: hardware address list, network ID lists,
+ * client ID, hostname, and IPv6 address list (if HAVE_DHCP6 enabled). Handles
+ * NULL input gracefully. Checks config->flags to determine which optional fields
+ * were allocated (CONFIG_CLID, CONFIG_NAME, CONFIG_ADDR6).
+ *
+ * @param config dhcp_config structure to free, or NULL (no-op if NULL)
+ *
+ * @note Safe to call with NULL argument
+ * @note Conditionally frees IPv6 addresses only if HAVE_DHCP6 defined
+ * @see dhcp_netid_list_free() for freeing config->netid tag lists
+ * @see dhcp_netid_free() for freeing config->filter tag list
+ * @see struct dhcp_config in dnsmasq.h for structure definition
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_config *conf = parse_dhcp_host_option(arg);
+ * if (error) {
+ *   dhcp_config_free(conf);  // Clean up on parse error
+ *   return NULL;
+ * }
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Frees all memory in dhcp_config structure
+ * - Frees embedded hwaddr_config linked list
+ * - Frees client ID, hostname, netid lists, IPv6 addresses
+ *
+ * THREAD SAFETY: Safe with exclusive config structure access
+ */
 static void dhcp_config_free(struct dhcp_config *config)
 {
   if (config)
@@ -1181,6 +1968,28 @@ static void dhcp_config_free(struct dhcp_config *config)
     }
 }
 
+/**
+ * @brief Free DHCP context (address range) structure and embedded data
+ *
+ * @detailed
+ * Deallocates dhcp_context structure created by --dhcp-range option, freeing tag
+ * filter list, network ID name, and DHCPv6 template interface name (if HAVE_DHCP6).
+ * Handles NULL input gracefully. dhcp_context defines an IP address range/subnet
+ * for DHCP lease allocation with optional tag-based conditional application.
+ *
+ * @param ctx dhcp_context structure to free, or NULL (no-op if NULL)
+ *
+ * @note Safe to call with NULL argument
+ * @note Conditionally frees template_interface only if HAVE_DHCP6 defined
+ * @see dhcp_netid_free() for freeing ctx->filter tag list
+ * @see struct dhcp_context in dnsmasq.h for structure definition
+ *
+ * SIDE EFFECTS:
+ * - Frees all memory in dhcp_context structure
+ * - Frees filter tag list, netid name, template interface
+ *
+ * THREAD SAFETY: Safe with exclusive context structure access
+ */
 static void dhcp_context_free(struct dhcp_context *ctx)
 {
   if (ctx)
@@ -1194,6 +2003,29 @@ static void dhcp_context_free(struct dhcp_context *ctx)
     }
 }
 
+/**
+ * @brief Free DHCP option structure and embedded data
+ *
+ * @detailed
+ * Deallocates dhcp_opt structure created by --dhcp-option parsing, freeing vendor
+ * class string (if DHOPT_VENDOR flag set), network ID tag list, and option value
+ * buffer. dhcp_opt represents a DHCP option (RFC 2132) to be sent to clients,
+ * either unconditionally or conditionally based on tags.
+ *
+ * @param opt dhcp_opt structure to free (must not be NULL)
+ *
+ * @note Does not handle NULL argument - caller must check
+ * @note Conditionally frees u.vendor_class only if DHOPT_VENDOR flag set
+ * @see dhcp_netid_free() for freeing opt->netid tag list
+ * @see parse_dhcp_opt() which allocates dhcp_opt structures
+ * @see struct dhcp_opt in dnsmasq.h for structure definition
+ *
+ * SIDE EFFECTS:
+ * - Frees all memory in dhcp_opt structure
+ * - Frees vendor class string, netid list, option value buffer
+ *
+ * THREAD SAFETY: Safe with exclusive opt structure access
+ */
 static void dhcp_opt_free(struct dhcp_opt *opt)
 {
   if (opt->flags & DHOPT_VENDOR)
@@ -1205,6 +2037,68 @@ static void dhcp_opt_free(struct dhcp_opt *opt)
 
 
 /* This is too insanely large to keep in-line in the switch */
+/**
+ * @brief Parse DHCP option specification in complex format with multiple encodings
+ *
+ * @detailed
+ * Parses --dhcp-option and related option arguments supporting multiple format variations:
+ * numeric option codes (--dhcp-option=3,192.168.1.1), named options (--dhcp-option=option:router,
+ * 192.168.1.1), DHCPv6 options (--dhcp-option=option6:23,2001:db8::1), vendor classes, tag-based
+ * conditional options, and option 82 relay agent information. Allocates and populates struct
+ * dhcp_opt with parsed option number, data encoding type, value buffer, and associated netid tags.
+ *
+ * Supports multiple data encodings auto-detected from value format: IPv4 addresses (dotted quad),
+ * IPv6 addresses (colon-hex), hexadecimal strings (01:02:03:04 or 0x01020304), decimal numbers,
+ * and ASCII strings. Special handling for encapsulated options, sub-options within option 82,
+ * and RFC 3361 sub-option encoding. The function performs extensive validation: option number
+ * ranges (0-254 DHCPv4, 0-65535 DHCPv6), data length constraints per option type, address family
+ * matching (IPv4 vs IPv6), and proper encoding for known option types via lookup_dhcp_opt().
+ *
+ * Particularly complex for option 82 (relay agent information) which requires sub-option parsing
+ * with circuit-id and remote-id encoding. Tags can be specified with net:tag syntax for conditional
+ * option delivery based on client matching. The flags parameter controls behavior: DHOPT_ADDR_MATCH
+ * for address-dependent matching, DHOPT_ENCAPSULATE for encapsulated vendor options, DHOPT_VENDOR
+ * for vendor-specific information options.
+ *
+ * @param errstr Buffer for error message string (caller-provided storage, typically 256 bytes)
+ * @param arg Comma-separated DHCP option specification string (modified in-place during parsing)
+ * @param flags Option behavior flags (DHOPT_ADDR_MATCH, DHOPT_ENCAPSULATE, DHOPT_VENDOR, etc.)
+ * @return 1 on successful parse and struct dhcp_opt allocation, 0 on error (errstr contains description)
+ *
+ * @note Allocates struct dhcp_opt which is linked into daemon->dhcp_opts list by caller
+ * @note Modifies arg string in-place using split() for comma-separated value parsing
+ * @note Returns 0 with errstr set on any validation failure
+ * @warning Extremely complex function (~500 lines) with many encoding formats and edge cases
+ * @warning Option 82 relay agent parsing is particularly intricate with sub-option handling
+ * @see struct dhcp_opt in dnsmasq.h for DHCP option data structure
+ * @see lookup_dhcp_opt() for option name to number translation
+ * @see lookup_dhcp_len() for expected option length validation
+ * @see one_opt() case 'O' which calls parse_dhcp_opt() for --dhcp-option
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char errstr[256];
+ * // Parse router option: --dhcp-option=option:router,192.168.1.1
+ * if (!parse_dhcp_opt(errstr, "option:router,192.168.1.1", 0))
+ *   return errstr;
+ * // struct dhcp_opt allocated and populated with option 3 (router), IPv4 address data
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 2131: DHCPv4 option format and encoding (Section 3)
+ * - RFC 2132: DHCP Options and BOOTP Vendor Extensions (defines standard option numbers)
+ * - RFC 3046: DHCP Relay Agent Information Option (option 82 with sub-options)
+ * - RFC 3315: DHCPv6 option format (Section 22)
+ * - RFC 3361: DHCP sub-option for SIP servers
+ *
+ * SIDE EFFECTS:
+ * - Allocates struct dhcp_opt via opt_malloc()
+ * - Modifies arg string in-place via split()
+ * - May allocate additional memory for option value data
+ * - Links new dhcp_opt into global configuration (done by caller)
+ *
+ * THREAD SAFETY: Safe if caller ensures exclusive access to arg string and errstr buffer
+ */
 static int parse_dhcp_opt(char *errstr, char *arg, int flags)
 {
   struct dhcp_opt *new = opt_malloc(sizeof(struct dhcp_opt));
@@ -1762,6 +2656,68 @@ void reset_option_bool(unsigned int opt)
   option_var(opt) &= ~(option_val(opt));
 }
 
+/**
+ * @brief Process single configuration option and update daemon structure
+ *
+ * @detailed
+ * Central dispatcher function containing massive switch statement handling all ~150+ dnsmasq
+ * configuration options. Validates option argument syntax, converts string arguments to
+ * appropriate types (IP addresses, port numbers, time intervals), allocates and populates
+ * data structures (struct server, struct dhcp_context, struct dhcp_config, etc.), and stores
+ * configuration in global daemon structure.
+ *
+ * Implements option precedence: command-line options override config file options. Tracks
+ * option repetition using usage[] array to prevent illegal duplicates (ARG_ONE options)
+ * while allowing legitimate repetition (ARG_DUP options like --server which can appear
+ * multiple times). The servers_only flag restricts processing to DNS server options only,
+ * used during SIGHUP reload when only upstream server changes are permitted.
+ *
+ * Each case in the switch handles option-specific parsing: splitting comma-separated values,
+ * validating IP addresses with inet_pton(), parsing port numbers with atoi_check*(), converting
+ * time specifications, and performing conflict detection (overlapping DHCP ranges, duplicate
+ * interface specifications). Compile-time conditionals (#ifdef HAVE_DHCP, HAVE_DNSSEC, etc.)
+ * disable processing for features not compiled in, returning appropriate error messages.
+ *
+ * @param option Option code from getopt_long() (single char or LOPT_* constant from lines 67+)
+ * @param arg Option argument string, or NULL for boolean options
+ * @param errstr Buffer for error message (caller-provided storage, typically 256 bytes)
+ * @param gen_err Generic error message to use for unrecognized options
+ * @param command_line 1 if option from command line (higher precedence), 0 if from config file
+ * @param servers_only 1 to restrict to server options only (SIGHUP reload), 0 for all options
+ * @return 1 on successful option processing, 0 on error (errstr contains description)
+ *
+ * @note Modifies global daemon structure by adding/updating configuration
+ * @note Uses ret_err() macro to set errstr and return 0 for error conditions
+ * @warning Massive switch statement (~3700 lines) - one case per configuration option
+ * @warning Some options have complex side effects (file I/O, memory allocation, validation)
+ * @see read_opts() which calls one_opt() for each option from all configuration sources
+ * @see one_file() which recursively processes --conf-file and --conf-dir includes
+ * @see parse_dhcp_opt() for DHCP option 82 parsing complexity
+ * @see parse_server() for upstream DNS server specification parsing
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * char errstr[256];
+ * // Parse --server=8.8.8.8 from command line
+ * if (!one_opt('S', "8.8.8.8", errstr, "error", 1, 0))
+ *   die(errstr, NULL, EC_BADCONF);
+ * // daemon->servers now contains new upstream server entry
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - DHCP options parsing implements RFC 2131/RFC 3315 option formats
+ * - DNS server specifications follow RFC 1035 address formats
+ * - Port number ranges validated per RFC 1035 (0-65535)
+ *
+ * SIDE EFFECTS:
+ * - Modifies global daemon structure extensively (adds servers, contexts, configs, etc.)
+ * - May allocate heap memory for configuration structures via opt_malloc()
+ * - May call one_file() recursively for --conf-file and --conf-dir options
+ * - May perform file I/O for --conf-dir directory scanning
+ * - Updates usage[] array to track option repetition
+ *
+ * THREAD SAFETY: Single-threaded only, modifies global state without locking
+ */
 static int one_opt(int option, char *arg, char *errstr, char *gen_err, int command_line, int servers_only)
 {      
   int i;
@@ -5146,6 +6102,61 @@ int option_read_dynfile(char *file, int flags)
 }
 #endif
 
+/**
+ * @brief Process configuration file or script with recursive include support
+ *
+ * @detailed
+ * Reads and parses configuration file line-by-line, calling one_opt() for each parsed option.
+ * Supports three input modes: regular file with fopen(), executable script with popen() for
+ * --conf-script, and stdin for file="-". Implements duplicate file detection using dev/ino
+ * tracking to prevent infinite recursion when configuration files include each other. Handles
+ * --conf-file recursive includes via one_opt() case 'C' callbacks.
+ *
+ * Each line is parsed using custom format: option_name=value or option_name with no value for
+ * boolean options. Supports line continuation with trailing backslash, comment lines starting
+ * with #, and quoted strings with embedded metacharacters. The hard_opt parameter controls
+ * error handling: 0 for command-line --conf-file (fatal errors call die()), LOPT_DHCP_HOST/
+ * LOPT_DHCP_OPTS for optional files (errors logged but not fatal), LOPT_CONF_OPT for default
+ * /etc/dnsmasq.conf (missing file OK), LOPT_CONF_SCRIPT for executable script output piped
+ * through popen().
+ *
+ * File reading tracks seen files in static filesread linked list to detect circular includes
+ * by comparing dev/ino from stat(). Special handling for stdin ("-") which can only be read
+ * once per invocation. Lines up to MAXDNAME (1024) bytes are supported with dynamic buffer
+ * growth for longer lines. Whitespace is normalized and trailing comments stripped before
+ * option parsing.
+ *
+ * @param file File path to configuration file or executable script, or "-" for stdin
+ * @param hard_opt Controls error handling: 0 for fatal errors, LOPT_* for optional/script modes
+ * @return 1 on success (file processed or safely skipped), 0 on fatal error with hard_opt non-zero
+ *
+ * @note Static filesread list persists across calls to detect file re-reading
+ * @note Modifies parsed line buffer in-place during option parsing
+ * @note Recursive calls via one_opt() case 'C' for --conf-file within processed file
+ * @warning stdin can only be processed once, subsequent "-" attempts are silently skipped
+ * @warning Circular file includes are detected and ignored (second read returns immediately)
+ * @see one_opt() for individual option processing called for each parsed line
+ * @see read_opts() which initiates configuration file processing
+ * @see split() for comma-separated value parsing within option lines
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // From one_opt() case 'C' (--conf-file processing)
+ * char *conffile = opt_string_alloc("/etc/dnsmasq.d/servers.conf");
+ * one_file(conffile, 0);  // Process file, fatal errors call die()
+ * free(conffile);
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Opens and reads file via fopen() or popen()
+ * - Calls one_opt() for each parsed configuration option
+ * - Updates static filesread list with file dev/ino to prevent re-reading
+ * - May recursively call one_file() for nested --conf-file options
+ * - May call die() and terminate process on fatal errors (hard_opt == 0)
+ * - May log errors via my_syslog() for non-fatal failures (hard_opt != 0)
+ *
+ * THREAD SAFETY: Not thread-safe, uses static filesread list and read_stdin flag
+ */
 static int one_file(char *file, int hard_opt)
 {
   FILE *f;
@@ -5383,6 +6394,28 @@ void read_servers_file(void)
  
 
 #ifdef HAVE_DHCP
+/**
+ * @brief Remove dynamically loaded DHCP host configurations from daemon configuration
+ *
+ * @detailed
+ * Walks daemon->dhcp_conf linked list removing and freeing all dhcp_config entries
+ * marked with CONFIG_BANK flag (indicating dynamic loading from --dhcp-hostsfile or
+ * inotify-monitored directories). Preserves static configurations from command-line
+ * or primary config file. Called during SIGHUP reload to clear old dynamic entries
+ * before re-reading DHCP hosts files.
+ *
+ * @note Only removes entries with CONFIG_BANK flag set
+ * @note Modifies global daemon->dhcp_conf linked list
+ * @see dhcp_config_free() for structure deallocation
+ * @see reread_dhcp() which calls this during configuration reload
+ * @see clear_dynamic_opt() for parallel DHCP option cleanup
+ *
+ * SIDE EFFECTS:
+ * - Modifies daemon->dhcp_conf linked list
+ * - Frees CONFIG_BANK-flagged dhcp_config structures
+ *
+ * THREAD SAFETY: Safe in single-threaded reload context
+ */
 static void clear_dynamic_conf(void)
 {
   struct dhcp_config *configs, *cp, **up;
@@ -5402,6 +6435,28 @@ static void clear_dynamic_conf(void)
     }
 }
 
+/**
+ * @brief Remove dynamically loaded DHCP options from daemon configuration
+ *
+ * @detailed
+ * Walks daemon->dhcp_opts linked list removing and freeing all dhcp_opt entries
+ * marked with DHOPT_BANK flag (indicating dynamic loading from --dhcp-optsfile or
+ * inotify-monitored directories). Preserves static option configurations from
+ * command-line or primary config file. Called during SIGHUP reload to clear old
+ * dynamic options before re-reading DHCP option files.
+ *
+ * @note Only removes entries with DHOPT_BANK flag set
+ * @note Modifies global daemon->dhcp_opts linked list
+ * @see dhcp_opt_free() for structure deallocation
+ * @see reread_dhcp() which calls this during configuration reload
+ * @see clear_dynamic_conf() for parallel DHCP host configuration cleanup
+ *
+ * SIDE EFFECTS:
+ * - Modifies daemon->dhcp_opts linked list
+ * - Frees DHOPT_BANK-flagged dhcp_opt structures
+ *
+ * THREAD SAFETY: Safe in single-threaded reload context
+ */
 static void clear_dynamic_opt(void)
 {
   struct dhcp_opt *opts, *cp, **up;
@@ -5420,6 +6475,43 @@ static void clear_dynamic_opt(void)
     }
 }
 
+/**
+ * @brief Reload DHCP host and option configurations from dynamic files
+ *
+ * @detailed
+ * Public API called during SIGHUP configuration reload to re-read dynamically loaded
+ * DHCP configurations. Clears existing dynamic entries (CONFIG_BANK and DHOPT_BANK),
+ * expands file lists from --dhcp-hostsfile and --dhcp-optsfile directives, re-parses
+ * all active files using one_file() with appropriate flags (LOPT_BANK or LOPT_OPTS),
+ * and re-initializes inotify monitoring for dynamic directories (if HAVE_INOTIFY enabled).
+ * Allows DHCP configuration changes without daemon restart while preserving static
+ * configurations from primary config file.
+ *
+ * @note Called from signal handler context on SIGHUP via poll_check()
+ * @note Always clears dynamic configs even if no files configured (inotify may have created entries)
+ * @note Logs successful file reads to syslog with MS_DHCP facility
+ * @see clear_dynamic_conf() for removing old host configurations
+ * @see clear_dynamic_opt() for removing old option configurations
+ * @see one_file() for parsing individual configuration files
+ * @see expand_filelist() for glob pattern expansion in file lists
+ * @see set_dynamic_inotify() for inotify monitoring setup
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // In signal handler on SIGHUP
+ * if (daemon->options & OPT_RELOAD)
+ *   reread_dhcp();
+ * @endcode
+ *
+ * SIDE EFFECTS:
+ * - Clears daemon->dhcp_conf CONFIG_BANK entries
+ * - Clears daemon->dhcp_opts DHOPT_BANK entries
+ * - Re-reads all DHCP hosts and options files
+ * - Re-initializes inotify watches for dynamic directories
+ * - Logs to syslog for each file successfully read
+ *
+ * THREAD SAFETY: Safe in single-threaded signal handler context
+ */
 void reread_dhcp(void)
 {
    struct hostsfile *hf;
@@ -5460,6 +6552,67 @@ void reread_dhcp(void)
 }
 #endif
 
+/**
+ * @brief Parse all configuration sources and populate global daemon structure
+ *
+ * @detailed
+ * Main entry point for dnsmasq configuration system. Allocates and initializes global daemon
+ * structure with compiled-in defaults from config.h, then processes configuration from three
+ * sources in precedence order: (1) command-line arguments via getopt_long(), (2) configuration
+ * files specified by --conf-file and recursively included via --conf-dir, (3) default config
+ * file /etc/dnsmasq.conf if not disabled by --no-resolv. Command-line options override file
+ * options which override compiled defaults.
+ *
+ * The function implements complete configuration loading workflow: allocate daemon structure,
+ * zero-initialize all fields, set defaults from config.h constants (CACHESIZ, FTABSIZ, ports,
+ * paths), add version.bind TXT records for RFC 4892 compliance, parse command line with
+ * getopt_long() delegating each option to one_opt(), process --test mode for configuration
+ * syntax validation, handle --conf-file recursive includes, and perform final validation
+ * (check root-required features, validate DHCP ranges, verify file permissions).
+ *
+ * Called twice during daemon lifecycle: (1) at startup from main() in dnsmasq.c for initial
+ * configuration load, (2) on SIGHUP signal for configuration reload with mem_recover mode
+ * active to gracefully handle allocation failures by reverting to previous configuration.
+ *
+ * @param argc Argument count from main() including program name
+ * @param argv Argument vector from main() containing command-line options
+ * @param compile_opts String describing compile-time features for --version output
+ *
+ * @note Populates global daemon structure which must remain valid for daemon lifetime
+ * @note Command-line arguments are copied to prevent modification of argv[]
+ * @note In mem_recover mode (SIGHUP reload), setjmp/longjmp used for error recovery
+ * @warning No return value - errors cause die() termination (startup) or longjmp (reload)
+ * @warning Validates that certain options require root privileges (DHCP, port 53, etc.)
+ * @see one_opt() for individual option processing logic
+ * @see one_file() for configuration file processing
+ * @see parse_dhcp_opt() for DHCP option format parsing
+ * @see struct daemon in dnsmasq.h (~800-1100) for complete configuration structure
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // From main() in dnsmasq.c
+ * read_opts(argc, argv, compile_opts_string);
+ * // Global daemon structure now fully populated with configuration
+ * if (daemon->port < 1024 && getuid() != 0)
+ *   die("Must be root", NULL, EC_BADCONF);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 4892 compliance: Adds version.bind, authors.bind, cachesize.bind TXT records
+ * - RFC 2131/3315 compliance: Validates DHCP option formats and port numbers
+ * - RFC 1035 compliance: Validates DNS port numbers and server specifications
+ *
+ * SIDE EFFECTS:
+ * - Allocates and populates global daemon structure
+ * - Calls getopt_long() which modifies optind global variable
+ * - May read multiple configuration files via one_file()
+ * - May scan directories via opendir/readdir for --conf-dir
+ * - May call die() and terminate process on fatal configuration errors
+ * - In mem_recover mode, may longjmp on allocation failure
+ * - Validates file permissions for security-sensitive paths
+ *
+ * THREAD SAFETY: Single-threaded only, initializes global daemon structure
+ */
 void read_opts(int argc, char **argv, char *compile_opts)
 {
   size_t argbuf_size = MAXDNAME;

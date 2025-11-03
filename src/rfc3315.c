@@ -14,25 +14,137 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file rfc3315.c
+ * @brief DHCPv6 protocol implementation per RFC 3315
+ *
+ * DETAILED PURPOSE:
+ * This file implements the DHCPv6 server and relay agent functionality according to 
+ * RFC 3315 (DHCPv6), RFC 3633 (Prefix Delegation), RFC 4361 (DUID client identifiers),
+ * RFC 6939 (Client Link-Layer Address Option), and RFC 8415 (DHCPv6 bis). It handles
+ * stateful DHCPv6 address allocation (IA_NA - Identity Association for Non-temporary
+ * Addresses), temporary address allocation (IA_TA), prefix delegation (IA_PD), and
+ * stateless configuration (INFORMATION-REQUEST). The implementation supports DHCPv6
+ * relay forwarding/reply messages enabling multi-hop relay chains, and uses DUID-based
+ * client identification instead of MAC addresses.
+ *
+ * The DHCPv6 message exchange typically follows a four-message pattern:
+ * SOLICIT→ADVERTISE→REQUEST→REPLY for stateful address allocation, or a two-message
+ * rapid commit exchange (SOLICIT→REPLY). Additional message types support lease
+ * lifecycle: CONFIRM (address validation), RENEW (lease renewal from same server),
+ * REBIND (lease renewal from any server), RELEASE (explicit lease termination), and
+ * DECLINE (address conflict notification). The stateless mode uses INFORMATION-REQUEST
+ * for configuration parameters without address allocation.
+ *
+ * Unlike DHCPv4, DHCPv6 uses TLV (Type-Length-Value) option encoding, supports multiple
+ * IAs (Identity Associations) per client, and operates over link-local addresses or
+ * through relay agents that provide link-address information for address pool selection.
+ *
+ * KEY RESPONSIBILITIES:
+ * - dhcp6_reply() - Main entry point dispatching DHCPv6 messages by type (lines 71-104)
+ * - dhcp6_maybe_relay() - Handle RELAY-FORW messages with recursive relay chain processing (lines 107-260)
+ * - dhcp6_no_relay() - Process direct client messages: SOLICIT, REQUEST, CONFIRM, RENEW, REBIND, RELEASE, DECLINE, INFORMATION-REQUEST (lines 262-1104)
+ * - check_ia() - Validate IA_NA/IA_TA/IA_PD options and extract address/prefix suboptions (lines 1107-1210)
+ * - build_ia() - Construct IA response with allocated addresses/prefixes and T1/T2 timers (lines 1213-1437)
+ * - add_address() - Allocate IPv6 address from context pool and create/update lease (lines 1575-1666)
+ * - update_leases() - Update existing DHCPv6 lease database with renewed address bindings (lines 1669-1756)
+ *
+ * DEPENDENCIES:
+ * - #include "dnsmasq.h" - Primary header with struct daemon, dhcp_context, dhcp_config, dhcp_lease
+ * - #include "dhcp6-protocol.h" (via dnsmasq.h) - DHCPv6 message types (DHCP6SOLICIT, DHCP6ADVERTISE, etc.) and option codes (OPTION6_IA_NA, OPTION6_IAADDR, etc.)
+ * - Called by: Network packet receive loop when DHCPv6 packet (port 547) arrives
+ * - Calls: lease_find_by_client(), lease_update_from_configs(), log_packet(), option processing functions
+ *
+ * DATA STRUCTURES:
+ * - struct state (lines 22-34) - Ephemeral per-request state tracking DUID, IA type, selected context, tags, MAC address, hostname, packet boundaries
+ * - struct dhcp_context (dnsmasq.h) - Address/prefix pool configuration with start6/end6 range, preferred/valid lifetimes, network matching
+ * - struct dhcp_config (dnsmasq.h) - Static client reservations by DUID with fixed addresses and options
+ * - struct dhcp_lease (dnsmasq.h) - Persistent lease database entry with CLID (DUID), IAID, IPv6 address, expiry time
+ *
+ * COMPILE-TIME OPTIONS:
+ * - HAVE_DHCP6 (mandatory) - Entire file conditionally compiled only if DHCPv6 support enabled
+ * - HAVE_SCRIPT - Enables lease-change script execution via helper process
+ * - HAVE_BROKEN_RTC - Adjusts lease expiry handling for systems without real-time clock
+ *
+ * THREADING/CONCURRENCY:
+ * Single-process event-driven architecture. Function is called from main event loop poll()
+ * when DHCPv6 packet arrives on UDP port 547. Not reentrant - uses global daemon->dhcp_packet
+ * buffer and daemon->outpacket for reply construction. State passed via stack-allocated
+ * struct state, no persistent per-request state between calls.
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315: DHCPv6 core protocol (message types, option format, DUID, IA_NA/IA_TA)
+ * - RFC 3633: IPv6 Prefix Delegation (IA_PD, IAPREFIX options)
+ * - RFC 4361: DUID definition and format (DUID-LLT, DUID-EN, DUID-LL)
+ * - RFC 6939: Client Link-Layer Address Option (OPTION6_CLIENT_MAC in relay messages)
+ * - RFC 8415: DHCPv6 bis (updated DHCPv6 specification incorporating errata)
+ *
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/DHCP_V6.md for complete DHCPv6 architecture and state machine documentation
+ */
 
 #include "dnsmasq.h"
 
 #ifdef HAVE_DHCP6
 
+/**
+ * @struct state
+ * @brief Ephemeral per-request DHCPv6 transaction state
+ *
+ * Tracks all information needed to process a single DHCPv6 request/reply cycle.
+ * This structure is stack-allocated for each incoming DHCPv6 message and destroyed
+ * after reply transmission. It consolidates client identification (DUID), network
+ * context selection, option parsing boundaries, and accumulated tags for conditional
+ * configuration matching.
+ *
+ * LIFECYCLE:
+ * - Allocated: Stack allocation in dhcp6_reply() for each incoming DHCPv6 packet
+ * - Initialized: Members set to NULL/0, then populated during dhcp6_maybe_relay() and dhcp6_no_relay()
+ * - Used: Passed by pointer through entire DHCPv6 processing pipeline
+ * - Destroyed: Automatic deallocation on function return (stack variable)
+ *
+ * MEMORY LAYOUT:
+ * Total size approximately 100-120 bytes depending on pointer size. Contains pointers
+ * to packet data (clid, packet_options, end), allocated strings (hostname, domain),
+ * and embedded MAC address array. No dynamic allocation within struct itself.
+ *
+ * USAGE PATTERNS:
+ * Always accessed via pointer (struct state *state). Modified throughout request
+ * processing to accumulate client information, selected address pools, and configuration
+ * tags. The link_address field is particularly critical for relay agent scenarios,
+ * pointing to the innermost relay's link-address for pool selection.
+ */
 struct state {
-  unsigned char *clid;
-  int clid_len, ia_type, interface, hostname_auth, lease_allocate;
-  char *client_hostname, *hostname, *domain, *send_domain;
-  struct dhcp_context *context;
-  struct in6_addr *link_address, *fallback, *ll_addr, *ula_addr;
-  unsigned int xid, fqdn_flags, iaid;
-  char *iface_name;
-  void *packet_options, *end;
-  struct dhcp_netid *tags, *context_tags;
-  unsigned char mac[DHCP_CHADDR_MAX];
-  unsigned int mac_len, mac_type;
+  unsigned char *clid;           /**< Client DUID (DHCPv6 Unique Identifier), extracted from OPTION6_CLIENT_ID */
+  int clid_len;                  /**< Length of DUID in bytes (variable length per RFC 3315 Section 9) */
+  int ia_type;                   /**< Identity Association type: OPTION6_IA_NA (non-temporary), OPTION6_IA_TA (temporary), or OPTION6_IA_PD (prefix delegation) */
+  int interface;                 /**< Receiving interface index for packet arrival interface */
+  int hostname_auth;             /**< Boolean: client-provided hostname authenticated/authorized for DNS updates */
+  int lease_allocate;            /**< Boolean: whether new lease allocation occurred (vs renewal) */
+  char *client_hostname;         /**< Hostname supplied by client in OPTION6_FQDN */
+  char *hostname;                /**< Resolved/validated hostname to use for this client */
+  char *domain;                  /**< Domain name for FQDN construction */
+  char *send_domain;             /**< Domain to send in OPTION6_DOMAIN_SEARCH reply */
+  struct dhcp_context *context;  /**< Selected address pool/context for allocation, linked list of applicable contexts */
+  struct in6_addr *link_address; /**< Link address from relay agent (innermost RELAY-FORW), used for pool selection */
+  struct in6_addr *fallback;     /**< Fallback address for replies when client address unknown */
+  struct in6_addr *ll_addr;      /**< Link-local address of receiving interface */
+  struct in6_addr *ula_addr;     /**< Unique Local Address (ULA) of receiving interface */
+  unsigned int xid;              /**< Transaction ID (24-bit) from DHCPv6 message header */
+  unsigned int fqdn_flags;       /**< FQDN option flags controlling server DNS update behavior */
+  unsigned int iaid;             /**< Identity Association Identifier from IA_NA/IA_TA/IA_PD option */
+  char *iface_name;              /**< Interface name string (e.g., "eth0") for logging and tag matching */
+  void *packet_options;          /**< Start of DHCPv6 options in request packet (after 4-byte header) */
+  void *end;                     /**< End boundary of request packet for bounds checking */
+  struct dhcp_netid *tags;       /**< Linked list of accumulated tags for conditional configuration matching */
+  struct dhcp_netid *context_tags; /**< Tags derived from selected dhcp_context */
+  unsigned char mac[DHCP_CHADDR_MAX]; /**< Client MAC address from OPTION6_CLIENT_MAC (RFC 6939) or local ND cache */
+  unsigned int mac_len;          /**< Length of MAC address in bytes (typically 6 for Ethernet) */
+  unsigned int mac_type;         /**< Hardware type code (RFC 826): 1=Ethernet, 6=IEEE 802 */
 };
 
+/* Forward declarations for static helper functions */
 static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t sz, 
 			     struct in6_addr *client_addr, int is_unicast, time_t now);
 static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbuff, size_t sz, int is_unicast, time_t now);
@@ -59,15 +171,101 @@ static struct dhcp_netid *add_options(struct state *state, int do_refresh);
 static void calculate_times(struct dhcp_context *context, unsigned int *min_time, unsigned int *valid_timep, 
 			    unsigned int *preferred_timep, unsigned int lease_time);
 
+/**
+ * @def opt6_len
+ * @brief Extract length field from DHCPv6 option
+ * Accesses 2 bytes before option data to read TLV length field.
+ */
 #define opt6_len(opt) ((int)(opt6_uint(opt, -2, 2)))
+
+/**
+ * @def opt6_type
+ * @brief Extract type field from DHCPv6 option
+ * Accesses 4 bytes before option data to read TLV type field.
+ */
 #define opt6_type(opt) (opt6_uint(opt, -4, 2))
+
+/**
+ * @def opt6_ptr
+ * @brief Get pointer to option data at offset i
+ * Skips 4-byte TLV header (2-byte type + 2-byte length) to access value.
+ */
 #define opt6_ptr(opt, i) ((void *)&(((unsigned char *)(opt))[4+(i)]))
 
+/**
+ * @def opt6_user_vendor_ptr
+ * @brief Get pointer to user/vendor option data at offset i
+ * Uses 2-byte header offset for nested vendor-specific options.
+ */
 #define opt6_user_vendor_ptr(opt, i) ((void *)&(((unsigned char *)(opt))[2+(i)]))
+
+/**
+ * @def opt6_user_vendor_len
+ * @brief Extract length from user/vendor option
+ * Reads length field with 4-byte offset for vendor option structures.
+ */
 #define opt6_user_vendor_len(opt) ((int)(opt6_uint(opt, -4, 2)))
+
+/**
+ * @def opt6_user_vendor_next
+ * @brief Advance to next user/vendor option
+ * Adjusts pointer 2 bytes back before calling opt6_next() for proper alignment.
+ */
 #define opt6_user_vendor_next(opt, end) (opt6_next(((void *) opt) - 2, end))
  
 
+/**
+ * @brief Main DHCPv6 packet handler and request dispatcher
+ *
+ * Primary entry point for all incoming DHCPv6 packets received on UDP port 547.
+ * Determines packet type (relay vs direct client message), initializes per-request
+ * state structure, and delegates to dhcp6_maybe_relay() for relay processing or
+ * message-type-specific handling. Returns destination port number for reply routing:
+ * DHCPV6_SERVER_PORT (547) for relay replies, DHCPV6_CLIENT_PORT (546) for direct
+ * client replies, or 0 for packet rejection/drop.
+ *
+ * @param context Initial address pool context list from receiving interface configuration
+ * @param interface Interface index where packet arrived (for get_client_mac() ND cache lookup)
+ * @param iface_name Interface name string (e.g., "eth0") for logging and tag-based configuration
+ * @param fallback Fallback source address for replies when client address cannot be determined
+ * @param ll_addr Link-local address of receiving interface for preference calculation
+ * @param ula_addr Unique Local Address of receiving interface for ULA-only client support
+ * @param sz Packet size in bytes from recvmsg(), must be >4 to contain message type
+ * @param client_addr Source IPv6 address from packet (multicast or unicast)
+ * @param now Current time_t for lease expiry calculations and timestamp logging
+ *
+ * @return Destination port for reply: DHCPV6_SERVER_PORT (547) for relay agent replies,
+ *         DHCPV6_CLIENT_PORT (546) for direct client replies, 0 for packet drop (invalid/ignored)
+ *
+ * @note Packet data accessed via global daemon->dhcp_packet.iov_base buffer, reply constructed
+ *       in daemon->outpacket. Both buffers owned by caller in main event loop.
+ * @warning Not reentrant - modifies global vendor->netid.next pointers to prevent duplicate
+ *          vendor matching. Must be serialized by event loop.
+ *
+ * @see dhcp6_maybe_relay() for relay agent forwarding logic
+ * @see dhcp6_no_relay() for direct message type handling (SOLICIT, REQUEST, RENEW, etc.)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct in6_addr client, ll, ula, fallback;
+ * unsigned short dest_port = dhcp6_reply(daemon->dhcp6, if_index, "eth0", 
+ *                                         &fallback, &ll, &ula, packet_len, &client, time(NULL));
+ * if (dest_port) send_reply_to_port(dest_port);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 15: Message type determination and relay detection
+ * - RFC 3315 Section 20: Server message processing overview
+ *
+ * SIDE EFFECTS:
+ * - Initializes daemon option counter via reset_counter()
+ * - Modifies vendor->netid.next for all daemon->dhcp_vendors (reset on each call)
+ * - May construct reply in daemon->outpacket buffer via recursive relay/message processing
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Relies on single-threaded event loop guaranteeing serialized packet
+ * processing. Access to global daemon structure and vendor list not protected by locks.
+ */
 unsigned short dhcp6_reply(struct dhcp_context *context, int interface, char *iface_name,
 			   struct in6_addr *fallback,  struct in6_addr *ll_addr, struct in6_addr *ula_addr,
 			   size_t sz, struct in6_addr *client_addr, time_t now)
@@ -103,6 +301,66 @@ unsigned short dhcp6_reply(struct dhcp_context *context, int interface, char *if
   return 0;
 }
 
+/**
+ * @brief Process DHCPv6 relay agent messages with recursive relay chain handling
+ *
+ * Handles RELAY-FORW (relay forward) messages from DHCPv6 relay agents per RFC 3315
+ * Section 20.1, recursively unwrapping nested relay encapsulation to extract the
+ * innermost client message. Constructs RELAY-REPL (relay reply) with preserved relay
+ * options and encapsulated server response. If message is not RELAY-FORW, delegates
+ * to dhcp6_no_relay() for direct client message processing. The link-address from the
+ * innermost relay determines address pool selection for network topology awareness.
+ *
+ * Original author's warning comment preserved: "This cost me blood to write, it will
+ * probably cost you blood to understand - srk." The complexity arises from recursive
+ * relay chain traversal, careful pointer arithmetic for TLV parsing, and maintaining
+ * both request and reply packet structures simultaneously.
+ *
+ * @param state Per-request state structure, modified to set state->link_address to
+ *              innermost relay's link-address field for pool selection. Also accumulates
+ *              vendor tags from OPTION6_SUBSCRIBER_ID and OPTION6_REMOTE_ID relay options.
+ * @param inbuff Input packet buffer starting at message-type byte (not necessarily
+ *               daemon->dhcp_packet, may be recursively unwrapped RELAY_MSG option)
+ * @param sz Size of inbuff in bytes, must be >=38 for RELAY-FORW minimum size
+ * @param client_addr Source address for final reply routing (from outermost packet)
+ * @param is_unicast Boolean: true if client sent to server unicast (forbidden for
+ *                   some message types per RFC 3315 Section 15), false for multicast
+ * @param now Current time_t for lease operations
+ *
+ * @return 1 if packet processed successfully (reply constructed in daemon->outpacket),
+ *         0 if packet invalid/rejected/no-address-range-available (no reply sent)
+ *
+ * @note Recursively calls itself when processing nested RELAY-FORW messages found in
+ *       OPTION6_RELAY_MSG, unwrapping up to maximum relay hop count.
+ * @warning Modifies state->link_address pointer to reference aligned copy of relay's
+ *          link-address field. Pointer only valid during request processing lifetime.
+ *
+ * @see dhcp6_no_relay() for actual message type handling after relay unwrapping
+ * @see opt6_find() for TLV option searching in relay options
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct state state = {0};
+ * if (dhcp6_maybe_relay(&state, packet_data, packet_len, &src_addr, is_multicast, now)) {
+ *     // Reply constructed, send daemon->outpacket buffer
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 20.1: Relay-forward message processing
+ * - RFC 3315 Section 20.3: Constructing relay-reply messages
+ * - RFC 6939 Section 4: Client Link-Layer Address Option in relay messages
+ *
+ * SIDE EFFECTS:
+ * - Writes RELAY-REPL header to daemon->outpacket via put_opt6()
+ * - Copies relay options to reply packet (except OPTION6_CLIENT_MAC filtered out)
+ * - Modifies state->tags by prepending vendor netid tags for matching relay options
+ * - Recalculates state->context if state->link_address indicates different network segment
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Uses global daemon structures and modifies vendor netid chains.
+ * Must be called from single-threaded event loop context.
+ */
 /* This cost me blood to write, it will probably cost you blood to understand - srk. */
 static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t sz, 
 			     struct in6_addr *client_addr, int is_unicast, time_t now)
@@ -259,6 +517,76 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t 
   return 1;
 }
 
+/**
+ * @brief Process direct client DHCPv6 messages by message type
+ *
+ * Handles non-relay DHCPv6 messages from clients including SOLICIT (discover available
+ * servers), ADVERTISE (server availability announcement - not received by server),
+ * REQUEST (request specific addresses/prefixes), CONFIRM (address validation after
+ * network change), RENEW (lease renewal from original server), REBIND (lease renewal
+ * from any server), RELEASE (explicit lease termination), DECLINE (address conflict
+ * notification), and INFORMATION-REQUEST (stateless configuration). Validates message
+ * structure, extracts CLIENT-ID and SERVER-ID, processes vendor/user class options for
+ * tag-based configuration, and dispatches to appropriate handler logic for each message
+ * type. Constructs REPLY or ADVERTISE response in daemon->outpacket.
+ *
+ * This function implements the core DHCPv6 server state machine transitions per RFC 3315
+ * Section 15 and 18, handling client lifecycle from initial address discovery through
+ * renewal and release. It enforces RFC requirements such as rejecting unicast messages
+ * when multicast required, validating SERVER-ID matches for non-SOLICIT messages, and
+ * including mandatory options in replies.
+ *
+ * @param state Per-request state structure with context, interface, tags initialized
+ *              by caller. Modified to populate clid, xid, mac, hostname, config.
+ * @param msg_type DHCPv6 message type from packet header: DHCP6SOLICIT, DHCP6REQUEST,
+ *                 DHCP6CONFIRM, DHCP6RENEW, DHCP6REBIND, DHCP6RELEASE, DHCP6DECLINE,
+ *                 or DHCP6IREQ (INFORMATION-REQUEST). Type determines response behavior.
+ * @param inbuff Packet buffer starting at message-type byte (after relay unwrapping if
+ *               relayed), contains transaction-id and options.
+ * @param sz Size of inbuff in bytes
+ * @param is_unicast Boolean: true if message sent to server unicast address (triggers
+ *                   UseMulticast status code for REQUEST/RENEW/RELEASE/DECLINE per
+ *                   RFC 3315 Section 18.2.1)
+ * @param now Current time_t for lease expiry calculations
+ *
+ * @return 1 if reply constructed successfully in daemon->outpacket (send to client),
+ *         0 if message invalid/ignored (missing CLIENT-ID, wrong SERVER-ID, no ranges)
+ *
+ * @note Expects CLIENT-ID option (OPTION6_CLIENT_ID) in all messages except INFORMATION-REQUEST.
+ *       Missing CLIENT-ID causes silent packet drop per RFC 3315 Section 15.
+ * @warning Implements RFC 3315 Section 18.2.1 unicast rejection: REQUEST, RENEW, RELEASE,
+ *          DECLINE sent unicast receive REPLY with UseMulticast status instead of processing.
+ *
+ * @see check_ia() for IA_NA/IA_TA/IA_PD validation and address extraction
+ * @see build_ia() for IA response construction with allocated addresses
+ * @see add_options() for DHCPv6 option construction (DNS servers, domain search, etc.)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct state state = {.context = daemon->dhcp6, .interface = if_idx};
+ * int msg_type = inbuff[0];
+ * if (dhcp6_no_relay(&state, msg_type, inbuff, packet_len, is_unicast, now)) {
+ *     send_packet(daemon->outpacket, outpacket_len, &client_addr);
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 15: Message validation requirements
+ * - RFC 3315 Section 17-18: Server message processing by type
+ * - RFC 3315 Section 18.2.1: UseMulticast status code for incorrectly unicast messages
+ * - RFC 4361: DUID-based client identification instead of MAC addresses
+ *
+ * SIDE EFFECTS:
+ * - Constructs full REPLY or ADVERTISE message in daemon->outpacket via new_opt6/put_opt6
+ * - Allocates/updates leases in global daemon->dhcp_lease_db via add_address/update_leases
+ * - Logs message processing to syslog via log6_packet() if logging enabled
+ * - May invoke lease-change scripts via helper process
+ * - Modifies state->tags by prepending interface and "dhcpv6" tags for conditional config
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Modifies global daemon->outpacket buffer and lease database. Must
+ * be serialized by single-threaded event loop.
+ */
 static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbuff, size_t sz, int is_unicast, time_t now)
 {
   void *opt;
@@ -1289,6 +1617,78 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 
 }
 
+/**
+ * @brief Construct DHCPv6 option set for reply packet based on tags and client requests
+ *
+ * Builds complete DHCPv6 option payload for ADVERTISE/REPLY messages by filtering configured
+ * options (daemon->dhcp_opts6) through tag matching (option_filter), honoring client Option
+ * Request Option (ORO, OPTION6_ORO), and adding required options like DNS servers (RFC 3646),
+ * NTP servers (RFC 5908), refresh time (RFC 4242), vendor-encapsulated options (RFC 3925),
+ * and FQDN (RFC 4704). Supports conditional options (dhcp-option=tag:...), forced options
+ * (DHOPT_FORCE), special address substitutions (:: = local addrs, fe80:: = link-local,
+ * fec0:: = ULA), and NTP multicast/unicast sub-option encoding.
+ *
+ * Option processing phases:
+ * 1. Tag filtering: option_filter() marks DHOPT_TAGOK for options matching accumulated tags
+ * 2. ORO matching: For non-forced options, verify client requested via OPTION6_ORO
+ * 3. Address substitution: Replace :: with server local addrs, fe80:: with LL, fec0:: with ULA
+ * 4. Vendor encapsulation: Group RFC 3925 vendor options by enterprise number
+ * 5. FQDN option: Add client FQDN if hostname validated and authorized
+ * 6. Logging: Log requested options if OPT_LOG_OPTS enabled
+ *
+ * Special address handling (DHOPT_ADDR6 options like DNS_SERVER, NTP_SERVER):
+ * - IN6_IS_ADDR_UNSPECIFIED (::): Call add_local_addrs() to include server's own addresses
+ * - IN6_IS_ADDR_LINK_LOCAL_ZERO (fe80::): Replace with state->ll_addr
+ * - IN6_IS_ADDR_ULA_ZERO (fec0::): Replace with state->ula_addr
+ * - Skip if substitution address unspecified
+ *
+ * @param state Per-request state with tags (client classification), context_tags (subnet tags),
+ *              packet_options/end (client's ORO), fallback/ll_addr/ula_addr (server addresses),
+ *              hostname/send_domain/fqdn_flags (for FQDN option), xid (for logging)
+ * @param do_refresh If non-zero, include OPTION6_REFRESH_TIME with minimum context lease time
+ *                   (\u2265600 seconds per RFC 4242). Zero suppresses refresh time.
+ *
+ * @return Pointer to filtered tag list (dhcp_netid chain) representing active conditional
+ *         tags after option_filter(), used by caller for further tag-dependent processing,
+ *         or NULL if no tags active
+ *
+ * @note RFC 4242 mandates OPTION6_REFRESH_TIME \u2265 600 seconds. Function enforces floor.
+ * @warning Function calls new_opt6()/put_opt6()/end_opt6() which modify global packet buffer
+ *          (daemon->outpacket). Not reentrant. Assumes sufficient buffer space via
+ *          save_counter()/reset_counter() overflow protection elsewhere.
+ *
+ * @see option_filter() for tag-based option filtering (marks DHOPT_TAGOK)
+ * @see add_local_addrs() for appending server's own IPv6 addresses
+ * @see new_opt6() for starting new DHCPv6 option in reply packet
+ * @see put_opt6() for appending data to current option
+ * @see end_opt6() for finalizing option with correct length field
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_netid *tagif = add_options(state, 1); // Include refresh time
+ * // Now daemon->outpacket contains complete option set for client
+ * if (tagif) {
+ *     // Conditional tags active, may affect further processing
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.7: Option Request Option (ORO) processing
+ * - RFC 3646: DNS Recursive Name Server Option (OPTION6_DNS_SERVER)
+ * - RFC 3925: Vendor-Identifying Vendor Options (OPTION6_VENDOR_OPTS)
+ * - RFC 4242: Information Refresh Time Option (OPTION6_REFRESH_TIME \u2265 600s)
+ * - RFC 4704: Client FQDN Option (OPTION6_FQDN)
+ * - RFC 5908: NTP Server Option (OPTION6_NTP_SERVER with sub-options)
+ *
+ * SIDE EFFECTS:
+ * - Calls option_filter() which may modify opt->flags (sets DHOPT_TAGOK)
+ * - Calls new_opt6()/put_opt6()/end_opt6() appending to daemon->outpacket
+ * - Calls add_local_addrs() which advances packet write pointer
+ * - Modifies opt_cfg->flags (DHOPT_ENCAP_DONE, DHOPT_ENCAP_MATCH) for vendor option tracking
+ * - Logs to syslog if OPT_LOG_OPTS enabled
+ *
+ * THREAD SAFETY: Not thread-safe (modifies global packet buffer and option flags)
+ */
 static struct dhcp_netid *add_options(struct state *state, int do_refresh)  
 {
   void *oro;
@@ -1521,6 +1921,52 @@ static struct dhcp_netid *add_options(struct state *state, int do_refresh)
 
   return tagif;
 }
+
+/**
+ * @brief Add local server IPv6 addresses to DHCPv6 reply packet
+ *
+ * Appends OPTION6_IA_ADDR entries for local server IPv6 addresses (context->local6) from
+ * CONTEXT_USED address pools to DHCPv6 reply packet. Used for Information-Request replies
+ * to provide server DNS/NTP addresses to clients. Deduplicates addresses when multiple
+ * contexts share same local6 value (e.g., overlapping ranges on same interface). Only
+ * includes contexts marked CONTEXT_USED (actually selected for this client) and with
+ * non-unspecified local6 address.
+ *
+ * Local address semantics: context->local6 is server's own IPv6 address on the subnet,
+ * typically used for DNS recursive resolver address (OPTION6_NAME_SERVERS) or NTP server
+ * address (OPTION6_NTP_SERVER). Clients use these addresses for subsequent protocol
+ * communication after DHCP configuration.
+ *
+ * @param context Address pool context chain to iterate (context->current linkage)
+ *
+ * @return 1 if at least one local address added to packet,
+ *         0 if no local addresses added (all contexts unspecified or no CONTEXT_USED)
+ *
+ * @note Duplicate suppression: Iterates context->current chain for each candidate to check
+ *       if same local6 already seen. Only first occurrence added to reply.
+ * @warning Assumes packet buffer has sufficient space (no overflow checking). Caller must
+ *          ensure space via save_counter()/reset_counter() mechanism.
+ *
+ * @see put_opt6() for appending raw bytes to DHCPv6 reply packet
+ * @see add_options() for primary caller (adds local addrs after other options)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (add_local_addrs(state->context)) {
+ *     // At least one server address included in reply
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 18.2.6: Information-Request processing and server addresses
+ * - RFC 3646: DNS Configuration Options (OPTION6_NAME_SERVERS)
+ * - RFC 5908: NTP Server Option for DHCPv6 (OPTION6_NTP_SERVER)
+ *
+ * SIDE EFFECTS:
+ * - Calls put_opt6() which advances packet write pointer (daemon->outpacket.iov_len)
+ *
+ * THREAD SAFETY: Not thread-safe (modifies global outpacket buffer)
+ */
  
 static int add_local_addrs(struct dhcp_context *context)
 {
@@ -1546,7 +1992,57 @@ static int add_local_addrs(struct dhcp_context *context)
   return done;
 }
 
-
+/**
+ * @brief Accumulate network identification tags from address pool context
+ *
+ * Extracts netid tags from address pool context (context->netid) and appends to per-request
+ * accumulated tag chain (state->context_tags). Tags used for conditional option processing
+ * (dhcp-option=tag:foo,...) and hostname authorization (dhcp-ignore-names). Implements
+ * single-use tagging: context->netid.next initially points to self (sentinel), set to
+ * state->context_tags after first use to prevent duplicate tag accumulation. Conditionally
+ * disables hostname registration (state->hostname=NULL) if dhcp-ignore-names matches
+ * accumulated tags.
+ *
+ * Tag semantics: Each context has optional netid.net string (e.g., "vlan10") identifying
+ * subnet characteristics. Tags accumulate across multiple matching contexts (client may
+ * match multiple overlapping ranges). Accumulated tags in state->context_tags used by
+ * add_options() for tag-based option selection.
+ *
+ * Hostname authorization: If state->hostname_auth not already set (client hostname not
+ * pre-authorized via dhcp-host), checks daemon->dhcp_ignore_names list. If matching
+ * tag-based ignore rule found, nulls state->hostname preventing DNS registration.
+ *
+ * @param state Per-request state with context_tags chain (accumulated tags) and hostname
+ *              (candidate hostname for DNS registration, may be nulled by ignore rules)
+ * @param context Address pool context providing netid tag to potentially add
+ *
+ * @return None (void function, modifies state->context_tags and potentially state->hostname)
+ *
+ * @note Self-referencing sentinel: context->netid.next == &context->netid indicates unused
+ *       tag. Once used, netid.next points into state->context_tags chain.
+ * @warning Modifies both state and context structures. Context modification (netid.next)
+ *          prevents re-tagging but makes context non-reentrant for subsequent requests.
+ *
+ * @see add_options() for using accumulated tags to select conditional DHCP options
+ * @see match_netid() for tag matching logic in dhcp_ignore_names
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * for (context = state->context; context; context = context->current) {
+ *     get_context_tag(state, context); // Accumulate tags from all matching contexts
+ * }
+ * // Now state->context_tags contains complete tag chain for option selection
+ * @endcode
+ *
+ * RFC COMPLIANCE: Not RFC-mandated (dnsmasq-specific tagging/conditional option feature)
+ *
+ * SIDE EFFECTS:
+ * - Modifies context->netid.next (first-use marking)
+ * - Appends to state->context_tags linked list
+ * - May set state->hostname = NULL (disabling DNS registration)
+ *
+ * THREAD SAFETY: Not thread-safe (modifies shared context and per-request state)
+ */
 static void get_context_tag(struct state *state, struct dhcp_context *context)
 {
   /* get tags from context if we've not used it before */
@@ -1567,6 +2063,52 @@ static void get_context_tag(struct state *state, struct dhcp_context *context)
     }
 } 
 
+/**
+ * @brief Validate Identity Association option structure and extract IAID and address suboptions
+ *
+ * Verifies IA_NA (non-temporary address) or IA_TA (temporary address) option meets minimum
+ * size requirements per RFC 3315 Section 22.4-22.5, extracts IAID (Identity Association
+ * Identifier) for client IA tracking, and searches for IAADDR suboptions containing requested
+ * or allocated IPv6 addresses. Sets state->ia_type for subsequent processing and provides
+ * boundary pointers for iterating through IA suboptions.
+ *
+ * IA_NA structure: 4-byte IAID + 4-byte T1 + 4-byte T2 + suboptions (minimum 12 bytes total)
+ * IA_TA structure: 4-byte IAID + suboptions (minimum 4 bytes total, no T1/T2 for temporary)
+ *
+ * @param state Per-request state structure, modified to set state->ia_type (OPTION6_IA_NA
+ *              or OPTION6_IA_TA) and state->iaid (4-byte Identity Association Identifier)
+ * @param opt Pointer to IA_NA or IA_TA option start (type field)
+ * @param[out] endp Output pointer set to end of IA option suboptions area for iteration
+ * @param[out] ia_option Output pointer set to first IAADDR suboption if found, NULL otherwise
+ *
+ * @return 1 if option is valid IA_NA or IA_TA with correct size, 0 if invalid/unsupported type
+ *
+ * @note Does not validate IAADDR suboption content (preferred/valid lifetimes, address validity),
+ *       only locates first occurrence. Caller must iterate for multiple IAADDR suboptions.
+ * @warning Prefix Delegation (IA_PD/IAPREFIX) not handled by this function, returns 0
+ *
+ * @see build_ia() for constructing IA response with allocated addresses
+ * @see add_address() for processing IAADDR suboptions and allocating addresses
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * void *endp, *ia_addr_opt;
+ * if (check_ia(state, ia_na_opt, &endp, &ia_addr_opt)) {
+ *     // Process IA_NA with IAID in state->iaid, iterate IAADDR options
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.4: IA_NA option format (IAID + T1 + T2 + options)
+ * - RFC 3315 Section 22.5: IA_TA option format (IAID + options, no T1/T2)
+ * - RFC 3315 Section 22.6: IAADDR option (address + preferred + valid lifetimes)
+ *
+ * SIDE EFFECTS:
+ * - Modifies state->ia_type to OPTION6_IA_NA or OPTION6_IA_TA
+ * - Modifies state->iaid to extracted 4-byte IAID value
+ *
+ * THREAD SAFETY: Thread-safe (only modifies caller-owned state structure)
+ */
 static int check_ia(struct state *state, void *opt, void **endp, void **ia_option)
 {
   state->ia_type = opt6_type(opt);
@@ -1588,7 +2130,52 @@ static int check_ia(struct state *state, void *opt, void **endp, void **ia_optio
   return 1;
 }
 
-
+/**
+ * @brief Begin constructing IA_NA or IA_TA response option in reply packet
+ *
+ * Initializes Identity Association response option in daemon->outpacket with client's
+ * IAID echoed back for IA matching per RFC 3315 Section 18. For IA_NA, reserves space
+ * for T1 (renewal time) and T2 (rebind time) timers to be filled later by end_ia() after
+ * calculating minimum lease time across all allocated addresses. For IA_TA, no T1/T2
+ * needed as temporary addresses don't have renewal semantics.
+ *
+ * Typical call sequence: build_ia() → multiple add_address() → end_ia() to construct
+ * complete IA with addresses and timer values.
+ *
+ * @param state Per-request state containing ia_type (OPTION6_IA_NA or OPTION6_IA_TA)
+ *              and iaid (Identity Association Identifier to echo in response)
+ * @param[out] t1cntr Output pointer set to save_counter() position for T1/T2 fields
+ *                    in IA_NA (0 for IA_TA which has no T1/T2), used by end_ia() to
+ *                    backfill timer values after address allocation
+ *
+ * @return Option handle from new_opt6() for passing to end_opt6() after addresses added
+ *
+ * @note Caller must call end_ia() with returned t1cntr to finalize IA_NA with T1/T2 values
+ * @warning After build_ia(), daemon->outpacket write position is immediately after IAID
+ *          (and T1/T2 placeholders for IA_NA). Caller adds IAADDR suboptions before end_ia().
+ *
+ * @see end_ia() for finalizing IA_NA with calculated T1/T2 renewal timers
+ * @see add_address() for adding IAADDR suboptions within IA
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int ia_option_handle, t1cntr;
+ * ia_option_handle = build_ia(state, &t1cntr);
+ * add_address(state, context, lease_time, NULL, &min_time, &addr, now); // Add addresses
+ * end_ia(t1cntr, min_time, 1); // Finalize with T1/T2
+ * end_opt6(ia_option_handle);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.4: IA_NA format with IAID + T1 + T2
+ * - RFC 3315 Section 22.5: IA_TA format with IAID only (no T1/T2)
+ *
+ * SIDE EFFECTS:
+ * - Writes IAID to daemon->outpacket via put_opt6_long()
+ * - For IA_NA: writes placeholder 0 values for T1/T2, saves position in *t1cntr
+ *
+ * THREAD SAFETY: Not thread-safe (modifies global daemon->outpacket buffer)
+ */
 static int build_ia(struct state *state, int *t1cntr)
 {
   int  o = new_opt6(state->ia_type);
@@ -1608,6 +2195,57 @@ static int build_ia(struct state *state, int *t1cntr)
   return o;
 }
 
+/**
+ * @brief Finalize IA_NA option by backfilling T1 and T2 renewal timer values
+ *
+ * Calculates and writes T1 (renewal time) and T2 (rebind time) timer values into IA_NA
+ * response option after all addresses added and minimum lease time determined. Per RFC 3315
+ * Section 22.4, T1 defaults to 50% of minimum valid lifetime (when client should begin
+ * renewal with original server), T2 to 87.5% (when client should begin rebinding with any
+ * server). Optionally applies random fuzz to prevent thundering herd of simultaneous renewals.
+ *
+ * For IA_TA (temporary addresses), t1cntr is 0 and function is no-op as temporary addresses
+ * don't have renewal semantics per RFC 3315 Section 22.5.
+ *
+ * @param t1cntr Save counter position from build_ia() pointing to T1 field in IA_NA,
+ *               or 0 for IA_TA (no-op). Used to seek back in daemon->outpacket buffer
+ *               and overwrite placeholder zeros with calculated timers.
+ * @param min_time Minimum valid lifetime across all IAADDR suboptions in seconds, determines
+ *                 T1/T2 calculation base. Special value 0xffffffff (infinite) propagates
+ *                 to T1/T2 as infinite (no renewal required).
+ * @param do_fuzz Boolean: if true, subtract random value (up to min_time/16) from T1/T2
+ *                to randomize renewal timing and prevent synchronized renewal storms
+ *
+ * @return None (void function, modifies daemon->outpacket buffer in-place)
+ *
+ * @note T1 calculation: min_time/2 - fuzz, T2 calculation: (min_time/8)*7 - fuzz.
+ *       Fuzz repeatedly halved until ≤ min_time/16 for bounded randomization.
+ * @warning Must be called after all add_address() calls complete and min_time determined.
+ *          Calling before addresses added results in incorrect T1/T2 based on stale min_time.
+ *
+ * @see build_ia() for creating IA_NA with t1cntr save point
+ * @see calculate_times() for determining min_time from context lifetimes
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * int t1cntr;
+ * unsigned int min_time = 0xffffffff;
+ * build_ia(state, &t1cntr);
+ * add_address(state, context, lease_time, NULL, &min_time, &addr1, now);
+ * add_address(state, context, lease_time, NULL, &min_time, &addr2, now);
+ * end_ia(t1cntr, min_time, 1); // Apply fuzz for renewal randomization
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.4: T1/T2 values in IA_NA option
+ * - RFC 3315 Section 22.21: T1 < T2 < preferred < valid lifetime requirement
+ *
+ * SIDE EFFECTS:
+ * - Seeks to t1cntr position in daemon->outpacket, writes 8 bytes (T1 + T2), restores position
+ * - If do_fuzz true, calls rand16() for randomization
+ *
+ * THREAD SAFETY: Not thread-safe (modifies global daemon->outpacket, calls non-reentrant rand16())
+ */
 static void end_ia(int t1cntr, unsigned int min_time, int do_fuzz)
 {
   if (t1cntr != 0)
@@ -1632,6 +2270,73 @@ static void end_ia(int t1cntr, unsigned int min_time, int do_fuzz)
     }	
 }
 
+/**
+ * @brief Add IAADDR suboption to IA response with allocated IPv6 address and lifetimes
+ *
+ * Constructs IAADDR suboption per RFC 3315 Section 22.6 containing allocated IPv6 address,
+ * preferred lifetime (address usable for new connections), and valid lifetime (address
+ * usable for existing connections). Honors client-requested lifetimes from ia_option if
+ * provided, but clamps to server policy via calculate_times(). Updates or creates lease
+ * in database if state->lease_allocate true (REPLY vs ADVERTISE). Accumulates context tags
+ * for conditional configuration and logs allocation with log6_quiet().
+ *
+ * Preferred lifetime ≤ Valid lifetime per RFC 3315 Section 22.21. Address remains valid
+ * for ongoing connections until valid lifetime expires, but should not be used for new
+ * connections after preferred lifetime expires (deprecation). Lifetimes calculated from
+ * context configuration, lease time override, and optional client hints.
+ *
+ * @param state Per-request state with CLID, XID, context tags for logging and configuration.
+ *              state->lease_allocate determines if lease database modified (REPLY) or
+ *              tentative allocation only (ADVERTISE).
+ * @param context Address pool context providing default preferred/valid lifetime policy
+ * @param lease_time Configured lease duration in seconds from static config or default,
+ *                   used as baseline for lifetime calculation
+ * @param ia_option Pointer to client's IAADDR suboption from request (if RENEW/REBIND)
+ *                  containing requested preferred/valid lifetimes at offsets 16 and 20,
+ *                  or NULL if SOLICIT (use defaults)
+ * @param[in,out] min_time Pointer to accumulated minimum valid lifetime across all IAADDR
+ *                         suboptions in IA, updated to min(current, valid_time) for T1/T2
+ *                         calculation by end_ia()
+ * @param addr IPv6 address to allocate/renew, already selected from pool by caller
+ * @param now Current time_t for lease expiry calculation (valid_time + now = expiry)
+ *
+ * @return None (void function, adds IAADDR to daemon->outpacket and optionally updates leases)
+ *
+ * @note Only updates lease database if state->lease_allocate true. SOLICIT→ADVERTISE uses
+ *       lease_allocate=0 for tentative allocation, REQUEST→REPLY uses lease_allocate=1
+ *       for committed allocation.
+ * @warning Caller must ensure addr is valid allocation from context pool and not duplicate.
+ *          No duplicate address detection performed by this function.
+ *
+ * @see calculate_times() for preferred/valid lifetime policy enforcement
+ * @see update_leases() for lease database modification
+ * @see build_ia() and end_ia() for IA container construction
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned int min_time = 0xffffffff;
+ * struct in6_addr addr;
+ * select_address_from_pool(context, &addr); // Hypothetical allocation
+ * add_address(state, context, 3600, NULL, &min_time, &addr, now);
+ * end_ia(t1cntr, min_time, 1); // Finalize IA with calculated T1/T2
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.6: IAADDR option format (address + preferred + valid)
+ * - RFC 3315 Section 22.21: Lifetime relationships (preferred ≤ valid ≤ lease)
+ * - RFC 3315 Section 18.2.4: Server SHOULD grant requested lifetimes if within policy
+ *
+ * SIDE EFFECTS:
+ * - Writes IAADDR option (28 bytes: 16-byte address + 4-byte preferred + 4-byte valid +
+ *   4-byte TLV header) to daemon->outpacket via put_opt6()
+ * - Updates *min_time if valid_time < current *min_time
+ * - Calls update_leases() to modify lease database if state->lease_allocate true
+ * - Marks lease LEASE_USED flag if existing lease found via lease6_find_by_addr()
+ * - Accumulates context->netid tags into state->context_tags for conditional config
+ * - Logs allocation via log6_quiet() (respects OPT_QUIET_DHCP6)
+ *
+ * THREAD SAFETY: Not thread-safe (modifies global daemon structures and lease database)
+ */
 static void add_address(struct state *state, struct dhcp_context *context, unsigned int lease_time, void *ia_option, 
 			unsigned int *min_time, struct in6_addr *addr, time_t now)
 {
@@ -1681,6 +2386,34 @@ static void add_address(struct state *state, struct dhcp_context *context, unsig
 
 }
 
+/**
+ * @brief Mark address pool context as having allocated address for tracking
+ *
+ * Sets CONTEXT_USED flag on all contexts in state->context chain whose IPv6 prefix matches
+ * the allocated address. Used for tracking which address pools have active allocations to
+ * prevent premature context reclamation and for statistics/monitoring. Multiple contexts
+ * can match if address falls within overlapping ranges (e.g., specific /64 within broader /48).
+ *
+ * @param state Per-request state with context chain to search
+ * @param addr Allocated IPv6 address to match against context prefixes
+ *
+ * @return None (void function, modifies context->flags)
+ *
+ * @note Uses is_same_net6() for prefix matching with context->prefix mask length
+ * @warning Modifies context->flags for ALL matching contexts in chain, not just first match
+ *
+ * @see mark_config_used() for similar tracking at static config level
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * mark_context_used(state, &allocated_addr); // Mark pool as used after allocation
+ * @endcode
+ *
+ * RFC COMPLIANCE: Not RFC-mandated (internal tracking feature)
+ *
+ * SIDE EFFECTS: Sets context->flags |= CONTEXT_USED for all matching contexts
+ * THREAD SAFETY: Not thread-safe (modifies shared context structures)
+ */
 static void mark_context_used(struct state *state, struct in6_addr *addr)
 {
   struct dhcp_context *context;
@@ -1691,6 +2424,38 @@ static void mark_context_used(struct state *state, struct in6_addr *addr)
       context->flags |= CONTEXT_USED;
 }
 
+/**
+ * @brief Mark address pool contexts as having static config address allocated
+ *
+ * Sets CONTEXT_CONF_USED flag on all contexts whose IPv6 prefix matches the statically
+ * configured address from dhcp-host. Distinguishes between dynamic pool allocations
+ * (CONTEXT_USED) and static host reservation usage (CONTEXT_CONF_USED) for address pool
+ * management and statistics. Static reservations take priority over dynamic allocation,
+ * so CONTEXT_CONF_USED indicates reserved address space within pool.
+ *
+ * @param context Address pool context chain to search and mark
+ * @param addr IPv6 address from static dhcp-host configuration to match against prefixes
+ *
+ * @return None (void function, modifies context->flags)
+ *
+ * @note Typically called when allocating from dhcp_config->addr6 static reservation list
+ * @warning Modifies ALL contexts whose prefix matches address, not just first match
+ *
+ * @see mark_context_used() for dynamic allocation tracking
+ * @see config_valid() for validation of static config addresses
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (config && config->addr6) {
+ *     mark_config_used(context, &config->addr6->addr.addr6); // Mark static reservation
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE: Not RFC-mandated (internal pool management feature)
+ *
+ * SIDE EFFECTS: Sets context->flags |= CONTEXT_CONF_USED for matching contexts
+ * THREAD SAFETY: Not thread-safe (modifies shared context structures)
+ */
 static void mark_config_used(struct dhcp_context *context, struct in6_addr *addr)
 {
   for (; context; context = context->current)
@@ -1698,6 +2463,47 @@ static void mark_config_used(struct dhcp_context *context, struct in6_addr *addr
       context->flags |= CONTEXT_CONF_USED;
 }
 
+/**
+ * @brief Verify IPv6 address available for allocation to current client
+ *
+ * Ensures address not already leased to different client (different DUID or IAID) to prevent
+ * duplicate address allocation. Per RFC 3315, each DUID+IAID pair identifies unique client
+ * Identity Association requiring distinct address set. Allows renewal if address already
+ * leased to same DUID+IAID (client renewing existing allocation). Critical for preventing
+ * IPv6 address conflicts and maintaining lease database integrity.
+ *
+ * Original comment preserved: "make sure address not leased to another CLID/IAID"
+ *
+ * @param state Per-request state containing clid (DUID) and clid_len for client identification,
+ *              plus iaid (Identity Association Identifier) for IA matching
+ * @param addr IPv6 address to check for availability
+ *
+ * @return 1 if address available (not leased, or leased to same DUID+IAID for renewal),
+ *         0 if address already leased to different client (allocation forbidden)
+ *
+ * @note Performs exact byte-wise comparison of DUID (clid) and IAID. DUID comparison is
+ *       case-sensitive as DUIDs are binary data, not text strings.
+ * @warning Does not perform on-link duplicate address detection (DAD). Only checks lease
+ *          database. Actual on-link conflicts detected by client ICMPv6 Neighbor Discovery.
+ *
+ * @see lease6_find_by_addr() for lease database lookup
+ * @see add_address() for calling check_address() before allocation
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (check_address(state, &candidate_addr)) {
+ *     // Address available, proceed with allocation
+ *     add_address(state, context, lease_time, ia_opt, &min_time, &candidate_addr, now);
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 18.2: Server must not assign address to multiple clients
+ * - RFC 3315 Section 25.6: IAID identifies IA, must match for address reuse
+ *
+ * SIDE EFFECTS: None (read-only lease database query)
+ * THREAD SAFETY: Thread-safe (read-only operation on lease database)
+ */
 /* make sure address not leased to another CLID/IAID */
 static int check_address(struct state *state, struct in6_addr *addr)
 { 
@@ -1714,7 +2520,54 @@ static int check_address(struct state *state, struct in6_addr *addr)
   return 1;
 }
 
-
+/**
+ * @brief Check if IPv6 address matches static dhcp-host configuration address pattern
+ *
+ * Validates whether candidate address could have been generated from specified dhcp-host
+ * configuration by testing against config's static address list (config->addr6). Supports
+ * wildcard host-part addressing (e.g., dhcp-host=id:*,::1234 meaning any /64 with host
+ * portion ::1234) and explicit prefix specifications. Returns matching addrlist entry if
+ * address implies configuration, NULL if no match. Used for renewal validation to verify
+ * client renewing address originally allocated from static reservation.
+ *
+ * Original comment preserved: "return true of *addr could have been generated from config."
+ * (Note: Typo "of" vs "if" preserved from original for historical accuracy)
+ *
+ * Matching logic: For each addr6 in config->addr6 list:
+ * - If ADDRLIST_WILDCARD and context->prefix==64: Match network part from context->start6
+ *   with host part from config->addr6, allowing ::1234 to match 2001:db8::1234 in subnet
+ * - If ADDRLIST_PREFIX set: Use addr_list->prefixlen for subnet matching (e.g., /60)
+ * - Otherwise: Full 128-bit address match or context subnet match
+ *
+ * @param config Static dhcp-host configuration (dhcp-host=duid:...,addr6:...), NULL if none
+ * @param context Address pool context providing network prefix (context->start6, context->prefix)
+ * @param addr Candidate IPv6 address to test against config patterns
+ *
+ * @return Pointer to matching addrlist entry from config->addr6 chain if address matches pattern,
+ *         NULL if no config, config lacks CONFIG_ADDR6 flag, or no address pattern matches
+ *
+ * @note Wildcard matching requires context->prefix == 64 (single subnet). Non-/64 prefixes
+ *       cannot use wildcard host-part addressing (returns NULL for wildcard on non-/64).
+ * @warning Does not validate if address is actually allocated or available. Only checks
+ *          pattern match between address and static configuration address list.
+ *
+ * @see config_valid() for finding valid available address from static configuration
+ * @see check_address() for verifying address not leased to another client
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct addrlist *matched = config_implies(config, context, &renewal_addr);
+ * if (matched) {
+ *     // Address matches static reservation pattern, allow renewal
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 18.2.3: Server should honor client-requested addresses if valid
+ *
+ * SIDE EFFECTS: None (read-only validation, no state modifications)
+ * THREAD SAFETY: Thread-safe (read-only operation)
+ */
 /* return true of *addr could have been generated from config. */
 static struct addrlist *config_implies(struct dhcp_config *config, struct dhcp_context *context, struct in6_addr *addr)
 {
@@ -1745,6 +2598,61 @@ static struct addrlist *config_implies(struct dhcp_config *config, struct dhcp_c
   return NULL;
 }
 
+/**
+ * @brief Find valid available address from static dhcp-host configuration
+ *
+ * Searches dhcp-host static address configuration (config->addr6 list) for available address
+ * matching current context and not already leased to another client. Handles prefix ranges
+ * (e.g., addr6=2001:db8::100-1ff/120 allocates from 128-address range) and wildcard host
+ * portions. Skips addresses marked ADDRLIST_DECLINED unless DECLINE_BACKOFF (10 minutes)
+ * elapsed since decline, allowing gradual decline recovery. Returns via *addr pointer
+ * modification, setting to first valid available address found. Returns 1 on success, 0 if
+ * no valid address available from configuration.
+ *
+ * Address validation per entry:
+ * - ADDRLIST_DECLINED: Skip if decline_time < now-DECLINE_BACKOFF (recent decline)
+ * - ADDRLIST_PREFIX: Iterate through all addresses in prefix range (2^(128-prefixlen))
+ * - ADDRLIST_WILDCARD: Substitute network part from context->start6 (requires /64)
+ * - For each candidate: check_address(state, addr) ensures not leased to different client
+ *
+ * @param config Static dhcp-host configuration with addr6 address list, NULL returns 0
+ * @param context Address pool context providing network prefix and subnet boundaries
+ * @param[out] addr Pointer to in6_addr to receive valid address if found, modified on success
+ * @param state Per-request state with clid/iaid for check_address() lease conflict detection
+ * @param now Current time_t for decline backoff calculation (DECLINE_BACKOFF = 600 seconds)
+ *
+ * @return 1 if valid available address found (addr set to valid address),
+ *         0 if no config, config lacks CONFIG_ADDR6, or all addresses declined/leased
+ *
+ * @note Prefix ranges allow single dhcp-host entry to reserve multiple addresses
+ *       (e.g., /120 = 256 addresses from ::0 to ::ff). Useful for host pools.
+ * @warning Wildcard addressing requires context->prefix == 64. Non-/64 contexts skip
+ *          wildcard entries (continue to next addr_list entry).
+ *
+ * @see config_implies() for testing if address matches config pattern
+ * @see check_address() for per-address availability validation
+ * @see add_address() for allocating valid address from config
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct in6_addr static_addr;
+ * if (config_valid(config, context, &static_addr, state, now)) {
+ *     // static_addr contains valid available address from static reservation
+ *     add_address(state, context, lease_time, ia_opt, &min_time, &static_addr, now);
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 18: Static address reservations per DUID
+ * - RFC 8415 Section 18.3.12: DHCPv6 DECLINE for duplicate detection recovery
+ *
+ * SIDE EFFECTS:
+ * - Modifies *addr output parameter with valid address on success
+ * - Calls check_address() which performs read-only lease database query
+ * - setaddr6part() used to construct candidate addresses in-place in *addr
+ *
+ * THREAD SAFETY: Thread-safe (read-only on config/context, modifies only caller's addr)
+ */
 static int config_valid(struct dhcp_config *config, struct dhcp_context *context, struct in6_addr *addr, struct state *state, time_t now)
 {
   u64 addrpart, i, addresses;
@@ -1787,22 +2695,75 @@ static int config_valid(struct dhcp_config *config, struct dhcp_context *context
   return 0;
 }
 
-/* Calculate valid and preferred times to send in leases/renewals. 
-
-   Inputs are:
-
-   *valid_timep, *preferred_timep - requested times from IAADDR options.
-   context->valid, context->preferred - times associated with subnet address on local interface.
-   context->flags | CONTEXT_DEPRECATE - "deprecated" flag in dhcp-range.
-   lease_time - configured time for context for individual client.
-   *min_time - smallest valid time sent so far.
-
-   Outputs are :
-   
-   *valid_timep, *preferred_timep - times to be send in IAADDR option.
-   *min_time - smallest valid time sent so far, to calculate T1 and T2.
-   
-   */
+/**
+ * @brief Calculate valid and preferred lifetimes for IAADDR option in DHCPv6 replies
+ *
+ * Determines appropriate valid (total address usability) and preferred (new connection usage)
+ * lifetimes to send in IAADDR response option by honoring client-requested lifetimes from
+ * RENEW/REBIND while enforcing server policy limits. Per RFC 3315 Section 22.21, preferred
+ * lifetime must not exceed valid lifetime. Applies minimum 120-second sanity floor to prevent
+ * unreasonably short lifetimes. Handles address deprecation (preferred=0) when context marked
+ * CONTEXT_DEPRECATE or when local interface address deprecated. Tracks minimum lifetime
+ * across multiple addresses in IA for T1/T2 renewal timer calculation by end_ia().
+ *
+ * Lifetime semantics per RFC 3315: preferred lifetime is duration address SHOULD be used for
+ * new connections (after expiry, address "deprecated" but still valid for existing connections).
+ * Valid lifetime is total duration address MAY be used (after expiry, address invalid and
+ * packets discarded). Relationship: 0 ≤ preferred ≤ valid ≤ lease_time.
+ *
+ * INPUTS (passed by reference, modified in-place):
+ * - *valid_timep: Client-requested valid lifetime from IAADDR option (0 = no preference)
+ * - *preferred_timep: Client-requested preferred lifetime from IAADDR option (0 = no preference)
+ * - *min_time: Accumulated minimum valid lifetime across all IAADDR in IA
+ *
+ * INPUTS (read-only):
+ * - context: Address pool with context->valid, context->preferred (local interface lifetimes),
+ *           context->flags & CONTEXT_DEPRECATE (explicit deprecation flag)
+ * - lease_time: Server policy lease duration from dhcp-range configuration
+ *
+ * OUTPUTS (via pointer modification):
+ * - *valid_timep: Calculated valid lifetime to send (min of requested and policy)
+ * - *preferred_timep: Calculated preferred lifetime (min of requested and policy, or 0 if deprecated)
+ * - *min_time: Updated to minimum of existing *min_time and calculated valid_time
+ *
+ * @param context Address pool context providing server policy limits and deprecation status
+ * @param[in,out] min_time Pointer to minimum valid lifetime accumulator for T1/T2 calculation,
+ *                         updated if valid_time < *min_time
+ * @param[in,out] valid_timep Pointer to valid lifetime: input is client request (0=no preference),
+ *                            output is server-determined lifetime (≥120 seconds, ≤lease_time)
+ * @param[in,out] preferred_timep Pointer to preferred lifetime: input is client request,
+ *                                output is server-determined lifetime (0 if deprecated, ≤valid_time)
+ * @param lease_time Server policy lease duration in seconds from dhcp-range or static config
+ *
+ * @return None (void function, modifies lifetime pointers in-place)
+ *
+ * @note Client requests of 0 for preferred or valid lifetime mean "no preference, use server
+ *       default" per RFC 3315 Section 22.6, not "zero lifetime" or "infinite lifetime".
+ * @warning RFC 3315 compliance: If client requests preferred > valid, server MUST ignore both
+ *          client requests and use server defaults. This prevents invalid lifetime relationships.
+ *
+ * @see end_ia() for using *min_time to calculate T1 (renewal) and T2 (rebind) timers
+ * @see add_address() for calling calculate_times() during address allocation
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned int min_time = 0xffffffff;
+ * unsigned int valid = 7200, preferred = 3600; // Client requested
+ * calculate_times(context, &min_time, &valid, &preferred, lease_time);
+ * // Now valid and preferred clamped to policy, min_time updated
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.6: IAADDR preferred/valid lifetime fields
+ * - RFC 3315 Section 22.21: Lifetime relationships (preferred ≤ valid)
+ * - RFC 3315 Section 18.2.4: Server SHOULD grant requested lifetimes within policy
+ *
+ * SIDE EFFECTS:
+ * - Modifies *valid_timep, *preferred_timep, *min_time via pointers
+ * - No global state modifications
+ *
+ * THREAD SAFETY: Thread-safe (only modifies caller-provided pointers, no shared state)
+ */
 static void calculate_times(struct dhcp_context *context, unsigned int *min_time, unsigned int *valid_timep, 
 			    unsigned int *preferred_timep, unsigned int lease_time)
 {
@@ -1850,6 +2811,69 @@ static void calculate_times(struct dhcp_context *context, unsigned int *min_time
   *preferred_timep = preferred_time;
 }
 
+/**
+ * @brief Update DHCPv6 lease database with allocated/renewed address information
+ *
+ * Creates new lease or updates existing lease in persistent lease database (daemon->dhcp6)
+ * with binding between client DUID+IAID and allocated IPv6 address. Sets lease expiry,
+ * hardware address, hostname for DNS updates, and interface association. For OPTION6_IA_NA
+ * (non-temporary addresses), associates hostname and domain for DDNS updates. Conditionally
+ * invokes lease-change script (HAVE_SCRIPT) with client classification tags and vendor class
+ * information for external integration (e.g., DNS updates, firewall rules, monitoring).
+ *
+ * Lease lifecycle: lease6_find_by_addr() searches for existing lease by address, if not found
+ * lease6_allocate() creates new entry. Lease persisted to lease file (typically
+ * /var/lib/misc/dnsmasq.leases6) for survival across daemon restarts. Lease expiry triggers
+ * automatic reclamation for pool reuse.
+ *
+ * @param state Per-request state with CLID (DUID), clid_len, iaid (Identity Association ID),
+ *              mac/mac_len/mac_type (client MAC from OPTION6_CLIENT_MAC or ND cache),
+ *              hostname (validated client hostname for DDNS), interface (receiving interface
+ *              index), ia_type (OPTION6_IA_NA or OPTION6_IA_TA), tags (accumulated config tags),
+ *              packet_options/end (for VENDOR_CLASS/USER_CLASS extraction)
+ * @param context Address pool context (currently unused but passed for future extensions,
+ *                marked (void)context to suppress compiler warning)
+ * @param addr IPv6 address being allocated/renewed (lease binding key)
+ * @param lease_time Lease duration in seconds from add_address() calculation
+ * @param now Current time_t for lease expiry calculation (expires = now + lease_time)
+ *
+ * @return None (void function, modifies global lease database and optionally queues script)
+ *
+ * @note OPTION6_IA_TA (temporary addresses) do not get hostname/domain association as they
+ *       are intentionally unlinkable per RFC 4941 privacy extensions. Only IA_NA addresses
+ *       eligible for DDNS updates.
+ * @warning If HAVE_SCRIPT enabled and daemon->lease_change_command configured, this function
+ *          allocates lease extradata (vendor class, user class, tags, link-address) which
+ *          triggers asynchronous helper process via queue_script(). Helper invoked later
+ *          from event loop, not synchronously during update_leases().
+ *
+ * @see lease6_find_by_addr() for existing lease lookup
+ * @see lease6_allocate() for new lease creation
+ * @see lease_add_extradata() for script parameter construction
+ * @see queue_script() for asynchronous lease-change script invocation
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (state->lease_allocate) // REPLY not ADVERTISE
+ *     update_leases(state, context, &allocated_addr, lease_time, now);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 18: Lease binding creation per DUID+IAID
+ * - RFC 4704: DHCPv6 Client FQDN Option for hostname registration
+ *
+ * SIDE EFFECTS:
+ * - Calls lease6_find_by_addr() searching global daemon->dhcp6 lease list
+ * - Calls lease6_allocate() creating new lease entry if not found
+ * - Modifies lease fields: expires, iaid, hwaddr (DUID), interface, hostname, flags
+ * - Sets lease->flags |= LEASE_CHANGED if lease-change script configured
+ * - Allocates/frees lease->extradata with client classification for script parameters
+ * - Calls get_domain6() to determine domain suffix from address
+ * - Modifies state->send_domain if not already set (for FQDN option reply)
+ * - Logs lease modification if logging enabled
+ *
+ * THREAD SAFETY: Not thread-safe (modifies global lease database without locking)
+ */
 static void update_leases(struct state *state, struct dhcp_context *context, struct in6_addr *addr, unsigned int lease_time, time_t now)
 {
   struct dhcp_lease *lease = lease6_find_by_addr(addr, 128, 0);
@@ -1948,6 +2972,46 @@ static void update_leases(struct state *state, struct dhcp_context *context, str
 			  
 			
 	
+/**
+ * @brief Log all DHCPv6 options in packet or nested IA option for debugging
+ *
+ * Recursively iterates through DHCPv6 option list logging each option's type, size,
+ * and decoded value to syslog when OPT_LOG_OPTS enabled. Provides special handling
+ * for Identity Association options (IA_NA, IA_TA) with IAADDR suboptions, recursively
+ * logging nested options within IA containers. Essential for troubleshooting client
+ * configuration issues and verifying option encoding correctness.
+ *
+ * @param nest Recursion depth indicator: 0 for top-level options (labeled "sent"),
+ *             1+ for nested options within IA_NA/IA_TA/IAADDR (labeled "nest")
+ * @param xid Transaction ID for correlation with packet in logs (24-bit from header)
+ * @param start_opts Starting boundary of options to log
+ * @param end_opts Ending boundary of options area
+ *
+ * @return None (void function, output to syslog only)
+ *
+ * @note Special formatting for IA_NA (shows IAID, T1, T2), IA_TA (shows IAID),
+ *       IAADDR (shows IPv6 address, preferred/valid lifetimes), STATUS_CODE (shows
+ *       status code number and message text). Other options formatted via option_string().
+ * @warning Truncates very long option values to fit in daemon->namebuff (MAXDNAME bytes).
+ *          CLID longer than 100 bytes truncated to prevent buffer overflow.
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * log6_opts(0, state->xid, state->packet_options, state->end); // Log request options
+ * log6_opts(0, state->xid, daemon->outpacket, outpacket_end);  // Log reply options
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22: All standard DHCPv6 options decoded and labeled
+ * - RFC 3315 Section 22.4-22.6: IA_NA/IA_TA/IAADDR structure correctly parsed
+ *
+ * SIDE EFFECTS:
+ * - Writes log messages to syslog via my_syslog() for each option found
+ * - Modifies daemon->namebuff and daemon->addrbuff for temporary string formatting
+ * - Recursively calls itself for nested IA options (stack depth limited by nesting)
+ *
+ * THREAD SAFETY: Not thread-safe (uses global daemon buffers for string formatting)
+ */
 static void log6_opts(int nest, unsigned int xid, void *start_opts, void *end_opts)
 {
   void *opt;
@@ -2009,12 +3073,81 @@ static void log6_opts(int nest, unsigned int xid, void *start_opts, void *end_op
     }
 }		 
  
+/**
+ * @brief Conditionally log DHCPv6 packet based on quiet mode setting
+ *
+ * Wrapper around log6_packet() that respects OPT_QUIET_DHCP6 configuration option.
+ * Logs packet only if explicit option logging enabled (OPT_LOG_OPTS) or quiet mode
+ * disabled. Enables selective DHCPv6 transaction logging without flooding syslog with
+ * routine SOLICIT/ADVERTISE/REQUEST/REPLY exchanges in high-traffic environments.
+ *
+ * @param state Per-request state with CLID, XID, interface for logging context
+ * @param type Message type string for display: "SOLICIT", "ADVERTISE", "REQUEST", "REPLY", etc.
+ * @param addr IPv6 address to log (allocated/renewed/released), or NULL if not applicable
+ * @param string Additional context string (hostname, status message), or NULL
+ *
+ * @return None (void function)
+ *
+ * @note Typical usage: log6_quiet() for routine transactions (SOLICIT, REQUEST),
+ *       log6_packet() for exceptional conditions (DECLINE, errors) to bypass quiet mode
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * log6_quiet(state, "SOLICIT", NULL, hostname);  // May be suppressed by OPT_QUIET_DHCP6
+ * log6_packet(state, "DECLINE", &declined_addr, "address conflict"); // Always logged
+ * @endcode
+ *
+ * RFC COMPLIANCE: Not RFC-mandated (operational logging feature only)
+ *
+ * SIDE EFFECTS: Conditionally calls log6_packet() which logs to syslog
+ * THREAD SAFETY: Inherits thread-safety properties of log6_packet()
+ */
 static void log6_quiet(struct state *state, char *type, struct in6_addr *addr, char *string)
 {
   if (option_bool(OPT_LOG_OPTS) || !option_bool(OPT_QUIET_DHCP6))
     log6_packet(state, type, addr, string);
 }
 
+/**
+ * @brief Log DHCPv6 packet transaction with client DUID, address, and message
+ *
+ * Primary DHCPv6 logging function formatting transaction information for syslog:
+ * transaction ID, message type, receiving interface, IPv6 address (if applicable),
+ * client DUID (formatted as hex MAC address style), and optional status string.
+ * Provides essential audit trail of all DHCPv6 address allocations, renewals, and
+ * releases for troubleshooting and compliance.
+ *
+ * @param state Per-request state containing clid (DUID), clid_len, xid (transaction ID),
+ *              iface_name (receiving interface) for log message formatting
+ * @param type Message type string: "SOLICIT", "ADVERTISE", "REQUEST", "REPLY", "RENEW",
+ *             "REBIND", "CONFIRM", "RELEASE", "DECLINE", "INFORMATION-REQUEST"
+ * @param addr IPv6 address being allocated/renewed/released, or NULL if not address-related
+ *             (e.g., INFORMATION-REQUEST for stateless configuration)
+ * @param string Optional contextual information: hostname, error message, status description
+ *
+ * @return None (void function, output to syslog only)
+ *
+ * @note CLID truncated to 100 bytes if longer to prevent buffer overflow in print_mac().
+ *       Format varies based on OPT_LOG_OPTS: includes transaction ID if option logging
+ *       enabled, omits XID for cleaner logs in non-verbose mode.
+ * @warning Uses global daemon->namebuff and daemon->dhcp_buff2 for temporary formatting,
+ *          not reentrant if called from multiple threads simultaneously
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * log6_packet(state, "ADVERTISE", NULL, "no address available");
+ * log6_packet(state, "REPLY", &allocated_addr, client_hostname);
+ * log6_packet(state, "RELEASE", &released_addr, NULL);
+ * @endcode
+ *
+ * RFC COMPLIANCE: Not RFC-mandated (operational logging feature)
+ *
+ * SIDE EFFECTS:
+ * - Writes formatted message to syslog via my_syslog() at LOG_INFO level with MS_DHCP tag
+ * - Modifies daemon->namebuff (for CLID hex formatting) and daemon->dhcp_buff2 (for IPv6 address)
+ *
+ * THREAD SAFETY: Not thread-safe due to global buffer usage
+ */
 static void log6_packet(struct state *state, char *type, struct in6_addr *addr, char *string)
 {
   int clid_len = state->clid_len;
@@ -2050,6 +3183,43 @@ static void log6_packet(struct state *state, char *type, struct in6_addr *addr, 
 	      string ? string : "");
 }
 
+/**
+ * @brief Search for specific DHCPv6 option in TLV option list
+ *
+ * Iterates through DHCPv6 option list searching for option matching specified type code.
+ * Each option follows TLV (Type-Length-Value) format: 2-byte type, 2-byte length,
+ * variable-length value. Validates option boundaries to prevent buffer overruns and
+ * ensures found option meets minimum size requirement. Returns pointer to option start
+ * (beginning of type field) or NULL if not found.
+ *
+ * @param opts Starting position of option search (typically state->packet_options)
+ * @param end End boundary of option area for bounds checking (typically state->end)
+ * @param search Option type code to find (e.g., OPTION6_CLIENT_ID, OPTION6_IA_NA)
+ * @param minsize Minimum required value length in bytes (0 for no size check)
+ *
+ * @return Pointer to start of matching option (type field), or NULL if not found,
+ *         opts is NULL, option too short, or buffer boundary exceeded
+ *
+ * @note Returned pointer points to 2-byte type field. Use opt6_ptr(result, 0) to
+ *       access value, opt6_len(result) for length, opt6_type(result) for type.
+ * @warning Does not validate option-specific value format, only length. Caller must
+ *          perform additional validation for complex options like IA_NA.
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * void *client_id_opt = opt6_find(state->packet_options, state->end, OPTION6_CLIENT_ID, 1);
+ * if (client_id_opt) {
+ *     state->clid = opt6_ptr(client_id_opt, 0);
+ *     state->clid_len = opt6_len(client_id_opt);
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.1: DHCPv6 option format (2-byte type, 2-byte length, value)
+ *
+ * SIDE EFFECTS: None (read-only option scanning)
+ * THREAD SAFETY: Thread-safe (pure function, no shared state modification)
+ */
 static void *opt6_find (void *opts, void *end, unsigned int search, unsigned int minsize)
 {
   u16 opt, opt_len;
@@ -2077,6 +3247,37 @@ static void *opt6_find (void *opts, void *end, unsigned int search, unsigned int
     }
 }
 
+/**
+ * @brief Advance to next DHCPv6 option in TLV list
+ *
+ * Calculates pointer to next option by reading current option's length field and
+ * skipping past its value. Used for iterating through all options when specific
+ * option type is not known in advance. Performs bounds checking to prevent reading
+ * past end of options area.
+ *
+ * @param opts Pointer to current option start (type field)
+ * @param end End boundary of options area for bounds checking
+ *
+ * @return Pointer to start of next option (type field), or NULL if no more options
+ *         (insufficient space for 4-byte header, or length extends past end boundary)
+ *
+ * @note Typical usage pattern: for (opt = opts; opt; opt = opt6_next(opt, end))
+ * @warning Caller must validate returned pointer is not NULL before dereferencing
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * for (void *opt = opts; opt; opt = opt6_next(opt, end)) {
+ *     unsigned int opt_type = opt6_type(opt);
+ *     if (opt_type == OPTION6_IA_NA) process_ia_na(opt);
+ * }
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315 Section 22.1: Option format enables sequential option iteration
+ *
+ * SIDE EFFECTS: None (read-only pointer arithmetic)
+ * THREAD SAFETY: Thread-safe (pure function)
+ */
 static void *opt6_next(void *opts, void *end)
 {
   u16 opt_len;
@@ -2093,6 +3294,42 @@ static void *opt6_next(void *opts, void *end)
   return opts + opt_len;
 }
 
+/**
+ * @brief Extract unsigned integer from DHCPv6 option with unaligned data handling
+ *
+ * Reads multi-byte unsigned integer from option data handling both unaligned memory
+ * access and network byte order (big-endian) conversion. Supports extracting integers
+ * at negative offsets (for type/length fields before option value) or positive offsets
+ * (within option value). Safely handles 1-byte, 2-byte, or 4-byte integers.
+ *
+ * Original comment preserved: "this worries about unaligned data and byte order" - critical
+ * for portability to architectures requiring aligned memory access (SPARC, older ARM).
+ *
+ * @param opt Pointer to option value start (after 4-byte TLV header), NOT to type field
+ * @param offset Byte offset from opt pointer: negative for type/length fields (-4 for type,
+ *               -2 for length), positive or 0 for value fields
+ * @param size Number of bytes to read: 1, 2, or 4 for uint8/uint16/uint32 extraction
+ *
+ * @return Unsigned integer value in host byte order (big-endian converted to host endian)
+ *
+ * @note Commonly used via macros: opt6_len(opt) calls opt6_uint(opt, -2, 2),
+ *       opt6_type(opt) calls opt6_uint(opt, -4, 2)
+ * @warning Caller must ensure offset and size do not exceed option boundaries to avoid
+ *          reading invalid memory. No bounds checking performed.
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * void *ia_na_opt = opt6_find(opts, end, OPTION6_IA_NA, 12);
+ * unsigned int iaid = opt6_uint(opt6_ptr(ia_na_opt, 0), 0, 4); // Extract 4-byte IAID
+ * unsigned int t1 = opt6_uint(opt6_ptr(ia_na_opt, 0), 4, 4);   // Extract T1 timer
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3315: All DHCPv6 integers in network byte order (big-endian per RFC 1700)
+ *
+ * SIDE EFFECTS: None (read-only memory access)
+ * THREAD SAFETY: Thread-safe (pure function, no shared state)
+ */
 static unsigned int opt6_uint(unsigned char *opt, int offset, int size)
 {
   /* this worries about unaligned data and byte order */

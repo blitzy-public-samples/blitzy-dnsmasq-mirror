@@ -14,6 +14,96 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/**
+ * @file rfc2131.c
+ * @brief DHCPv4 protocol implementation per RFC 2131
+ *
+ * DETAILED PURPOSE:
+ * This file implements the complete DHCPv4 server protocol as specified in RFC 2131
+ * (Dynamic Host Configuration Protocol). It handles all DHCPv4 message types including
+ * DHCPDISCOVER→DHCPOFFER, DHCPREQUEST→DHCPACK/DHCPNAK, DHCPRELEASE, DHCPDECLINE, and
+ * DHCPINFORM exchanges. The implementation manages the entire DHCPv4 server state machine,
+ * performing lease allocation from configured address pools, applying static host 
+ * reservations, handling DHCP relay agent operations (GIADDR processing), processing
+ * relay agent information (Option 82), integrating with PXE/TFTP boot services, and
+ * implementing ping-before-offer for address conflict detection.
+ *
+ * The core message processing flow begins with dhcp_reply() which receives raw DHCPv4
+ * packets, extracts and validates DHCP options, identifies the client (by client 
+ * identifier or MAC address), determines the client's network context, applies 
+ * configuration matching rules (netid tags, vendor classes, user classes), and dispatches
+ * to message-type-specific handlers. Response packets are constructed by dhcp_packet()
+ * which assembles DHCP options according to client requests and server policy, handles
+ * option overload (using sname/file fields), applies vendor-specific options, and 
+ * manages PXE-specific extensions for network boot.
+ *
+ * KEY RESPONSIBILITIES:
+ * - dhcp_reply() - Main DHCPv4 packet handler and message type dispatcher (lines 71-1025)
+ * - dhcp_packet() - DHCP response packet construction and option assembly (lines 1027-1283)
+ * - do_options() - Populate DHCP options in response packets (lines 1448-2119)
+ * - calc_time() - Calculate lease time from context and configuration (lines 1409-1446)
+ * - server_id() - Determine server identifier for responses (lines 1377-1407)
+ * - option_find() - Locate and extract DHCP options from packets (lines 1311-1327)
+ * - log_packet() - Generate detailed DHCP transaction log entries (lines 2194-2330)
+ * - is_pxe_client() - Detect and classify PXE network boot clients (lines 2683-2722)
+ * - pxe_opts() - Generate PXE-specific DHCP options (lines 2390-2656)
+ * - apply_delay() - Implement delayed DHCP response for load control (lines 2660-2681)
+ *
+ * DEPENDENCIES:
+ * - dnsmasq.h - Core daemon structures (struct dhcp_context, dhcp_config, dhcp_lease,
+ *               dhcp_packet, dhcp_netid, dhcp_opt, dhcp_boot, dhcp_vendor, dhcp_mac)
+ * - dhcp-protocol.h - DHCPv4 wire protocol constants (DHCPDISCOVER, DHCPOFFER, DHCPREQUEST,
+ *                     DHCPACK, DHCPNAK, DHCPRELEASE, DHCPDECLINE, DHCPINFORM, OPTION_* constants)
+ * 
+ * Called by:
+ * - dhcp.c dhcp_packet_handler() - Receives raw DHCP packets from network layer
+ * 
+ * Calls:
+ * - lease.c lease_find_by_client(), lease_find_by_addr(), lease_allocate() - Lease database operations
+ * - dhcp-common.c match_netid(), run_tag_if() - Configuration matching logic
+ * - helper.c queue_script() - External lease-change script execution
+ * - network.c iface_check() - Interface validation
+ * - cache.c cache_add_dhcp_entry() - DNS cache integration for DHCP hostnames
+ *
+ * DATA STRUCTURES:
+ * - struct dhcp_packet (dhcp-protocol.h:94-101) - DHCPv4 wire format packet structure
+ * - struct dhcp_context (dnsmasq.h) - DHCP address range/pool configuration
+ * - struct dhcp_config (dnsmasq.h) - Static DHCP host configuration
+ * - struct dhcp_lease (dnsmasq.h) - Active DHCP lease tracking
+ * - struct dhcp_netid (dnsmasq.h) - Configuration tag matching system
+ * - struct dhcp_opt (dnsmasq.h) - DHCP option configuration
+ * - struct dhcp_boot (dnsmasq.h) - PXE boot configuration
+ *
+ * COMPILE-TIME OPTIONS:
+ * - HAVE_DHCP (mandatory) - Entire file conditionally compiled with #ifdef HAVE_DHCP
+ * - HAVE_SCRIPT - Enables external script integration via add_extradata_opt() (line 24-26)
+ * - HAVE_BROKEN_RTC - Affects lease time calculations for embedded systems without RTC
+ * - NO_ID - Disables client identifier processing
+ * - HAVE_DHCP_AUTH - Enables DHCP authentication (RFC 3118)
+ *
+ * RFC COMPLIANCE:
+ * - RFC 2131: Dynamic Host Configuration Protocol (complete implementation)
+ * - RFC 2132: DHCP Options and BOOTP Vendor Extensions
+ * - RFC 3046: DHCP Relay Agent Information Option (Option 82)
+ * - RFC 3527: Link Selection sub-option for Option 82
+ * - RFC 3942: Reclassifying DHCPv4 Options
+ * - RFC 4578: Dynamic Host Configuration Protocol (DHCP) Options for PXE
+ * - RFC 5107: DHCP Server Identifier Override Suboption
+ *
+ * THREADING MODEL:
+ * This file operates within dnsmasq's single-process, event-driven architecture using
+ * poll()-based I/O multiplexing. All functions are called sequentially from the main
+ * event loop in response to incoming DHCP packets. No multi-threading or locking is
+ * required. Static variables are safe as there is no concurrent execution. Functions
+ * are not re-entrant and must not be called from signal handlers.
+ *
+ * @copyright Copyright (c) 2000-2022 Simon Kelley
+ * @license GPL-2.0-or-later
+ * @see docs/DHCP_V4.md for complete DHCPv4 server architecture documentation
+ * @see dhcp.c for DHCP packet reception and socket management
+ * @see lease.c for DHCP lease database persistence
+ */
+
 #include "dnsmasq.h"
 
 #ifdef HAVE_DHCP
@@ -68,6 +158,100 @@ static int pxe_uefi_workaround(int pxe_arch, struct dhcp_netid *netid, struct dh
 static void apply_delay(u32 xid, time_t recvtime, struct dhcp_netid *netid);
 static int is_pxe_client(struct dhcp_packet *mess, size_t sz, const char **pxe_vendor);
 
+/**
+ * @brief Process incoming DHCPv4 packet and generate appropriate response
+ *
+ * @detailed
+ * This is the main entry point for all DHCPv4 server operations. It receives raw DHCP packets,
+ * validates packet structure and options, determines the DHCP message type (DISCOVER, REQUEST,
+ * RELEASE, DECLINE, INFORM), identifies the client using client identifier or hardware address,
+ * matches clients against configured address pools and static reservations, applies network ID
+ * tag-based configuration rules, dispatches to message-type-specific processing logic, and
+ * constructs appropriate response packets (OFFER, ACK, NAK) with all requested DHCP options.
+ * 
+ * The function implements the complete RFC 2131 server state machine including: initial address
+ * discovery (DISCOVER→OFFER), address allocation (REQUEST→ACK/NAK), lease renewal (REQUEST→ACK),
+ * address release (RELEASE), address conflict reporting (DECLINE), and stateless configuration
+ * (INFORM→ACK). It handles DHCP relay operations via GIADDR processing, processes relay agent
+ * information option (Option 82) for circuit/remote ID, integrates with PXE network boot via
+ * architecture-specific options, implements ping-before-offer for conflict avoidance, maintains
+ * lease database persistence, triggers external lease-change scripts, and provides comprehensive
+ * transaction logging.
+ *
+ * @param context Initial DHCP context matching the receiving interface's subnet, may be NULL
+ *                if packet arrives on interface without configured DHCP range
+ * @param iface_name Name of network interface packet was received on (e.g. "eth0")
+ * @param int_index Integer index of receiving interface for kernel operations
+ * @param sz Size of received DHCP packet in bytes including IP/UDP headers (typically 300-1500)
+ * @param now Current time in seconds since epoch for lease expiration calculations
+ * @param unicast_dest Boolean flag: 1 if response should be unicast, 0 for broadcast
+ * @param loopback Boolean flag: 1 if packet received on loopback interface
+ * @param is_inform Output parameter set to 1 if message is DHCPINFORM, else unchanged, may be NULL
+ * @param pxe File descriptor for PXE-specific socket (port 4011) or -1 if PXE disabled
+ * @param fallback Server identifier to use if primary interface has no address configured
+ * @param recvtime Packet reception timestamp for delayed response processing
+ *
+ * @return Size of constructed response packet in bytes if response generated, 0 if no response
+ *         needed (e.g. packet validation failed, RELEASE/DECLINE processed, client ignored)
+ *
+ * @retval >0 Response packet constructed in daemon->dhcp_packet buffer, ready for transmission
+ * @retval 0 No response packet generated (invalid request, ignored client, or silent operation)
+ *
+ * @note Response packet is constructed in global daemon->dhcp_packet buffer which may be 
+ *       dynamically expanded based on client's OPTION_MAXMESSAGE size request
+ * @note Function may update daemon->dhcp_packet buffer pointer via expand_buf() requiring
+ *       local mess pointer to be reassigned from daemon->dhcp_packet.iov_base
+ * @note Client identification uses client identifier option (Option 61) if present, else
+ *       falls back to hardware address from chaddr field
+ * @note Lease allocation integrates with DNS cache to enable hostname→IP resolution for
+ *       DHCP clients via cache_add_dhcp_entry()
+ *
+ * @warning Modifies global daemon->dhcp_packet buffer contents and may reallocate buffer
+ * @warning Not re-entrant due to use of static DHCP option configuration state
+ * @warning Some buggy DHCP clients incorrectly set ciaddr field which is cleared here
+ *
+ * @see dhcp_packet() for DHCP response packet construction (lines 1027-1283)
+ * @see do_options() for DHCP option population logic (lines 1448-2119)
+ * @see option_find() for DHCP option extraction from packets (lines 1311-1327)
+ * @see calc_time() for lease time calculation (lines 1409-1446)
+ * @see server_id() for server identifier determination (lines 1377-1407)
+ * @see is_pxe_client() for PXE client detection (lines 2683-2722)
+ * @see docs/DHCP_V4.md for complete DHCPv4 architecture and RFC compliance matrix
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_context *context = find_context(iface);
+ * int is_inform = 0;
+ * size_t reply_size = dhcp_reply(context, "eth0", 2, packet_size, time(NULL),
+ *                                 0, 0, &is_inform, -1, fallback_addr, time(NULL));
+ * if (reply_size > 0)
+ *   send_dhcp_packet(daemon->dhcp_packet.iov_base, reply_size);
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * - RFC 2131 Section 3.1: Client-Server Interaction (DISCOVER/OFFER/REQUEST/ACK state machine)
+ * - RFC 2131 Section 3.2: DHCP Server Behavior (address allocation and lease management)
+ * - RFC 2131 Section 4.3: DHCP Message processing (all message types implemented)
+ * - RFC 2132: DHCP Options (complete option processing)
+ * - RFC 3046: Relay Agent Information Option (Option 82 circuit-id, remote-id, server-id-override)
+ * - RFC 3527: Link Selection sub-option for Relay Agent (subnet selection)
+ * - RFC 4578: PXE Options (architecture, UUID, boot menu processing)
+ * - RFC 5107: Server Identifier Override Suboption (relay agent server selection)
+ *
+ * SIDE EFFECTS:
+ * - May allocate new lease in lease database via lease_allocate()
+ * - May update existing lease via lease_update_from_configs()
+ * - May trigger external script execution via queue_script() if HAVE_SCRIPT enabled
+ * - May add DNS cache entries via cache_add_dhcp_entry() for DHCP-assigned hostnames
+ * - Modifies daemon->dhcp_packet buffer contents (response packet construction)
+ * - May reallocate daemon->dhcp_packet buffer via expand_buf() if client requests larger packet
+ * - Logs transaction details to syslog via log_packet()
+ * - Implements delayed response via apply_delay() for load control
+ *
+ * THREAD SAFETY:
+ * Not thread-safe. Must be called only from main event loop. Uses global daemon state and
+ * static DHCP option configuration. Not re-entrant.
+ */
 size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
 		  size_t sz, time_t now, int unicast_dest, int loopback,
 		  int *is_inform, int pxe, struct in_addr fallback, time_t recvtime)
@@ -1633,6 +1817,31 @@ unsigned char *extended_hwaddr(int hwtype, int hwlen, unsigned char *hwaddr,
   return hwaddr;
 }
 
+/**
+ * @brief Calculate DHCP lease time from context, configuration, and client request
+ *
+ * @detailed
+ * Determines the lease time to offer to a DHCP client by considering three sources in order
+ * of precedence: static host configuration (CONFIG_TIME), DHCP context default, and client's
+ * requested lease time option (Option 51). Implements RFC 2131 Section 4.3.1 requirement that
+ * server may choose to use client's requested lease time or override with its own policy.
+ * Enforces minimum lease time of 120 seconds as sanity check. Returns the minimum of configured
+ * time and requested time unless either is infinite (0xffffffff).
+ *
+ * @param context DHCP context containing default lease time for this subnet, may be NULL
+ * @param config Static host configuration potentially containing specific lease time for this client
+ * @param opt Pointer to Option 51 (OPTION_LEASE_TIME) from client request, or NULL if not present
+ *
+ * @return Lease time in seconds to assign to the client, minimum 120 seconds unless infinite
+ *
+ * @note Returns static configuration time if CONFIG_TIME flag set, else context lease time
+ * @note If client requests less than 120 seconds, enforces minimum of 120 seconds
+ * @note Infinite lease time (0xffffffff) allowed and not subject to minimum limit
+ * @note If both client and server offer infinite leases, returns infinite
+ *
+ * @see calc_time() usage in dhcp_reply() for DHCPOFFER and DHCPACK generation
+ * @see RFC 2131 Section 4.3.1 for lease time negotiation semantics
+ */
 static unsigned int calc_time(struct dhcp_context *context, struct dhcp_config *config, unsigned char *opt)
 {
   unsigned int time = have_config(config, CONFIG_TIME) ? config->lease_time : context->lease_time;
@@ -1649,6 +1858,31 @@ static unsigned int calc_time(struct dhcp_context *context, struct dhcp_config *
   return time;
 }
 
+/**
+ * @brief Determine server identifier address to include in DHCP response
+ *
+ * @detailed
+ * Selects the IP address to use as DHCP server identifier (Option 54) in response packets.
+ * Uses three-level priority: relay agent server identifier override (Option 82 sub-option 11)
+ * takes highest priority, context's local interface address takes second priority, and fallback
+ * address (typically from primary interface) used as last resort. Server identifier must match
+ * the address clients use for unicast DHCP messages during RENEW/REBIND. Implements RFC 5107
+ * Server Identifier Override Suboption for relay agent control of server selection.
+ *
+ * @param context DHCP context for the client's subnet containing local interface address
+ * @param override Server identifier specified by relay agent via Option 82 Sub-option 11, or 0.0.0.0
+ * @param fallback Default server identifier if context has no local address, typically primary interface
+ *
+ * @return IPv4 address to use as server identifier in DHCP response packets
+ *
+ * @note Override address (from relay agent) takes absolute priority if non-zero
+ * @note Context local address used if override not present and context has local interface configured
+ * @note Fallback used when receiving interface has no DHCP context or no local address
+ * @note Server identifier must remain consistent across DISCOVER/OFFER/REQUEST/ACK exchange
+ *
+ * @see RFC 2131 Section 3.5 for server identifier usage requirements
+ * @see RFC 5107 for DHCP Server Identifier Override Suboption specification
+ */
 static struct in_addr server_id(struct dhcp_context *context, struct in_addr override, struct in_addr fallback)
 {
   if (override.s_addr != 0)
@@ -1659,6 +1893,33 @@ static struct in_addr server_id(struct dhcp_context *context, struct in_addr ove
     return fallback;
 }
 
+/**
+ * @brief Sanitize DHCP option data by extracting only printable ASCII characters
+ *
+ * @detailed
+ * Copies printable characters from a DHCP option into output buffer, filtering out non-printable
+ * characters (control codes, extended ASCII) to prevent log injection attacks and display corruption.
+ * Used primarily for sanitizing client-supplied text options like OPTION_MESSAGE (56) and
+ * OPTION_HOSTNAME (12) before logging or processing. Implements defensive programming practice
+ * of never trusting client-supplied data in log output. Null-terminates output buffer even if
+ * input is empty or NULL.
+ *
+ * @param opt Pointer to DHCP option containing potentially unsafe text data, may be NULL
+ * @param buf Output buffer to receive sanitized printable-only string, must have space for
+ *            option_len(opt)+1 bytes to accommodate null terminator
+ *
+ * @return 1 if option was present and data copied, 0 if opt was NULL
+ *
+ * @note Output buffer always null-terminated even for empty or NULL input
+ * @note Uses isprint() to filter characters, keeping only printable ASCII (space through ~)
+ * @note Non-printable characters silently dropped from output with no indication
+ * @note Caller must ensure buf has sufficient size (typically DHCP_BUFF_SZ=256 bytes)
+ *
+ * @warning Does not validate UTF-8 or handle multi-byte character encodings
+ * @warning Buffer overflow possible if buf too small for option length plus null terminator
+ *
+ * @see log_packet() for primary usage logging DHCPDECLINE message text
+ */
 static int sanitise(unsigned char *opt, char *buf)
 {
   char *p;
@@ -1683,6 +1944,28 @@ static int sanitise(unsigned char *opt, char *buf)
 }
 
 #ifdef HAVE_SCRIPT
+/**
+ * @brief Add DHCP option data to lease as extra data for script execution
+ *
+ * @detailed
+ * Attaches raw DHCP option data to a lease record for passing to external lease-change scripts
+ * via environment variables. Enables scripts to access arbitrary DHCP options beyond standard
+ * fields (IP, hostname, MAC). When opt is NULL, clears extra data. Option data stored with
+ * lease includes option type, length, and raw payload bytes which script can parse. Used
+ * primarily for passing vendor-specific options and user class identifiers to scripts for
+ * custom provisioning logic.
+ *
+ * @param lease Lease record to attach extra data to
+ * @param opt Pointer to DHCP option structure (type-length-value format), or NULL to clear extra data
+ *
+ * @note Only compiled if HAVE_SCRIPT defined, otherwise function does not exist
+ * @note Extra data passed to script via DNSMASQ_SUPPLIED_* environment variables
+ * @note NULL opt clears any existing extra data on the lease
+ * @note Multiple options require multiple calls, data appended to lease
+ *
+ * @see lease_add_extradata() in lease.c for extra data storage mechanism
+ * @see queue_script() for script execution with environment variables
+ */
 static void add_extradata_opt(struct dhcp_lease *lease, unsigned char *opt)
 {
   if (!opt)
@@ -1692,6 +1975,44 @@ static void add_extradata_opt(struct dhcp_lease *lease, unsigned char *opt)
 }
 #endif
 
+/**
+ * @brief Generate comprehensive DHCP transaction log entry to syslog
+ *
+ * @detailed
+ * Creates detailed syslog entries for DHCP transactions including message type, client identifier,
+ * IP address, hardware address, interface, hostname, transaction ID, and any error conditions.
+ * Implements conditional logging based on OPT_LOG_OPTS (detailed option logging), OPT_QUIET_DHCP
+ * (suppress routine transactions), and error conditions. Formats hardware address in colon-hexadecimal
+ * notation. Logs at LOG_INFO level for successful transactions, LOG_WARNING for errors. Essential
+ * for DHCP troubleshooting, security auditing, and lease tracking. Output includes full transaction
+ * context enabling correlation of DISCOVER/OFFER/REQUEST/ACK sequences via XID.
+ *
+ * @param type DHCP message type string (e.g. "DHCPDISCOVER", "DHCPOFFER", "DHCPREQUEST", "DHCPACK",
+ *             "DHCPNAK", "DHCPRELEASE", "DHCPDECLINE", "DHCPINFORM")
+ * @param addr Pointer to IP address (struct in_addr*) involved in transaction (offered, requested, or released)
+ * @param ext_mac Pointer to client hardware address bytes (typically 6 bytes for Ethernet MAC)
+ * @param mac_len Length of hardware address in bytes (6 for Ethernet, varies for other link types)
+ * @param interface Name of interface packet received on (e.g. "eth0", "br0")
+ * @param string Optional client hostname or additional descriptive string, may be NULL
+ * @param err Optional error message string for failed transactions, NULL for successful transactions
+ * @param xid DHCP transaction ID (32-bit) for correlating related messages in log
+ *
+ * @note Respects OPT_QUIET_DHCP option: suppresses logging if no error and quiet mode enabled
+ * @note Includes detailed option dump if OPT_LOG_OPTS enabled via log_options()
+ * @note Hardware address formatted as colon-separated hex (e.g. "01:23:45:67:89:ab")
+ * @note Transaction ID logged in hexadecimal for correlation with packet captures
+ * @note Error conditions always logged regardless of quiet mode
+ *
+ * @see log_options() for detailed DHCP option content logging
+ * @see my_syslog() for syslog output with DHCP facility tag
+ * @see daemon->addrbuff for address formatting buffer
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * log_packet("DHCPACK", &lease->addr, client_mac, 6, "eth0", "hostname", NULL, xid);
+ * log_packet("DHCPNAK", &requested_addr, client_mac, 6, "eth0", NULL, "wrong network", xid);
+ * @endcode
+ */
 static void log_packet(char *type, void *addr, unsigned char *ext_mac, 
 		       int mac_len, char *interface, char *string, char *err, u32 xid)
 {
@@ -1744,6 +2065,38 @@ static void log_options(unsigned char *start, u32 xid)
     }
 }
 
+/**
+ * @brief Search for specific DHCP option within a contiguous option area
+ *
+ * @detailed
+ * Low-level DHCP option parser for searching a single contiguous option region (e.g. options field,
+ * file field, or sname field). Scans type-length-value encoded option sequence handling OPTION_PAD
+ * (0x00) skip bytes and OPTION_END (0xff) terminator. Validates minimum option length requirement
+ * and performs bounds checking to prevent buffer overruns from malformed packets. Returns pointer
+ * to start of option (type byte) not option data, caller must use option_ptr() macro to access data.
+ * Used internally by option_find() which searches all three option areas.
+ *
+ * @param p Start of option area to search (after DHCP cookie for options field)
+ * @param end Pointer one byte beyond valid option area for bounds checking
+ * @param opt Option type code to search for (OPTION_* constants from dhcp-protocol.h)
+ * @param minsize Minimum acceptable option data length in bytes (excluding type and length bytes)
+ *
+ * @return Pointer to start of option (type byte) if found with sufficient length, NULL if not found
+ *         or insufficient length or malformed packet structure
+ *
+ * @note Returns option start pointer (type byte), not data pointer; use option_ptr() to get data
+ * @note OPTION_PAD (0) bytes skipped during scan
+ * @note OPTION_END (0xff) terminates scan, can be searched for explicitly
+ * @note Malformed packets with invalid lengths detected and return NULL
+ * @note Options must have at least minsize data bytes to match
+ *
+ * @warning No validation of option content, only structure and length checked
+ * @warning Caller must not modify option area during search as end pointer may become invalid
+ *
+ * @see option_find() for high-level search across options/file/sname areas
+ * @see option_ptr() macro to get pointer to option data payload
+ * @see option_len() macro to get option data length
+ */
 static unsigned char *option_find1(unsigned char *p, unsigned char *end, int opt, int minsize)
 {
   while (1) 
@@ -1768,7 +2121,43 @@ static unsigned char *option_find1(unsigned char *p, unsigned char *end, int opt
 	}
     }
 }
- 
+
+/**
+ * @brief Locate DHCP option in packet searching all valid option areas
+ *
+ * @detailed
+ * High-level DHCP option extraction supporting RFC 2131 Section 4.1 option overload mechanism.
+ * Searches three areas in order: options field (primary), file field (if overload bit 1 set),
+ * sname field (if overload bit 2 set). Option overload (Option 52) repurposes normally-fixed
+ * file and sname fields for additional option space when options field exhausted. First checks
+ * for option in primary options area after DHCP magic cookie (0x63825363). If not found, examines
+ * OPTION_OVERLOAD to determine if file/sname fields contain options, then searches those areas.
+ * Enables clients to send extensive option lists exceeding 312-byte options field capacity.
+ *
+ * @param mess Pointer to DHCP packet structure to search
+ * @param size Total size of packet buffer in bytes for bounds checking
+ * @param opt_type Option code to locate (OPTION_* constants, e.g. OPTION_REQUESTED_IP = 50)
+ * @param minsize Minimum required option data length in bytes for match, 0 to accept any length
+ *
+ * @return Pointer to option structure (type byte) if found with sufficient length, NULL if not found,
+ *         malformed, insufficient length, or OPTION_OVERLOAD missing when needed
+ *
+ * @note Skips DHCP magic cookie (4 bytes) at start of options field automatically
+ * @note Returns NULL if option present but shorter than minsize
+ * @note Options in file/sname only accessible if OPTION_OVERLOAD present with correct bits
+ * @note Search order: options field, file field (if overload & 1), sname field (if overload & 2)
+ *
+ * @see option_find1() for low-level single-area search implementation
+ * @see RFC 2131 Section 4.1 for option overload specification
+ * @see option_ptr() to extract pointer to option data payload
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char *opt = option_find(mess, packet_size, OPTION_REQUESTED_IP, INADDRSZ);
+ * if (opt)
+ *   struct in_addr requested = option_addr(opt);
+ * @endcode
+ */
 static unsigned char *option_find(struct dhcp_packet *mess, size_t size, int opt_type, int minsize)
 {
   unsigned char *ret, *overload;
@@ -1794,6 +2183,32 @@ static unsigned char *option_find(struct dhcp_packet *mess, size_t size, int opt
   return NULL;
 }
 
+/**
+ * @brief Extract IPv4 address from DHCP option handling potential misalignment
+ *
+ * @detailed
+ * Safely extracts 4-byte IPv4 address from DHCP option data accommodating potentially unaligned
+ * memory access. DHCP options may not be word-aligned in packet buffer due to variable-length
+ * preceding options, causing misaligned access faults on some architectures (SPARC, ARM without
+ * unaligned access support). Uses memcpy to avoid direct structure cast ensuring safe access on
+ * all platforms. Returns struct in_addr in network byte order (big-endian) as received in packet,
+ * no host byte order conversion applied.
+ *
+ * @param opt Pointer to DHCP option containing IPv4 address (e.g. OPTION_REQUESTED_IP, OPTION_SERVER_IDENTIFIER)
+ *
+ * @return struct in_addr containing IPv4 address in network byte order
+ *
+ * @note Assumes opt points to valid option with at least INADDRSZ (4) bytes of data
+ * @note No validation of option length or type performed, caller responsible
+ * @note Returned address in network byte order, use inet_ntop() for display
+ * @note Uses option_ptr() macro to skip option type and length bytes
+ *
+ * @warning Caller must verify option length >= INADDRSZ before calling to prevent buffer overrun
+ * @warning Does not validate address contents (could be 0.0.0.0, broadcast, multicast, etc.)
+ *
+ * @see option_uint() for extracting integer values from options
+ * @see option_ptr() macro for accessing option data area
+ */
 static struct in_addr option_addr(unsigned char *opt)
 {
    /* this worries about unaligned data in the option. */
@@ -1805,6 +2220,41 @@ static struct in_addr option_addr(unsigned char *opt)
   return ret;
 }
 
+/**
+ * @brief Extract unsigned integer from DHCP option with network byte order conversion
+ *
+ * @detailed
+ * Extracts multi-byte unsigned integer from DHCP option handling potential memory misalignment
+ * and network-to-host byte order conversion. Supports 1, 2, or 4-byte integers commonly used
+ * in DHCP options (OPTION_LEASE_TIME=4 bytes, OPTION_MESSAGE_TYPE=1 byte, OPTION_MAXMESSAGE=2 bytes).
+ * Reads bytes sequentially accumulating big-endian (network byte order) value into host byte order
+ * unsigned int. Safe for unaligned access on all architectures. Supports offset parameter for
+ * extracting integers from middle of option data (e.g. multiple sub-options in vendor-specific options).
+ *
+ * @param opt Pointer to DHCP option structure containing integer data
+ * @param offset Byte offset within option data to start extraction, 0 for start of option data
+ * @param size Number of bytes to extract (1, 2, or 4 typically), maximum reasonable is 4
+ *
+ * @return Unsigned integer value extracted from option in host byte order
+ *
+ * @note Performs network-to-host byte order conversion (big-endian to host endianness)
+ * @note Uses option_ptr() macro to skip option type/length and apply offset
+ * @note Safe for unaligned access via byte-by-byte read and shift
+ * @note Can extract up to 4-byte values fitting in unsigned int return type
+ *
+ * @warning Caller must ensure option has at least offset+size bytes to prevent buffer overrun
+ * @warning No bounds checking performed, malformed packets can cause invalid reads
+ * @warning Returns partial data if size exceeds option length without error indication
+ *
+ * @see option_addr() for IPv4 address extraction
+ * @see option_ptr() macro for accessing option data with offset
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned int lease_time = option_uint(opt, 0, 4); // Extract 4-byte lease time
+ * unsigned int msg_type = option_uint(opt, 0, 1);   // Extract 1-byte message type
+ * @endcode
+ */
 static unsigned int option_uint(unsigned char *opt, int offset, int size)
 {
   /* this worries about unaligned data and byte order */
@@ -1818,6 +2268,33 @@ static unsigned int option_uint(unsigned char *opt, int offset, int size)
   return ret;
 }
 
+/**
+ * @brief Skip to end marker of DHCP option sequence during packet construction
+ *
+ * @detailed
+ * Advances pointer through packed DHCP option sequence to locate OPTION_END (0xff) marker.
+ * Used during packet construction (not parsing) when building response packets and appending
+ * additional options. Assumes well-formed option sequence as comment notes "only for use when
+ * building packet: doesn't check for bad data." Steps through type-length-value encoded options
+ * using length byte to skip each option until reaching null (0x00) which represents OPTION_END
+ * or end of allocated option space.
+ *
+ * @param start Pointer to beginning of option sequence to skip through
+ *
+ * @return Pointer to OPTION_END marker (0x00 byte) or end of option space
+ *
+ * @note Only safe for use during packet construction with known-good option data
+ * @note Does not perform bounds checking or malformed packet detection
+ * @note Stops at first 0x00 byte encountered (OPTION_END or uninitialized space)
+ * @note Not suitable for parsing untrusted received packets, use option_find1() instead
+ *
+ * @warning No validation of option lengths, infinite loop possible with malformed data
+ * @warning No bounds checking, can run past end of buffer if data malformed
+ * @warning Only use with options constructed by dnsmasq's own code
+ *
+ * @see option_find1() for safe parsing of untrusted received option data
+ * @see free_space() which uses dhcp_skip_opts() to find insertion point
+ */
 static unsigned char *dhcp_skip_opts(unsigned char *start)
 {
   while (*start != 0)
@@ -1825,6 +2302,33 @@ static unsigned char *dhcp_skip_opts(unsigned char *start)
   return start;
 }
 
+/**
+ * @brief Locate OPTION_OVERLOAD in packet during response construction
+ *
+ * @detailed
+ * Searches for Option 52 (OPTION_OVERLOAD) in DHCP response packet being constructed. Used during
+ * packet building to determine if file and/or sname fields are available for additional options.
+ * Unlike option_find() which validates untrusted packets, this function assumes well-formed option
+ * data created by dnsmasq's own code and performs no bounds checking. Returns pointer to OPTION_OVERLOAD
+ * structure enabling caller to check overload bits: bit 0 (file field contains options), bit 1
+ * (sname field contains options).
+ *
+ * @param mess DHCP packet under construction with options added by dnsmasq code
+ *
+ * @return Pointer to OPTION_OVERLOAD option if present, NULL if not found
+ *
+ * @note Only safe during packet construction with known-good option data
+ * @note Does not validate option structure or perform bounds checking
+ * @note Used by free_space() to determine if overload areas available for option expansion
+ * @note Used by dhcp_packet_size() to finalize option areas before transmission
+ *
+ * @warning No validation of data, assumes options constructed by dnsmasq code
+ * @warning Potential infinite loop if option lengths corrupted
+ * @warning Not suitable for parsing received packets
+ *
+ * @see free_space() for usage expanding options into overload areas
+ * @see dhcp_packet_size() for usage finalizing packet before transmission
+ */
 /* only for use when building packet: doesn't check for bad data. */ 
 static unsigned char *find_overload(struct dhcp_packet *mess)
 {
@@ -1839,6 +2343,40 @@ static unsigned char *find_overload(struct dhcp_packet *mess)
   return NULL;
 }
 
+/**
+ * @brief Calculate final DHCP response packet size and finalize option areas
+ *
+ * @detailed
+ * Finalizes DHCP response packet for transmission by compacting relay agent information (Option 82)
+ * if present, adding OPTION_END terminators to all active option areas (options/file/sname), logging
+ * option contents if detailed logging enabled, and calculating total packet size respecting MIN_PACKETSZ
+ * (300 bytes) minimum for Linux kernel DHCP client compatibility. Handles option overload mechanism
+ * by terminating file and sname option areas if overload bits set. Moves agent_id data to end of
+ * options area to maintain relay agent information transparency. Returns size suitable for sendto()
+ * call transmission.
+ *
+ * @param mess DHCP packet with options populated, ready for size calculation and finalization
+ * @param agent_id Pointer to relay agent information (Option 82) to preserve, or NULL if none
+ * @param real_end Pointer to end of agent_id data for calculating move size
+ *
+ * @return Size of finalized packet in bytes, minimum MIN_PACKETSZ (300), suitable for network transmission
+ *
+ * @note Moves agent_id to end of options maintaining relay transparency per RFC 3046
+ * @note Adds OPTION_END (0xff) to options field and overload areas if used
+ * @note Enforces MIN_PACKETSZ (300 bytes) minimum for Linux kernel compatibility
+ * @note Logs bootfile name and server name if present and OPT_LOG_OPTS enabled
+ * @note Logs all option content via log_options() if OPT_LOG_OPTS enabled
+ * @note Logs broadcast flag status if set with zero ciaddr
+ *
+ * @see find_overload() for detecting option overload configuration
+ * @see dhcp_skip_opts() for locating end of option sequences
+ * @see log_options() for detailed option content logging
+ * @see MIN_PACKETSZ constant (300 bytes) for minimum packet size requirement
+ *
+ * RFC COMPLIANCE:
+ * - RFC 3046: DHCP Relay Agent Information Option (agent_id preservation)
+ * - RFC 2131: Minimum 300-byte packet size for interoperability
+ */
 static size_t dhcp_packet_size(struct dhcp_packet *mess, unsigned char *agent_id, unsigned char *real_end)
 {
   unsigned char *p = dhcp_skip_opts(&mess->options[0] + sizeof(u32));
@@ -1899,6 +2437,50 @@ static size_t dhcp_packet_size(struct dhcp_packet *mess, unsigned char *agent_id
   return ret;
 }
 
+/**
+ * @brief Allocate space for DHCP option in packet with automatic overload handling
+ *
+ * @detailed
+ * Finds or creates space for DHCP option in response packet, automatically using option overload
+ * mechanism if primary options area exhausted. Attempts allocation in order: options field, file
+ * field (if available and overload enabled), sname field (if available and overload enabled).
+ * Creates OPTION_OVERLOAD (52) automatically if needed and space available. Returns pointer to
+ * option data area with type and length bytes already written. Essential function for all DHCP
+ * response construction enabling transparent use of extended option space via RFC 2131 overload.
+ * Logs warning if unable to allocate space for requested option.
+ *
+ * @param mess DHCP packet under construction
+ * @param end Pointer to end of packet buffer for bounds checking in options area
+ * @param opt Option type code to allocate space for (written to type byte)
+ * @param len Option data length in bytes (written to length byte)
+ *
+ * @return Pointer to option data area (after type and length bytes) if space allocated,
+ *         NULL if insufficient space in all available areas
+ *
+ * @note Writes option type and length bytes automatically, caller fills data area
+ * @note Creates OPTION_OVERLOAD if needed and file/sname areas unused
+ * @note Searches options field first, then file field (if overload bit 0 set), then sname (bit 1)
+ * @note Sets overload bits dynamically as fields brought into use
+ * @note Logs warning message if unable to allocate requested space
+ * @note Space calculation includes 3-byte overhead (type + length + END marker)
+ *
+ * @warning Returns NULL if no space available, caller must check before writing data
+ * @warning Does not validate whether overload appropriate for specific options
+ * @warning File and sname overload only possible if those fields not used for traditional purposes
+ *
+ * @see option_put() for integer option insertion using free_space()
+ * @see option_put_string() for string option insertion using free_space()
+ * @see find_overload() for locating existing OPTION_OVERLOAD
+ * @see RFC 2131 Section 4.1 for option overload specification
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char *p = free_space(mess, end, OPTION_LEASE_TIME, 4);
+ * if (p) {
+ *   // Write 4-byte lease time value to p
+ * }
+ * @endcode
+ */
 static unsigned char *free_space(struct dhcp_packet *mess, unsigned char *end, int opt, int len)
 {
   unsigned char *p = dhcp_skip_opts(&mess->options[0] + sizeof(u32));
@@ -1960,7 +2542,39 @@ static unsigned char *free_space(struct dhcp_packet *mess, unsigned char *end, i
 
   return p;
 }
-	      
+
+/**
+ * @brief Insert unsigned integer DHCP option into packet with automatic space allocation
+ *
+ * @detailed
+ * Convenience function for adding integer-valued DHCP options to response packets. Allocates space
+ * via free_space() handling option overload transparently, then writes multi-byte integer in network
+ * byte order (big-endian). Supports 1, 2, or 4-byte integers commonly used in DHCP options like
+ * OPTION_LEASE_TIME (4 bytes), OPTION_T1 (4 bytes), OPTION_T2 (4 bytes), OPTION_MESSAGE_TYPE (1 byte).
+ * Silently fails if no space available rather than corrupting packet. Used throughout DHCP response
+ * construction for all integer option types.
+ *
+ * @param mess DHCP response packet under construction
+ * @param end End of packet buffer for bounds checking
+ * @param opt Option type code (OPTION_* constant)
+ * @param len Number of bytes for integer (1, 2, or 4 typically)
+ * @param val Unsigned integer value to write in network byte order
+ *
+ * @note Performs host-to-network byte order conversion automatically
+ * @note Silently does nothing if free_space() returns NULL (no space available)
+ * @note Writes multi-byte integers big-endian (most significant byte first)
+ * @note Common usage: option_put(mess, end, OPTION_LEASE_TIME, 4, lease_seconds)
+ *
+ * @see free_space() for space allocation and overload handling
+ * @see option_put_string() for string option insertion
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * option_put(mess, end, OPTION_LEASE_TIME, 4, 3600);        // 1 hour lease
+ * option_put(mess, end, OPTION_MESSAGE_TYPE, 1, DHCPACK);   // Message type
+ * option_put(mess, end, OPTION_T1, 4, 1800);                // T1 renewal time
+ * @endcode
+ */	      
 static void option_put(struct dhcp_packet *mess, unsigned char *end, int opt, int len, unsigned int val)
 {
   int i;
@@ -1971,6 +2585,38 @@ static void option_put(struct dhcp_packet *mess, unsigned char *end, int opt, in
       *(p++) = val >> (8 * (len - (i + 1)));
 }
 
+/**
+ * @brief Insert string-valued DHCP option into packet with optional null termination
+ *
+ * @detailed
+ * Adds string option to DHCP response packet with configurable null termination. Allocates space
+ * via free_space() then copies string bytes directly into option data area. Used for text options
+ * like OPTION_HOSTNAME (12), OPTION_DOMAINNAME (15), OPTION_MESSAGE (56). Null termination controlled
+ * by null_term parameter required by some ancient DHCP clients expecting C-style strings. String
+ * length calculated via strlen(), maximum 255 bytes per DHCP option length field size. Silently
+ * fails if no space available.
+ *
+ * @param mess DHCP response packet under construction
+ * @param end End of packet buffer for bounds checking
+ * @param opt Option type code (OPTION_* constant for string options)
+ * @param string Null-terminated C string to copy into option, must not exceed 255 bytes
+ * @param null_term Boolean: 1 to include null terminator in option data (legacy clients), 0 for RFC-compliant
+ *
+ * @note String length limited to 255 bytes due to DHCP option length field (8-bit)
+ * @note If null_term true and string shorter than 255, includes null terminator in transmitted data
+ * @note Silently does nothing if free_space() returns NULL (no space available)
+ * @note Uses memcpy for string transfer, includes null terminator if null_term set
+ *
+ * @see free_space() for space allocation and overload handling
+ * @see option_put() for integer option insertion
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * option_put_string(mess, end, OPTION_HOSTNAME, "client.example.com", 0);
+ * option_put_string(mess, end, OPTION_DOMAINNAME, "example.com", 0);
+ * option_put_string(mess, end, OPTION_MESSAGE, "Address already in use", 0);
+ * @endcode
+ */
 static void option_put_string(struct dhcp_packet *mess, unsigned char *end, int opt, 
 			      const char *string, int null_term)
 {
@@ -1985,6 +2631,41 @@ static void option_put_string(struct dhcp_packet *mess, unsigned char *end, int 
 }
 
 /* return length, note this only does the data part */
+/**
+ * @brief Copy DHCP option data to packet buffer with address substitution
+ *
+ * @detailed
+ * Copies option data from dhcp_opt structure to packet buffer, handling special cases including
+ * address substitution (0.0.0.0 replaced with server's local address on subnet), null-termination
+ * for string options, and empty option handling. Used by do_options() to insert custom DHCP
+ * options configured via --dhcp-option. Implements DHOPT_ADDR flag for automatic IP address
+ * substitution enabling portable configuration files (zero addresses dynamically replaced with
+ * context-specific server addresses). Returns adjusted length accounting for null-termination.
+ *
+ * @param opt Pointer to dhcp_opt structure containing option data and flags
+ * @param p Pointer to destination buffer in DHCP packet where option data will be written, or NULL to calculate length only
+ * @param context DHCP context providing local server address for DHOPT_ADDR substitution, may be NULL if no substitution needed
+ * @param null_term If non-zero and opt has DHOPT_STRING flag, append null terminator to string options (PXE compatibility)
+ *
+ * @return Adjusted length of option data in bytes, including null terminator if added
+ *
+ * @note If opt->val is NULL, treats as empty string (zero-length or "\0" if null_term)
+ * @note DHOPT_ADDR flag requires context parameter for address substitution
+ * @note Address 0.0.0.0 in DHOPT_ADDR options replaced with context->local (server's interface address)
+ * @note Multiple addresses in DHOPT_ADDR options processed in 4-byte chunks (INADDRSZ)
+ * @note If p is NULL, performs length calculation without copying data
+ *
+ * @see do_options() for primary caller
+ * @see dhcp_opt structure in dnsmasq.h for flags (DHOPT_ADDR, DHOPT_STRING)
+ * @see DHOPT_ADDR flag for automatic address substitution behavior
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char buffer[256];
+ * int len = do_opt(custom_opt, buffer, dhcp_context, 0);
+ * // buffer now contains option data with 0.0.0.0 replaced by context->local
+ * @endcode
+ */
 static int do_opt(struct dhcp_opt *opt, unsigned char *p, struct dhcp_context *context, int null_term)
 {
   int len = opt->len;
@@ -2015,6 +2696,37 @@ static int do_opt(struct dhcp_opt *opt, unsigned char *p, struct dhcp_context *c
   return len;
 }
 
+/**
+ * @brief Check if DHCP option code present in client's requested options list
+ *
+ * @detailed
+ * Tests whether client requested specific DHCP option via OPTION_REQUESTED_OPTIONS (55) parameter
+ * request list. Scans client's option request list terminated by OPTION_END (0xff) searching for
+ * matching option code. Implements "send everything if no request list" policy returning true for
+ * all options when client provides no parameter request list, ensuring clients with broken DHCP
+ * implementations still receive essential options. Used by do_options() to filter which configured
+ * options to include in response based on client's explicit requests.
+ *
+ * @param list Pointer to client's parameter request list from OPTION_REQUESTED_OPTIONS (Option 55),
+ *             or NULL if client provided no request list
+ * @param opt Option code to search for in request list
+ *
+ * @return 1 if option found in list or list is NULL (send everything), 0 if option not requested
+ *
+ * @note NULL list treated as request for all options (liberal interpretation for broken clients)
+ * @note List expected to be OPTION_END (0xff) terminated, not length-prefixed
+ * @note Linear search performance acceptable for typical request lists of 5-20 options
+ * @note Essential options (netmask, router, DNS) typically requested by all clients
+ *
+ * @see do_options() for usage filtering configured options by client requests
+ * @see OPTION_REQUESTED_OPTIONS (55) in dhcp-protocol.h for parameter request list option
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (in_list(req_options, OPTION_DNSSERVER))
+ *   option_put_addr(mess, end, OPTION_DNSSERVER, dns_server);
+ * @endcode
+ */
 static int in_list(unsigned char *list, int opt)
 {
   int i;
@@ -2030,6 +2742,41 @@ static int in_list(unsigned char *list, int opt)
   return 0;
 }
 
+/**
+ * @brief Find user-configured DHCP option by option number with tag validation
+ *
+ * @detailed
+ * Searches daemon->dhcp_opts linked list for custom DHCP option matching specified option code
+ * that has passed tag matching (DHOPT_TAGOK flag set). Used after tag evaluation to retrieve
+ * options that apply to current client based on dhcp-match, dhcp-host, dhcp-range tags. Returns
+ * first matching option, enabling configuration of different option values per client class or
+ * network segment. Returns NULL if no matching tagged option found, allowing fallback to default
+ * behavior or built-in options.
+ *
+ * @param opt DHCP option code to search for (0-255, standard codes from RFC 2132)
+ *
+ * @return Pointer to matching dhcp_opt structure if found with DHOPT_TAGOK set, NULL if no match or no valid tagged options
+ *
+ * @note Only returns options with DHOPT_TAGOK flag (tags matched current client)
+ * @note Searches daemon->dhcp_opts list (user-configured options from --dhcp-option directives)
+ * @note Returns first match; if multiple options with same code exist, first tagged one returned
+ * @note DHOPT_TAGOK set by match_bytes() during tag evaluation in dhcp_reply()
+ * @note NULL return allows fallback to built-in default behavior for standard options
+ *
+ * @see daemon->dhcp_opts for linked list of custom DHCP options
+ * @see DHOPT_TAGOK flag for tag matching validation
+ * @see match_bytes() for tag matching and DHOPT_TAGOK setting logic
+ * @see do_options() for primary usage context
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_opt *custom_router = option_find2(OPTION_ROUTER);
+ * if (custom_router)
+ *   // Use custom router option value
+ * else
+ *   // Use default context->router
+ * @endcode
+ */
 static struct dhcp_opt *option_find2(int opt)
 {
   struct dhcp_opt *opts;
@@ -2041,8 +2788,43 @@ static struct dhcp_opt *option_find2(int opt)
   return NULL;
 }
 
-/* mark vendor-encapsulated options which match the client-supplied  or
-   config-supplied vendor class */
+/**
+ * @brief Mark vendor-specific DHCP options matching client's vendor class identifier
+ *
+ * @detailed
+ * Iterates through custom DHCP option list, marking vendor-specific options (DHOPT_VENDOR flag)
+ * as DHOPT_VENDOR_MATCH if client's vendor class identifier (option 60) contains configured
+ * vendor string. Enables conditional vendor-encapsulated options (option 43) based on client
+ * type (e.g., PXE client gets PXE boot options, Cisco phone gets Cisco-specific config).
+ * Supports both PXE vendor matching (DHOPT_VENDOR_PXE uses daemon->dhcp_pxe_vendors list)
+ * and direct string matching. Clears DHOPT_VENDOR_MATCH before evaluation, then sets flag
+ * if substring match found in client's option 60 data.
+ *
+ * @param opt Pointer to client's vendor class identifier option (option 60) data, or NULL if client didn't send option 60
+ * @param dopt Head of dhcp_opt linked list to evaluate for vendor matching
+ *
+ * @note Clears DHOPT_VENDOR_MATCH flag for all options before matching begins
+ * @note Only processes options with DHOPT_VENDOR flag set (vendor-specific options)
+ * @note DHOPT_VENDOR_PXE flag uses daemon->dhcp_pxe_vendors list (configured via --pxe-service)
+ * @note Non-PXE vendor options use dopt->u.vendor_class string directly
+ * @note Performs substring match: vendor string can appear anywhere in option 60 data
+ * @note Empty vendor string (len==0) matches all clients (wildcard)
+ * @note First matching vendor in list sets DHOPT_VENDOR_MATCH and stops search
+ *
+ * @see DHOPT_VENDOR flag for vendor-specific option marking
+ * @see DHOPT_VENDOR_MATCH flag set when vendor identifier matches
+ * @see DHOPT_VENDOR_PXE flag for PXE-specific vendor matching
+ * @see daemon->dhcp_pxe_vendors for PXE vendor list (configured via --pxe-service)
+ * @see option 43 (vendor-encapsulated options) usage
+ * @see RFC 2132 section 9.13 for vendor class identifier (option 60)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char *vendor_opt = option_find(mess, sz, OPTION_VENDOR_ID, 1);
+ * match_vendor_opts(vendor_opt, daemon->dhcp_opts);
+ * // Options with DHOPT_VENDOR_MATCH now identified for inclusion
+ * @endcode
+ */
 static void match_vendor_opts(unsigned char *opt, struct dhcp_opt *dopt)
 {
   for (; dopt; dopt = dopt->next)
@@ -2080,6 +2862,45 @@ static void match_vendor_opts(unsigned char *opt, struct dhcp_opt *dopt)
     }
 }
 
+/**
+ * @brief Assemble vendor-encapsulated DHCP options with 255-byte sub-option chunking
+ *
+ * @detailed
+ * Constructs vendor-encapsulated options (option 43 or other encapsulated types) by iterating
+ * through dhcp_opt list, selecting options matching specified flag, and assembling into
+ * encapsulated format with sub-option code+length+data encoding. Handles 255-byte maximum
+ * sub-option length by splitting long option sequences across multiple encap option instances.
+ * Each encap option ends with OPTION_END marker. Used for vendor-specific options (option 43),
+ * PXE options, and other encapsulated option spaces. Returns 1 if any options added, 0 if none.
+ *
+ * @param opt Head of dhcp_opt linked list to search for matching options
+ * @param encap Encapsulation option code (typically OPTION_VENDOR_CLASS_OPT=43 for vendor-encapsulated)
+ * @param flag Option flag to match (e.g., DHOPT_VENDOR_MATCH for vendor options)
+ * @param mess Pointer to DHCP packet structure for option insertion
+ * @param end Pointer to end of available option space in packet
+ * @param null_term If non-zero, null-terminate string options (PXE compatibility)
+ *
+ * @return 1 if at least one encapsulated option was added, 0 if no matching options found
+ *
+ * @note Enforces 255-byte maximum length per RFC 2132: splits long sequences into multiple encap options
+ * @note Each sub-option formatted as: 1-byte code + 1-byte length + N-byte data
+ * @note Each encapsulated option terminated with OPTION_END (255)
+ * @note Two-pass algorithm: first calculates size, second writes data
+ * @note Automatically splits option sequence if accumulated length exceeds 255 bytes
+ * @note Uses free_space() to find available buffer space in packet
+ *
+ * @see free_space() for buffer allocation in DHCP packet
+ * @see do_opt() for individual option data formatting
+ * @see DHOPT_VENDOR_MATCH flag for vendor-specific option selection
+ * @see RFC 2132 option 43 for vendor-encapsulated options format
+ * @see RFC 3396 for long option handling (not implemented here, uses multiple instances)
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Add vendor-encapsulated options (option 43) matching vendor class
+ * int added = do_encap_opts(daemon->dhcp_opts, OPTION_VENDOR_CLASS_OPT, DHOPT_VENDOR_MATCH, mess, end, 0);
+ * @endcode
+ */
 static int do_encap_opts(struct dhcp_opt *opt, int encap, int flag,  
 			 struct dhcp_packet *mess, unsigned char *end, int null_term)
 {
@@ -2128,6 +2949,41 @@ static int do_encap_opts(struct dhcp_opt *opt, int encap, int flag,
   return ret;
 }
 
+/**
+ * @brief Add PXE-specific vendor identification and client UUID to DHCP response
+ *
+ * @detailed
+ * Inserts vendor class identifier (option 60) and PXE client UUID (option 97) into DHCP response
+ * packet for PXE (Pre-boot Execution Environment) client support. Vendor ID identifies server
+ * as PXE-capable (default "PXEClient" or custom value). Client UUID (16-byte GUID + 1-byte type)
+ * enables PXE firmware to recognize responses from correct PXE server. Required for RFC 4578
+ * PXE compliance. UUID option only added if client provided one (preserves client's UUID).
+ *
+ * @param mess Pointer to DHCP packet structure for option insertion
+ * @param end Pointer to end of available option space in packet
+ * @param uuid Pointer to 17-byte client UUID (16-byte GUID + 1-byte type prefix), or NULL if client didn't provide UUID
+ * @param pxevendor Vendor class identifier string (e.g., "PXEClient"), or NULL to use default "PXEClient"
+ *
+ * @note Always adds vendor class identifier (option 60)
+ * @note Client UUID (option 97) only added if uuid parameter non-NULL
+ * @note UUID format: 1 byte type (0=binary GUID, 1=text) + 16 bytes GUID
+ * @note Default vendor ID "PXEClient" identifies standard PXE server
+ * @note Custom pxevendor enables vendor-specific PXE implementations
+ *
+ * @see OPTION_VENDOR_ID (option 60) for vendor class identifier
+ * @see OPTION_PXE_UUID (option 97) for client UUID
+ * @see RFC 4578 for PXE DHCP extensions
+ * @see is_pxe_client() for UUID extraction from client request
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * unsigned char client_uuid[17];
+ * if (extracted_uuid_from_client)
+ *   pxe_misc(mess, end, client_uuid, "PXEClient");
+ * else
+ *   pxe_misc(mess, end, NULL, NULL); // Just vendor ID, no UUID
+ * @endcode
+ */
 static void pxe_misc(struct dhcp_packet *mess, unsigned char *end, unsigned char *uuid, const char *pxevendor)
 {
   unsigned char *p;
@@ -2139,6 +2995,40 @@ static void pxe_misc(struct dhcp_packet *mess, unsigned char *end, unsigned char
     memcpy(p, uuid, 17);
 }
 
+/**
+ * @brief Filter vendor-matched options by network/client tags and check for forced options
+ *
+ * @detailed
+ * Second-stage filtering of vendor-encapsulated options after vendor class matching. Clears
+ * DHOPT_VENDOR_MATCH flag for options whose network/client tags don't match current client's
+ * netid set, enabling fine-grained control (e.g., different PXE boot configs per VLAN or
+ * client class). Simultaneously checks for DHOPT_FORCE flag, indicating option must be sent
+ * even if not requested, and returns 1 if any forced vendor option remains after pruning.
+ * Enables tag-based conditional vendor option delivery (--dhcp-option=tag:subnet1,encap:43,1,"data").
+ *
+ * @param netid Linked list of network and client identification tags (from dhcp-match, dhcp-host, dhcp-range)
+ *
+ * @return 1 if at least one vendor-matched option has DHOPT_FORCE flag (must send unrequested), 0 otherwise
+ *
+ * @note Only processes options with DHOPT_VENDOR_MATCH flag (set by match_vendor_opts)
+ * @note Clears DHOPT_VENDOR_MATCH if option's netid tags don't match client's tags
+ * @note Uses match_netid() with positive-only matching (tag must be present, not just not negated)
+ * @note DHOPT_FORCE flag indicates option must be sent regardless of client's parameter request list
+ * @note Return value allows do_options() to send vendor options even if not requested
+ *
+ * @see match_vendor_opts() for initial vendor class matching (sets DHOPT_VENDOR_MATCH)
+ * @see match_netid() for tag matching logic
+ * @see DHOPT_VENDOR_MATCH flag for vendor-matched options
+ * @see DHOPT_FORCE flag for mandatory option inclusion
+ * @see do_encap_opts() for final vendor option assembly
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * match_vendor_opts(vendor_class_opt, daemon->dhcp_opts);
+ * int force_vendor = prune_vendor_opts(netid);
+ * // Only vendor options matching both vendor class AND netid tags remain marked
+ * @endcode
+ */
 static int prune_vendor_opts(struct dhcp_netid *netid)
 {
   int force = 0;
@@ -2157,11 +3047,49 @@ static int prune_vendor_opts(struct dhcp_netid *netid)
 }
 
 
-/* Many UEFI PXE implementations have badly broken menu code.
-   If there's exactly one relevant menu item, we abandon the menu system,
-   and jamb the data direct into the DHCP file, siaddr and sname fields.
-   Note that in this case, we have to assume that layer zero would be requested
-   by the client PXE stack. */
+/**
+ * @brief Workaround for broken UEFI PXE menu implementations by direct boot file insertion
+ *
+ * @detailed
+ * Many UEFI PXE firmware implementations have broken menu code (fail to parse PXE boot menu
+ * options correctly). When exactly ONE pxe-service matches client architecture and tags, bypasses
+ * PXE menu system entirely by jamming boot file directly into DHCP packet's 'file' field,
+ * TFTP server IP into 'siaddr' field, and server name into 'sname' field. Only activates for
+ * UEFI architectures (CSA >= 6: x86-64 UEFI, IA32 UEFI, ARM UEFI). Returns 1 if workaround
+ * applied (single menu item), 0 if multiple or zero menu items found (use standard PXE menu).
+ * Assumes layer 0 boot requested. Appends ".0" to basename if no extension present.
+ *
+ * @param pxe_arch PXE client system architecture from option 93 (6=x86-64 UEFI, 7=x86-32 UEFI, 10=ARM32 UEFI, 11=ARM64 UEFI)
+ * @param netid Linked list of network/client tags for matching pxe-service entries
+ * @param mess Pointer to DHCP packet to populate with boot file, siaddr, sname fields
+ * @param local Local server IP address for TFTP server (fallback if service doesn't specify server)
+ * @param now Current time for a_record_from_hosts() hostname resolution
+ * @param pxe If non-zero, actually populate packet fields; if zero, only test whether workaround would apply
+ *
+ * @return 1 if exactly one matching pxe-service found (workaround applied or would apply), 0 if zero or multiple matches (use standard menu)
+ *
+ * @note Only affects UEFI architectures (pxe_arch >= 6), returns 0 for BIOS PXE (arch 0)
+ * @note Workaround bypasses PXE boot menu option 43.6/43.7/43.8/43.9 completely
+ * @note If multiple pxe-service entries match, returns 0 to allow proper menu display
+ * @note mess->siaddr set to service->server or a_record_from_hosts(service->sname) or local
+ * @note mess->sname populated with hostname or IP address as string
+ * @note mess->file populated with basename, ".0" appended if no extension
+ * @note Assumes PXE layer 0 boot (immediate boot, not menu)
+ *
+ * @see daemon->pxe_services list configured via --pxe-service directives
+ * @see match_netid() for tag-based service selection
+ * @see a_record_from_hosts() for hostname to IP resolution
+ * @see RFC 4578 for PXE client system architecture identifiers
+ * @see RFC 2132 for DHCP siaddr, sname, file fields
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * if (pxe_uefi_workaround(pxe_arch, netid, mess, context->local, now, 1))
+ *   // Workaround applied, skip normal PXE menu option assembly
+ * else
+ *   // Use standard PXE menu options
+ * @endcode
+ */
 static int pxe_uefi_workaround(int pxe_arch, struct dhcp_netid *netid, struct dhcp_packet *mess, struct in_addr local, time_t now, int pxe)
 {
   struct pxe_service *service, *found;
@@ -2207,6 +3135,46 @@ static int pxe_uefi_workaround(int pxe_arch, struct dhcp_netid *netid, struct dh
   return 1;
 }
 
+/**
+ * @brief Construct PXE boot menu options (option 43 sub-options) for client architecture
+ *
+ * @detailed
+ * Dynamically builds PXE vendor-encapsulated options (option 43 sub-options) including boot
+ * menu (SUBOPT_PXE_MENU), boot servers (SUBOPT_PXE_SERVERS), menu prompt (SUBOPT_PXE_MENU_PROMPT),
+ * and discovery control (SUBOPT_PXE_DISCOVERY). Iterates through daemon->pxe_services list,
+ * selecting services matching client architecture and network tags. Constructs menu with type
+ * codes and descriptive text. Generates server list with boot server IP addresses. Sets
+ * discovery control to disable multicast (unsupported), enable broadcast only if needed.
+ * Returns linked list of fake_opts prepended to daemon->dhcp_opts for inclusion in response.
+ * Uses static buffers daemon->dhcp_buff and daemon->dhcp_buff3 for menu and server data.
+ *
+ * @param pxe_arch PXE client system architecture from option 93 (0=x86 BIOS, 6=x86-64 UEFI, 7=x86-32 UEFI, 9=x64 EFI BC, 10=ARM32 UEFI, 11=ARM64 UEFI)
+ * @param netid Linked list of network/client tags for matching pxe-service entries
+ * @param local Local server IP address used as TFTP server for services with basename
+ * @param now Current time for a_record_from_hosts() hostname resolution
+ *
+ * @return Pointer to head of fake_opts list (prepended to daemon->dhcp_opts), or daemon->dhcp_opts if no PXE services or error
+ *
+ * @note Enforces 253-byte maximum for encapsulated option data (255 - 2 bytes for type/length)
+ * @note Boot menu format: 2-byte type + 1-byte length + variable text for each entry
+ * @note Boot servers format: 2-byte type + 1-byte count + count * 4-byte IP addresses
+ * @note Discovery control: 3=no multicast/broadcast, 2=no multicast/broadcast ok, 8=no menu (use filename)
+ * @note Fake menu prompt: 0-byte timeout (wait forever) or 255-byte timeout (wait forever if multiple choices)
+ * @note Static fake_opts allocated once and reused (4 option slots)
+ * @note Uses static buffers daemon->dhcp_buff (menu) and daemon->dhcp_buff3 (servers)
+ *
+ * @see daemon->pxe_services list configured via --pxe-service directives
+ * @see match_netid() for tag-based service selection
+ * @see a_record_from_hosts() for hostname to IP resolution
+ * @see RFC 4578 for PXE specifications
+ * @see PXE specification for option 43 sub-option format
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_opt *pxe_options = pxe_opts(pxe_arch, netid, context->local, now);
+ * // pxe_options now contains menu, servers, prompt, discovery options
+ * @endcode
+ */
 static struct dhcp_opt *pxe_opts(int pxe_arch, struct dhcp_netid *netid, struct in_addr local, time_t now)
 {
 #define NUM_OPTS 4  
@@ -2326,7 +3294,31 @@ static struct dhcp_opt *pxe_opts(int pxe_arch, struct dhcp_netid *netid, struct 
  
   return ret;
 }
-  
+
+/**
+ * @brief Initialize DHCP response packet clearing optional fields for fresh construction
+ *
+ * @detailed
+ * Prepares DHCP packet structure for response construction by zeroing fields that may contain
+ * options or data: sname (64 bytes), file (128 bytes), options area (after DHCP magic cookie),
+ * and siaddr (next server address). Leaves fixed header fields (op, htype, hlen, xid, etc.)
+ * untouched allowing response to mirror request's transaction context. Clearing enables option
+ * overload mechanism to use file/sname fields for options if needed. Essential first step before
+ * populating response with do_options() and option_put() calls. Does not clear DHCP magic cookie
+ * (first 4 bytes of options) maintaining packet structure validity.
+ *
+ * @param mess DHCP packet to initialize for response construction
+ * @param end Pointer to end of available option space for calculating clear range
+ *
+ * @note Preserves DHCP magic cookie (0x63825363) in options[0..3]
+ * @note Preserves fixed header fields (op, htype, hlen, hops, xid, secs, flags, addresses, chaddr)
+ * @note Zeroes sname, file, siaddr, and options area after magic cookie
+ * @note After clearing, file and sname available for option overload if needed
+ * @note Typically called after copying request packet into response buffer
+ *
+ * @see do_options() for populating cleared packet with response options
+ * @see free_space() for utilizing cleared file/sname areas via option overload
+ */  
 static void clear_packet(struct dhcp_packet *mess, unsigned char *end)
 {
   memset(mess->sname, 0, sizeof(mess->sname));
@@ -2335,6 +3327,39 @@ static void clear_packet(struct dhcp_packet *mess, unsigned char *end)
   mess->siaddr.s_addr = 0;
 }
 
+/**
+ * @brief Select PXE boot configuration matching client's network ID tags
+ *
+ * @detailed
+ * Searches configured PXE boot options (--dhcp-boot) to find entry matching client's network
+ * context identified by netid tags (interface, vendor class, user class, circuit-id, etc.).
+ * Implements two-pass search: first pass requires netid match, second pass (fallback) accepts
+ * boot configuration with no netid restrictions (default boot). Enables context-specific PXE
+ * boot serving different boot images to different client classes (BIOS vs UEFI, x86 vs ARM, etc.).
+ * Returns selected boot configuration containing boot filename, next-server address, and optional
+ * boot server list for PXE menu presentation.
+ *
+ * @param netid Linked list of network ID tags identifying client context (vendor, arch, interface, etc.)
+ *
+ * @return Pointer to matching dhcp_boot configuration if found, NULL if no boot config matches
+ *
+ * @note Two-pass search: first requires netid match, second accepts default (no netid)
+ * @note Network IDs include: interface name, vendor class, user class, circuit-id, remote-id,
+ *       architecture type, and tag-if conditional tags
+ * @note Enables architecture-specific boot: different boot files for BIOS, UEFI x64, UEFI ARM
+ * @note Used by pxe_opts() and dhcp_reply() to determine boot parameters for PXE responses
+ *
+ * @see match_netid() for network ID matching logic
+ * @see daemon->boot_config for configured boot option list
+ * @see pxe_opts() for generating PXE-specific DHCP options using boot config
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * struct dhcp_boot *boot = find_boot(client_netid);
+ * if (boot && boot->file)
+ *   option_put_string(mess, end, OPTION_FILENAME, boot->file, 0);
+ * @endcode
+ */
 struct dhcp_boot *find_boot(struct dhcp_netid *netid)
 {
   struct dhcp_boot *boot;
@@ -2352,6 +3377,43 @@ struct dhcp_boot *find_boot(struct dhcp_netid *netid)
   return boot;
 }
 
+/**
+ * @brief Detect PXE network boot client by vendor ID string matching
+ *
+ * @detailed
+ * Identifies PXE (Preboot eXecution Environment) clients by examining OPTION_VENDOR_ID (60) for
+ * known PXE vendor strings configured via --dhcp-vendorclass option. Common PXE vendor IDs include
+ * "PXEClient", "HTTPClient", "AAPLBSDPC" (Apple NetBoot), "Etherboot", etc. Enables dnsmasq to
+ * provide PXE-specific DHCP options (architecture type, boot menu, boot servers) only to actual
+ * PXE clients avoiding option pollution for non-PXE devices. Returns matched vendor string via
+ * output parameter for later use in PXE response customization. Essential for PXE/TFTP boot
+ * server operation.
+ *
+ * @param mess DHCP request packet to examine for PXE vendor identification
+ * @param sz Size of packet for option extraction bounds checking
+ * @param pxe_vendor Output parameter receiving pointer to matched vendor string, or unchanged if not PXE
+ *
+ * @return 1 if packet from PXE client (vendor ID matches configured PXE vendor), 0 if not PXE
+ *
+ * @note Searches OPTION_VENDOR_ID (60) option for configured PXE vendor string prefixes
+ * @note Vendor strings configured via --dhcp-vendorclass option in daemon->dhcp_pxe_vendors list
+ * @note Uses prefix matching allowing vendor ID "PXEClient:Arch:00000:UNDI:002001" to match "PXEClient"
+ * @note Returns first matching vendor string if multiple configs match
+ * @note NULL pxe_vendor parameter acceptable if vendor string not needed by caller
+ *
+ * @see daemon->dhcp_pxe_vendors for configured PXE vendor ID list
+ * @see pxe_opts() for generating PXE options for detected PXE clients
+ * @see dhcp_reply() for PXE client detection in main DHCP processing
+ * @see RFC 4578 for PXE DHCP options specification
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * const char *vendor = NULL;
+ * if (is_pxe_client(mess, packet_size, &vendor)) {
+ *   // Generate PXE-specific options for boot
+ * }
+ * @endcode
+ */
 static int is_pxe_client(struct dhcp_packet *mess, size_t sz, const char **pxe_vendor)
 {
   const unsigned char *opt = NULL;
@@ -2375,6 +3437,74 @@ static int is_pxe_client(struct dhcp_packet *mess, size_t sz, const char **pxe_v
   return 0;
 }
 
+/**
+ * @brief Populate DHCP response packet with all applicable options
+ *
+ * @detailed
+ * Core DHCP option assembly function constructing complete option set for response packets (OFFER/ACK).
+ * Processes configured DHCP options from daemon->dhcp_opts list, filtering by network ID tag matching,
+ * client parameter request list (Option 55), and option priority. Handles standard options (subnet mask,
+ * router, DNS servers, domain name, lease time, renewal times T1/T2), vendor-specific options (Option 43),
+ * vendor class options (Option 60), user class options (Option 77), PXE boot options (architecture,
+ * UUID, boot menu), FQDN option (Option 81), and encapsulated sub-options. Implements option overload
+ * for extended option space. Applies configuration priority allowing specific matches to override
+ * general defaults. Formats all options per RFC 2132 specifications handling null termination for
+ * legacy clients.
+ *
+ * @param context DHCP context for client's subnet providing network parameters (netmask, router, DNS, lease time)
+ * @param mess DHCP response packet to populate with options (already cleared via clear_packet())
+ * @param end Pointer to end of packet buffer for bounds checking
+ * @param req_options Client's parameter request list (Option 55) or NULL to send all configured options
+ * @param hostname Client's hostname from Option 12 or static config, may be NULL
+ * @param domain Domain name to assign to client for FQDN construction, may be NULL
+ * @param netid Network ID tag list for configuration matching (interface, vendor, arch, etc.)
+ * @param subnet_addr Subnet address for relay agent subnet selection (Option 82 sub-option 5)
+ * @param fqdn_flags FQDN option flags if client sent FQDN request (Option 81)
+ * @param null_term Boolean: 1 to null-terminate string options for ancient DHCP clients, 0 for RFC compliance
+ * @param pxe_arch PXE client architecture type (x86 BIOS=0, x64 UEFI=7, ARM=10, etc.) or -1 if not PXE
+ * @param uuid PXE client UUID (Option 97) for boot server matching, or NULL
+ * @param vendor_class_len Length of vendor class option if present, 0 otherwise
+ * @param now Current time for relative timestamp options
+ * @param lease_time Lease duration in seconds for T1/T2 calculation
+ * @param fuzz Random offset for T1/T2 to distribute client renewal load
+ * @param pxevendor PXE vendor ID string matched by is_pxe_client(), or NULL
+ *
+ * @note Processes options in priority order allowing specific tag matches to override general configs
+ * @note Filters options by client's parameter request list (Option 55) unless force flag set
+ * @note Handles option overload transparently via free_space() when options area exhausted
+ * @note Adds standard network parameters: subnet mask, router, DNS servers from context
+ * @note Adds lease timing: lease time, renewal T1 (50% of lease), rebind T2 (87.5% of lease)
+ * @note Adds PXE options if pxe_arch >= 0: boot menu, architecture type, UUID
+ * @note Processes vendor-specific options (Option 43) with encapsulation
+ * @note Applies fuzz to T1/T2 to prevent thundering herd of client renewals
+ *
+ * @see free_space() for option space allocation with overload handling
+ * @see option_put() for integer option insertion
+ * @see option_put_string() for string option insertion
+ * @see in_list() for checking client's parameter request list
+ * @see pxe_opts() for generating PXE-specific option list
+ * @see match_netid() for network ID tag matching
+ *
+ * RFC COMPLIANCE:
+ * - RFC 2131: Standard DHCP option processing
+ * - RFC 2132: DHCP Options and BOOTP Vendor Extensions
+ * - RFC 3046: Relay Agent Information Option
+ * - RFC 4578: PXE DHCP Options (architecture, UUID, boot menu)
+ * - RFC 4702: DHCP Client FQDN Option
+ *
+ * SIDE EFFECTS:
+ * - Modifies mess packet adding all applicable DHCP options
+ * - May use option overload consuming file/sname fields if options area full
+ * - Logs option details if OPT_LOG_OPTS enabled
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * clear_packet(mess, end);
+ * do_options(context, mess, end, req_options, hostname, domain, netid,
+ *            subnet_addr, fqdn_flags, 0, pxe_arch, uuid, 0, now, 
+ *            lease_time, 0, pxevendor);
+ * @endcode
+ */
 static void do_options(struct dhcp_context *context,
 		       struct dhcp_packet *mess,
 		       unsigned char *end, 
@@ -2785,6 +3915,45 @@ static void do_options(struct dhcp_context *context,
     }
 }
 
+/**
+ * @brief Apply configured DHCP response delay based on client/network tags
+ *
+ * @detailed
+ * Implements tag-based response delay (configured via --dhcp-reply-delay) by searching
+ * daemon->delay_conf list for first delay_config matching client's netid tags. Enables
+ * artificial response delays for specific clients or networks to work around PXE firmware
+ * bugs, prevent network storms, or throttle DHCP traffic. Two-pass search: first looks for
+ * positive tag match (delay_conf->netid explicitly matches netid), then looks for untagged
+ * default delay (delay_conf with NULL netid). Calls delay_dhcp() to implement actual delay
+ * via select() timeout, allowing other DHCP requests to be processed during delay period.
+ * Logs delay application unless OPT_QUIET_DHCP enabled.
+ *
+ * @param xid DHCP transaction ID for logging correlation (logged in network byte order)
+ * @param recvtime Timestamp when original DHCP request was received (for delay calculation)
+ * @param netid Linked list of network/client identification tags (from dhcp-match, dhcp-host, dhcp-range)
+ *
+ * @note First searches for delay_conf with explicit netid match (match_netid mode 0)
+ * @note If no explicit match, searches for delay_conf without netid (default delay, match_netid mode 1)
+ * @note Delay measured in milliseconds, configured via --dhcp-reply-delay directive
+ * @note Delay applies before sending DHCP response, not after receiving request
+ * @note Logs delay application with transaction ID and delay value (unless OPT_QUIET_DHCP)
+ * @note Uses delay_dhcp() which implements non-blocking delay (processes other requests during delay)
+ *
+ * @see daemon->delay_conf list configured via --dhcp-reply-delay directives
+ * @see match_netid() for tag matching logic (mode 0=explicit match, mode 1=match if no tags)
+ * @see delay_dhcp() for actual delay implementation (select-based non-blocking delay)
+ * @see struct delay_config in dnsmasq.h for delay configuration structure
+ *
+ * EXAMPLE USAGE:
+ * @code
+ * // Apply delay before sending DHCP response
+ * apply_delay(xid, recvtime, netid);
+ * // Response will be delayed according to matching delay_conf entry
+ * @endcode
+ *
+ * RFC COMPLIANCE:
+ * Not RFC-mandated, but useful workaround for buggy PXE firmware and DHCP storm mitigation
+ */
 static void apply_delay(u32 xid, time_t recvtime, struct dhcp_netid *netid)
 {
   struct delay_config *delay_conf;
