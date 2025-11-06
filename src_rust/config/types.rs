@@ -163,10 +163,21 @@ pub struct InterfaceName {
 }
 
 impl InterfaceName {
+    /// Creates a new interface name without an associated address
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The interface name (e.g., "eth0", "wlan0")
     pub fn new(name: String) -> Self {
         Self { name, addr: None }
     }
 
+    /// Creates a new interface name with an associated address
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The interface name (e.g., "eth0", "wlan0")
+    /// * `addr` - The IP address bound to this interface
     pub fn with_addr(name: String, addr: IpAddr) -> Self {
         Self {
             name,

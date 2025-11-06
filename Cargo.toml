@@ -168,7 +168,8 @@ lru = "0.12"
 # bitflags: Type-safe bit flag manipulation
 # - Replaces: C bit manipulation with macros
 # - Prevents: Invalid flag combinations at compile time
-bitflags = "2.6"
+# - serde feature: Enables Serialize/Deserialize for bitflags types
+bitflags = { version = "2.6", features = ["serde"] }
 
 # rand: Cryptographically secure random number generation
 # - Replaces: SURF (Secure Universal Random Function) RNG in util.c
