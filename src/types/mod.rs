@@ -3,6 +3,8 @@
 //! This module provides shared types, error definitions, and type aliases used
 //! throughout the dnsmasq-rs codebase.
 
+pub mod addresses;
+
 use thiserror::Error;
 
 /// Main error type for dnsmasq operations
