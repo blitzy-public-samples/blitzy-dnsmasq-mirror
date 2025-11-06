@@ -1,0 +1,139 @@
+# Edge Case DHCP Lease Database Fixture
+# Tests unusual but valid lease entries per src/lease.c format specification
+#
+# Format: <timestamp> <hw_addr> <ip_addr> <hostname> <client_id>
+#
+# Edge cases tested:
+# 1. Non-Ethernet hardware types with type prefix (e.g., 06-MAC for token ring)
+# 2. Missing hostnames using '*' placeholder
+# 3. Missing client IDs using '*' placeholder  
+# 4. Long hostnames approaching 255-character DNS limit
+# 5. IPv4 address edge cases (first/last usable in subnet)
+# 6. Zero hardware address length (type prefix only)
+# 7. Maximum client ID length (255 bytes)
+#
+# Hardware type encoding per src/lease.c lines 556-557:
+# - If hwaddr_type != ARPHRD_ETHER (1) OR hwaddr_len == 0:
+#   Format: <type_hex>-<mac_bytes>
+# - Otherwise: <mac_bytes> (standard Ethernet)
+#
+# Common hardware types from Linux if_arp.h:
+# - 01 (ARPHRD_ETHER): Ethernet
+# - 06 (ARPHRD_IEEE802): Token Ring  
+# - 07 (ARPHRD_ARCNET): ARCnet
+# - 13 (ARPHRD_ATM): ATM
+# - 0306 (ARPHRD_FDDI): FDDI (774 decimal = 0x0306)
+
+# Edge case 1: Token Ring hardware type (06) with full MAC address
+1735689600 06-01:23:45:67:89:ab 192.168.1.100 tokenring-host 01:02:03:04:05:06
+
+# Edge case 2: ARCnet hardware type (07) with non-standard address length
+1735689601 07-ab:cd 192.168.1.101 arcnet-host 0a:0b:0c:0d
+
+# Edge case 3: Missing hostname (using '*' placeholder per src/lease.c line 568)
+1735689602 aa:bb:cc:dd:ee:ff 192.168.1.102 * 01:02:03:04:05:06:07:08
+
+# Edge case 4: Missing client ID (using '*' placeholder per src/lease.c lines 576-577)
+1735689603 00:11:22:33:44:55 192.168.1.103 client-no-id *
+
+# Edge case 5: Both hostname and client ID missing
+1735689604 de:ad:be:ef:ca:fe 192.168.1.104 * *
+
+# Edge case 6: ATM hardware type (13) with zero-length hardware address
+# Per src/lease.c line 556, hwaddr_len == 0 triggers type prefix output
+1735689605 13- 192.168.1.105 atm-no-hwaddr 01:02:03:04:05:06:07:08:09:0a
+
+# Edge case 7: FDDI hardware type (0306 hex = 774 decimal)
+1735689606 0306-01:02:03:04:05:06 192.168.1.106 fddi-host 0f:0d:0d:01
+
+# Edge case 8: First usable IP in subnet (network + 1)
+1735689607 00:00:00:00:00:01 192.168.1.1 first-ip 01:02:03
+
+# Edge case 9: Last usable IP in subnet (broadcast - 1)
+1735689608 ff:ff:ff:ff:ff:fe 192.168.1.254 last-ip fe:dc:ba:98:76:54
+
+# Edge case 10: Long hostname approaching DNS 255-character limit
+# DNS label max is 63 chars, FQDN max is 255 chars total including dots
+1735689609 aa:bb:cc:dd:ee:11 192.168.1.110 this-is-a-very-long-hostname-that-approaches-the-maximum-allowed-length-for-dns-names-according-to-rfc1035-which-specifies-255-octets-as-the-limit.example.com 01:02:03:04:05:06:07:08:09:0a:0b:0c
+
+# Edge case 11: Long hostname with multiple labels (testing label boundaries)
+1735689610 aa:bb:cc:dd:ee:22 192.168.1.111 label1234567890123456789012345678901234567890123456789012345.label2345678901234567890123456789012345678901234567890123456.label3456789012345678901234567890123456789012345678901234567.example.com 02:03:04:05:06:07
+
+# Edge case 12: Maximum client ID length (255 bytes)
+# Client ID format: hex bytes separated by colons (255 bytes = 510 hex chars + 254 colons = 764 chars)
+# This tests parse buffer limits per src/lease.c line 160 comment (764 byte buffer check)
+1735689611 aa:bb:cc:dd:ee:33 192.168.1.112 max-clid-host 00:01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f:10:11:12:13:14:15:16:17:18:19:1a:1b:1c:1d:1e:1f:20:21:22:23:24:25:26:27:28:29:2a:2b:2c:2d:2e:2f:30:31:32:33:34:35:36:37:38:39:3a:3b:3c:3d:3e:3f:40:41:42:43:44:45:46:47:48:49:4a:4b:4c:4d:4e:4f:50:51:52:53:54:55:56:57:58:59:5a:5b:5c:5d:5e:5f:60:61:62:63:64:65:66:67:68:69:6a:6b:6c:6d:6e:6f:70:71:72:73:74:75:76:77:78:79:7a:7b:7c:7d:7e:7f:80:81:82:83:84:85:86:87:88:89:8a:8b:8c:8d:8e:8f:90:91:92:93:94:95:96:97:98:99:9a:9b:9c:9d:9e:9f:a0:a1:a2:a3:a4:a5:a6:a7:a8:a9:aa:ab:ac:ad:ae:af:b0:b1:b2:b3:b4:b5:b6:b7:b8:b9:ba:bb:bc:bd:be:bf:c0:c1:c2:c3:c4:c5:c6:c7:c8:c9:ca:cb:cc:cd:ce:cf:d0:d1:d2:d3:d4:d5:d6:d7:d8:d9:da:db:dc:dd:de:df:e0:e1:e2:e3:e4:e5:e6:e7:e8:e9:ea:eb:ec:ed:ee:ef:f0:f1:f2:f3:f4:f5:f6:f7:f8:f9:fa:fb:fc:fd:fe
+
+# Edge case 13: Non-Ethernet hardware type with missing hostname and client ID
+1735689612 06-aa:bb:cc:dd:ee:ff 192.168.1.113 * *
+
+# Edge case 14: Standard Ethernet with very short hostname (single character)
+1735689613 00:11:22:33:44:66 192.168.1.114 x 01:02
+
+# Edge case 15: Standard Ethernet with numeric-only hostname
+1735689614 00:11:22:33:44:77 192.168.1.115 12345 ab:cd:ef
+
+# Edge case 16: Hardware address with all zeros (broadcast-like, but valid)
+1735689615 00:00:00:00:00:00 192.168.1.116 all-zeros-mac 00:00:00
+
+# Edge case 17: Hardware address with all ones (shouldn't be used but syntactically valid)
+1735689616 ff:ff:ff:ff:ff:ff 192.168.1.117 all-ones-mac ff:ff:ff
+
+# Edge case 18: Client ID with all zeros
+1735689617 aa:bb:cc:dd:ee:88 192.168.1.118 zero-clid 00:00:00:00:00:00:00:00
+
+# Edge case 19: Client ID with single byte
+1735689618 aa:bb:cc:dd:ee:99 192.168.1.119 single-byte-clid 42
+
+# Edge case 20: Hostname with hyphens and underscores (RFC-compliant edge case)
+1735689619 aa:bb:cc:dd:ee:aa 192.168.1.120 my-host_name-123 01:02:03:04
+
+# Edge case 21: IP address at subnet boundaries (x.x.x.0 - network address, unusual but may appear)
+1735689620 aa:bb:cc:dd:ee:bb 192.168.2.0 network-addr 01:02:03:04:05
+
+# Edge case 22: IP address at broadcast (x.x.x.255 - broadcast address, unusual but may appear)
+1735689621 aa:bb:cc:dd:ee:cc 192.168.2.255 broadcast-addr 01:02:03:04:06
+
+# Edge case 23: Multiple hardware types in same file (mixed hardware infrastructure)
+1735689622 07-01:02:03:04 192.168.1.121 arcnet-mixed 01:02:03:04:05:06:07
+1735689623 06-05:06:07:08:09:0a 192.168.1.122 tokenring-mixed 01:02:03:04:05:06:08
+
+# Edge case 24: Extremely short but valid client IDs (2 bytes)
+1735689624 aa:bb:cc:dd:ee:dd 192.168.1.123 short-clid aa:bb
+
+# Edge case 25: Hostname with maximum single label length (63 characters per RFC 1035)
+1735689625 aa:bb:cc:dd:ee:ee 192.168.1.124 this-is-exactly-sixty-three-characters-long-label-max-length 01:02:03:04:05:06:07:08:09
+
+# Edge case 26: Zero hardware type (should be interpreted as Ethernet per src/lease.c line 197-198)
+# Note: Type 0 with explicit prefix tests backward compatibility handling
+1735689626 00-01:02:03:04:05:06 192.168.1.125 zero-hwtype 01:02:03:04:05:06:07
+
+# Edge case 27: Large hardware type value (testing hex parsing)
+1735689627 ff-aa:bb:cc:dd:ee:ff 192.168.1.126 large-hwtype 01:02:03:04
+
+# Edge case 28: Hardware type requiring two bytes in hex (e.g., 256 = 0x100)
+# FDDI is 774 decimal which requires multi-byte representation
+1735689628 0306-01:23:45:67:89:ab:cd 192.168.1.127 fddi-long-addr 01:02:03:04:05:06:07:08:09:0a:0b
+
+# Edge case 29: Client ID with non-sequential pattern (testing hex parsing correctness)
+1735689629 aa:bb:cc:dd:ee:ff 192.168.1.128 pattern-clid de:ad:be:ef:ca:fe:ba:be
+
+# Edge case 30: Hostname with dots but not FQDN (relative hostname with dots)
+1735689630 aa:bb:cc:dd:ee:00 192.168.1.129 host.with.dots 01:02:03:04
+
+# Edge case 31: Very large timestamp (testing 64-bit time_t, year 2038+ compatibility)
+# Using timestamp for year 2050 (2524608000)
+2524608000 aa:bb:cc:dd:ee:01 192.168.1.130 future-lease 01:02:03:04:05
+
+# Edge case 32: Timestamp at exactly Unix epoch (testing zero/minimal values)
+1735689631 aa:bb:cc:dd:ee:02 192.168.1.131 recent-lease 01:02:03:04:05:06
+
+# Edge case 33: Hardware address with mixed case hex (testing case-insensitive parsing)
+# Note: C implementation outputs lowercase, but parser should accept mixed
+1735689632 Aa:Bb:Cc:Dd:Ee:03 192.168.1.132 mixed-case-mac 01:02:03:04:05:06:07
+
+# Edge case 34: Client ID with mixed case hex
+1735689633 aa:bb:cc:dd:ee:04 192.168.1.133 mixed-case-clid Aa:Bb:Cc:Dd:Ee:Ff
+
+# Edge case 35: Lease with all maximum-length fields combined
+1735689634 06-01:23:45:67:89:ab:cd:ef 192.168.1.134 maximum-length-hostname-with-many-labels-to-test-buffer-limits.subdomain.example.domain.com 00:01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f:10:11:12:13:14:15:16:17:18:19:1a:1b:1c:1d:1e:1f
