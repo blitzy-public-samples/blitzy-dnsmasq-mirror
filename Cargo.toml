@@ -160,6 +160,13 @@ lru = "0.12"
 # - Prevents: Invalid flag combinations at compile time
 bitflags = "2.6"
 
+# rand: Cryptographically secure random number generation
+# - Replaces: SURF (Secure Universal Random Function) RNG in util.c
+# - Provides: ChaCha8Rng for thread-safe cryptographic randomness
+# - Usage: DNS query ID randomization, source port randomization, IPv6 interface IDs
+# - Thread-safe: Uses thread-local storage (thread_rng())
+rand = "0.8"
+
 # -----------------------------------------------------------------------------
 # Cryptography (Section 0.11.4) - Optional DNSSEC support
 # -----------------------------------------------------------------------------
