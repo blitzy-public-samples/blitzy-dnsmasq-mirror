@@ -71,9 +71,7 @@ conntrack = []
 # HAVE_IPSET - Linux ipset integration (ipset.c)
 ipset = []
 # HAVE_NFTSET - nftables set manipulation (nftset.c)
-# NOTE: nftables v0.4 not found on crates.io - feature disabled until correct version identified
-# nftables = ["dep:nftables"]
-nftables = []
+nftables = ["dep:nftables"]
 
 # Build and runtime options
 # HAVE_SCRIPT - DHCP script execution on lease changes (helper.c)
@@ -128,8 +126,7 @@ zbus = { version = "4.4", optional = true }
 # NOTE: nfnetlink crate does not exist on crates.io - disabled pending alternative
 # nfnetlink = { version = "0.5", optional = true }
 # nftables integration - replaces libnftables
-# NOTE: nftables v0.4 not found - disabled pending version verification
-# nftables = { version = "0.4", optional = true }
+nftables = { version = "0.6.3", optional = true }
 # Lua scripting - replaces lua5.2
 mlua = { version = "0.10", optional = true, features = ["lua54", "send"] }
 # Internationalized domain names - replaces libidn2

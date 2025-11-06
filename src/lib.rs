@@ -31,3 +31,6 @@ pub mod dhcp;
 // TFTP subsystem - Trivial File Transfer Protocol server
 #[cfg(feature = "tftp")]
 pub mod tftp;
+
+// Platform-specific implementations
+pub mod platform;
