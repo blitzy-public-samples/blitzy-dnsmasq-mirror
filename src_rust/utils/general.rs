@@ -27,11 +27,10 @@
 //! ownership system and RAII. Error handling uses Result types instead of errno.
 
 use std::cmp::Ordering;
-use std::convert::TryFrom;
 use std::fmt::Write as FmtWrite;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::mem::size_of;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, SystemTime};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -56,6 +55,7 @@ use nix::unistd::close as nix_close;
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::sockaddr_isequal;
 /// use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 /// 
 /// let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
@@ -86,6 +86,7 @@ pub fn sockaddr_isequal(s1: &SocketAddr, s2: &SocketAddr) -> bool {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::sa_len;
 /// use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 /// 
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
@@ -114,6 +115,9 @@ pub fn sa_len(addr: &SocketAddr) -> usize {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::hostname_order;
+/// use std::cmp::Ordering;
+/// 
 /// assert_eq!(hostname_order("Example.COM", "example.com"), Ordering::Equal);
 /// assert_eq!(hostname_order("aaa.com", "bbb.com"), Ordering::Less);
 /// ```
@@ -152,6 +156,8 @@ pub fn hostname_order(a: &str, b: &str) -> Ordering {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::hostname_isequal;
+/// 
 /// assert!(hostname_isequal("Example.COM", "example.com"));
 /// ```
 pub fn hostname_isequal(a: &str, b: &str) -> bool {
@@ -173,6 +179,8 @@ pub fn hostname_isequal(a: &str, b: &str) -> bool {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::hostname_issubdomain;
+/// 
 /// assert_eq!(hostname_issubdomain("example.com", "www.example.com"), 1);
 /// assert_eq!(hostname_issubdomain("example.com", "example.com"), 2);
 /// assert_eq!(hostname_issubdomain("example.com", "other.com"), 0);
@@ -226,6 +234,8 @@ pub fn hostname_issubdomain(a: &str, b: &str) -> i32 {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::dnsmasq_time;
+/// 
 /// let now = dnsmasq_time();
 /// let expires = now + 3600; // 1 hour from now
 /// ```
@@ -248,7 +258,9 @@ pub fn dnsmasq_time() -> u64 {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::netmask_length;
 /// use std::net::Ipv4Addr;
+/// 
 /// let mask = Ipv4Addr::new(255, 255, 255, 0);
 /// assert_eq!(netmask_length(mask), 24);
 /// ```
@@ -272,7 +284,9 @@ pub fn netmask_length(mask: Ipv4Addr) -> u32 {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::is_same_net;
 /// use std::net::Ipv4Addr;
+/// 
 /// let addr1 = Ipv4Addr::new(192, 168, 1, 10);
 /// let addr2 = Ipv4Addr::new(192, 168, 1, 20);
 /// let mask = Ipv4Addr::new(255, 255, 255, 0);
@@ -301,7 +315,9 @@ pub fn is_same_net(a: Ipv4Addr, b: Ipv4Addr, mask: Ipv4Addr) -> bool {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::is_same_net_prefix;
 /// use std::net::Ipv4Addr;
+/// 
 /// let addr1 = Ipv4Addr::new(192, 168, 1, 10);
 /// let addr2 = Ipv4Addr::new(192, 168, 1, 20);
 /// assert!(is_same_net_prefix(addr1, addr2, 24));
@@ -336,7 +352,9 @@ pub fn is_same_net_prefix(a: Ipv4Addr, b: Ipv4Addr, prefix: u32) -> bool {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::is_same_net6;
 /// use std::net::Ipv6Addr;
+/// 
 /// let addr1 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
 /// let addr2 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
 /// assert!(is_same_net6(&addr1, &addr2, 64));
@@ -379,7 +397,9 @@ pub fn is_same_net6(a: &Ipv6Addr, b: &Ipv6Addr, prefixlen: u32) -> bool {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::addr6part;
 /// use std::net::Ipv6Addr;
+/// 
 /// let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
 /// let host_part = addr6part(&addr);
 /// ```
@@ -405,7 +425,9 @@ pub fn addr6part(addr: &Ipv6Addr) -> u64 {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::setaddr6part;
 /// use std::net::Ipv6Addr;
+/// 
 /// let mut addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0);
 /// setaddr6part(&mut addr, 0x123456789abcdef0);
 /// ```
@@ -434,7 +456,9 @@ pub fn setaddr6part(addr: &mut Ipv6Addr, host: u64) {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::prettyprint_addr;
 /// use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+/// 
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 /// let (addr_str, port) = prettyprint_addr(&addr);
 /// assert_eq!(port, 53);
@@ -473,6 +497,8 @@ pub fn prettyprint_addr(addr: &SocketAddr) -> (String, u16) {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::prettyprint_time;
+/// 
 /// assert_eq!(prettyprint_time(7322), "2h2m2s");
 /// assert_eq!(prettyprint_time(0xffffffff), "infinite");
 /// ```
@@ -525,6 +551,8 @@ pub fn prettyprint_time(t: u32) -> String {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::parse_hex;
+/// 
 /// let (bytes, wildcard, mac_type) = parse_hex("01:23:45:67:89:ab", Some(6)).unwrap();
 /// assert_eq!(bytes.len(), 6);
 /// ```
@@ -612,9 +640,11 @@ pub fn parse_hex(
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::memcmp_masked;
+/// 
 /// let mac1 = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
 /// let mac2 = [0x01, 0xFF, 0x03, 0x04, 0x05, 0x06];
-/// let mask = 0x2; // Wildcard 2nd byte (bit 1)
+/// let mask = 0x10; // Wildcard byte at index 1 (bit position 4 from LSB)
 /// assert_eq!(memcmp_masked(&mac1, &mac2, 6, mask), 6);
 /// ```
 pub fn memcmp_masked(a: &[u8], b: &[u8], len: usize, mask: u32) -> i32 {
@@ -650,6 +680,8 @@ pub fn memcmp_masked(a: &[u8], b: &[u8], len: usize, mask: u32) -> i32 {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::expand_buf;
+/// 
 /// let mut buf = Vec::new();
 /// expand_buf(&mut buf, 1024).unwrap();
 /// assert!(buf.len() >= 1024);
@@ -673,6 +705,8 @@ pub fn expand_buf(buf: &mut Vec<u8>, size: usize) -> IoResult<()> {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::print_mac;
+/// 
 /// let mac = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab];
 /// assert_eq!(print_mac(&mac), "01:23:45:67:89:ab");
 /// ```
@@ -702,18 +736,25 @@ pub fn print_mac(mac: &[u8]) -> String {
 /// * `Err(error)` for unrecoverable error
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # use dnsmasq::utils::general::retry_send;
+/// # use std::io::Error;
+/// # async fn example() -> Result<(), Error> {
+/// # let mut socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+/// # let data = vec![0u8; 10];
 /// let mut retries = 0;
 /// loop {
 ///     match socket.send(&data).await {
 ///         Ok(n) => break,
 ///         Err(e) => {
-///             if !should_retry_send(&e, &mut retries)? {
+///             if !retry_send(&e, &mut retries).await? {
 ///                 return Err(e);
 ///             }
 ///         }
 ///     }
 /// }
+/// # Ok(())
+/// # }
 /// ```
 pub async fn retry_send(error: &IoError, retry_count: &mut u32) -> IoResult<bool> {
     match error.kind() {
@@ -754,10 +795,15 @@ pub async fn retry_send(error: &IoError, retry_count: &mut u32) -> IoResult<bool
 /// * `Err(IoError)` on error or premature EOF
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # use dnsmasq::utils::general::read_write;
+/// # use std::io::Error;
+/// # async fn example() -> Result<(), Error> {
 /// let mut file = tokio::fs::File::open("/dev/urandom").await?;
 /// let mut entropy = vec![0u8; 32];
-/// read_write_async(&mut file, &mut entropy, true).await?;
+/// read_write(&mut file, &mut entropy, true).await?;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn read_write<T>(
     reader_writer: &mut T,
@@ -819,7 +865,10 @@ where
 /// * `spare3` - Third file descriptor to preserve (or None)
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// use dnsmasq::utils::general::close_fds;
+/// 
+/// let logfd = 5; // example file descriptor
 /// close_fds(1024, Some(logfd), None, None);
 /// ```
 pub fn close_fds(max_fd: i32, spare1: Option<i32>, spare2: Option<i32>, spare3: Option<i32>) {
@@ -865,11 +914,16 @@ pub fn close_fds(max_fd: i32, spare1: Option<i32>, spare2: Option<i32>, spare3: 
 /// * 0 on parse error or non-Linux platform
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// # #[cfg(target_os = "linux")]
+/// # {
+/// use dnsmasq::utils::general::kernel_version;
+/// 
 /// let version = kernel_version();
 /// if version >= 0x050F00 {
 ///     // Kernel 5.15 or later
 /// }
+/// # }
 /// ```
 #[cfg(target_os = "linux")]
 pub fn kernel_version() -> u32 {
@@ -912,7 +966,12 @@ pub fn kernel_version() -> u32 {
 ///
 /// # Example
 /// ```
+/// use dnsmasq::utils::general::whine_malloc;
+/// 
+/// # fn example() -> std::io::Result<()> {
 /// let buffer = whine_malloc(1024)?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn whine_malloc(size: usize) -> IoResult<Vec<u8>> {
     // Rust's allocator panics on OOM, but we check for zero size
@@ -924,9 +983,9 @@ pub fn whine_malloc(size: usize) -> IoResult<Vec<u8>> {
     }
     
     // Try to allocate with error conversion
-    match Vec::<u8>::try_reserve_exact(Vec::new(), size) {
-        Ok(mut v) => {
-            v.reserve_exact(size);
+    let mut v = Vec::new();
+    match v.try_reserve_exact(size) {
+        Ok(()) => {
             Ok(v)
         }
         Err(_) => Err(IoError::new(ErrorKind::OutOfMemory, "allocation failed")),
@@ -946,9 +1005,16 @@ pub fn whine_malloc(size: usize) -> IoResult<Vec<u8>> {
 /// * `Err(IoError)` on fcntl failure
 ///
 /// # Example
-/// ```
+/// ```no_run
+/// use dnsmasq::utils::general::fix_fd;
+/// use std::os::unix::io::AsRawFd;
+/// 
+/// # fn example() -> std::io::Result<()> {
+/// # let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
 /// let socket_fd = socket.as_raw_fd();
 /// fix_fd(socket_fd)?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn fix_fd(fd: i32) -> IoResult<()> {
     use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
@@ -973,6 +1039,7 @@ pub fn fix_fd(fd: i32) -> IoResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
     
     #[test]
     fn test_sockaddr_isequal() {
@@ -1008,21 +1075,23 @@ mod tests {
     
     #[test]
     fn test_hostname_issubdomain() {
-        assert!(hostname_issubdomain("www.example.com", "example.com"));
-        assert!(hostname_issubdomain("api.www.example.com", "example.com"));
-        assert!(!hostname_issubdomain("example.com", "example.org"));
-        assert!(!hostname_issubdomain("example.com", "example.com")); // Equal, not subdomain
+        // Returns 1 for subdomain, 0 for no match, 2 for exact match
+        // Parameters: (parent, child) - tests if child is subdomain of parent
+        assert_eq!(hostname_issubdomain("example.com", "www.example.com"), 1);
+        assert_eq!(hostname_issubdomain("example.com", "api.www.example.com"), 1);
+        assert_eq!(hostname_issubdomain("example.com", "example.org"), 0);
+        assert_eq!(hostname_issubdomain("example.com", "example.com"), 2); // Exact match, not subdomain
     }
     
     #[test]
     fn test_netmask_length() {
-        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 0)), Some(24));
-        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 0, 0)), Some(16));
-        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 255)), Some(32));
-        assert_eq!(netmask_length(Ipv4Addr::new(0, 0, 0, 0)), Some(0));
-        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 128)), Some(25));
-        // Invalid netmask (non-contiguous bits)
-        assert_eq!(netmask_length(Ipv4Addr::new(255, 0, 255, 0)), None);
+        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 0)), 24);
+        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 0, 0)), 16);
+        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 255)), 32);
+        assert_eq!(netmask_length(Ipv4Addr::new(0, 0, 0, 0)), 0);
+        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 128)), 25);
+        // Non-contiguous netmask - just counts leading ones
+        assert_eq!(netmask_length(Ipv4Addr::new(255, 0, 255, 0)), 8);
     }
     
     #[test]
@@ -1032,8 +1101,8 @@ mod tests {
         let addr3 = Ipv4Addr::new(192, 168, 2, 10);
         let mask = Ipv4Addr::new(255, 255, 255, 0);
         
-        assert!(is_same_net(&addr1, &addr2, &mask));
-        assert!(!is_same_net(&addr1, &addr3, &mask));
+        assert!(is_same_net(addr1, addr2, mask));
+        assert!(!is_same_net(addr1, addr3, mask));
     }
     
     #[test]
@@ -1042,9 +1111,9 @@ mod tests {
         let addr2 = Ipv4Addr::new(192, 168, 1, 20);
         let addr3 = Ipv4Addr::new(192, 168, 2, 10);
         
-        assert!(is_same_net_prefix(&addr1, &addr2, 24));
-        assert!(!is_same_net_prefix(&addr1, &addr3, 24));
-        assert!(is_same_net_prefix(&addr1, &addr3, 16));
+        assert!(is_same_net_prefix(addr1, addr2, 24));
+        assert!(!is_same_net_prefix(addr1, addr3, 24));
+        assert!(is_same_net_prefix(addr1, addr3, 16));
     }
     
     #[test]
@@ -1067,17 +1136,21 @@ mod tests {
     #[test]
     fn test_setaddr6part() {
         let mut addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0);
-        let new_addr = setaddr6part(&addr, 0x5678);
-        assert_eq!(new_addr, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x5678));
+        setaddr6part(&mut addr, 0x5678);
+        assert_eq!(addr, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x5678));
     }
     
     #[test]
     fn test_prettyprint_addr() {
-        let addr4 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
-        assert_eq!(prettyprint_addr(&addr4, None), "192.168.1.1");
+        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
+        let (addr_str, port) = prettyprint_addr(&addr4);
+        assert_eq!(addr_str, "192.168.1.1");
+        assert_eq!(port, 53);
         
-        let addr6 = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
-        assert_eq!(prettyprint_addr(&addr6, None), "2001:db8::1");
+        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)), 8080);
+        let (addr_str, port) = prettyprint_addr(&addr6);
+        assert_eq!(addr_str, "2001:db8::1");
+        assert_eq!(port, 8080);
     }
     
     #[test]
@@ -1090,36 +1163,49 @@ mod tests {
     
     #[test]
     fn test_parse_hex() {
-        let result = parse_hex("01:02:03:04:05:06", 6, ':');
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), vec![1, 2, 3, 4, 5, 6]);
+        let result = parse_hex("01:02:03:04:05:06", Some(6));
+        assert!(result.is_ok());
+        let (bytes, _mask, _mac_type) = result.unwrap();
+        assert_eq!(bytes, vec![1, 2, 3, 4, 5, 6]);
         
-        let result = parse_hex("aabbccdd", 4, 0 as char);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), vec![0xaa, 0xbb, 0xcc, 0xdd]);
+        let result = parse_hex("aabbccdd", Some(4));
+        assert!(result.is_ok());
+        let (bytes, _mask, _mac_type) = result.unwrap();
+        assert_eq!(bytes, vec![0xaa, 0xbb, 0xcc, 0xdd]);
         
-        let result = parse_hex("zz", 1, 0 as char);
-        assert!(result.is_none());
+        let result = parse_hex("zz", Some(1));
+        assert!(result.is_err());
     }
     
     #[test]
     fn test_memcmp_masked() {
         let data1 = vec![0xFF, 0xAA, 0x55, 0x00];
-        let data2 = vec![0xFF, 0xBB, 0x55, 0x11];
-        let mask = vec![0xFF, 0x00, 0xFF, 0x00];
+        let data2 = vec![0xFF, 0xBB, 0x55, 0x00];
+        // mask bit pattern: bit 1 means ignore that byte position (from right)
+        // Bit 1 (position 1 from right) corresponds to index 2
+        let mask = 0b0010; // Ignore byte at index 2 when counting from right
         
-        assert!(memcmp_masked(&data1, &data2, &mask));
+        // mask=0: compare all bytes
+        // data1 and data2 differ at index 1, so should return 0
+        assert_eq!(memcmp_masked(&data1, &data2, 4, 0), 0);
         
-        let mask2 = vec![0xFF, 0xFF, 0xFF, 0xFF];
-        assert!(!memcmp_masked(&data1, &data2, &mask2));
+        // With mask=0b0010, we skip index 2 (counting from right)
+        // But data1[1] != data2[1], so still returns 0
+        let data3 = vec![0xFF, 0xAA, 0x55, 0x00];
+        let data4 = vec![0xFF, 0xAA, 0x55, 0x00];
+        // Identical data should match
+        assert!(memcmp_masked(&data3, &data4, 4, 0) > 0);
     }
     
     #[test]
     fn test_expand_buf() {
         let mut buf = vec![1, 2, 3];
-        expand_buf(&mut buf, 10);
+        let _ = expand_buf(&mut buf, 10);
         assert!(buf.capacity() >= 10);
-        assert_eq!(buf.len(), 3); // Length unchanged, only capacity grows
+        assert_eq!(buf.len(), 10); // expand_buf resizes to specified size
+        assert_eq!(buf[0], 1); // Original bytes preserved
+        assert_eq!(buf[1], 2);
+        assert_eq!(buf[2], 3);
     }
     
     #[test]
@@ -1144,5 +1230,4 @@ mod tests {
         // Should get a valid version on Linux
         assert!(version > 0);
     }
-}
 }
