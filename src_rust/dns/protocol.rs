@@ -36,8 +36,6 @@
 //! - RFC 6891: Extension Mechanisms for DNS (EDNS0)
 //! - RFC 8914: Extended DNS Errors (EDE codes)
 
-use bitflags::bitflags;
-
 // ============================================================================
 // Port and Size Constants
 // ============================================================================
