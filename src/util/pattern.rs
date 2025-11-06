@@ -792,7 +792,18 @@ mod tests {
 
     #[test]
     fn test_validate_dns_name_total_too_long() {
-        let long_name = format!("{}.com", "a".repeat(250));
+        // Create a name with many short labels that together exceed 253 characters
+        // Each label is "aa" (2 chars), so "aa.bb.cc..." pattern
+        // To exceed 253, we need enough labels: each "aa." is 3 chars
+        // 85 labels of "aa." = 255 chars, minus the trailing dot = 254 chars
+        let mut labels = Vec::new();
+        for i in 0..85 {
+            labels.push(format!("a{}", (b'a' + (i % 26) as u8) as char));
+        }
+        let long_name = labels.join(".");
+        // Verify the length is indeed > 253
+        assert!(long_name.len() > 253, "Test setup: name should be longer than 253 chars, got {}", long_name.len());
+        
         let result = validate_dns_name(&long_name);
         assert!(matches!(result, Err(ValidationError::InvalidLength { .. })));
     }
@@ -830,8 +841,16 @@ mod tests {
 
     #[test]
     fn test_validate_dns_pattern_local_tld() {
+        // Pattern with wildcard NOT in final two labels but with "local" TLD
+        // Should fail with ReservedTld error, not WildcardInFinalLabels
         assert!(matches!(
-            validate_dns_pattern("*.local"),
+            validate_dns_pattern("*.example.local"),
+            Err(ValidationError::ReservedTld { .. })
+        ));
+        
+        // Pattern without wildcards with "local" TLD should also fail with ReservedTld
+        assert!(matches!(
+            validate_dns_pattern("host.local"),
             Err(ValidationError::ReservedTld { .. })
         ));
     }
