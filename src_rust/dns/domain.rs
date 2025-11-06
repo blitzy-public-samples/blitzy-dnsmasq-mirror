@@ -30,7 +30,7 @@ impl std::fmt::Display for DomainError {
             DomainError::TooLong => write!(f, "Domain name exceeds maximum length"),
             DomainError::LabelTooLong => write!(f, "Label exceeds maximum length"),
             DomainError::EmptyLabel => write!(f, "Empty label in domain name"),
-            DomainError::InvalidCharacter(c) => write!(f, "Invalid character: '{}'", c),
+            DomainError::InvalidCharacter(c) => write!(f, "Invalid character: '{c}'"),
             DomainError::Empty => write!(f, "Empty domain name"),
         }
     }
@@ -47,6 +47,10 @@ impl std::error::Error for DomainError {}
 /// # Returns
 ///
 /// Returns Ok(()) if valid, Err(DomainError) if invalid.
+///
+/// # Errors
+///
+/// Returns an error if the domain name is empty, too long, or contains invalid labels.
 pub fn validate_domain_name(domain: &str) -> Result<(), DomainError> {
     if domain.is_empty() {
         return Err(DomainError::Empty);
@@ -93,6 +97,7 @@ pub fn validate_domain_name(domain: &str) -> Result<(), DomainError> {
 /// # Returns
 ///
 /// Returns normalized domain name in lowercase.
+#[must_use] 
 pub fn normalize_domain(domain: &str) -> String {
     domain.to_lowercase()
 }
@@ -107,6 +112,7 @@ pub fn normalize_domain(domain: &str) -> String {
 /// # Returns
 ///
 /// Returns true if domain ends with suffix (case-insensitive).
+#[must_use] 
 pub fn is_subdomain(domain: &str, suffix: &str) -> bool {
     let domain_lower = domain.to_lowercase();
     let suffix_lower = suffix.to_lowercase();
@@ -116,7 +122,7 @@ pub fn is_subdomain(domain: &str, suffix: &str) -> bool {
     }
 
     // Check if it ends with "." + suffix
-    domain_lower.ends_with(&format!(".{}", suffix_lower))
+    domain_lower.ends_with(&format!(".{suffix_lower}"))
 }
 
 /// Extract the parent domain from a domain name
@@ -137,6 +143,7 @@ pub fn is_subdomain(domain: &str, suffix: &str) -> bool {
 /// assert_eq!(parent_domain("example.com"), Some("com".to_string()));
 /// assert_eq!(parent_domain("com"), None);
 /// ```
+#[must_use] 
 pub fn parent_domain(domain: &str) -> Option<String> {
     let first_dot = domain.find('.')?;
     Some(domain[first_dot + 1..].to_string())
@@ -159,6 +166,7 @@ pub fn parent_domain(domain: &str) -> Option<String> {
 /// assert_eq!(label_count("www.example.com"), 3);
 /// assert_eq!(label_count("example.com"), 2);
 /// ```
+#[must_use] 
 pub fn label_count(domain: &str) -> usize {
     if domain.is_empty() {
         return 0;
@@ -175,6 +183,7 @@ pub fn label_count(domain: &str) -> usize {
 /// # Returns
 ///
 /// Returns the TLD (e.g., "com").
+#[must_use] 
 pub fn tld(domain: &str) -> &str {
     domain
         .rsplit('.')
@@ -192,6 +201,7 @@ pub fn tld(domain: &str) -> &str {
 /// # Returns
 ///
 /// Returns true if domains are equal (case-insensitive).
+#[must_use] 
 pub fn domain_equals(domain1: &str, domain2: &str) -> bool {
     domain1.eq_ignore_ascii_case(domain2)
 }
@@ -214,6 +224,7 @@ pub fn domain_equals(domain1: &str, domain2: &str) -> bool {
 /// use dnsmasq::dns::domain::reverse_domain_ipv4;
 /// assert_eq!(reverse_domain_ipv4("192.168.1.1"), "1.1.168.192.in-addr.arpa");
 /// ```
+#[must_use] 
 pub fn reverse_domain_ipv4(ip: &str) -> String {
     let parts: Vec<&str> = ip.split('.').collect();
     if parts.len() != 4 {

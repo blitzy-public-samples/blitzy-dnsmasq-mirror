@@ -22,12 +22,12 @@
 //! # Purpose
 //!
 //! SLAAC allows IPv6 hosts to automatically configure their addresses without requiring
-//! DHCPv6 stateful address assignment. This implementation:
+//! `DHCPv6` stateful address assignment. This implementation:
 //!
 //! - Generates IPv6 addresses from RA prefixes + EUI-64 interface identifiers
-//! - Performs Duplicate Address Detection (DAD) via ICMPv6 Echo Request/Reply
+//! - Performs Duplicate Address Detection (DAD) via `ICMPv6` Echo Request/Reply
 //! - Registers confirmed SLAAC addresses in DNS cache for hostname resolution
-//! - Coordinates with DHCPv6 via M-bit/O-bit flags in Router Advertisements
+//! - Coordinates with `DHCPv6` via M-bit/O-bit flags in Router Advertisements
 //!
 //! # Key Components
 //!
@@ -35,8 +35,8 @@
 //!   * Insert 0xFFFE in middle of MAC address (e.g., 00:11:22:33:44:55 → 00:11:22:FF:FE:33:44:55)
 //!   * Flip universal/local bit (bit 6 of first octet)
 //!
-//! - **Duplicate Address Detection**: Verify address uniqueness via ICMPv6 ping
-//!   * Send ICMPv6 Echo Request to candidate address
+//! - **Duplicate Address Detection**: Verify address uniqueness via `ICMPv6` ping
+//!   * Send `ICMPv6` Echo Request to candidate address
 //!   * If no Echo Reply after exponential backoff (up to 2048 seconds), address is confirmed
 //!   * If Echo Reply received, address conflict detected
 //!
@@ -47,7 +47,7 @@
 //! - **RFC 4862**: IPv6 Stateless Address Autoconfiguration (Section 5.5.3 address formation)
 //! - **RFC 4291**: IPv6 Addressing Architecture (Appendix A Modified EUI-64 format)
 //! - **RFC 2464**: Transmission of IPv6 over Ethernet (MAC to EUI-64 conversion)
-//! - **RFC 4443**: ICMPv6 (Echo Request/Reply for DAD)
+//! - **RFC 4443**: `ICMPv6` (Echo Request/Reply for DAD)
 //!
 //! # Memory Safety Benefits (C to Rust Refactor)
 //!
@@ -98,6 +98,7 @@ pub struct SlaacAddress {
 
 impl SlaacAddress {
     /// Create a new SLAAC address requiring DAD validation
+    #[must_use] 
     pub fn new(addr: Ipv6Addr, now: SystemTime) -> Self {
         Self {
             addr,
@@ -107,11 +108,13 @@ impl SlaacAddress {
     }
 
     /// Check if the address is confirmed (DAD completed successfully)
+    #[must_use] 
     pub fn is_confirmed(&self) -> bool {
         self.backoff == 0
     }
 
     /// Check if the address is abandoned (DAD failed after max retries)
+    #[must_use] 
     pub fn is_abandoned(&self) -> bool {
         self.ping_time == SystemTime::UNIX_EPOCH
     }
@@ -134,12 +137,16 @@ impl SlaacAddress {
 /// exponential backoff retry logic.
 #[derive(Debug)]
 pub struct SlaacManager {
-    /// ICMPv6 Echo Request identifier for DAD probes
+    /// `ICMPv6` Echo Request identifier for DAD probes
     ping_id: u16,
 }
 
 impl SlaacManager {
     /// Create a new SLAAC manager
+    ///
+    /// # Panics
+    /// Panics if the system time is before the Unix epoch (January 1, 1970)
+    #[must_use] 
     pub fn new() -> Self {
         use std::time::UNIX_EPOCH;
         
@@ -152,7 +159,8 @@ impl SlaacManager {
         Self { ping_id }
     }
 
-    /// Get the ICMPv6 ping identifier
+    /// Get the `ICMPv6` ping identifier
+    #[must_use] 
     pub fn ping_id(&self) -> u16 {
         self.ping_id
     }
@@ -167,13 +175,14 @@ impl SlaacManager {
     /// # Returns
     ///
     /// Next scheduled ping time with exponential backoff and jitter
+    #[must_use] 
     pub fn calculate_next_ping_time(&self, now: SystemTime, backoff: u8) -> SystemTime {
         // Exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048 seconds
-        let delay_secs = 1u64 << (backoff.min(11) as u64);
+        let delay_secs = 1u64 << u64::from(backoff.min(11));
         
         // Add small random jitter (0-10% of delay) to avoid thundering herd
         let jitter_secs = (delay_secs / 10).max(1);
-        let jitter = (self.ping_id as u64 % jitter_secs) as u64;
+        let jitter = u64::from(self.ping_id) % jitter_secs;
         
         now + Duration::from_secs(delay_secs + jitter)
     }
@@ -191,13 +200,13 @@ impl Default for SlaacManager {
 /// Hardware address types supported for EUI-64 conversion
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardwareAddressType {
-    /// Ethernet (ARPHRD_ETHER = 1)
+    /// Ethernet (`ARPHRD_ETHER` = 1)
     Ethernet,
-    /// IEEE 802.11 wireless (ARPHRD_IEEE802 = 6)
+    /// IEEE 802.11 wireless (`ARPHRD_IEEE802` = 6)
     Ieee802,
-    /// EUI-64 (ARPHRD_EUI64 = 27)
+    /// EUI-64 (`ARPHRD_EUI64` = 27)
     Eui64,
-    /// IEEE 1394 FireWire (ARPHRD_IEEE1394 = 24)
+    /// IEEE 1394 `FireWire` (`ARPHRD_IEEE1394` = 24)
     Ieee1394,
 }
 
@@ -238,6 +247,9 @@ pub enum HardwareAddressType {
 ///
 /// - RFC 4291 Appendix A: Modified EUI-64 format
 /// - RFC 2464 Section 4: MAC-48 to EUI-64 conversion
+///
+/// # Errors
+/// Returns an error if the generated address is invalid (though this should not occur in practice)
 pub fn generate_eui64_from_mac(mac: &[u8; 6], prefix: &Ipv6Addr) -> Result<Ipv6Addr, String> {
     let mut octets = prefix.octets();
     
@@ -267,6 +279,9 @@ pub fn generate_eui64_from_mac(mac: &[u8; 6], prefix: &Ipv6Addr) -> Result<Ipv6A
 /// # Returns
 ///
 /// Complete IPv6 address with EUI-64 interface identifier
+///
+/// # Errors
+/// Returns an error if the generated address is invalid (though this should not occur in practice)
 pub fn generate_eui64_from_eui64(eui64: &[u8; 8], prefix: &Ipv6Addr) -> Result<Ipv6Addr, String> {
     let mut octets = prefix.octets();
     
@@ -280,6 +295,7 @@ pub fn generate_eui64_from_eui64(eui64: &[u8; 8], prefix: &Ipv6Addr) -> Result<I
 /// Check if two IPv6 addresses are equal
 ///
 /// Convenience function for address comparison in SLAAC address management.
+#[must_use] 
 pub fn addresses_equal(addr1: &Ipv6Addr, addr2: &Ipv6Addr) -> bool {
     addr1 == addr2
 }
@@ -303,7 +319,7 @@ pub fn addresses_equal(addr1: &Ipv6Addr, addr2: &Ipv6Addr) -> bool {
 /// Generate and validate SLAAC IPv6 addresses from Router Advertisement prefixes.
 ///
 /// This function is the main entry point for SLAAC address generation. It combines
-/// RA prefixes from configured DHCPv6 contexts with Modified EUI-64 interface
+/// RA prefixes from configured `DHCPv6` contexts with Modified EUI-64 interface
 /// identifiers derived from hardware addresses to construct candidate SLAAC addresses.
 ///
 /// # C Implementation Reference
@@ -314,7 +330,7 @@ pub fn addresses_equal(addr1: &Ipv6Addr, addr2: &Ipv6Addr) -> bool {
 /// ```
 ///
 /// The C implementation:
-/// 1. Iterates through all DHCPv6 contexts with RA-stateless mode
+/// 1. Iterates through all `DHCPv6` contexts with RA-stateless mode
 /// 2. For each context prefix, generates EUI-64 address from lease hardware address
 /// 3. Creates `slaac_address` entry in lease's SLAAC address list
 /// 4. Initializes DAD ping timing with randomized backoff
@@ -331,7 +347,7 @@ pub fn addresses_equal(addr1: &Ipv6Addr, addr2: &Ipv6Addr) -> bool {
 /// **STUB IMPLEMENTATION**: This function currently does nothing. Full implementation
 /// requires:
 /// - Integration with `dhcp::v6::lease::LeaseManager`
-/// - Access to DHCPv6 context configuration
+/// - Access to `DHCPv6` context configuration
 /// - Integration with DNS cache for hostname resolution
 ///
 /// # Future Implementation
@@ -364,7 +380,7 @@ pub fn slaac_add_addrs(_lease_id: &str, _now: std::time::SystemTime, _force: boo
 
 /// Perform periodic Duplicate Address Detection (DAD) for SLAAC addresses.
 ///
-/// This function implements the periodic DAD protocol by sending ICMPv6 Echo Request
+/// This function implements the periodic DAD protocol by sending `ICMPv6` Echo Request
 /// probes to tentative SLAAC addresses and managing retry timing with exponential backoff.
 /// It is called from the main event loop timer mechanism.
 ///
@@ -378,8 +394,8 @@ pub fn slaac_add_addrs(_lease_id: &str, _now: std::time::SystemTime, _force: boo
 /// The C implementation:
 /// 1. Iterates through all DHCP leases
 /// 2. For each lease's SLAAC address list, checks ping timing
-/// 3. Sends ICMPv6 Echo Request to addresses due for DAD probe
-/// 4. Updates ping_time with exponential backoff (1s → 2s → 4s → ...)
+/// 3. Sends `ICMPv6` Echo Request to addresses due for DAD probe
+/// 4. Updates `ping_time` with exponential backoff (1s → 2s → 4s → ...)
 /// 5. Returns next scheduled event time for timer
 ///
 /// # Parameters
@@ -396,7 +412,7 @@ pub fn slaac_add_addrs(_lease_id: &str, _now: std::time::SystemTime, _force: boo
 /// **STUB IMPLEMENTATION**: This function currently returns `now + 60 seconds`. Full
 /// implementation requires:
 /// - Integration with `dhcp::v6::lease::LeaseManager`
-/// - Async ICMPv6 socket for Echo Request transmission
+/// - Async `ICMPv6` socket for Echo Request transmission
 /// - Timer scheduling integration with tokio runtime
 ///
 /// # Future Implementation
@@ -430,15 +446,16 @@ pub fn slaac_add_addrs(_lease_id: &str, _now: std::time::SystemTime, _force: boo
 ///     Ok(next_event)
 /// }
 /// ```
-pub fn periodic_slaac(_now: std::time::SystemTime) -> std::time::SystemTime {
+#[must_use] 
+pub fn periodic_slaac(now: std::time::SystemTime) -> std::time::SystemTime {
     // STUB: Return now + 60 seconds as placeholder next event time
     // Full implementation requires dhcp::v6::lease and network::sockets integration
-    _now + std::time::Duration::from_secs(60)
+    now + std::time::Duration::from_secs(60)
 }
 
-/// Process ICMPv6 Echo Reply to detect address conflicts and confirm SLAAC addresses.
+/// Process `ICMPv6` Echo Reply to detect address conflicts and confirm SLAAC addresses.
 ///
-/// This function handles incoming ICMPv6 Echo Reply packets during Duplicate Address
+/// This function handles incoming `ICMPv6` Echo Reply packets during Duplicate Address
 /// Detection. If a reply is received for a tentative address, it indicates a duplicate
 /// and the address must be abandoned. If no reply is received within the timeout,
 /// the address is confirmed and added to the DNS cache.
@@ -452,7 +469,7 @@ pub fn periodic_slaac(_now: std::time::SystemTime) -> std::time::SystemTime {
 /// ```
 ///
 /// The C implementation:
-/// 1. Extracts ICMPv6 Echo Reply identifier and sequence number
+/// 1. Extracts `ICMPv6` Echo Reply identifier and sequence number
 /// 2. Iterates through all leases to find matching SLAAC address
 /// 3. If address matches sender and identifier matches our probe:
 ///    - Duplicate detected → remove address from lease
@@ -464,7 +481,7 @@ pub fn periodic_slaac(_now: std::time::SystemTime) -> std::time::SystemTime {
 /// # Parameters
 ///
 /// * `sender` - IPv6 address that sent the Echo Reply
-/// * `packet` - Raw ICMPv6 packet bytes (includes Echo Reply header and data)
+/// * `packet` - Raw `ICMPv6` packet bytes (includes Echo Reply header and data)
 /// * `interface` - Network interface name where reply was received
 ///
 /// # Current Status
@@ -472,7 +489,7 @@ pub fn periodic_slaac(_now: std::time::SystemTime) -> std::time::SystemTime {
 /// **STUB IMPLEMENTATION**: This function currently does nothing. Full implementation
 /// requires:
 /// - Integration with `dhcp::v6::lease::LeaseManager`
-/// - ICMPv6 packet parsing (identifier, sequence matching)
+/// - `ICMPv6` packet parsing (identifier, sequence matching)
 /// - DNS cache integration for address confirmation
 ///
 /// # Future Implementation

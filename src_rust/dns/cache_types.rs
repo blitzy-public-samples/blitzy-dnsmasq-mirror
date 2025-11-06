@@ -38,12 +38,21 @@ pub enum CacheData {
     /// Pointer (reverse lookup domain)
     Ptr(String),
     /// Mail exchange (priority, hostname)
-    Mx { priority: u16, hostname: String },
+    Mx { 
+        /// MX priority
+        priority: u16, 
+        /// Mail server hostname
+        hostname: String 
+    },
     /// Service record
     Srv {
+        /// Service priority
         priority: u16,
+        /// Service weight
         weight: u16,
+        /// Service port
         port: u16,
+        /// Target hostname
         target: String,
     },
     /// Text record
@@ -54,6 +63,7 @@ pub enum CacheData {
 
 impl CacheData {
     /// Get the cache entry type for this data
+    #[must_use] 
     pub fn entry_type(&self) -> CacheEntryType {
         match self {
             CacheData::A(_) => CacheEntryType::A,
@@ -97,6 +107,7 @@ impl CacheEntry {
     /// * `name` - Domain name
     /// * `data` - Resource record data
     /// * `ttl` - Time-to-live in seconds
+    #[must_use] 
     pub fn new(name: String, data: CacheData, ttl: u32) -> Self {
         Self {
             name,
@@ -108,61 +119,64 @@ impl CacheEntry {
     }
 
     /// Check if this cache entry has expired
+    #[must_use] 
     pub fn is_expired(&self) -> bool {
         let elapsed = self.created_at.elapsed();
-        elapsed >= Duration::from_secs(self.ttl as u64)
+        elapsed >= Duration::from_secs(u64::from(self.ttl))
     }
 
     /// Get remaining TTL in seconds
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn remaining_ttl(&self) -> u32 {
         let elapsed = self.created_at.elapsed().as_secs() as u32;
         self.ttl.saturating_sub(elapsed)
     }
 
     /// Get the entry type
+    #[must_use] 
     pub fn entry_type(&self) -> CacheEntryType {
         self.data.entry_type()
     }
 }
 
-/// Cache entry flags
-///
-/// Replaces C bit flags with type-safe bitflags.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CacheFlags {
-    /// Entry came from /etc/hosts or static configuration
-    pub is_static: bool,
-    
-    /// Entry has been validated by DNSSEC
-    pub is_dnssec_validated: bool,
-    
-    /// Entry is a negative cache (NXDOMAIN or NODATA)
-    pub is_negative: bool,
-    
-    /// Entry is from authoritative nameserver
-    pub is_authoritative: bool,
+bitflags::bitflags! {
+    /// Cache entry flags
+    ///
+    /// Replaces C bit flags with type-safe bitflags.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct CacheFlags: u8 {
+        /// Entry came from /etc/hosts or static configuration
+        const IS_STATIC = 0b0001;
+        
+        /// Entry has been validated by DNSSEC
+        const IS_DNSSEC_VALIDATED = 0b0010;
+        
+        /// Entry is a negative cache (NXDOMAIN or NODATA)
+        const IS_NEGATIVE = 0b0100;
+        
+        /// Entry is from authoritative nameserver
+        const IS_AUTHORITATIVE = 0b1000;
+    }
 }
 
 impl CacheFlags {
     /// Create default flags
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Create flags for static entry
+    #[must_use] 
     pub fn static_entry() -> Self {
-        Self {
-            is_static: true,
-            ..Default::default()
-        }
+        Self::IS_STATIC
     }
 
     /// Create flags for negative cache entry
+    #[must_use] 
     pub fn negative_entry() -> Self {
-        Self {
-            is_negative: true,
-            ..Default::default()
-        }
+        Self::IS_NEGATIVE
     }
 }
 
@@ -179,6 +193,7 @@ pub struct CacheKey {
 
 impl CacheKey {
     /// Create a new cache key
+    #[must_use] 
     pub fn new(name: String, entry_type: CacheEntryType) -> Self {
         Self { name, entry_type }
     }
@@ -207,11 +222,14 @@ pub struct CacheStats {
 
 impl CacheStats {
     /// Create new empty statistics
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Calculate cache hit rate (0.0 to 1.0)
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
@@ -295,14 +313,14 @@ mod tests {
     #[test]
     fn test_cache_flags() {
         let mut flags = CacheFlags::new();
-        assert!(!flags.is_static);
-        assert!(!flags.is_dnssec_validated);
+        assert!(!flags.contains(CacheFlags::IS_STATIC));
+        assert!(!flags.contains(CacheFlags::IS_DNSSEC_VALIDATED));
 
-        flags.is_static = true;
-        assert!(flags.is_static);
+        flags.insert(CacheFlags::IS_STATIC);
+        assert!(flags.contains(CacheFlags::IS_STATIC));
 
         let static_flags = CacheFlags::static_entry();
-        assert!(static_flags.is_static);
+        assert!(static_flags.contains(CacheFlags::IS_STATIC));
     }
 
     #[test]

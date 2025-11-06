@@ -2,7 +2,7 @@
 //!
 //! This module provides cryptographically secure random number generation,
 //! replacing the C implementation's SURF (Secure Universal Random Function)
-//! RNG with Rust's rand crate. The rand crate uses ChaCha8Rng which provides
+//! RNG with Rust's rand crate. The rand crate uses `ChaCha8Rng` which provides
 //! better cryptographic properties than SURF while being thread-safe and
 //! requiring no manual initialization.
 //!
@@ -16,9 +16,9 @@
 //! - Separate outleft counters for different bit widths
 //!
 //! This Rust implementation eliminates all these issues:
-//! - Thread-safe via thread_rng() (thread-local storage)
+//! - Thread-safe via `thread_rng()` (thread-local storage)
 //! - Automatic initialization (no explicit init needed)
-//! - No manual state management (handled by ChaCha8Rng)
+//! - No manual state management (handled by `ChaCha8Rng`)
 //! - No possibility of uninitialized RNG usage (enforced by type system)
 //!
 //! # Usage
@@ -46,7 +46,7 @@
 //!
 //! # Performance
 //!
-//! ChaCha8Rng provides comparable performance to SURF while offering:
+//! `ChaCha8Rng` provides comparable performance to SURF while offering:
 //! - Better cryptographic properties (256-bit security)
 //! - Longer period (2^256 vs SURF's 2^128)
 //! - Thread-safety without locks (thread-local storage)
@@ -57,9 +57,9 @@ use tracing::{debug, info, trace};
 
 /// Generate a cryptographically-strong 16-bit random number.
 ///
-/// This function replaces the C implementation's rand16() which used the SURF
-/// algorithm. It uses Rust's thread_rng() which provides a thread-local
-/// ChaCha8Rng instance that is automatically initialized on first use.
+/// This function replaces the C implementation's `rand16()` which used the SURF
+/// algorithm. It uses Rust's `thread_rng()` which provides a thread-local
+/// `ChaCha8Rng` instance that is automatically initialized on first use.
 ///
 /// # Returns
 ///
@@ -86,14 +86,14 @@ use tracing::{debug, info, trace};
 ///
 /// This function is highly optimized:
 /// - Thread-local storage eliminates lock contention
-/// - ChaCha8 uses SIMD instructions on supported platforms
+/// - `ChaCha8` uses SIMD instructions on supported platforms
 /// - Comparable or better performance than C's SURF implementation
 ///
 /// # Security
 ///
-/// ChaCha8Rng provides 256-bit security vs SURF's estimated 128-bit security.
+/// `ChaCha8Rng` provides 256-bit security vs SURF's estimated 128-bit security.
 /// The RNG is automatically seeded from the OS's secure random source
-/// (/dev/urandom on Linux, CryptGenRandom on Windows, etc.) on first use.
+/// (/dev/urandom on Linux, `CryptGenRandom` on Windows, etc.) on first use.
 ///
 /// # RFC Compliance
 ///
@@ -121,8 +121,8 @@ pub fn rand16() -> u16 {
 
 /// Generate a cryptographically-strong 32-bit random number.
 ///
-/// This function replaces the C implementation's rand32() which used the SURF
-/// algorithm. It provides full 32-bit entropy using ChaCha8Rng.
+/// This function replaces the C implementation's `rand32()` which used the SURF
+/// algorithm. It provides full 32-bit entropy using `ChaCha8Rng`.
 ///
 /// # Returns
 ///
@@ -152,13 +152,13 @@ pub fn rand16() -> u16 {
 ///
 /// # Performance
 ///
-/// ChaCha8 generates random numbers in 64-byte blocks internally, making
-/// successive calls very efficient due to buffering within thread_rng().
+/// `ChaCha8` generates random numbers in 64-byte blocks internally, making
+/// successive calls very efficient due to buffering within `thread_rng()`.
 ///
 /// # Security
 ///
 /// Provides full 32-bit entropy with cryptographic strength. Each call
-/// returns an independent random value drawn from ChaCha8's output stream.
+/// returns an independent random value drawn from `ChaCha8`'s output stream.
 ///
 /// # RFC Compliance
 ///
@@ -185,9 +185,9 @@ pub fn rand32() -> u32 {
 
 /// Generate a cryptographically-strong 64-bit random number.
 ///
-/// This function replaces the C implementation's rand64() which combined two
+/// This function replaces the C implementation's `rand64()` which combined two
 /// consecutive 32-bit SURF outputs. It provides full 64-bit entropy in a single
-/// call using ChaCha8Rng.
+/// call using `ChaCha8Rng`.
 ///
 /// # Returns
 ///
@@ -196,7 +196,7 @@ pub fn rand32() -> u32 {
 /// # Thread Safety
 ///
 /// This function is thread-safe. The C implementation had a particularly
-/// complex thread-safety issue with rand64() using a local static outleft
+/// complex thread-safety issue with `rand64()` using a local static outleft
 /// variable separate from the file-scope outleft, causing potential state
 /// corruption under concurrent access. This Rust implementation eliminates
 /// that issue entirely.
@@ -220,14 +220,14 @@ pub fn rand32() -> u32 {
 ///
 /// # Performance
 ///
-/// Slightly more efficient than calling rand32() twice due to ChaCha8's
+/// Slightly more efficient than calling `rand32()` twice due to `ChaCha8`'s
 /// internal block generation. The RNG generates 64-bit words natively on
 /// 64-bit platforms.
 ///
 /// # Security
 ///
-/// Provides full 64-bit entropy with cryptographic strength. ChaCha8 has a
-/// proven security record and is used in TLS 1.3 and WireGuard.
+/// Provides full 64-bit entropy with cryptographic strength. `ChaCha8` has a
+/// proven security record and is used in TLS 1.3 and `WireGuard`.
 ///
 /// # RFC Compliance
 ///
@@ -261,13 +261,13 @@ pub fn rand64() -> u64 {
 /// Initialize random number generator (compatibility function).
 ///
 /// This function exists for API compatibility with the C implementation which
-/// required explicit initialization via rand_init(). In the Rust implementation,
+/// required explicit initialization via `rand_init()`. In the Rust implementation,
 /// initialization is automatic and this function is a no-op.
 ///
 /// The C implementation read entropy from /dev/urandom during initialization
-/// and would terminate the process with die() if entropy could not be obtained.
+/// and would terminate the process with `die()` if entropy could not be obtained.
 /// The Rust implementation handles initialization automatically on first use
-/// of thread_rng(), using the OS's secure random source, and panics internally
+/// of `thread_rng()`, using the OS's secure random source, and panics internally
 /// only if the OS random source is completely unavailable (extremely rare).
 ///
 /// # Thread Safety
@@ -289,9 +289,9 @@ pub fn rand64() -> u64 {
 ///
 /// # Migration Note
 ///
-/// When porting C code that calls rand_init() in main(), you can:
-/// 1. Keep the rand_init() call for clarity (it's a no-op)
-/// 2. Remove the rand_init() call entirely (RNG auto-initializes)
+/// When porting C code that calls `rand_init()` in `main()`, you can:
+/// 1. Keep the `rand_init()` call for clarity (it's a no-op)
+/// 2. Remove the `rand_init()` call entirely (RNG auto-initializes)
 ///
 /// Either approach is correct. The C implementation's fatal error handling
 /// for initialization failure is not needed in Rust.

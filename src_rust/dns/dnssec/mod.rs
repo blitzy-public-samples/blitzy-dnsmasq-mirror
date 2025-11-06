@@ -2,6 +2,7 @@
 
 /// Configuration for DNSSEC validation
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct DnssecConfig {
     /// Enable DNSSEC validation
     pub enabled: bool,
@@ -9,14 +10,6 @@ pub struct DnssecConfig {
     pub trust_anchor_file: Option<String>,
 }
 
-impl Default for DnssecConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            trust_anchor_file: None,
-        }
-    }
-}
 
 /// Result of DNSSEC validation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,19 +26,27 @@ pub enum ValidationResult {
 
 /// DNSSEC validator for signature verification
 pub struct DnssecValidator {
-    config: DnssecConfig,
+    _config: DnssecConfig,
+}
+
+impl Default for DnssecValidator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DnssecValidator {
     /// Create a new DNSSEC validator with default configuration
+    #[must_use] 
     pub fn new() -> Self {
         Self {
-            config: DnssecConfig::default(),
+            _config: DnssecConfig::default(),
         }
     }
 
     /// Create a new DNSSEC validator with custom configuration
+    #[must_use] 
     pub fn with_config(config: DnssecConfig) -> Self {
-        Self { config }
+        Self { _config: config }
     }
 }

@@ -131,7 +131,7 @@ pub enum SignalEvent {
     /// Triggers daemon termination sequence: kills TCP child processes with SIGALRM,
     /// flushes pending DHCP lease changes via helper process, closes lease file stream,
     /// updates DNSSEC timestamp file, removes PID file, logs shutdown message, exits
-    /// with EC_GOOD status code.
+    /// with `EC_GOOD` status code.
     Shutdown,
 
     /// SIGUSR1: Dump DNS cache statistics to logs
@@ -145,13 +145,13 @@ pub enum SignalEvent {
     ///
     /// Triggers `log_reopen()` to close and reopen log file with same path, enabling
     /// log rotation via external tool (logrotate). TCP child processes continue logging
-    /// to old FD until they exit within CHILD_LIFETIME timeout.
+    /// to old FD until they exit within `CHILD_LIFETIME` timeout.
     RotateLogs,
 
     /// SIGCHLD: Child process exited or terminated
     ///
     /// Triggers `waitpid(-1, WNOHANG)` loop to reap zombie TCP child processes. dnsmasq
-    /// forks up to MAX_PROCS=20 children for long-lived DNS-over-TCP connections. Child
+    /// forks up to `MAX_PROCS=20` children for long-lived DNS-over-TCP connections. Child
     /// PIDs tracked in `daemon->tcp_pids[]` array.
     ChildExited,
 
@@ -196,7 +196,7 @@ pub enum SignalError {
     /// Failed to register signal handler with OS (errno from sigaction)
     ///
     /// Occurs when `signal()` registration fails due to invalid signal number,
-    /// resource exhaustion (RLIMIT_SIGPENDING), or permission denied. Wraps
+    /// resource exhaustion (`RLIMIT_SIGPENDING`), or permission denied. Wraps
     /// underlying `std::io::Error` with signal type context.
     #[error("Failed to register signal handler for {signal_type}: {source}")]
     SignalRegistrationFailed {
@@ -295,7 +295,7 @@ pub enum SignalError {
 /// - Signal delivery latency: <1ms (tokio async signal notification)
 /// - Memory overhead: ~8KB per spawned task (tokio default stack size)
 /// - CPU overhead: Negligible (event-driven, no polling)
-/// - Channel capacity: 32 events (prevents signal storm DoS)
+/// - Channel capacity: 32 events (prevents signal storm `DoS`)
 ///
 /// # Thread Safety
 ///
@@ -325,13 +325,13 @@ impl SignalHandler {
     ///
     /// # Signal Registration
     ///
-    /// - **SIGHUP** → SignalEvent::Reload
-    /// - **SIGUSR1** → SignalEvent::DumpCache
-    /// - **SIGUSR2** → SignalEvent::RotateLogs
-    /// - **SIGTERM** → SignalEvent::Shutdown
-    /// - **SIGINT** → SignalEvent::TimeCheck (or Shutdown in debug mode)
-    /// - **SIGCHLD** → SignalEvent::ChildExited
-    /// - **SIGALRM** → SignalEvent::Alarm
+    /// - **SIGHUP** → `SignalEvent::Reload`
+    /// - **SIGUSR1** → `SignalEvent::DumpCache`
+    /// - **SIGUSR2** → `SignalEvent::RotateLogs`
+    /// - **SIGTERM** → `SignalEvent::Shutdown`
+    /// - **SIGINT** → `SignalEvent::TimeCheck` (or Shutdown in debug mode)
+    /// - **SIGCHLD** → `SignalEvent::ChildExited`
+    /// - **SIGALRM** → `SignalEvent::Alarm`
     ///
     /// # Errors
     ///
@@ -594,7 +594,7 @@ impl Debug for SignalHandler {
         f.debug_struct("SignalHandler")
             .field("task_count", &self.task_handles.len())
             .field("channel_capacity", &32)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

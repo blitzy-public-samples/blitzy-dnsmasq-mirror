@@ -22,8 +22,8 @@
 //! # Purpose
 //!
 //! The RA server announces the router's presence, provides IPv6 prefix information
-//! for SLAAC, and coordinates with DHCPv6 via M-bit and O-bit flags. This replaces
-//! the C implementation in `src/radv.c` with async I/O using tokio for ICMPv6
+//! for SLAAC, and coordinates with `DHCPv6` via M-bit and O-bit flags. This replaces
+//! the C implementation in `src/radv.c` with async I/O using tokio for `ICMPv6`
 //! socket handling.
 //!
 //! # Key Features
@@ -31,7 +31,7 @@
 //! - Periodic unsolicited Router Advertisements (default every 200-600 seconds)
 //! - Immediate RA responses to Router Solicitation requests
 //! - Multiple prefix advertisement with per-prefix lifetimes
-//! - DHCPv6 coordination via managed/other configuration flags
+//! - `DHCPv6` coordination via managed/other configuration flags
 //! - DNS server advertisement via RDNSS option (RFC 8106)
 //! - Interface-specific RA configuration
 //!
@@ -54,7 +54,7 @@
 //! Compared to C implementation:
 //! - No manual packet buffer management (Vec<u8> with automatic deallocation)
 //! - No pointer arithmetic for option insertion (safe slice operations)
-//! - No htons/htonl byte order conversions (automatic with to_be_bytes())
+//! - No htons/htonl byte order conversions (automatic with `to_be_bytes()`)
 //! - Tokio async I/O eliminates blocking socket operations
 //!
 //! # Usage Example
@@ -81,7 +81,7 @@ use super::protocol::{RaPacket, PrefixOption};
 ///
 /// # Thread Safety
 ///
-/// Wrapped in Arc<RwLock<T>> for safe shared access across async tasks.
+/// Wrapped in Arc<`RwLock`<T>> for safe shared access across async tasks.
 /// Multiple tasks can read configuration, while periodic RA transmission
 /// holds write lock during packet construction.
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ pub struct RadVServer {
     managed_flag: bool,
     /// Other configuration flag (O-bit)
     other_flag: bool,
-    /// Map of IPv6 prefixes to advertise (prefix -> PrefixOption)
+    /// Map of IPv6 prefixes to advertise (prefix -> `PrefixOption`)
     prefixes: HashMap<Ipv6Addr, PrefixOption>,
     /// Minimum interval between unsolicited RAs in seconds (default: 200)
     min_interval: u32,
@@ -116,7 +116,7 @@ impl RadVServer {
     /// - Router lifetime: 1800 seconds (30 minutes)
     /// - Hop limit: 64
     /// - M-bit: false (SLAAC only)
-    /// - O-bit: false (no DHCPv6 for other config)
+    /// - O-bit: false (no `DHCPv6` for other config)
     /// - RA interval: 200-600 seconds
     ///
     /// # Examples
@@ -124,6 +124,7 @@ impl RadVServer {
     /// ```rust,ignore
     /// let server = RadVServer::new("eth0".to_string());
     /// ```
+    #[must_use] 
     pub fn new(interface: String) -> Self {
         Self {
             interface,
@@ -139,8 +140,8 @@ impl RadVServer {
 
     /// Set the managed address configuration flag (M-bit)
     ///
-    /// When true, indicates that addresses are available via DHCPv6 stateful
-    /// address configuration. Hosts should use DHCPv6 for address assignment.
+    /// When true, indicates that addresses are available via `DHCPv6` stateful
+    /// address configuration. Hosts should use `DHCPv6` for address assignment.
     pub fn set_managed_flag(&mut self, managed: bool) {
         self.managed_flag = managed;
     }
@@ -148,8 +149,8 @@ impl RadVServer {
     /// Set the other configuration flag (O-bit)
     ///
     /// When true, indicates that other configuration information (DNS, NTP, etc.)
-    /// is available via DHCPv6. Hosts may use SLAAC for addresses but should
-    /// query DHCPv6 for additional configuration.
+    /// is available via `DHCPv6`. Hosts may use SLAAC for addresses but should
+    /// query `DHCPv6` for additional configuration.
     pub fn set_other_flag(&mut self, other: bool) {
         self.other_flag = other;
     }
@@ -167,7 +168,7 @@ impl RadVServer {
     ///
     /// # Arguments
     ///
-    /// * `prefix` - IPv6 prefix (e.g., 2001:db8::)
+    /// * `prefix` - IPv6 prefix (e.g., `2001:db8::`)
     /// * `prefix_len` - Prefix length in bits (typically 64)
     /// * `valid_lifetime` - Valid lifetime in seconds
     /// * `preferred_lifetime` - Preferred lifetime in seconds
@@ -199,11 +200,13 @@ impl RadVServer {
     }
 
     /// Get the interface name
+    #[must_use] 
     pub fn interface(&self) -> &str {
         &self.interface
     }
 
     /// Get the current RA configuration
+    #[must_use] 
     pub fn get_ra_packet(&self) -> RaPacket {
         let mut ra = RaPacket::new()
             .with_lifetime(self.router_lifetime);
@@ -221,11 +224,13 @@ impl RadVServer {
     }
 
     /// Get all configured prefixes
+    #[must_use] 
     pub fn prefixes(&self) -> &HashMap<Ipv6Addr, PrefixOption> {
         &self.prefixes
     }
 
     /// Get the RA transmission interval range
+    #[must_use] 
     pub fn interval_range(&self) -> (u32, u32) {
         (self.min_interval, self.max_interval)
     }
@@ -237,7 +242,7 @@ impl RadVServer {
     /// * `min_interval` - Minimum interval in seconds (default: 200)
     /// * `max_interval` - Maximum interval in seconds (default: 600)
     ///
-    /// Per RFC 4861, MinRtrAdvInterval must be <= 0.75 * MaxRtrAdvInterval.
+    /// Per RFC 4861, `MinRtrAdvInterval` must be <= 0.75 * `MaxRtrAdvInterval`.
     /// This method does not enforce that constraint; callers are responsible
     /// for providing valid values.
     pub fn set_interval_range(&mut self, min_interval: u32, max_interval: u32) {
@@ -246,9 +251,9 @@ impl RadVServer {
     }
 }
 
-/// Builder for RadVServer configuration
+/// Builder for `RadVServer` configuration
 ///
-/// Provides a fluent interface for constructing RadVServer instances with
+/// Provides a fluent interface for constructing `RadVServer` instances with
 /// custom configuration.
 ///
 /// # Examples
@@ -268,6 +273,7 @@ pub struct RadVServerBuilder {
 
 impl RadVServerBuilder {
     /// Create a new builder with default configuration
+    #[must_use] 
     pub fn new(interface: String) -> Self {
         Self {
             server: RadVServer::new(interface),
@@ -275,24 +281,28 @@ impl RadVServerBuilder {
     }
 
     /// Set the managed address configuration flag (M-bit)
+    #[must_use] 
     pub fn with_managed_flag(mut self, managed: bool) -> Self {
         self.server.set_managed_flag(managed);
         self
     }
 
     /// Set the other configuration flag (O-bit)
+    #[must_use] 
     pub fn with_other_flag(mut self, other: bool) -> Self {
         self.server.set_other_flag(other);
         self
     }
 
     /// Set the router lifetime
+    #[must_use] 
     pub fn with_router_lifetime(mut self, lifetime: u16) -> Self {
         self.server.set_router_lifetime(lifetime);
         self
     }
 
     /// Add an IPv6 prefix to advertise
+    #[must_use] 
     pub fn add_prefix(
         mut self,
         prefix: Ipv6Addr,
@@ -305,12 +315,14 @@ impl RadVServerBuilder {
     }
 
     /// Set the RA transmission interval range
+    #[must_use] 
     pub fn with_interval_range(mut self, min_interval: u32, max_interval: u32) -> Self {
         self.server.set_interval_range(min_interval, max_interval);
         self
     }
 
-    /// Build the configured RadVServer
+    /// Build the configured `RadVServer`
+    #[must_use] 
     pub fn build(self) -> RadVServer {
         self.server
     }

@@ -21,16 +21,16 @@
 
 use super::types::Config;
 
-/// Default DNS port (from C: NAMESERVER_PORT in config.h)
+/// Default DNS port (from C: `NAMESERVER_PORT` in config.h)
 pub const DEFAULT_DNS_PORT: u16 = 53;
 
-/// Default DHCP server port (from C: DHCP_SERVER_PORT in config.h)
+/// Default DHCP server port (from C: `DHCP_SERVER_PORT` in config.h)
 pub const DEFAULT_DHCP_SERVER_PORT: u16 = 67;
 
-/// Default DHCPv6 server port (from C: DHCPV6_SERVER_PORT in config.h)
+/// Default `DHCPv6` server port (from C: `DHCPV6_SERVER_PORT` in config.h)
 pub const DEFAULT_DHCP6_SERVER_PORT: u16 = 547;
 
-/// Default TFTP port (from C: TFTP_PORT in config.h)
+/// Default TFTP port (from C: `TFTP_PORT` in config.h)
 pub const DEFAULT_TFTP_PORT: u16 = 69;
 
 /// Default DNS cache size (from C: CACHESIZ in config.h)
@@ -39,10 +39,10 @@ pub const DEFAULT_CACHE_SIZE: usize = 150;
 /// Default forward table size (from C: FTABSIZ in config.h)
 pub const DEFAULT_FTAB_SIZE: usize = 150;
 
-/// Default lease time in seconds (from C: DEFAULT_LEASE_TIME in config.h)
+/// Default lease time in seconds (from C: `DEFAULT_LEASE_TIME` in config.h)
 pub const DEFAULT_LEASE_TIME: u32 = 3600; // 1 hour
 
-/// Default EDNS packet max size (from C: EDNS_PKTSZ in config.h)
+/// Default EDNS packet max size (from C: `EDNS_PKTSZ` in config.h)
 pub const DEFAULT_EDNS_PACKET_MAX: u16 = 4096;
 
 /// Default configuration file path on Linux
@@ -93,6 +93,7 @@ pub const DEFAULT_LEASE_FILE: &str = "/var/db/dnsmasq.leases";
 /// assert_eq!(config.dns.port, 53);
 /// assert_eq!(config.dns.cache_size, 150);
 /// ```
+#[must_use] 
 pub fn default_config() -> Config {
     // Use the Default trait implementation from types.rs
     // All subsystem defaults (DnsConfig, DhcpConfig, etc.) are defined in types.rs

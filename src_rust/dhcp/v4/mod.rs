@@ -1,12 +1,19 @@
-//! DHCPv4 server implementation
+//! `DHCPv4` server implementation
 
 pub mod protocol;
 
-/// DHCPv4 server
+/// `DHCPv4` server
 pub struct DhcpV4Server {}
 
+impl Default for DhcpV4Server {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DhcpV4Server {
-    /// Create new DHCPv4 server
+    /// Create new `DHCPv4` server
+    #[must_use] 
     pub fn new() -> Self {
         Self {}
     }

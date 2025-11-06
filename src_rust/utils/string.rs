@@ -45,7 +45,7 @@
 //! # References
 //!
 //! - C source: `src/util.c` (lines 348-702)
-//! - RFC 952: DoD Internet Host Table Specification (hostname syntax)
+//! - RFC 952: `DoD` Internet Host Table Specification (hostname syntax)
 //! - RFC 1123: Requirements for Internet Hosts (allows leading digit in hostname)
 //! - RFC 1035: Domain Names - Implementation and Specification (wire format)
 //! - RFC 5890: Internationalized Domain Names for Applications (IDNA2008)
@@ -66,7 +66,7 @@ enum CheckNameResult {
     NeedsIdnEncoding,
 }
 
-/// Safe string copy with guaranteed null termination (Rust equivalent of C safe_strncpy)
+/// Safe string copy with guaranteed null termination (Rust equivalent of C `safe_strncpy`)
 ///
 /// Copies `src` string to a newly allocated `String`, truncating if necessary to fit
 /// within `max_size` bytes. Unlike C's `strncpy()`, this always produces a valid
@@ -101,7 +101,8 @@ enum CheckNameResult {
 ///
 /// # Performance
 ///
-/// O(n) where n = min(src.len(), max_size). Allocates new String on heap.
+/// O(n) where n = `min(src.len()`, `max_size`). Allocates new String on heap.
+#[must_use] 
 pub fn safe_strncpy(src: &str, max_size: usize) -> String {
     if max_size == 0 {
         return String::new();
@@ -113,7 +114,7 @@ pub fn safe_strncpy(src: &str, max_size: usize) -> String {
     String::from(&src[..bytes_to_copy])
 }
 
-/// Internal domain name validation (Rust equivalent of C check_name)
+/// Internal domain name validation (Rust equivalent of C `check_name`)
 ///
 /// Validates domain name format, checking for:
 /// - Empty string (invalid)
@@ -206,7 +207,7 @@ fn check_name(name: &mut String) -> CheckNameResult {
 
 /// Validate hostname against stricter RFC 952/1123 hostname rules
 ///
-/// Validates that hostname conforms to DoD Internet Host Table Specification (RFC 952)
+/// Validates that hostname conforms to `DoD` Internet Host Table Specification (RFC 952)
 /// as updated by RFC 1123:
 /// - First label must contain only alphanumeric, hyphen, and underscore characters
 /// - Hyphens and underscores cannot be first character
@@ -222,7 +223,7 @@ fn check_name(name: &mut String) -> CheckNameResult {
 /// # Returns
 ///
 /// * `true` - Valid hostname per RFC 952/1123 rules
-/// * `false` - Invalid hostname (fails check_name or invalid first label chars)
+/// * `false` - Invalid hostname (fails `check_name` or invalid first label chars)
 ///
 /// # Examples
 ///
@@ -237,13 +238,14 @@ fn check_name(name: &mut String) -> CheckNameResult {
 ///
 /// # RFC Compliance
 ///
-/// - RFC 952: DoD Internet Host Table Specification
+/// - RFC 952: `DoD` Internet Host Table Specification
 /// - RFC 1123: Requirements for Internet Hosts (allows leading digit)
 ///
 /// # See Also
 ///
 /// - [`check_name`] for general domain validation
 /// - [`canonicalise`] for domain canonicalization
+#[must_use] 
 pub fn legal_hostname(name: &str) -> bool {
     let mut name_copy = String::from(name);
     
@@ -466,7 +468,11 @@ pub fn do_rfc1035_name(
         }
         
         // Write length byte
-        buffer[pos] = label_len as u8;
+        // SAFETY: label_len is validated to be <= MAXLABEL (63) above, so fits in u8
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            buffer[pos] = label_len as u8;
+        }
         pos += 1;
         
         // Write label characters

@@ -12,37 +12,65 @@ use crate::dns::protocol::DnsRrType;
 #[derive(Debug, Clone)]
 pub enum AuthRecord {
     /// IPv4 address record
-    A { address: Ipv4Addr },
+    A { 
+        /// IPv4 address
+        address: Ipv4Addr 
+    },
     
     /// IPv6 address record
-    Aaaa { address: Ipv6Addr },
+    Aaaa { 
+        /// IPv6 address
+        address: Ipv6Addr 
+    },
     
     /// Canonical name record
-    Cname { target: String },
+    Cname { 
+        /// Target canonical name
+        target: String 
+    },
     
     /// Name server record
-    Ns { nameserver: String },
+    Ns { 
+        /// Name server hostname
+        nameserver: String 
+    },
     
     /// Mail exchange record
-    Mx { priority: u16, hostname: String },
+    Mx { 
+        /// MX priority
+        priority: u16, 
+        /// Mail server hostname
+        hostname: String 
+    },
     
     /// Text record
-    Txt { data: Vec<String> },
+    Txt { 
+        /// Text data
+        data: Vec<String> 
+    },
     
     /// Start of authority record
     Soa {
+        /// Primary name server
         mname: String,
+        /// Responsible party email
         rname: String,
+        /// Serial number
         serial: u32,
+        /// Refresh interval in seconds
         refresh: u32,
+        /// Retry interval in seconds
         retry: u32,
+        /// Expire time in seconds
         expire: u32,
+        /// Minimum TTL in seconds
         minimum: u32,
     },
 }
 
 impl AuthRecord {
     /// Get the RR type for this record
+    #[must_use] 
     pub fn rr_type(&self) -> DnsRrType {
         match self {
             AuthRecord::A { .. } => DnsRrType::A,
@@ -71,7 +99,8 @@ pub struct ZoneEntry {
 
 impl ZoneEntry {
     /// Create a new zone entry
-    pub fn new(name: String, ttl: u32) -> Self {
+    #[must_use] 
+    pub fn new(name: &str, ttl: u32) -> Self {
         Self {
             name: name.to_lowercase(),
             records: Vec::new(),
@@ -85,6 +114,7 @@ impl ZoneEntry {
     }
 
     /// Get records of a specific type
+    #[must_use] 
     pub fn get_records(&self, rr_type: DnsRrType) -> Vec<&AuthRecord> {
         self.records
             .iter()
@@ -113,7 +143,8 @@ impl AuthZone {
     ///
     /// * `zone` - Zone name (e.g., "example.com")
     /// * `default_ttl` - Default TTL for records
-    pub fn new(zone: String, default_ttl: u32) -> Self {
+    #[must_use] 
+    pub fn new(zone: &str, default_ttl: u32) -> Self {
         Self {
             zone: zone.to_lowercase(),
             entries: HashMap::new(),
@@ -135,12 +166,14 @@ impl AuthZone {
     /// # Returns
     ///
     /// Returns Some(entry) if found, None otherwise.
+    #[must_use] 
     pub fn lookup(&self, name: &str) -> Option<&ZoneEntry> {
         let name_lower = name.to_lowercase();
         self.entries.get(&name_lower)
     }
 
     /// Check if a name is in this zone
+    #[must_use] 
     pub fn contains(&self, name: &str) -> bool {
         let name_lower = name.to_lowercase();
         
@@ -154,11 +187,13 @@ impl AuthZone {
     }
 
     /// Get the number of entries in the zone
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if the zone has no entries
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -174,6 +209,7 @@ pub struct AuthServer {
 
 impl AuthServer {
     /// Create a new authoritative server
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             zones: HashMap::new(),
@@ -194,6 +230,7 @@ impl AuthServer {
     /// # Returns
     ///
     /// Returns Some(zone) if a matching zone is found, None otherwise.
+    #[must_use] 
     pub fn find_zone(&self, domain: &str) -> Option<&AuthZone> {
         let domain_lower = domain.to_lowercase();
         
@@ -203,13 +240,7 @@ impl AuthServer {
         }
         
         // Try to find a parent zone
-        for zone in self.zones.values() {
-            if zone.contains(&domain_lower) {
-                return Some(zone);
-            }
-        }
-        
-        None
+        self.zones.values().find(|&zone| zone.contains(&domain_lower)).map(|v| v as _)
     }
 
     /// Query for records in authoritative zones
@@ -222,6 +253,7 @@ impl AuthServer {
     /// # Returns
     ///
     /// Returns Some(records) if found in an authoritative zone, None otherwise.
+    #[must_use] 
     pub fn query(&self, domain: &str, rr_type: DnsRrType) -> Option<Vec<&AuthRecord>> {
         let zone = self.find_zone(domain)?;
         let entry = zone.lookup(domain)?;
@@ -235,11 +267,13 @@ impl AuthServer {
     }
 
     /// Get the number of zones
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.zones.len()
     }
 
     /// Check if there are no zones
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.zones.is_empty()
     }
@@ -270,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_zone_entry_basic() {
-        let mut entry = ZoneEntry::new("www.example.com".to_string(), 300);
+        let mut entry = ZoneEntry::new("www.example.com", 300);
         
         entry.add_record(AuthRecord::A {
             address: Ipv4Addr::new(192, 168, 1, 1),
@@ -282,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_zone_entry_filter_by_type() {
-        let mut entry = ZoneEntry::new("example.com".to_string(), 300);
+        let mut entry = ZoneEntry::new("example.com", 300);
         
         entry.add_record(AuthRecord::A {
             address: Ipv4Addr::new(192, 168, 1, 1),
@@ -303,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_auth_zone_basic() {
-        let zone = AuthZone::new("example.com".to_string(), 300);
+        let zone = AuthZone::new("example.com", 300);
         
         assert_eq!(zone.zone, "example.com");
         assert_eq!(zone.default_ttl, 300);
@@ -312,9 +346,9 @@ mod tests {
 
     #[test]
     fn test_auth_zone_add_lookup() {
-        let mut zone = AuthZone::new("example.com".to_string(), 300);
+        let mut zone = AuthZone::new("example.com", 300);
         
-        let mut entry = ZoneEntry::new("www.example.com".to_string(), 300);
+        let mut entry = ZoneEntry::new("www.example.com", 300);
         entry.add_record(AuthRecord::A {
             address: Ipv4Addr::new(192, 168, 1, 1),
         });
@@ -332,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_auth_zone_contains() {
-        let zone = AuthZone::new("example.com".to_string(), 300);
+        let zone = AuthZone::new("example.com", 300);
         
         assert!(zone.contains("example.com"));
         assert!(zone.contains("www.example.com"));
@@ -352,7 +386,7 @@ mod tests {
     fn test_auth_server_add_zone() {
         let mut server = AuthServer::new();
         
-        let zone = AuthZone::new("example.com".to_string(), 300);
+        let zone = AuthZone::new("example.com", 300);
         server.add_zone(zone);
         
         assert_eq!(server.len(), 1);
@@ -363,7 +397,7 @@ mod tests {
     fn test_auth_server_find_zone() {
         let mut server = AuthServer::new();
         
-        let zone = AuthZone::new("example.com".to_string(), 300);
+        let zone = AuthZone::new("example.com", 300);
         server.add_zone(zone);
         
         assert!(server.find_zone("example.com").is_some());
@@ -375,9 +409,9 @@ mod tests {
     fn test_auth_server_query() {
         let mut server = AuthServer::new();
         
-        let mut zone = AuthZone::new("example.com".to_string(), 300);
+        let mut zone = AuthZone::new("example.com", 300);
         
-        let mut entry = ZoneEntry::new("www.example.com".to_string(), 300);
+        let mut entry = ZoneEntry::new("www.example.com", 300);
         entry.add_record(AuthRecord::A {
             address: Ipv4Addr::new(192, 168, 1, 1),
         });

@@ -16,6 +16,7 @@ pub struct CompressionMap {
 
 impl CompressionMap {
     /// Create a new compression map
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             name_offsets: HashMap::new(),
@@ -39,11 +40,11 @@ impl CompressionMap {
         }
         
         // Only insert if name doesn't already exist (preserve first occurrence)
-        if self.name_offsets.contains_key(&name) {
-            false
-        } else {
-            self.name_offsets.insert(name, offset);
+        if let std::collections::hash_map::Entry::Vacant(e) = self.name_offsets.entry(name) {
+            e.insert(offset);
             true
+        } else {
+            false
         }
     }
 
@@ -56,6 +57,7 @@ impl CompressionMap {
     /// # Returns
     ///
     /// Returns Some(offset) if the name has been seen before, None otherwise.
+    #[must_use] 
     pub fn get(&self, name: &str) -> Option<u16> {
         self.name_offsets.get(name).copied()
     }
@@ -69,6 +71,7 @@ impl CompressionMap {
     /// # Returns
     ///
     /// Returns true if the name can be compressed (has been seen before).
+    #[must_use] 
     pub fn can_compress(&self, name: &str) -> bool {
         self.name_offsets.contains_key(name)
     }
@@ -79,11 +82,13 @@ impl CompressionMap {
     }
 
     /// Get the number of names tracked
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.name_offsets.len()
     }
 
     /// Check if the compression map is empty
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.name_offsets.is_empty()
     }
@@ -111,6 +116,7 @@ impl CompressionContext {
     /// # Arguments
     ///
     /// * `initial_offset` - Starting offset (typically 12 for after DNS header)
+    #[must_use] 
     pub fn new(initial_offset: u16) -> Self {
         Self {
             map: CompressionMap::new(),
@@ -139,11 +145,13 @@ impl CompressionContext {
     }
 
     /// Get a reference to the compression map
+    #[must_use] 
     pub fn map(&self) -> &CompressionMap {
         &self.map
     }
 
     /// Get the current write offset
+    #[must_use] 
     pub fn current_offset(&self) -> u16 {
         self.current_offset
     }

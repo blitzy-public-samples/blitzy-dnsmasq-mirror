@@ -78,7 +78,7 @@
 //! // Step 1: After binding privileged sockets, fork helper if scripts configured
 //! let helper = if let Some(script_path) = get_script_config() {
 //!     let (helper_handle, control_socket) = create_helper(
-//!         script_path,
+//!         &script_path,
 //!         1000,  // script_uid
 //!         1000,  // script_gid
 //!     )?;
@@ -102,8 +102,8 @@
 //! // ...
 //!
 //! // On shutdown, cleanup
-//! if let Some(mut helper) = helper {
-//!     helper.shutdown().await?;
+//! if let Some(helper) = helper {
+//!     helper.shutdown()?;
 //! }
 //! remove_pidfile(pidfile_path).await;
 //! # Ok(())
@@ -131,7 +131,7 @@
 //! };
 //!
 //! // Queue event to helper process for script execution
-//! helper.queue_event(script_data).await?;
+//! helper.queue_event(&script_data)?;
 //!
 //! // Helper will invoke configured script with environment variables:
 //! // DNSMASQ_LEASE_ACTION=add
@@ -217,7 +217,8 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
-    /// Create a new ProcessManager
+    /// Create a new `ProcessManager`
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             helper: None,
@@ -241,15 +242,18 @@ impl ProcessManager {
     }
 
     /// Shutdown the process manager, cleaning up resources
+    ///
+    /// # Errors
+    /// Returns an error if helper shutdown fails
     pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Shutdown helper if present
         if let Some(helper) = self.helper.take() {
-            helper.shutdown().await?;
+            helper.shutdown()?;
         }
 
         // Remove PID file if present
         if let Some(path) = &self.pidfile_path {
-            let _ = remove_pidfile(path); // Ignore errors on shutdown
+            remove_pidfile(path).await; // Ignore errors on shutdown
         }
 
         Ok(())

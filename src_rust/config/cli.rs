@@ -56,16 +56,16 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CliError::InvalidArgument { arg, value, reason } => {
-                write!(f, "Invalid value '{}' for argument '{}': {}", value, arg, reason)
+                write!(f, "Invalid value '{value}' for argument '{arg}': {reason}")
             }
             CliError::MissingRequired { arg } => {
-                write!(f, "Missing required argument: {}", arg)
+                write!(f, "Missing required argument: {arg}")
             }
             CliError::Conflict { arg1, arg2 } => {
-                write!(f, "Conflicting arguments: {} and {}", arg1, arg2)
+                write!(f, "Conflicting arguments: {arg1} and {arg2}")
             }
             CliError::ParseError(msg) => {
-                write!(f, "CLI parsing error: {}", msg)
+                write!(f, "CLI parsing error: {msg}")
             }
         }
     }
@@ -83,6 +83,7 @@ impl std::error::Error for CliError {}
 #[command(author = "Simon Kelley")]
 #[command(version)]
 #[command(about = "A lightweight DHCP and caching DNS server", long_about = None)]
+#[allow(clippy::struct_excessive_bools)] // CLI flags naturally map to individual booleans
 pub struct CliArgs {
     /// Configuration file path
     #[arg(short = 'C', long = "conf-file", value_name = "FILE")]
@@ -174,6 +175,11 @@ pub struct CliArgs {
 /// Processes command-line arguments using clap and converts them into a Config struct.
 /// Merges CLI arguments with default configuration, with CLI taking precedence.
 ///
+/// # Errors
+///
+/// Returns `CliError` if command-line arguments are invalid or cannot be converted
+/// to a valid configuration.
+///
 /// # Returns
 ///
 /// `Ok(Config)` with parsed configuration, or `Err(CliError)` on parsing failure
@@ -198,7 +204,7 @@ pub fn parse_cli_args() -> Result<Config, CliError> {
     cli_args_to_config(args)
 }
 
-/// Convert CliArgs to Config
+/// Convert `CliArgs` to Config
 ///
 /// Internal function that merges CLI arguments with default configuration.
 fn cli_args_to_config(args: CliArgs) -> Result<Config, CliError> {

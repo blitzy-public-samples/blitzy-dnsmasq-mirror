@@ -48,7 +48,8 @@ pub struct BlockData {
 }
 
 impl BlockData {
-    /// Create a new empty BlockData
+    /// Create a new empty `BlockData`
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             head: None,
@@ -56,7 +57,7 @@ impl BlockData {
         }
     }
 
-    /// Create BlockData from a slice of bytes
+    /// Create `BlockData` from a slice of bytes
     ///
     /// # Arguments
     ///
@@ -64,7 +65,8 @@ impl BlockData {
     ///
     /// # Returns
     ///
-    /// Returns a new BlockData containing the data split into blocks.
+    /// Returns a new `BlockData` containing the data split into blocks.
+    #[must_use] 
     pub fn from_slice(data: &[u8]) -> Self {
         if data.is_empty() {
             return Self::new();
@@ -91,20 +93,23 @@ impl BlockData {
     }
 
     /// Get the total size of stored data
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.total_size
     }
 
-    /// Check if the BlockData is empty
+    /// Check if the `BlockData` is empty
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.total_size == 0
     }
 
-    /// Convert BlockData back to a contiguous Vec<u8>
+    /// Convert `BlockData` back to a contiguous Vec<u8>
     ///
     /// # Returns
     ///
     /// Returns a Vec<u8> containing all data from all blocks.
+    #[must_use] 
     pub fn to_vec(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(self.total_size);
         
@@ -117,7 +122,7 @@ impl BlockData {
         result
     }
 
-    /// Read data from the BlockData at a specific offset
+    /// Read data from the `BlockData` at a specific offset
     ///
     /// # Arguments
     ///
@@ -141,11 +146,7 @@ impl BlockData {
             let block_end = current_offset + block.data.len();
             
             if offset < block_end && bytes_read < max_read {
-                let block_offset = if offset > current_offset {
-                    offset - current_offset
-                } else {
-                    0
-                };
+                let block_offset = offset.saturating_sub(current_offset);
                 
                 let available = block.data.len() - block_offset;
                 let to_read = std::cmp::min(available, max_read - bytes_read);
@@ -167,7 +168,7 @@ impl BlockData {
         bytes_read
     }
 
-    /// Get a slice of data from the BlockData
+    /// Get a slice of data from the `BlockData`
     ///
     /// # Arguments
     ///
@@ -177,6 +178,7 @@ impl BlockData {
     /// # Returns
     ///
     /// Returns Some(Vec<u8>) if the range is valid, None otherwise.
+    #[must_use] 
     pub fn slice(&self, offset: usize, len: usize) -> Option<Vec<u8>> {
         if offset + len > self.total_size {
             return None;
@@ -192,7 +194,7 @@ impl BlockData {
         }
     }
 
-    /// Compare BlockData with a byte slice
+    /// Compare `BlockData` with a byte slice
     ///
     /// # Arguments
     ///
@@ -200,7 +202,8 @@ impl BlockData {
     ///
     /// # Returns
     ///
-    /// Returns true if the BlockData contains the same data as the slice.
+    /// Returns true if the `BlockData` contains the same data as the slice.
+    #[must_use] 
     pub fn equals(&self, other: &[u8]) -> bool {
         if self.total_size != other.len() {
             return false;

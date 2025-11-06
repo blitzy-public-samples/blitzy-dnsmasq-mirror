@@ -37,6 +37,7 @@ impl FilterRule {
     /// * `rr_type` - Optional RR type to filter (None = all types)
     /// * `domain_pattern` - Optional domain pattern (None = all domains)
     /// * `action` - Action to take when rule matches
+    #[must_use] 
     pub fn new(
         rr_type: Option<DnsRrType>,
         domain_pattern: Option<String>,
@@ -59,6 +60,7 @@ impl FilterRule {
     /// # Returns
     ///
     /// Returns true if the rule matches.
+    #[must_use] 
     pub fn matches(&self, rr_type: DnsRrType, domain: &str) -> bool {
         // Check RR type match
         if let Some(filter_type) = self.rr_type {
@@ -72,16 +74,16 @@ impl FilterRule {
             let domain_lower = domain.to_lowercase();
             let pattern_lower = pattern.to_lowercase();
             
-            if pattern_lower.starts_with('*') {
+            if let Some(suffix) = pattern_lower.strip_prefix('*') {
                 // Wildcard pattern
-                let suffix = &pattern_lower[1..]; // Remove '*' -> ".example.com"
+                // Remove '*' -> ".example.com"
                 
                 // Match if domain ends with suffix (subdomains)
                 // OR if domain equals suffix without leading dot (base domain)
                 if !domain_lower.ends_with(suffix) {
                     // Check if it matches the base domain
-                    if suffix.starts_with('.') {
-                        let base_domain = &suffix[1..]; // Remove leading '.'
+                    if let Some(base_domain) = suffix.strip_prefix('.') {
+                        // Remove leading '.'
                         if domain_lower != base_domain {
                             return false;
                         }
@@ -112,6 +114,7 @@ pub struct RrFilter {
 
 impl RrFilter {
     /// Create a new RR filter with default allow action
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             rules: Vec::new(),
@@ -120,6 +123,7 @@ impl RrFilter {
     }
 
     /// Create a new RR filter with specified default action
+    #[must_use] 
     pub fn with_default_action(default_action: FilterAction) -> Self {
         Self {
             rules: Vec::new(),
@@ -142,6 +146,7 @@ impl RrFilter {
     /// # Returns
     ///
     /// Returns the action to take for this RR.
+    #[must_use] 
     pub fn filter(&self, rr_type: DnsRrType, domain: &str) -> FilterAction {
         // Apply rules in order, first match wins
         for rule in &self.rules {
@@ -155,11 +160,13 @@ impl RrFilter {
     }
 
     /// Get the number of rules
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.rules.len()
     }
 
     /// Check if there are no rules
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
@@ -179,6 +186,7 @@ impl Default for RrFilter {
 /// Common filter configurations
 impl RrFilter {
     /// Create a filter that blocks all AAAA records
+    #[must_use] 
     pub fn block_aaaa() -> Self {
         let mut filter = Self::new();
         filter.add_rule(FilterRule::new(
@@ -190,12 +198,13 @@ impl RrFilter {
     }
 
     /// Create a filter that blocks specific domains
+    #[must_use] 
     pub fn block_domains(domains: &[&str]) -> Self {
         let mut filter = Self::new();
         for domain in domains {
             filter.add_rule(FilterRule::new(
                 None,
-                Some(domain.to_string()),
+                Some((*domain).to_string()),
                 FilterAction::Block,
             ));
         }
@@ -203,6 +212,7 @@ impl RrFilter {
     }
 
     /// Create a filter that allows only specific RR types
+    #[must_use] 
     pub fn allow_only_types(types: &[DnsRrType]) -> Self {
         let mut filter = Self::with_default_action(FilterAction::Block);
         for rr_type in types {

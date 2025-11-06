@@ -4,8 +4,8 @@
 //! PID file management module for dnsmasq daemon process tracking
 //!
 //! Provides async functions for secure PID file creation, writing, ownership management,
-//! and deletion using tokio::fs. Implements security-hardened PID file handling with
-//! unlink-before-create pattern to prevent symlink attacks (O_EXCL flag equivalent in Rust).
+//! and deletion using `tokio::fs`. Implements security-hardened PID file handling with
+//! unlink-before-create pattern to prevent symlink attacks (`O_EXCL` flag equivalent in Rust).
 //!
 //! This module replaces the PID file management from src/dnsmasq.c lines 819-878 and 2168-2169.
 //!
@@ -22,10 +22,10 @@
 //! with a symlink, and have the target of that symlink overwritten as root next time
 //! dnsmasq starts.
 //!
-//! The implementation first deletes any existing file, and then opens it with the O_EXCL
-//! flag (via `create_new(true)` in Rust), ensuring that the open() fails should there be
-//! any existing file (because the unlink() failed, or an attacker exploited the race
-//! between unlink() and open()). This ensures that no symlink attack can succeed.
+//! The implementation first deletes any existing file, and then opens it with the `O_EXCL`
+//! flag (via `create_new(true)` in Rust), ensuring that the `open()` fails should there be
+//! any existing file (because the `unlink()` failed, or an attacker exploited the race
+//! between `unlink()` and `open()`). This ensures that no symlink attack can succeed.
 //!
 //! ## Privilege Handling
 //!
@@ -53,7 +53,7 @@ use tracing::{debug, error, info, warn};
 /// Write the daemon's PID to the specified file with security hardening
 ///
 /// This function implements the secure PID file creation pattern from src/dnsmasq.c
-/// lines 819-878. It follows the unlink-before-create pattern with O_EXCL to prevent
+/// lines 819-878. It follows the unlink-before-create pattern with `O_EXCL` to prevent
 /// symlink attacks.
 ///
 /// # Arguments
@@ -65,14 +65,14 @@ use tracing::{debug, error, info, warn};
 /// # Behavior
 ///
 /// 1. Unlinks any existing PID file (ignoring errors)
-/// 2. Creates new file with O_EXCL flag (fails if file exists)
+/// 2. Creates new file with `O_EXCL` flag (fails if file exists)
 /// 3. Writes current process PID as string with newline
-/// 4. If running as root and target_uid/target_gid provided, changes ownership
+/// 4. If running as root and `target_uid/target_gid` provided, changes ownership
 /// 5. Returns error only if running as root (silently ignores errors for non-root)
 ///
 /// # Security
 ///
-/// - Prevents symlink attacks via unlink + O_EXCL pattern
+/// - Prevents symlink attacks via unlink + `O_EXCL` pattern
 /// - Only fails for root user (testing mode for non-root)
 /// - File permissions set to 0o644 (readable by all, writable by owner)
 /// - Ownership transferred to unprivileged user for systemd compatibility
@@ -103,6 +103,7 @@ use tracing::{debug, error, info, warn};
 /// # Ok(())
 /// # }
 /// ```
+#[allow(clippy::similar_names)]
 pub async fn write_pidfile(
     pidfile_path: &Path,
     target_uid: Option<Uid>,

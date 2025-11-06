@@ -20,8 +20,8 @@ impl std::fmt::Display for SerializationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SerializationError::BufferTooSmall => write!(f, "Buffer too small for DNS packet"),
-            SerializationError::InvalidPacket(msg) => write!(f, "Invalid packet: {}", msg),
-            SerializationError::EncodingError(msg) => write!(f, "Encoding error: {}", msg),
+            SerializationError::InvalidPacket(msg) => write!(f, "Invalid packet: {msg}"),
+            SerializationError::EncodingError(msg) => write!(f, "Encoding error: {msg}"),
         }
     }
 }
@@ -42,6 +42,10 @@ impl DnsSerializer {
     ///
     /// Returns Ok(Vec<u8>) containing the serialized packet on success.
     /// Returns Err(SerializationError) if serialization fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the message cannot be encoded into a valid DNS packet format.
     pub fn serialize(message: &Message) -> Result<Vec<u8>, SerializationError> {
         message
             .to_vec()

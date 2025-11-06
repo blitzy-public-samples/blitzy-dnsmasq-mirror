@@ -37,19 +37,27 @@ pub struct ForwardQuery {
 
 /// DNS query forwarder for upstream resolution
 pub struct Forwarder {
-    config: ForwardConfig,
+    _config: ForwardConfig,
+}
+
+impl Default for Forwarder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Forwarder {
     /// Create a new DNS forwarder instance with default configuration
+    #[must_use] 
     pub fn new() -> Self {
         Self {
-            config: ForwardConfig::default(),
+            _config: ForwardConfig::default(),
         }
     }
 
     /// Create a new DNS forwarder with custom configuration
+    #[must_use] 
     pub fn with_config(config: ForwardConfig) -> Self {
-        Self { config }
+        Self { _config: config }
     }
 }

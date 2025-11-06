@@ -42,16 +42,15 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::Io(e) => write!(f, "IO error: {}", e),
+            ParseError::Io(e) => write!(f, "IO error: {e}"),
             ParseError::InvalidSyntax { line, message } => {
-                write!(f, "Invalid syntax at line {}: {}", line, message)
+                write!(f, "Invalid syntax at line {line}: {message}")
             }
             ParseError::CircularInclude { path } => {
-                write!(f, "Circular include detected: {}", path)
+                write!(f, "Circular include detected: {path}")
             }
             ParseError::InvalidValue { line, option, value, reason } => {
-                write!(f, "Invalid value '{}' for option '{}' at line {}: {}", 
-                       value, option, line, reason)
+                write!(f, "Invalid value '{value}' for option '{option}' at line {line}: {reason}")
             }
         }
     }
@@ -91,7 +90,7 @@ impl From<std::io::Error> for ParseError {
 /// The parser supports the following directives:
 /// - `port=<number>` - Set DNS port (0 to disable)
 /// - `dhcp-range=...` - DHCP range configuration (placeholder in minimal implementation)
-/// - `dnssec` - Enable DNSSEC validation (sets OPT_DNSSEC_VALID flag)
+/// - `dnssec` - Enable DNSSEC validation (sets `OPT_DNSSEC_VALID` flag)
 /// - `no-dhcp` - Disable DHCP (placeholder in minimal implementation)
 /// - `#` - Comment lines (ignored)
 /// - Empty lines (ignored)

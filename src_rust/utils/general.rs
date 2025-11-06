@@ -62,6 +62,7 @@ use nix::unistd::close as nix_close;
 /// let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 /// assert!(sockaddr_isequal(&addr1, &addr2));
 /// ```
+#[must_use] 
 pub fn sockaddr_isequal(s1: &SocketAddr, s2: &SocketAddr) -> bool {
     match (s1, s2) {
         (SocketAddr::V4(a1), SocketAddr::V4(a2)) => {
@@ -92,6 +93,7 @@ pub fn sockaddr_isequal(s1: &SocketAddr, s2: &SocketAddr) -> bool {
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 /// let size = sa_len(&addr);
 /// ```
+#[must_use] 
 pub fn sa_len(addr: &SocketAddr) -> usize {
     match addr {
         SocketAddr::V4(_) => size_of::<SocketAddrV4>(),
@@ -121,6 +123,7 @@ pub fn sa_len(addr: &SocketAddr) -> usize {
 /// assert_eq!(hostname_order("Example.COM", "example.com"), Ordering::Equal);
 /// assert_eq!(hostname_order("aaa.com", "bbb.com"), Ordering::Less);
 /// ```
+#[must_use] 
 pub fn hostname_order(a: &str, b: &str) -> Ordering {
     let mut chars_a = a.chars();
     let mut chars_b = b.chars();
@@ -134,7 +137,7 @@ pub fn hostname_order(a: &str, b: &str) -> Ordering {
                 let c1_lower = c1.to_ascii_lowercase();
                 let c2_lower = c2.to_ascii_lowercase();
                 match c1_lower.cmp(&c2_lower) {
-                    Ordering::Equal => continue,
+                    Ordering::Equal => {}
                     other => return other,
                 }
             }
@@ -144,7 +147,7 @@ pub fn hostname_order(a: &str, b: &str) -> Ordering {
 
 /// Test hostname equality (case-insensitive)
 ///
-/// Simple wrapper around hostname_order() returning true if hostnames are equal.
+/// Simple wrapper around `hostname_order()` returning true if hostnames are equal.
 ///
 /// # Arguments
 /// * `a` - First hostname string
@@ -160,6 +163,7 @@ pub fn hostname_order(a: &str, b: &str) -> Ordering {
 /// 
 /// assert!(hostname_isequal("Example.COM", "example.com"));
 /// ```
+#[must_use] 
 pub fn hostname_isequal(a: &str, b: &str) -> bool {
     hostname_order(a, b) == Ordering::Equal
 }
@@ -185,6 +189,7 @@ pub fn hostname_isequal(a: &str, b: &str) -> bool {
 /// assert_eq!(hostname_issubdomain("example.com", "example.com"), 2);
 /// assert_eq!(hostname_issubdomain("example.com", "other.com"), 0);
 /// ```
+#[must_use] 
 pub fn hostname_issubdomain(a: &str, b: &str) -> i32 {
     // a shorter than b or a empty
     if b.len() < a.len() || a.is_empty() {
@@ -226,7 +231,7 @@ pub fn hostname_issubdomain(a: &str, b: &str) -> i32 {
 
 /// Get current time (real time or monotonic for embedded systems)
 ///
-/// Returns current time in seconds. Uses SystemTime::now() which provides
+/// Returns current time in seconds. Uses `SystemTime::now()` which provides
 /// monotonic-like behavior on most platforms.
 ///
 /// # Returns
@@ -239,6 +244,7 @@ pub fn hostname_issubdomain(a: &str, b: &str) -> i32 {
 /// let now = dnsmasq_time();
 /// let expires = now + 3600; // 1 hour from now
 /// ```
+#[must_use] 
 pub fn dnsmasq_time() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -264,6 +270,7 @@ pub fn dnsmasq_time() -> u64 {
 /// let mask = Ipv4Addr::new(255, 255, 255, 0);
 /// assert_eq!(netmask_length(mask), 24);
 /// ```
+#[must_use] 
 pub fn netmask_length(mask: Ipv4Addr) -> u32 {
     let mask_u32 = u32::from(mask);
     mask_u32.leading_ones()
@@ -292,6 +299,7 @@ pub fn netmask_length(mask: Ipv4Addr) -> u32 {
 /// let mask = Ipv4Addr::new(255, 255, 255, 0);
 /// assert!(is_same_net(addr1, addr2, mask));
 /// ```
+#[must_use] 
 pub fn is_same_net(a: Ipv4Addr, b: Ipv4Addr, mask: Ipv4Addr) -> bool {
     let a_u32 = u32::from(a);
     let b_u32 = u32::from(b);
@@ -322,6 +330,7 @@ pub fn is_same_net(a: Ipv4Addr, b: Ipv4Addr, mask: Ipv4Addr) -> bool {
 /// let addr2 = Ipv4Addr::new(192, 168, 1, 20);
 /// assert!(is_same_net_prefix(addr1, addr2, 24));
 /// ```
+#[must_use] 
 pub fn is_same_net_prefix(a: Ipv4Addr, b: Ipv4Addr, prefix: u32) -> bool {
     if prefix > 32 {
         return false;
@@ -359,6 +368,7 @@ pub fn is_same_net_prefix(a: Ipv4Addr, b: Ipv4Addr, prefix: u32) -> bool {
 /// let addr2 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
 /// assert!(is_same_net6(&addr1, &addr2, 64));
 /// ```
+#[must_use] 
 pub fn is_same_net6(a: &Ipv6Addr, b: &Ipv6Addr, prefixlen: u32) -> bool {
     if prefixlen > 128 {
         return false;
@@ -403,12 +413,13 @@ pub fn is_same_net6(a: &Ipv6Addr, b: &Ipv6Addr, prefixlen: u32) -> bool {
 /// let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
 /// let host_part = addr6part(&addr);
 /// ```
+#[must_use] 
 pub fn addr6part(addr: &Ipv6Addr) -> u64 {
     let bytes = addr.octets();
     let mut ret: u64 = 0;
     
-    for i in 8..16 {
-        ret = (ret << 8) | (bytes[i] as u64);
+    for &byte in &bytes[8..16] {
+        ret = (ret << 8) | u64::from(byte);
     }
     
     ret
@@ -446,7 +457,7 @@ pub fn setaddr6part(addr: &mut Ipv6Addr, host: u64) {
 /// Format socket address as human-readable string with optional scope
 ///
 /// Converts socket address (IPv4 or IPv6) to string representation.
-/// For IPv6 link-local addresses with scope_id, appends "%interface_name".
+/// For IPv6 link-local addresses with `scope_id`, appends "%`interface_name`".
 ///
 /// # Arguments
 /// * `addr` - Socket address reference
@@ -463,6 +474,7 @@ pub fn setaddr6part(addr: &mut Ipv6Addr, host: u64) {
 /// let (addr_str, port) = prettyprint_addr(&addr);
 /// assert_eq!(port, 53);
 /// ```
+#[must_use] 
 pub fn prettyprint_addr(addr: &SocketAddr) -> (String, u16) {
     let port = addr.port();
     let addr_str = match addr {
@@ -502,8 +514,9 @@ pub fn prettyprint_addr(addr: &SocketAddr) -> (String, u16) {
 /// assert_eq!(prettyprint_time(7322), "2h2m2s");
 /// assert_eq!(prettyprint_time(0xffffffff), "infinite");
 /// ```
+#[must_use] 
 pub fn prettyprint_time(t: u32) -> String {
-    if t == 0xffffffff {
+    if t == 0xffff_ffff {
         return "infinite".to_string();
     }
     
@@ -511,22 +524,22 @@ pub fn prettyprint_time(t: u32) -> String {
     
     let days = t / 86400;
     if days > 0 {
-        let _ = write!(result, "{}d", days);
+        let _ = write!(result, "{days}d");
     }
     
     let hours = (t / 3600) % 24;
     if hours > 0 {
-        let _ = write!(result, "{}h", hours);
+        let _ = write!(result, "{hours}h");
     }
     
     let minutes = (t / 60) % 60;
     if minutes > 0 {
-        let _ = write!(result, "{}m", minutes);
+        let _ = write!(result, "{minutes}m");
     }
     
     let seconds = t % 60;
     if seconds > 0 {
-        let _ = write!(result, "{}s", seconds);
+        let _ = write!(result, "{seconds}s");
     }
     
     if result.is_empty() {
@@ -539,7 +552,7 @@ pub fn prettyprint_time(t: u32) -> String {
 /// Parse colon/hyphen-separated hexadecimal string (MAC addresses, hex data)
 ///
 /// Parses hex string like "01:23:45:67:89:ab" or "01-23-45-67-89-ab" into byte array.
-/// Supports wildcard "*" for any byte (tracked in wildcard_mask bitmask).
+/// Supports wildcard "*" for any byte (tracked in `wildcard_mask` bitmask).
 ///
 /// # Arguments
 /// * `input` - Input hex string
@@ -556,16 +569,19 @@ pub fn prettyprint_time(t: u32) -> String {
 /// let (bytes, wildcard, mac_type) = parse_hex("01:23:45:67:89:ab", Some(6)).unwrap();
 /// assert_eq!(bytes.len(), 6);
 /// ```
+///
+/// # Errors
+/// Returns an error if the input contains invalid hex characters or cannot be parsed
 pub fn parse_hex(
     input: &str,
     maxlen: Option<usize>,
-) -> Result<(Vec<u8>, u32, Option<i32>), ()> {
+) -> IoResult<(Vec<u8>, u32, Option<i32>)> {
     let mut output = Vec::new();
     let mut wildcard_mask = 0u32;
     let mut mac_type = None;
     let mut is_first = true;
     
-    for part in input.split(|c| c == ':' || c == '-' || c == ' ') {
+    for part in input.split([':', '-', ' ']) {
         if part.is_empty() {
             continue;
         }
@@ -596,11 +612,11 @@ pub fn parse_hex(
         
         // Validate hex characters
         if !part.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(());
+            return Err(IoError::new(ErrorKind::InvalidInput, "invalid hex characters"));
         }
         
         // Parse hex bytes (can be 1 or 2 hex digits per byte)
-        let bytes_to_parse = (part.len() + 1) / 2;
+        let bytes_to_parse = part.len().div_ceil(2);
         for j in 0..bytes_to_parse {
             if let Some(max) = maxlen {
                 if output.len() >= max {
@@ -616,7 +632,7 @@ pub fn parse_hex(
                 output.push(byte);
                 wildcard_mask <<= 1;
             } else {
-                return Err(());
+                return Err(IoError::new(ErrorKind::InvalidInput, "failed to parse hex byte"));
             }
         }
     }
@@ -647,6 +663,7 @@ pub fn parse_hex(
 /// let mask = 0x10; // Wildcard byte at index 1 (bit position 4 from LSB)
 /// assert_eq!(memcmp_masked(&mac1, &mac2, 6, mask), 6);
 /// ```
+#[must_use] 
 pub fn memcmp_masked(a: &[u8], b: &[u8], len: usize, mask: u32) -> i32 {
     let mut count = 1;
     let mut m = mask;
@@ -686,6 +703,9 @@ pub fn memcmp_masked(a: &[u8], b: &[u8], len: usize, mask: u32) -> i32 {
 /// expand_buf(&mut buf, 1024).unwrap();
 /// assert!(buf.len() >= 1024);
 /// ```
+///
+/// # Errors
+/// Returns an error if buffer allocation fails (though in practice this function always succeeds)
 pub fn expand_buf(buf: &mut Vec<u8>, size: usize) -> IoResult<()> {
     if buf.len() < size {
         buf.resize(size, 0);
@@ -710,13 +730,14 @@ pub fn expand_buf(buf: &mut Vec<u8>, size: usize) -> IoResult<()> {
 /// let mac = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab];
 /// assert_eq!(print_mac(&mac), "01:23:45:67:89:ab");
 /// ```
+#[must_use] 
 pub fn print_mac(mac: &[u8]) -> String {
     if mac.is_empty() {
         return "<null>".to_string();
     }
     
     mac.iter()
-        .map(|b| format!("{:02x}", b))
+        .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(":")
 }
@@ -734,6 +755,9 @@ pub fn print_mac(mac: &[u8]) -> String {
 /// * `Ok(true)` to retry send
 /// * `Ok(false)` to stop retrying
 /// * `Err(error)` for unrecoverable error
+///
+/// # Errors
+/// Returns an error for unrecoverable I/O errors that should not be retried
 ///
 /// # Example
 /// ```no_run
@@ -786,13 +810,16 @@ pub async fn retry_send(error: &IoError, retry_count: &mut u32) -> IoResult<bool
 /// Automatically retries on interrupts and transient errors.
 ///
 /// # Arguments
-/// * `reader_writer` - AsyncRead or AsyncWrite object
+/// * `reader_writer` - `AsyncRead` or `AsyncWrite` object
 /// * `buffer` - Buffer for read/write data
 /// * `is_read` - true for read, false for write
 ///
 /// # Returns
 /// * `Ok(())` if all bytes transferred
 /// * `Err(IoError)` on error or premature EOF
+///
+/// # Errors
+/// Returns an I/O error if the read/write operation fails or encounters EOF before completing
 ///
 /// # Example
 /// ```no_run
@@ -838,7 +865,6 @@ where
                 Err(e) if e.kind() == ErrorKind::OutOfMemory => {
                     // Special case: retry on ENOMEM
                     sleep(Duration::from_millis(10)).await;
-                    continue;
                 }
                 Err(e) => {
                     if !retry_send(&e, &mut retry_count).await? {
@@ -906,7 +932,7 @@ pub fn close_fds(max_fd: i32, spare1: Option<i32>, spare2: Option<i32>, spare3: 
 
 /// Get Linux kernel version as u32 (Linux only)
 ///
-/// Parses kernel version from uname() into packed u32 format: (major << 16) | (minor << 8) | patch.
+/// Parses kernel version from `uname()` into packed u32 format: (major << 16) | (minor << 8) | patch.
 /// This allows simple numeric comparison of kernel versions.
 ///
 /// # Returns
@@ -926,6 +952,7 @@ pub fn close_fds(max_fd: i32, spare1: Option<i32>, spare2: Option<i32>, spare3: 
 /// # }
 /// ```
 #[cfg(target_os = "linux")]
+#[must_use] 
 pub fn kernel_version() -> u32 {
     match uname() {
         Ok(uts) => {
@@ -953,7 +980,7 @@ pub fn kernel_version() -> u32 {
 
 /// Safe memory allocation with automatic error handling
 ///
-/// Rust replacement for C's whine_malloc(). In Rust, Vec::with_capacity and Box handle
+/// Rust replacement for C's `whine_malloc()`. In Rust, `Vec::with_capacity` and Box handle
 /// allocation automatically, panicking on OOM. This function exists for API compatibility
 /// but simply delegates to Vec allocation.
 ///
@@ -963,6 +990,9 @@ pub fn kernel_version() -> u32 {
 /// # Returns
 /// * `Ok(Vec<u8>)` with capacity for size bytes
 /// * `Err(IoError)` on allocation failure (rare, usually panics)
+///
+/// # Errors
+/// Returns an error if size is zero or if allocation fails
 ///
 /// # Example
 /// ```
@@ -994,7 +1024,7 @@ pub fn whine_malloc(size: usize) -> IoResult<Vec<u8>> {
 
 /// Set file descriptor to non-blocking and close-on-exec
 ///
-/// Sets O_NONBLOCK (non-blocking I/O) and FD_CLOEXEC (close on exec) flags
+/// Sets `O_NONBLOCK` (non-blocking I/O) and `FD_CLOEXEC` (close on exec) flags
 /// on a file descriptor. Essential for socket handling in async contexts.
 ///
 /// # Arguments
@@ -1003,6 +1033,9 @@ pub fn whine_malloc(size: usize) -> IoResult<Vec<u8>> {
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err(IoError)` on fcntl failure
+///
+/// # Errors
+/// Returns an error if the fcntl system call fails when setting flags
 ///
 /// # Example
 /// ```no_run
@@ -1021,17 +1054,17 @@ pub fn fix_fd(fd: i32) -> IoResult<()> {
     
     // Set O_NONBLOCK
     let mut flags = fcntl(fd, FcntlArg::F_GETFL)
-        .map_err(|e| IoError::new(ErrorKind::Other, format!("F_GETFL failed: {}", e)))?;
+        .map_err(|e| IoError::other(format!("F_GETFL failed: {e}")))?;
     
     flags |= OFlag::O_NONBLOCK.bits();
     
     fcntl(fd, FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags)))
-        .map_err(|e| IoError::new(ErrorKind::Other, format!("F_SETFL failed: {}", e)))?;
+        .map_err(|e| IoError::other(format!("F_SETFL failed: {e}")))?;
     
     // Set FD_CLOEXEC
     let fd_flags = FdFlag::FD_CLOEXEC;
     fcntl(fd, FcntlArg::F_SETFD(fd_flags))
-        .map_err(|e| IoError::new(ErrorKind::Other, format!("F_SETFD failed: {}", e)))?;
+        .map_err(|e| IoError::other(format!("F_SETFD failed: {e}")))?;
     
     Ok(())
 }

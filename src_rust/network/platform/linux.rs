@@ -6,18 +6,18 @@
 //!
 //! # Implementation Details
 //!
-//! - Uses netlink sockets (AF_NETLINK) for interface enumeration and monitoring
-//! - Subscribes to multicast groups: RTMGRP_LINK, RTMGRP_IPV4_IFADDR, RTMGRP_IPV6_IFADDR
+//! - Uses netlink sockets (`AF_NETLINK`) for interface enumeration and monitoring
+//! - Subscribes to multicast groups: `RTMGRP_LINK`, `RTMGRP_IPV4_IFADDR`, `RTMGRP_IPV6_IFADDR`
 //! - Provides async interface through tokio
 //! - Replaces C netlink.c implementation with memory-safe Rust
 //!
 //! # Source Mapping
 //!
 //! Replaces: src/netlink.c
-//! - netlink_init() → LinuxPlatform::new()
-//! - iface_enumerate() → enumerate_interfaces()
-//! - netlink_multicast() → monitor_changes()
-//! - neighbor enumeration → enumerate_arp()
+//! - `netlink_init()` → `LinuxPlatform::new()`
+//! - `iface_enumerate()` → `enumerate_interfaces()`
+//! - `netlink_multicast()` → `monitor_changes()`
+//! - neighbor enumeration → `enumerate_arp()`
 
 use super::{
     ArpEntry, InterfaceInfo, NetworkChange, Platform, PlatformError, PlatformErrorKind,
@@ -72,7 +72,7 @@ impl LinuxPlatform {
 
 #[async_trait]
 impl Platform for LinuxPlatform {
-    /// Enumerate network interfaces using netlink RTM_GETLINK and RTM_GETADDR
+    /// Enumerate network interfaces using netlink `RTM_GETLINK` and `RTM_GETADDR`
     ///
     /// # Implementation Notes
     ///
@@ -94,7 +94,7 @@ impl Platform for LinuxPlatform {
     ///
     /// # Implementation Notes
     ///
-    /// Subscribes to RTMGRP_LINK, RTMGRP_IPV4_IFADDR, and RTMGRP_IPV6_IFADDR
+    /// Subscribes to `RTMGRP_LINK`, `RTMGRP_IPV4_IFADDR`, and `RTMGRP_IPV6_IFADDR`
     /// multicast groups to receive real-time notifications.
     async fn monitor_changes(&self) -> Result<Receiver<NetworkChange>, PlatformError> {
         let (_tx, rx) = channel(100);
@@ -111,7 +111,7 @@ impl Platform for LinuxPlatform {
         Ok(rx)
     }
 
-    /// Enumerate ARP cache using netlink RTM_GETNEIGH
+    /// Enumerate ARP cache using netlink `RTM_GETNEIGH`
     ///
     /// # Implementation Notes
     ///

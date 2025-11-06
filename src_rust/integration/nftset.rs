@@ -22,6 +22,11 @@ pub struct NftsetManager {}
 
 impl NftsetManager {
     /// Create new nftables set manager
+    ///
+    /// # Errors
+    ///
+    /// Currently returns `Ok` in all cases. Future implementation may return errors
+    /// if nftables initialization fails.
     pub fn new() -> Result<Self, NftsetError> {
         Ok(Self {})
     }
@@ -51,11 +56,11 @@ pub enum NftsetError {
 impl fmt::Display for NftsetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NftsetError::ConnectionFailed(msg) => write!(f, "nftables connection failed: {}", msg),
-            NftsetError::OperationFailed(msg) => write!(f, "nftables operation failed: {}", msg),
-            NftsetError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
-            NftsetError::SetNotFound(msg) => write!(f, "nftables set not found: {}", msg),
-            NftsetError::Other(msg) => write!(f, "nftables error: {}", msg),
+            NftsetError::ConnectionFailed(msg) => write!(f, "nftables connection failed: {msg}"),
+            NftsetError::OperationFailed(msg) => write!(f, "nftables operation failed: {msg}"),
+            NftsetError::InvalidArgument(msg) => write!(f, "Invalid argument: {msg}"),
+            NftsetError::SetNotFound(msg) => write!(f, "nftables set not found: {msg}"),
+            NftsetError::Other(msg) => write!(f, "nftables error: {msg}"),
         }
     }
 }

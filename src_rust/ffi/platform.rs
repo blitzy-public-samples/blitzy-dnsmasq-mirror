@@ -13,7 +13,7 @@
 //! - `pf`: BSD Packet Filter (PF) table integration for firewall rules
 //! - `conntrack`: Linux connection tracking (conntrack) mark propagation
 //! - `nftables`: Linux nftables set integration (successor to ipset)
-//! - `ubus`: OpenWrt ubus IPC interface for embedded systems
+//! - `ubus`: `OpenWrt` `ubus` IPC interface for embedded systems
 //! - `solaris_privileges`: Solaris privilege management
 //!
 //! # Platform Support
@@ -23,7 +23,7 @@
 //! - BSD (FreeBSD, OpenBSD, NetBSD): PF tables, routing sockets
 //! - macOS: Routing sockets (subset of BSD functionality)
 //! - Solaris: Privilege management, SIOCGLIFCONF fallback
-//! - OpenWrt: ubus integration (Linux-based)
+//! - `OpenWrt`: `ubus` integration (Linux-based)
 //!
 //! # Memory Safety
 //!
@@ -48,10 +48,10 @@ use std::ptr;
 
 /// Linux netlink socket operations for network interface monitoring
 ///
-/// Provides safe wrappers around Linux netlink RTNETLINK protocol for:
-/// - Interface enumeration (RTM_GETLINK, RTM_GETADDR)
-/// - Address monitoring (RTM_NEWADDR, RTM_DELADDR)
-/// - Route monitoring (RTM_NEWROUTE, RTM_DELROUTE)
+/// Provides safe wrappers around Linux netlink `RTNETLINK` protocol for:
+/// - Interface enumeration (`RTM_GETLINK`, `RTM_GETADDR`)
+/// - Address monitoring (`RTM_NEWADDR`, `RTM_DELADDR`)
+/// - Route monitoring (`RTM_NEWROUTE`, `RTM_DELROUTE`)
 /// - Real-time notifications via multicast groups
 ///
 /// # Platform
@@ -64,7 +64,7 @@ use std::ptr;
 /// buffer overflows. Message size is validated before parsing.
 #[cfg(target_os = "linux")]
 pub mod netlink {
-    use super::*;
+    use super::{Debug, RawFd, close, IoResult, IoError, size_of, ErrorKind};
     use libc::{
         nlmsghdr, sockaddr_nl, AF_NETLINK, SOCK_RAW,
     };
@@ -77,12 +77,14 @@ pub mod netlink {
     }
 
     impl NetlinkSocket {
-        /// Returns the raw file descriptor for poll() integration
+        /// Returns the raw file descriptor for `poll()` integration
+        #[must_use]
         pub fn as_raw_fd(&self) -> RawFd {
             self.fd
         }
 
         /// Returns the netlink PID assigned by kernel
+        #[must_use]
         pub fn pid(&self) -> u32 {
             self.pid
         }
@@ -95,17 +97,17 @@ pub mod netlink {
         }
     }
 
-    /// Netlink message header for RTNETLINK messages
+    /// Netlink message header for `RTNETLINK` messages
     ///
-    /// Matches kernel struct nlmsghdr from linux/netlink.h
+    /// Matches kernel struct `nlmsghdr` from `linux/netlink.h`
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct NlMsgHdr {
         /// Total message length including header
         pub nlmsg_len: u32,
-        /// Message type (RTM_* constants)
+        /// Message type (`RTM_*` constants)
         pub nlmsg_type: u16,
-        /// Message flags (NLM_F_* constants)
+        /// Message flags (`NLM_F_*` constants)
         pub nlmsg_flags: u16,
         /// Sequence number for message ordering
         pub nlmsg_seq: u32,
@@ -119,7 +121,7 @@ pub mod netlink {
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct NfGenMsg {
-        /// Address family (AF_INET, AF_INET6, etc.)
+        /// Address family (`AF_INET`, `AF_INET6`, etc.)
         pub nfgen_family: u8,
         /// Protocol version
         pub version: u8,
@@ -141,23 +143,23 @@ pub mod netlink {
 
     /// Create a netlink socket for RTNETLINK communication
     ///
-    /// Opens an AF_NETLINK socket for network interface and address monitoring.
+    /// Opens an `AF_NETLINK` socket for network interface and address monitoring.
     /// The socket is bound to netlink address with specified multicast groups.
     ///
     /// # Arguments
     ///
-    /// * `protocol` - Netlink protocol (e.g., NETLINK_ROUTE, NETLINK_NETFILTER)
+    /// * `protocol` - Netlink protocol (e.g., `NETLINK_ROUTE`, `NETLINK_NETFILTER`)
     /// * `groups` - Multicast groups bitmask (0 for no multicast)
     ///
     /// # Returns
     ///
-    /// NetlinkSocket on success with assigned PID
+    /// `NetlinkSocket` on success with assigned PID
     ///
     /// # Errors
     ///
-    /// Returns IoError if:
+    /// Returns `IoError` if:
     /// - Socket creation fails (permission denied, out of file descriptors)
-    /// - Bind fails (EPERM if groups > 0 without CAP_NET_ADMIN)
+    /// - Bind fails (EPERM if groups > 0 without `CAP_NET_ADMIN`)
     ///
     /// # Example
     ///
@@ -170,6 +172,7 @@ pub mod netlink {
     /// )?;
     /// # Ok::<(), std::io::Error>(())
     /// ```
+    #[allow(clippy::cast_possible_truncation)]
     pub fn create_netlink_socket(protocol: i32, groups: u32) -> IoResult<NetlinkSocket> {
         // SAFETY: socket(2) syscall with validated parameters
         // AF_NETLINK is kernel-provided constant, SOCK_RAW is standard type
@@ -192,7 +195,7 @@ pub mod netlink {
         let bind_result = unsafe {
             libc::bind(
                 fd,
-                &addr as *const sockaddr_nl as *const libc::sockaddr,
+                (&raw const addr).cast::<libc::sockaddr>(),
                 size_of::<sockaddr_nl>() as u32,
             )
         };
@@ -205,7 +208,7 @@ pub mod netlink {
                 let retry_result = unsafe {
                     libc::bind(
                         fd,
-                        &addr as *const sockaddr_nl as *const libc::sockaddr,
+                        (&raw const addr).cast::<libc::sockaddr>(),
                         size_of::<sockaddr_nl>() as u32,
                     )
                 };
@@ -230,8 +233,8 @@ pub mod netlink {
         let getsockname_result = unsafe {
             libc::getsockname(
                 fd,
-                &mut addr_out as *mut sockaddr_nl as *mut libc::sockaddr,
-                &mut addr_len,
+                (&raw mut addr_out).cast::<libc::sockaddr>(),
+                &raw mut addr_len,
             )
         };
 
@@ -259,7 +262,8 @@ pub mod netlink {
     ///
     /// # Errors
     ///
-    /// Returns IoError if bind fails (EPERM without CAP_NET_ADMIN)
+    /// Returns `IoError` if bind fails (EPERM without `CAP_NET_ADMIN`)
+    #[allow(clippy::cast_possible_truncation)]
     pub fn bind_netlink_socket(socket: &NetlinkSocket, groups: u32) -> IoResult<()> {
         let mut addr: sockaddr_nl = unsafe { std::mem::zeroed() };
         addr.nl_family = AF_NETLINK as u16;
@@ -270,7 +274,7 @@ pub mod netlink {
         let result = unsafe {
             libc::bind(
                 socket.fd,
-                &addr as *const sockaddr_nl as *const libc::sockaddr,
+                (&raw const addr).cast::<libc::sockaddr>(),
                 size_of::<sockaddr_nl>() as u32,
             )
         };
@@ -297,12 +301,13 @@ pub mod netlink {
     ///
     /// # Errors
     ///
-    /// Returns IoError if send fails
+    /// Returns `IoError` if send fails
     ///
     /// # Safety
     ///
     /// Message buffer must contain valid netlink message with correct length field.
-    /// Buffer size must match or exceed nlmsg_len field in header.
+    /// Buffer size must match or exceed `nlmsg_len` field in header.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn send_netlink_message(socket: &NetlinkSocket, msg: &[u8]) -> IoResult<usize> {
         // Validate message has at least nlmsghdr
         if msg.len() < size_of::<nlmsghdr>() {
@@ -321,10 +326,10 @@ pub mod netlink {
         let result = unsafe {
             libc::sendto(
                 socket.fd,
-                msg.as_ptr() as *const libc::c_void,
+                msg.as_ptr().cast::<libc::c_void>(),
                 msg.len(),
                 0,
-                &addr as *const sockaddr_nl as *const libc::sockaddr,
+                (&raw const addr).cast::<libc::sockaddr>(),
                 size_of::<sockaddr_nl>() as u32,
             )
         };
@@ -339,13 +344,13 @@ pub mod netlink {
     /// Receive netlink message from kernel
     ///
     /// Receives a netlink message into provided buffer. Validates message
-    /// originates from kernel (nl_pid == 0) to prevent userspace spoofing.
+    /// originates from kernel (`nl_pid` == 0) to prevent userspace spoofing.
     ///
     /// # Arguments
     ///
     /// * `socket` - Netlink socket
     /// * `buf` - Buffer to receive message
-    /// * `flags` - MSG_* flags (e.g., MSG_DONTWAIT, MSG_TRUNC)
+    /// * `flags` - MSG_* flags (e.g., `MSG_DONTWAIT`, `MSG_TRUNC`)
     ///
     /// # Returns
     ///
@@ -353,7 +358,7 @@ pub mod netlink {
     ///
     /// # Errors
     ///
-    /// Returns IoError if:
+    /// Returns `IoError` if:
     /// - recv fails (EINTR, ENOBUFS)
     /// - Message not from kernel (security check)
     ///
@@ -368,6 +373,7 @@ pub mod netlink {
     /// // Process message in buf[..len]
     /// # Ok::<(), std::io::Error>(())
     /// ```
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn recv_netlink_message(
         socket: &NetlinkSocket,
         buf: &mut [u8],
@@ -381,11 +387,11 @@ pub mod netlink {
         let result = unsafe {
             libc::recvfrom(
                 socket.fd,
-                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.as_mut_ptr().cast::<libc::c_void>(),
                 buf.len(),
                 flags,
-                &mut addr as *mut sockaddr_nl as *mut libc::sockaddr,
-                &mut addr_len,
+                (&raw mut addr).cast::<libc::sockaddr>(),
+                &raw mut addr_len,
             )
         };
 
@@ -416,6 +422,7 @@ pub mod netlink {
     ///
     /// Aligned length (rounded up to nearest multiple of 4)
     #[inline]
+    #[must_use] 
     pub fn nl_align(len: usize) -> usize {
         (len + 3) & !3
     }
@@ -773,27 +780,29 @@ pub mod pf {
 
 /// Linux connection tracking mark propagation
 ///
-/// Provides safe wrappers around libnetfilter_conntrack for querying
+/// Provides safe wrappers around `libnetfilter_conntrack` for querying
 /// firewall marks associated with network connections.
 ///
 /// # Platform
 ///
-/// Linux-only. Requires libnetfilter_conntrack.so and kernel conntrack module.
+/// Linux-only. Requires `libnetfilter_conntrack.so` and kernel conntrack module.
 ///
 /// # Safety
 ///
 /// All conntrack handle lifecycle is managed via RAII. Raw pointers from
-/// libnetfilter_conntrack are immediately wrapped in safe types.
+/// `libnetfilter_conntrack` are immediately wrapped in safe types.
 #[cfg(all(target_os = "linux", feature = "conntrack"))]
+#[allow(clippy::cast_possible_truncation)]
 pub mod conntrack {
-    use super::*;
+    use super::{IoResult, IoError};
 
-    // Opaque types from libnetfilter_conntrack
+    /// Opaque type from `libnetfilter_conntrack` representing a connection tracking entry
     #[repr(C)]
     pub struct nf_conntrack {
         _private: [u8; 0],
     }
 
+    /// Opaque type from `libnetfilter_conntrack` representing a connection tracking handle
     #[repr(C)]
     pub struct nfct_handle {
         _private: [u8; 0],
@@ -806,6 +815,7 @@ pub mod conntrack {
 
     impl ConntrackHandle {
         /// Open new conntrack handle
+        #[must_use] 
         pub fn new() -> Option<Self> {
             // SAFETY: FFI call to open conntrack netlink socket
             let handle = unsafe { nfct_open(CONNTRACK, 0) };
@@ -817,10 +827,15 @@ pub mod conntrack {
         }
 
         /// Query conntrack for connection entry
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the conntrack query fails
+        #[allow(clippy::cast_possible_wrap)]
         pub fn query(&self, ct: &ConntrackEntry) -> IoResult<()> {
             // SAFETY: handle and ct.entry are valid pointers
             let result = unsafe {
-                nfct_query(self.handle, NFCT_Q_GET as libc::c_int, ct.entry as *const _ as *mut _)
+                nfct_query(self.handle, NFCT_Q_GET as libc::c_int, ct.entry.cast_const() as *mut _)
             };
             if result < 0 {
                 Err(IoError::last_os_error())
@@ -830,12 +845,20 @@ pub mod conntrack {
         }
 
         /// Register callback for query results
-        pub fn register_callback(
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if callback registration fails
+        ///
+        /// # Safety
+        ///
+        /// `data` pointer must be valid for the lifetime of the callback registration
+        pub unsafe fn register_callback(
             &self,
-            callback: nfct_callback,
+            callback: NfctCallback,
             data: *mut libc::c_void,
         ) -> IoResult<()> {
-            // SAFETY: FFI call with function pointer and optional data
+            // SAFETY: FFI call with function pointer and optional data (caller's responsibility)
             let result = unsafe { nfct_callback_register(self.handle, NFCT_T_ALL, callback, data) };
             if result < 0 {
                 Err(IoError::last_os_error())
@@ -861,6 +884,7 @@ pub mod conntrack {
 
     impl ConntrackEntry {
         /// Create new conntrack entry
+        #[must_use] 
         pub fn new() -> Option<Self> {
             // SAFETY: FFI call to allocate conntrack structure
             let entry = unsafe { nfct_new() };
@@ -906,12 +930,14 @@ pub mod conntrack {
         }
 
         /// Get 32-bit attribute
+        #[must_use] 
         pub fn get_attr_u32(&self, attr: u32) -> u32 {
             // SAFETY: entry is valid, attr is enum value
             unsafe { nfct_get_attr_u32(self.entry, attr) }
         }
 
         /// Get raw entry pointer for callback registration
+        #[must_use] 
         pub fn as_ptr(&self) -> *mut nf_conntrack {
             self.entry
         }
@@ -927,7 +953,7 @@ pub mod conntrack {
     }
 
     // FFI declarations for libnetfilter_conntrack
-    type nfct_callback = unsafe extern "C" fn(
+    type NfctCallback = unsafe extern "C" fn(
         nf_conntrack_msg_type: libc::c_int,
         ct: *mut nf_conntrack,
         data: *mut libc::c_void,
@@ -944,7 +970,7 @@ pub mod conntrack {
         fn nfct_callback_register(
             handle: *mut nfct_handle,
             cb_type: libc::c_int,
-            cb: nfct_callback,
+            cb: NfctCallback,
             data: *mut libc::c_void,
         ) -> libc::c_int;
         fn nfct_new() -> *mut nf_conntrack;
@@ -957,22 +983,39 @@ pub mod conntrack {
     }
 
     // Conntrack constants
+    /// Connection tracking subsystem identifier
     pub const CONNTRACK: u8 = 1;
+    /// Connection mark attribute
     pub const ATTR_MARK: u32 = 0;
+    /// Layer 3 protocol attribute
     pub const ATTR_L3PROTO: u32 = 1;
+    /// Layer 4 protocol attribute
     pub const ATTR_L4PROTO: u32 = 2;
+    /// IPv4 source address attribute
     pub const ATTR_IPV4_SRC: u32 = 3;
+    /// IPv4 destination address attribute
     pub const ATTR_IPV4_DST: u32 = 4;
+    /// IPv6 source address attribute
     pub const ATTR_IPV6_SRC: u32 = 5;
+    /// IPv6 destination address attribute
     pub const ATTR_IPV6_DST: u32 = 6;
+    /// Source port attribute
     pub const ATTR_PORT_SRC: u32 = 7;
+    /// Destination port attribute
     pub const ATTR_PORT_DST: u32 = 8;
+    /// Query command to get connection entry
     pub const NFCT_Q_GET: u32 = 0;
+    /// Callback type for all events
     pub const NFCT_T_ALL: libc::c_int = 0;
+    /// Callback return value to continue processing
     pub const NFCT_CB_CONTINUE: libc::c_int = 1;
+    /// IPv4 address family constant
     pub const AF_INET: u8 = libc::AF_INET as u8;
+    /// IPv6 address family constant
     pub const AF_INET6: u8 = libc::AF_INET6 as u8;
+    /// TCP protocol constant
     pub const IPPROTO_TCP: u8 = libc::IPPROTO_TCP as u8;
+    /// UDP protocol constant
     pub const IPPROTO_UDP: u8 = libc::IPPROTO_UDP as u8;
 }
 
@@ -994,9 +1037,9 @@ pub mod conntrack {
 /// validated for correct UTF-8 before passing to libnftables.
 #[cfg(all(target_os = "linux", feature = "nftset"))]
 pub mod nftables {
-    use super::*;
+    use super::{IoResult, CString, IoError, ErrorKind, CStr};
 
-    // Opaque type from libnftables
+    /// Opaque type from libnftables representing an nftables context
     #[repr(C)]
     pub struct nft_ctx {
         _private: [u8; 0],
@@ -1009,6 +1052,7 @@ pub mod nftables {
 
     impl NftContext {
         /// Create new nftables context
+        #[must_use] 
         pub fn new() -> Option<Self> {
             // SAFETY: FFI call to create nftables context
             let ctx = unsafe { nft_ctx_new(NFT_CTX_DEFAULT) };
@@ -1027,7 +1071,7 @@ pub mod nftables {
         ///
         /// # Errors
         ///
-        /// Returns IoError if command execution fails
+        /// Returns `IoError` if command execution fails
         pub fn run_command(&mut self, cmd: &str) -> IoResult<()> {
             let cmd_cstr = CString::new(cmd).map_err(|_| {
                 IoError::new(ErrorKind::InvalidInput, "Command contains null byte")
@@ -1040,16 +1084,16 @@ pub mod nftables {
                 // Retrieve error message from context
                 let error_msg = unsafe {
                     let err_ptr = nft_ctx_get_error_buffer(self.ctx);
-                    if !err_ptr.is_null() {
+                    if err_ptr.is_null() {
+                        "nftables command failed".to_string()
+                    } else {
                         CStr::from_ptr(err_ptr)
                             .to_string_lossy()
                             .into_owned()
-                    } else {
-                        "nftables command failed".to_string()
                     }
                 };
 
-                return Err(IoError::new(ErrorKind::Other, error_msg));
+                return Err(IoError::other(error_msg));
             }
 
             Ok(())
@@ -1064,6 +1108,7 @@ pub mod nftables {
         }
 
         /// Get error buffer as string
+        #[must_use] 
         pub fn get_error_buffer(&self) -> Option<String> {
             // SAFETY: ctx is valid
             let err_ptr = unsafe { nft_ctx_get_error_buffer(self.ctx) };
@@ -1103,7 +1148,7 @@ pub mod nftables {
 // OpenWrt ubus Module
 // ============================================================================
 
-/// OpenWrt ubus IPC integration
+/// `OpenWrt` ubus IPC integration
 ///
 /// Provides safe wrappers around libubus for embedded system control.
 ///
@@ -1113,36 +1158,43 @@ pub mod nftables {
 ///
 /// # Safety
 ///
-/// All ubus context and blob_buf lifecycle managed via RAII. String
+/// All ubus context and `blob_buf` lifecycle managed via RAII. String
 /// conversions validated before passing to C.
 #[cfg(all(target_os = "linux", feature = "ubus"))]
 pub mod ubus {
-    use super::*;
+    use super::{IoResult, CString, IoError, ErrorKind, ptr, CStr};
 
     // Opaque types from libubus/libubox
+    /// Opaque type from libubus representing a ubus context
     #[repr(C)]
     pub struct ubus_context {
         _private: [u8; 0],
     }
 
+    /// Opaque type from libubus representing a ubus object
     #[repr(C)]
     pub struct ubus_object {
         _private: [u8; 0],
     }
 
+    /// Opaque type from libubox representing a blob buffer
     #[repr(C)]
     pub struct blob_buf {
         _private: [u8; 0],
     }
 
+    /// Opaque type from libubox representing a blob attribute
     #[repr(C)]
     pub struct blob_attr {
         _private: [u8; 0],
     }
 
+    /// Policy descriptor for blobmsg parsing
     #[repr(C)]
     pub struct blobmsg_policy {
+        /// Name of the attribute
         pub name: *const libc::c_char,
+        /// Expected type of the attribute
         pub blobmsg_type: u32,
     }
 
@@ -1153,6 +1205,7 @@ pub mod ubus {
 
     impl UbusContext {
         /// Get raw context pointer for FFI
+        #[must_use] 
         pub fn as_ptr(&self) -> *mut ubus_context {
             self.ctx
         }
@@ -1182,6 +1235,9 @@ pub mod ubus {
         }
 
         /// Add u32 field to blob
+        ///
+        /// # Errors
+        /// Returns error if name contains null byte
         pub fn add_u32(&mut self, name: &str, value: u32) -> IoResult<()> {
             let name_cstr = CString::new(name).map_err(|_| {
                 IoError::new(ErrorKind::InvalidInput, "Name contains null byte")
@@ -1195,6 +1251,9 @@ pub mod ubus {
         }
 
         /// Add string field to blob
+        ///
+        /// # Errors
+        /// Returns error if name or value contains null byte
         pub fn add_string(&mut self, name: &str, value: &str) -> IoResult<()> {
             let name_cstr = CString::new(name).map_err(|_| {
                 IoError::new(ErrorKind::InvalidInput, "Name contains null byte")
@@ -1211,6 +1270,9 @@ pub mod ubus {
         }
 
         /// Start array in blob
+        ///
+        /// # Errors
+        /// Returns error if name contains null byte
         pub fn add_array(&mut self, name: &str) -> IoResult<*mut libc::c_void> {
             let name_cstr = CString::new(name).map_err(|_| {
                 IoError::new(ErrorKind::InvalidInput, "Name contains null byte")
@@ -1223,12 +1285,12 @@ pub mod ubus {
     }
 
     /// Connect to ubus daemon
+    #[must_use] 
     pub fn ubus_connect(path: Option<&str>) -> Option<UbusContext> {
         let path_cstr = path.and_then(|p| CString::new(p).ok());
         let path_ptr = path_cstr
             .as_ref()
-            .map(|c: &CString| c.as_ptr())
-            .unwrap_or(ptr::null());
+            .map_or(ptr::null(), |c: &CString| c.as_ptr());
 
         // SAFETY: FFI call with optional C string
         let ctx = unsafe { ubus_connect_impl(path_ptr) };
@@ -1240,17 +1302,23 @@ pub mod ubus {
     }
 
     /// Add ubus object
+    ///
+    /// # Errors
+    /// Returns error if the ubus object cannot be added
     pub fn ubus_add_object(ctx: &UbusContext, obj: *const ubus_object) -> IoResult<()> {
         // SAFETY: ctx and obj are valid pointers
-        let result = unsafe { ubus_add_object_impl(ctx.ctx, obj as *mut _) };
+        let result = unsafe { ubus_add_object_impl(ctx.ctx, obj.cast_mut()) };
         if result < 0 {
-            Err(IoError::new(ErrorKind::Other, "Failed to add ubus object"))
+            Err(IoError::other("Failed to add ubus object"))
         } else {
             Ok(())
         }
     }
 
     /// Send ubus notification
+    ///
+    /// # Errors
+    /// Returns error if type name contains null byte or notification fails
     pub fn ubus_notify(
         ctx: &UbusContext,
         obj: *const ubus_object,
@@ -1265,53 +1333,65 @@ pub mod ubus {
         let result = unsafe {
             ubus_notify_impl(
                 ctx.ctx,
-                obj as *mut _,
+                obj.cast_mut(),
                 type_cstr.as_ptr(),
-                msg as *mut _,
+                msg.cast_mut(),
                 -1,
             )
         };
 
         if result < 0 {
-            Err(IoError::new(ErrorKind::Other, "ubus notify failed"))
+            Err(IoError::other("ubus notify failed"))
         } else {
             Ok(())
         }
     }
 
     /// Reconnect to ubus daemon
+    ///
+    /// # Errors
+    /// Returns error if reconnection fails
     pub fn ubus_reconnect(ctx: &mut UbusContext, path: Option<&str>) -> IoResult<()> {
         let path_cstr = path.and_then(|p| CString::new(p).ok());
         let path_ptr = path_cstr
             .as_ref()
-            .map(|c: &CString| c.as_ptr())
-            .unwrap_or(ptr::null());
+            .map_or(ptr::null(), |c: &CString| c.as_ptr());
 
         // SAFETY: ctx is valid, path is optional C string
         let result = unsafe { ubus_reconnect_impl(ctx.ctx, path_ptr) };
         if result < 0 {
-            Err(IoError::new(ErrorKind::Other, "ubus reconnect failed"))
+            Err(IoError::other("ubus reconnect failed"))
         } else {
             Ok(())
         }
     }
 
     /// Send ubus reply
-    pub fn ubus_send_reply(
+    ///
+    /// # Errors
+    /// Returns error if sending reply fails
+    ///
+    /// # Safety
+    ///
+    /// `req` and `msg` pointers must be valid and properly initialized
+    pub unsafe fn ubus_send_reply(
         ctx: &UbusContext,
         req: *mut libc::c_void,
         msg: *const blob_attr,
     ) -> IoResult<()> {
-        // SAFETY: All pointers are valid
-        let result = unsafe { ubus_send_reply_impl(ctx.ctx, req, msg as *mut _) };
+        // SAFETY: All pointers are valid (caller's responsibility)
+        let result = unsafe { ubus_send_reply_impl(ctx.ctx, req, msg.cast_mut()) };
         if result < 0 {
-            Err(IoError::new(ErrorKind::Other, "Failed to send reply"))
+            Err(IoError::other("Failed to send reply"))
         } else {
             Ok(())
         }
     }
 
     /// Handle ubus event
+    ///
+    /// # Errors
+    /// Returns error if event handling fails
     pub fn ubus_handle_event(ctx: &UbusContext) -> IoResult<()> {
         // SAFETY: ctx is valid
         let result = unsafe { ubus_handle_event_impl(ctx.ctx) };
@@ -1323,6 +1403,10 @@ pub mod ubus {
     }
 
     /// Parse blobmsg
+    ///
+    /// # Errors
+    /// Returns error if parsing fails
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     pub fn blobmsg_parse(
         policy: &[BlobmsgPolicy],
         data: *const blob_attr,
@@ -1333,10 +1417,10 @@ pub mod ubus {
         // SAFETY: All pointers are valid, lengths are validated
         let result = unsafe {
             blobmsg_parse_impl(
-                policy.as_ptr() as *const _,
+                policy.as_ptr().cast(),
                 policy.len() as libc::c_int,
                 tb.as_mut_ptr(),
-                data as *mut _,
+                data.cast_mut(),
                 len as libc::c_int,
             )
         };
@@ -1349,11 +1433,12 @@ pub mod ubus {
     }
 
     /// Get ubus error string
+    #[must_use] 
     pub fn ubus_strerror(error: i32) -> String {
         // SAFETY: FFI call returns static string
         let ptr = unsafe { ubus_strerror_impl(error) };
         if ptr.is_null() {
-            format!("Unknown error {}", error)
+            format!("Unknown error {error}")
         } else {
             unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() }
         }
@@ -1404,9 +1489,13 @@ pub mod ubus {
     pub type BlobmsgPolicy = blobmsg_policy;
 
     /// Blobmsg type constants
+    /// 32-bit integer type
     pub const BLOBMSG_TYPE_INT32: u32 = 5;
+    /// String type
     pub const BLOBMSG_TYPE_STRING: u32 = 3;
+    /// Array type
     pub const BLOBMSG_TYPE_ARRAY: u32 = 6;
+    /// Table type
     pub const BLOBMSG_TYPE_TABLE: u32 = 7;
 }
 

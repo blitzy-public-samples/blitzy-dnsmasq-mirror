@@ -400,13 +400,12 @@ pub(crate) mod internal {
         if path.is_dir() {
             // Directory without pattern - find all .conf files
             let mut entries: Vec<PathBuf> = fs::read_dir(path)?
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .map(|entry| entry.path())
                 .filter(|path| {
                     path.extension()
                         .and_then(|ext| ext.to_str())
-                        .map(|ext| ext == "conf")
-                        .unwrap_or(false)
+                        .is_some_and(|ext| ext == "conf")
                 })
                 .collect();
             

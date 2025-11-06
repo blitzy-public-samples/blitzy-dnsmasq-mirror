@@ -26,8 +26,8 @@
 //! ## Core Services
 //!
 //! - **DNS Forwarding & Caching**: RFC-compliant DNS resolver with efficient caching
-//! - **DHCPv4 Server**: Full RFC 2131/2132 implementation with lease management
-//! - **DHCPv6 Server**: RFC 3315/3646 compliant with IA_NA, IA_TA, and IA_PD support
+//! - **`DHCPv4` Server**: Full RFC 2131/2132 implementation with lease management
+//! - **`DHCPv6` Server**: RFC 3315/3646 compliant with `IA_NA`, `IA_TA`, and `IA_PD` support
 //! - **TFTP Server**: Network boot support per RFC 1350
 //! - **Router Advertisement**: IPv6 RA per RFC 4861 with SLAAC coordination
 //! - **Authoritative DNS**: Local zone authority for private networks
@@ -69,8 +69,8 @@
 //! ## Feature Flags
 //!
 //! Optional subsystems are controlled via Cargo feature flags, matching C's HAVE_* macros:
-//! - `dhcp` - DHCPv4 server (default)
-//! - `dhcp6` - DHCPv6 server (requires `dhcp`, default)
+//! - `dhcp` - `DHCPv4` server (default)
+//! - `dhcp6` - `DHCPv6` server (requires `dhcp`, default)
 //! - `tftp` - TFTP server (default)
 //! - `script` - External script execution (default)
 //! - `auth` - Authoritative DNS (default)
@@ -371,39 +371,39 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { context, source } => {
-                write!(f, "I/O error: {}: {}", context, source)
+                write!(f, "I/O error: {context}: {source}")
             }
             Self::Config { message } => {
-                write!(f, "Configuration error: {}", message)
+                write!(f, "Configuration error: {message}")
             }
             Self::Parse { message, location } => {
                 if let Some(loc) = location {
-                    write!(f, "Parse error at {}: {}", loc, message)
+                    write!(f, "Parse error at {loc}: {message}")
                 } else {
-                    write!(f, "Parse error: {}", message)
+                    write!(f, "Parse error: {message}")
                 }
             }
             Self::Network { message, source } => {
                 if let Some(src) = source {
-                    write!(f, "Network error: {}: {}", message, src)
+                    write!(f, "Network error: {message}: {src}")
                 } else {
-                    write!(f, "Network error: {}", message)
+                    write!(f, "Network error: {message}")
                 }
             }
             Self::Dns { message } => {
-                write!(f, "DNS error: {}", message)
+                write!(f, "DNS error: {message}")
             }
             Self::Dhcp { message } => {
-                write!(f, "DHCP error: {}", message)
+                write!(f, "DHCP error: {message}")
             }
             Self::Permission { message } => {
-                write!(f, "Permission denied: {}", message)
+                write!(f, "Permission denied: {message}")
             }
             Self::NotFound { resource } => {
-                write!(f, "Resource not found: {}", resource)
+                write!(f, "Resource not found: {resource}")
             }
             Self::InvalidState { message } => {
-                write!(f, "Invalid state: {}", message)
+                write!(f, "Invalid state: {message}")
             }
         }
     }
@@ -546,7 +546,7 @@ pub fn init() -> Result<()> {
     // Initialize logging with default configuration
     logging::init()
         .map_err(|e| Error::Config {
-            message: format!("Failed to initialize logging: {}", e),
+            message: format!("Failed to initialize logging: {e}"),
         })?;
 
     Ok(())

@@ -15,6 +15,7 @@ pub struct Daemon {
 
 impl Daemon {
     /// Create a new daemon instance
+    #[must_use]
     pub fn new(config: crate::config::types::Config) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
@@ -22,6 +23,11 @@ impl Daemon {
     }
 
     /// Run the daemon
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the daemon fails to initialize or encounters a fatal runtime error
+    #[allow(clippy::unused_async)] // Async for future implementation
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         // TODO: Implement daemon runtime
         Ok(())

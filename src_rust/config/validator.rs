@@ -87,28 +87,28 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ValidationError::InvalidPort { field, port, reason } => {
-                write!(f, "Invalid port {} for {}: {}", port, field, reason)
+                write!(f, "Invalid port {port} for {field}: {reason}")
             }
             ValidationError::InvalidNetwork { field, reason } => {
-                write!(f, "Invalid network configuration for {}: {}", field, reason)
+                write!(f, "Invalid network configuration for {field}: {reason}")
             }
             ValidationError::InvalidDhcpRange { reason } => {
-                write!(f, "Invalid DHCP range: {}", reason)
+                write!(f, "Invalid DHCP range: {reason}")
             }
             ValidationError::OverlappingRanges { range1, range2 } => {
-                write!(f, "Overlapping DHCP ranges: {} and {}", range1, range2)
+                write!(f, "Overlapping DHCP ranges: {range1} and {range2}")
             }
             ValidationError::FileNotFound { path, field } => {
-                write!(f, "File not found for {}: {}", field, path)
+                write!(f, "File not found for {field}: {path}")
             }
             ValidationError::MutuallyExclusive { option1, option2 } => {
-                write!(f, "Mutually exclusive options: {} and {}", option1, option2)
+                write!(f, "Mutually exclusive options: {option1} and {option2}")
             }
             ValidationError::ResourceLimit { resource, value, max } => {
-                write!(f, "Resource limit exceeded for {}: {} > {}", resource, value, max)
+                write!(f, "Resource limit exceeded for {resource}: {value} > {max}")
             }
             ValidationError::Other { message } => {
-                write!(f, "Validation error: {}", message)
+                write!(f, "Validation error: {message}")
             }
         }
     }
@@ -133,6 +133,9 @@ impl std::error::Error for ValidationError {}
 /// # Returns
 ///
 /// `Ok(())` if validation passes, `Err(ValidationError)` describing the first error found
+///
+/// # Errors
+/// Returns an error if any configuration validation fails
 ///
 /// # Example
 ///
@@ -229,12 +232,12 @@ fn validate_tftp_config(config: &Config) -> Result<(), ValidationError> {
         if let Some((start_port, end_port)) = config.tftp.port_range {
             if start_port == 0 || end_port == 0 {
                 return Err(ValidationError::Other {
-                    message: format!("TFTP port range must be 1-65535, got {}-{}", start_port, end_port),
+                    message: format!("TFTP port range must be 1-65535, got {start_port}-{end_port}"),
                 });
             }
             if start_port > end_port {
                 return Err(ValidationError::Other {
-                    message: format!("TFTP port range start ({}) must be <= end ({})", start_port, end_port),
+                    message: format!("TFTP port range start ({start_port}) must be <= end ({end_port})"),
                 });
             }
         }
@@ -266,6 +269,12 @@ fn validate_network_config(config: &Config) -> Result<(), ValidationError> {
 }
 
 /// Validate process configuration
+/// 
+/// # Errors
+/// 
+/// Returns `ValidationError` if process configuration is invalid.
+/// Currently placeholder for future process validation checks.
+#[allow(clippy::unnecessary_wraps)] // Kept for consistency with other validators
 fn validate_process_config(_config: &Config) -> Result<(), ValidationError> {
     // Process configuration validation
     // In full implementation, would check:
@@ -305,6 +314,12 @@ fn validate_file_references(config: &Config) -> Result<(), ValidationError> {
 }
 
 /// Validate mutually exclusive options
+/// 
+/// # Errors
+/// 
+/// Returns `ValidationError` if mutually exclusive options are configured.
+/// Currently placeholder for future mutual exclusivity checks.
+#[allow(clippy::unnecessary_wraps)] // Kept for consistency with other validators
 fn validate_mutual_exclusivity(_config: &Config) -> Result<(), ValidationError> {
     // Already checked bind-interfaces vs bind-dynamic in validate_network_config
     

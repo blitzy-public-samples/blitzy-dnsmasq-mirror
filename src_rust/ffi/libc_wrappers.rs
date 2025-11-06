@@ -30,7 +30,7 @@
 //!
 //! # Platform Support
 //!
-//! - Linux: Full support including capabilities, netlink, SO_BINDTODEVICE
+//! - Linux: Full support including capabilities, netlink, `SO_BINDTODEVICE`
 //! - BSD: Support via routing sockets and BPF
 //! - macOS: BSD-style support with launchd integration
 //! - Solaris: Basic support with privilege management
@@ -131,11 +131,11 @@ const CAP_SYS_CHROOT: c_uint = 18;
 
 // Linux capability version constants
 #[cfg(target_os = "linux")]
-const LINUX_CAPABILITY_VERSION_1: u32 = 0x19980330;
+const LINUX_CAPABILITY_VERSION_1: u32 = 0x1998_0330;
 #[cfg(target_os = "linux")]
-const LINUX_CAPABILITY_VERSION_2: u32 = 0x20071026;
+const LINUX_CAPABILITY_VERSION_2: u32 = 0x2007_1026;
 #[cfg(target_os = "linux")]
-const LINUX_CAPABILITY_VERSION_3: u32 = 0x20080522;
+const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 
 /// Result type alias for FFI operations
 pub type Result<T> = StdResult<T, FfiError>;
@@ -197,28 +197,28 @@ impl fmt::Display for FfiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FfiError::SystemCall { call, source } => {
-                write!(f, "System call '{}' failed: {}", call, source)
+                write!(f, "System call '{call}' failed: {source}")
             }
             FfiError::PermissionDenied { operation } => {
-                write!(f, "Permission denied for operation: {}", operation)
+                write!(f, "Permission denied for operation: {operation}")
             }
             FfiError::InvalidArgument { parameter, reason } => {
-                write!(f, "Invalid argument for '{}': {}", parameter, reason)
+                write!(f, "Invalid argument for '{parameter}': {reason}")
             }
             FfiError::NotFound { resource, name } => {
-                write!(f, "{} '{}' not found", resource, name)
+                write!(f, "{resource} '{name}' not found")
             }
             FfiError::UserNotFound { username } => {
-                write!(f, "User '{}' not found in system database", username)
+                write!(f, "User '{username}' not found in system database")
             }
             FfiError::GroupNotFound { groupname } => {
-                write!(f, "Group '{}' not found in system database", groupname)
+                write!(f, "Group '{groupname}' not found in system database")
             }
             FfiError::CapabilityNotSupported { capability } => {
-                write!(f, "Capability '{}' not supported on this platform", capability)
+                write!(f, "Capability '{capability}' not supported on this platform")
             }
             FfiError::SocketError { operation, source } => {
-                write!(f, "Socket operation '{}' failed: {}", operation, source)
+                write!(f, "Socket operation '{operation}' failed: {source}")
             }
         }
     }
@@ -227,8 +227,7 @@ impl fmt::Display for FfiError {
 impl std::error::Error for FfiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            FfiError::SystemCall { source, .. } => Some(source),
-            FfiError::SocketError { source, .. } => Some(source),
+            FfiError::SystemCall { source, .. } | FfiError::SocketError { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -254,19 +253,19 @@ impl From<nix::Error> for FfiError {
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinuxCapability {
-    /// CAP_NET_ADMIN: Configure network interfaces, routing tables, netfilter
+    /// `CAP_NET_ADMIN`: Configure network interfaces, routing tables, netfilter
     NetAdmin,
-    /// CAP_NET_RAW: Use RAW and PACKET sockets (required for DHCP)
+    /// `CAP_NET_RAW`: Use RAW and PACKET sockets (required for DHCP)
     NetRaw,
-    /// CAP_NET_BIND_SERVICE: Bind sockets to privileged ports (<1024)
+    /// `CAP_NET_BIND_SERVICE`: Bind sockets to privileged ports (<1024)
     NetBindService,
-    /// CAP_SETUID: Make arbitrary manipulations of process UIDs
+    /// `CAP_SETUID`: Make arbitrary manipulations of process UIDs
     SetUid,
-    /// CAP_SETGID: Make arbitrary manipulations of process GIDs
+    /// `CAP_SETGID`: Make arbitrary manipulations of process GIDs
     SetGid,
-    /// CAP_DAC_OVERRIDE: Bypass file read, write, and execute permission checks
+    /// `CAP_DAC_OVERRIDE`: Bypass file read, write, and execute permission checks
     DacOverride,
-    /// CAP_SYS_CHROOT: Use chroot(2) to change root directory
+    /// `CAP_SYS_CHROOT`: Use chroot(2) to change root directory
     SysChroot,
 }
 
@@ -291,6 +290,7 @@ impl LinuxCapability {
     }
 
     /// Get human-readable name for logging
+    #[must_use] 
     pub fn name(self) -> &'static str {
         match self {
             LinuxCapability::NetAdmin => "NET_ADMIN",
@@ -335,7 +335,7 @@ impl LinuxCapability {
 /// Replaces capability management from `src/dnsmasq.c`:
 /// - Lines 717-735: Capability API version detection
 /// - Lines 748-777: Capability bitmask manipulation
-/// - Lines 926-930, 968-976: capset() calls for privilege adjustment
+/// - Lines 926-930, 968-976: `capset()` calls for privilege adjustment
 ///
 /// # Example
 ///
@@ -356,8 +356,15 @@ pub struct CapabilitySet {
 }
 
 #[cfg(target_os = "linux")]
+impl Default for CapabilitySet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CapabilitySet {
     /// Create new empty capability set
+    #[must_use] 
     pub fn new() -> Self {
         CapabilitySet {
             effective: 0,
@@ -383,6 +390,7 @@ impl CapabilitySet {
     }
 
     /// Check if capability is in the set
+    #[must_use] 
     pub fn contains(&self, cap: LinuxCapability) -> bool {
         let bit = 1u64 << cap.to_raw();
         (self.effective & bit) != 0
@@ -396,6 +404,7 @@ impl CapabilitySet {
     }
 
     /// Check if capability set is empty
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.effective == 0 && self.permitted == 0 && self.inheritable == 0
     }
@@ -407,13 +416,17 @@ impl CapabilitySet {
     /// This function calls capset(2) which requires:
     /// 1. Valid capability header with correct version
     /// 2. Valid capability data structures
-    /// 3. Process has CAP_SETPCAP or is reducing capabilities
+    /// 3. Process has `CAP_SETPCAP` or is reducing capabilities
     ///
     /// All preconditions are validated before the unsafe call.
     ///
+    /// # Errors
+    ///
+    /// Returns `Err` if capget/capset system calls fail
+    ///
     /// # C Implementation Reference
     ///
-    /// Replaces capset() calls from `src/dnsmasq.c` lines 929, 972.
+    /// Replaces `capset()` calls from `src/dnsmasq.c` lines 929, 972.
     pub fn apply(&self) -> Result<()> {
         unsafe {
             // Detect kernel capability API version (dnsmasq.c lines 722-732)
@@ -421,7 +434,7 @@ impl CapabilitySet {
             hdr.pid = 0; // 0 = current process
             
             // Try to get version from kernel
-            if capget(&hdr, ptr::null_mut()) == -1 {
+            if capget(&raw const hdr, ptr::null_mut()) == -1 {
                 return Err(FfiError::SystemCall {
                     call: "capget_version_detect",
                     source: io::Error::last_os_error(),
@@ -431,8 +444,7 @@ impl CapabilitySet {
             // Validate version and determine data structure count
             let capsize = match hdr.version {
                 LINUX_CAPABILITY_VERSION_1 => 1,
-                LINUX_CAPABILITY_VERSION_2 => 2,
-                LINUX_CAPABILITY_VERSION_3 => 2,
+                LINUX_CAPABILITY_VERSION_2 | LINUX_CAPABILITY_VERSION_3 => 2,
                 _ => {
                     // Unknown version, default to v3 (dnsmasq.c line 730)
                     hdr.version = LINUX_CAPABILITY_VERSION_3;
@@ -445,18 +457,18 @@ impl CapabilitySet {
             
             // Split 64-bit capability masks into 32-bit words for kernel ABI
             // (Linux capabilities API uses array of 32-bit words)
-            data[0].effective = (self.effective & 0xFFFFFFFF) as u32;
-            data[0].permitted = (self.permitted & 0xFFFFFFFF) as u32;
-            data[0].inheritable = (self.inheritable & 0xFFFFFFFF) as u32;
+            data[0].effective = (self.effective & 0xFFFF_FFFF) as u32;
+            data[0].permitted = (self.permitted & 0xFFFF_FFFF) as u32;
+            data[0].inheritable = (self.inheritable & 0xFFFF_FFFF) as u32;
             
             if capsize == 2 {
-                data[1].effective = ((self.effective >> 32) & 0xFFFFFFFF) as u32;
-                data[1].permitted = ((self.permitted >> 32) & 0xFFFFFFFF) as u32;
-                data[1].inheritable = ((self.inheritable >> 32) & 0xFFFFFFFF) as u32;
+                data[1].effective = ((self.effective >> 32) & 0xFFFF_FFFF) as u32;
+                data[1].permitted = ((self.permitted >> 32) & 0xFFFF_FFFF) as u32;
+                data[1].inheritable = ((self.inheritable >> 32) & 0xFFFF_FFFF) as u32;
             }
 
             // Apply capabilities to current process
-            if capset(&hdr, data.as_ptr()) == -1 {
+            if capset(&raw const hdr, data.as_ptr()) == -1 {
                 return Err(FfiError::SystemCall {
                     call: "capset",
                     source: io::Error::last_os_error(),
@@ -468,6 +480,10 @@ impl CapabilitySet {
     }
 
     /// Drop all capabilities from current process
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if capability system calls fail
     pub fn drop_all() -> Result<()> {
         let caps = CapabilitySet::new();
         caps.apply()
@@ -480,15 +496,19 @@ impl CapabilitySet {
     /// Calls capget(2) to retrieve current process capabilities.
     /// Validates capability version and data structures before returning.
     ///
+    /// # Errors
+    ///
+    /// Returns `Err` if capget system call fails or capability version is invalid
+    ///
     /// # C Implementation Reference
     ///
-    /// Replaces capget() call from `src/dnsmasq.c` line 735.
+    /// Replaces `capget()` call from `src/dnsmasq.c` line 735.
     pub fn get_current() -> Result<Self> {
         unsafe {
             let mut hdr: __user_cap_header_struct = mem::zeroed();
             hdr.pid = 0;
             
-            if capget(&hdr, ptr::null_mut()) == -1 {
+            if capget(&raw const hdr, ptr::null_mut()) == -1 {
                 return Err(FfiError::SystemCall {
                     call: "capget_version_detect",
                     source: io::Error::last_os_error(),
@@ -506,7 +526,7 @@ impl CapabilitySet {
 
             let mut data: Vec<__user_cap_data_struct> = vec![mem::zeroed(); capsize];
             
-            if capget(&hdr, data.as_mut_ptr()) == -1 {
+            if capget(&raw const hdr, data.as_mut_ptr()) == -1 {
                 return Err(FfiError::SystemCall {
                     call: "capget",
                     source: io::Error::last_os_error(),
@@ -515,21 +535,21 @@ impl CapabilitySet {
 
             // Reconstruct 64-bit capability masks from 32-bit words
             let effective = if capsize == 2 {
-                (data[0].effective as u64) | ((data[1].effective as u64) << 32)
+                u64::from(data[0].effective) | (u64::from(data[1].effective) << 32)
             } else {
-                data[0].effective as u64
+                u64::from(data[0].effective)
             };
 
             let permitted = if capsize == 2 {
-                (data[0].permitted as u64) | ((data[1].permitted as u64) << 32)
+                u64::from(data[0].permitted) | (u64::from(data[1].permitted) << 32)
             } else {
-                data[0].permitted as u64
+                u64::from(data[0].permitted)
             };
 
             let inheritable = if capsize == 2 {
-                (data[0].inheritable as u64) | ((data[1].inheritable as u64) << 32)
+                u64::from(data[0].inheritable) | (u64::from(data[1].inheritable) << 32)
             } else {
-                data[0].inheritable as u64
+                u64::from(data[0].inheritable)
             };
 
             Ok(CapabilitySet {
@@ -581,12 +601,16 @@ impl CapabilitySet {
 ///
 /// # Safety
 ///
-/// Uses nix::unistd::User::from_name() which safely wraps getpwnam_r(3).
-/// Validates username is valid UTF-8 and converts to CString for FFI boundary.
+/// Uses `nix::unistd::User::from_name()` which safely wraps `getpwnam_r(3)`.
+/// Validates username is valid UTF-8 and converts to `CString` for FFI boundary.
+///
+/// # Errors
+///
+/// Returns `Err` if username contains null bytes or system user lookup fails
 ///
 /// # C Implementation Reference
 ///
-/// Replaces getpwnam() call pattern from `src/dnsmasq.c` around line 922.
+/// Replaces `getpwnam()` call pattern from `src/dnsmasq.c` around line 922.
 ///
 /// # Returns
 ///
@@ -617,12 +641,16 @@ pub fn get_user_by_name(username: &str) -> Result<Option<(Uid, Gid)>> {
 ///
 /// # Safety
 ///
-/// Uses nix::unistd::Group::from_name() which safely wraps getgrnam_r(3).
-/// Validates groupname is valid UTF-8 and converts to CString for FFI boundary.
+/// Uses `nix::unistd::Group::from_name()` which safely wraps `getgrnam_r(3)`.
+/// Validates groupname is valid UTF-8 and converts to `CString` for FFI boundary.
+///
+/// # Errors
+///
+/// Returns `Err` if groupname contains null bytes or system group lookup fails
 ///
 /// # C Implementation Reference
 ///
-/// Replaces getgrnam() call pattern from `src/dnsmasq.c` around line 914.
+/// Replaces `getgrnam()` call pattern from `src/dnsmasq.c` around line 914.
 ///
 /// # Returns
 ///
@@ -679,6 +707,10 @@ pub fn get_group_by_name(groupname: &str) -> Result<Option<Gid>> {
 ///
 /// * `username` - User name to drop privileges to (from /etc/passwd)
 /// * `groupname` - Group name to drop privileges to (from /etc/group)
+///
+/// # Errors
+///
+/// Returns `Err` if user or group not found, or if privilege drop system calls fail
 ///
 /// # Returns
 ///
@@ -739,11 +771,11 @@ pub fn drop_root_privileges(username: &str, groupname: &str) -> Result<()> {
 ///
 /// On Linux:
 /// 1. Validates capability requirements against current permitted set
-/// 2. Sets PR_SET_KEEPCAPS before dropping UID to preserve capabilities
+/// 2. Sets `PR_SET_KEEPCAPS` before dropping UID to preserve capabilities
 /// 3. Applies capability set via capset(2)
 /// 4. Drops SETUID capability after privilege drop
 ///
-/// On non-Linux platforms: Returns CapabilityNotSupported error
+/// On non-Linux platforms: Returns `CapabilityNotSupported` error
 ///
 /// # C Implementation Reference
 ///
@@ -760,8 +792,12 @@ pub fn drop_root_privileges(username: &str, groupname: &str) -> Result<()> {
 ///
 /// # Arguments
 ///
-/// * `caps` - CapabilitySet with desired capabilities
-/// * `keep_on_setuid` - If true, set PR_SET_KEEPCAPS before dropping UID
+/// * `caps` - `CapabilitySet` with desired capabilities
+/// * `keep_on_setuid` - If true, set `PR_SET_KEEPCAPS` before dropping UID
+///
+/// # Errors
+///
+/// Returns `Err` if capability system calls fail or requested capabilities are unavailable
 ///
 /// # Example
 ///
@@ -807,7 +843,7 @@ pub fn set_linux_capabilities(_caps: &CapabilitySet, _keep_on_setuid: bool) -> R
 ///
 /// # Safety
 ///
-/// Uses nix::sys::signal::sigaction() which safely wraps sigaction(2).
+/// Uses `nix::sys::signal::sigaction()` which safely wraps sigaction(2).
 /// All signal handler functions must be async-signal-safe as per POSIX.
 /// The handler parameter must point to a valid async-signal-safe function.
 ///
@@ -825,7 +861,11 @@ pub fn set_linux_capabilities(_caps: &CapabilitySet, _keep_on_setuid: bool) -> R
 /// # Arguments
 ///
 /// * `signal` - Signal number (SIGUSR1, SIGHUP, etc.)
-/// * `handler` - Signal handler (SigHandler::Handler or SigHandler::SigIgn)
+/// * `handler` - Signal handler (`SigHandler::Handler` or `SigHandler::SigIgn`)
+///
+/// # Errors
+///
+/// Returns `Err` if sigaction system call fails
 ///
 /// # Example
 ///
@@ -864,13 +904,13 @@ pub fn install_signal_handler(signal: Signal, handler: SigHandler) -> Result<()>
 ///
 /// # Safety
 ///
-/// Uses nix::sys::socket::socket() which validates parameters and returns
-/// Result type. Socket file descriptor is returned as RawFd which must be
+/// Uses `nix::sys::socket::socket()` which validates parameters and returns
+/// Result type. Socket file descriptor is returned as `RawFd` which must be
 /// properly closed by caller (use RAII wrapper in production code).
 ///
 /// # C Implementation Reference
 ///
-/// Replaces socket() call from `src/network.c` line 1370:
+/// Replaces `socket()` call from `src/network.c` line 1370:
 /// ```c
 /// if ((param.fd = socket(PF_INET, SOCK_DGRAM, 0)) == -1)
 ///     return 0;
@@ -878,9 +918,13 @@ pub fn install_signal_handler(signal: Signal, handler: SigHandler) -> Result<()>
 ///
 /// # Arguments
 ///
-/// * `family` - Address family (AF_INET, AF_INET6)
-/// * `sock_type` - Socket type (SOCK_DGRAM, SOCK_STREAM)
+/// * `family` - Address family (`AF_INET`, `AF_INET6`)
+/// * `sock_type` - Socket type (`SOCK_DGRAM`, `SOCK_STREAM`)
 /// * `protocol` - Protocol (0 for default)
+///
+/// # Errors
+///
+/// Returns `Err` if socket system call fails
 ///
 /// # Returns
 ///
@@ -915,12 +959,12 @@ pub fn create_socket(
 ///
 /// # Safety
 ///
-/// Uses nix::sys::socket::bind() with proper address type conversion.
+/// Uses `nix::sys::socket::bind()` with proper address type conversion.
 /// Validates socket file descriptor and address structure.
 ///
 /// # C Implementation Reference
 ///
-/// Replaces bind() call from `src/network.c` line 1667:
+/// Replaces `bind()` call from `src/network.c` line 1667:
 /// ```c
 /// if ((rc = bind(fd, (struct sockaddr *)addr, sa_len(addr))) == -1)
 ///     goto err;
@@ -928,8 +972,12 @@ pub fn create_socket(
 ///
 /// # Arguments
 ///
-/// * `fd` - Socket file descriptor from create_socket()
+/// * `fd` - Socket file descriptor from `create_socket()`
 /// * `addr` - Socket address to bind to
+///
+/// # Errors
+///
+/// Returns `Err` if bind system call fails
 ///
 /// # Example
 ///
@@ -967,17 +1015,17 @@ pub fn bind_socket<F: AsFd>(fd: F, addr: &SocketAddr) -> Result<()> {
 /// Socket options that can be set
 #[derive(Debug, Clone, Copy)]
 pub enum SocketOption {
-    /// SO_REUSEADDR - Allow local address reuse
+    /// `SO_REUSEADDR` - Allow local address reuse
     ReuseAddr(bool),
-    /// SO_REUSEPORT - Allow port reuse for load balancing
+    /// `SO_REUSEPORT` - Allow port reuse for load balancing
     ReusePort(bool),
-    /// IPV6_V6ONLY - Restrict socket to IPv6 only
+    /// `IPV6_V6ONLY` - Restrict socket to IPv6 only
     Ipv6Only(bool),
-    /// SO_RCVBUF - Set receive buffer size
+    /// `SO_RCVBUF` - Set receive buffer size
     ReceiveBufferSize(usize),
-    /// SO_SNDBUF - Set send buffer size
+    /// `SO_SNDBUF` - Set send buffer size
     SendBufferSize(usize),
-    /// TCP_FASTOPEN - Enable TCP Fast Open
+    /// `TCP_FASTOPEN` - Enable TCP Fast Open
     TcpFastOpen(i32),
 }
 
@@ -987,13 +1035,13 @@ pub enum SocketOption {
 ///
 /// # Safety
 ///
-/// Uses nix::sys::socket::setsockopt() for standard options with type safety.
-/// For platform-specific options (TCP_FASTOPEN), uses raw setsockopt with
+/// Uses `nix::sys::socket::setsockopt()` for standard options with type safety.
+/// For platform-specific options (`TCP_FASTOPEN`), uses raw setsockopt with
 /// validated parameters.
 ///
 /// # C Implementation Reference
 ///
-/// Replaces setsockopt() calls from `src/network.c` lines 1661-1689:
+/// Replaces `setsockopt()` calls from `src/network.c` lines 1661-1689:
 /// ```c
 /// if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
 ///     goto err;
@@ -1006,6 +1054,10 @@ pub enum SocketOption {
 ///
 /// * `fd` - Socket file descriptor
 /// * `option` - Socket option to set with value
+///
+/// # Errors
+///
+/// Returns `Err` if setsockopt system call fails or option is unsupported
 ///
 /// # Example
 ///
@@ -1043,13 +1095,15 @@ pub fn set_socket_option<F: AsFd>(fd: F, option: SocketOption) -> Result<()> {
         SocketOption::ReceiveBufferSize(size) => {
             // Use raw setsockopt for buffer sizes
             let raw_fd = fd.as_fd().as_raw_fd();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             unsafe {
                 let size_val = size as c_int;
+                #[allow(clippy::cast_possible_truncation)]
                 if libc::setsockopt(
                     raw_fd,
                     SOL_SOCKET,
                     SO_RCVBUF,
-                    &size_val as *const c_int as *const c_void,
+                    (&raw const size_val).cast::<c_void>(),
                     mem::size_of::<c_int>() as socklen_t,
                 ) == -1
                 {
@@ -1063,13 +1117,15 @@ pub fn set_socket_option<F: AsFd>(fd: F, option: SocketOption) -> Result<()> {
         }
         SocketOption::SendBufferSize(size) => {
             let raw_fd = fd.as_fd().as_raw_fd();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             unsafe {
                 let size_val = size as c_int;
+                #[allow(clippy::cast_possible_truncation)]
                 if libc::setsockopt(
                     raw_fd,
                     SOL_SOCKET,
                     SO_SNDBUF,
-                    &size_val as *const c_int as *const c_void,
+                    (&raw const size_val).cast::<c_void>(),
                     mem::size_of::<c_int>() as socklen_t,
                 ) == -1
                 {
@@ -1086,12 +1142,13 @@ pub fn set_socket_option<F: AsFd>(fd: F, option: SocketOption) -> Result<()> {
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             {
                 let raw_fd = fd.as_fd().as_raw_fd();
+                #[allow(clippy::cast_possible_truncation)]
                 unsafe {
                     if libc::setsockopt(
                         raw_fd,
                         IPPROTO_TCP,
                         TCP_FASTOPEN,
-                        &qlen as *const c_int as *const c_void,
+                        (&raw const qlen).cast::<c_void>(),
                         mem::size_of::<c_int>() as socklen_t,
                     ) == -1
                     {

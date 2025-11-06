@@ -26,7 +26,7 @@
 //! It defines three primary categories of configuration:
 //!
 //! 1. **Tuning Constants**: Resource limits and default operational parameters
-//! 2. **Timeout Values**: All timeout durations using std::time::Duration for type safety
+//! 2. **Timeout Values**: All timeout durations using `std::time::Duration` for type safety
 //! 3. **Default Paths**: File system paths for configuration, leases, and hosts files
 //!
 //! # Memory Safety
@@ -46,8 +46,8 @@
 //!
 //! ## DHCP Configuration  
 //! - `MAXLEASES`: Maximum number of DHCP leases
-//! - `DEFLEASE`: Default DHCPv4 lease time
-//! - `DEFLEASE6`: Default DHCPv6 lease time
+//! - `DEFLEASE`: Default `DHCPv4` lease time
+//! - `DEFLEASE6`: Default `DHCPv6` lease time
 //! - `PING_WAIT`: Ping timeout for address conflict detection
 //!
 //! ## Network Configuration
@@ -74,37 +74,37 @@
 //!
 //! These features match the C implementation's default build configuration:
 //!
-//! - `dhcp`: DHCPv4 server (HAVE_DHCP)
-//! - `dhcp6`: DHCPv6 server (HAVE_DHCP6, implies dhcp)
-//! - `tftp`: TFTP server (HAVE_TFTP)
-//! - `script`: External script execution (HAVE_SCRIPT)
-//! - `auth`: Authoritative DNS server (HAVE_AUTH)
-//! - `dnssec`: DNSSEC validation (HAVE_DNSSEC)
+//! - `dhcp`: `DHCPv4` server (`HAVE_DHCP`)
+//! - `dhcp6`: `DHCPv6` server (`HAVE_DHCP6`, implies dhcp)
+//! - `tftp`: TFTP server (`HAVE_TFTP`)
+//! - `script`: External script execution (`HAVE_SCRIPT`)
+//! - `auth`: Authoritative DNS server (`HAVE_AUTH`)
+//! - `dnssec`: DNSSEC validation (`HAVE_DNSSEC`)
 //!
 //! ## Optional Features (Disabled by Default)
 //!
 //! These features require external dependencies or are platform-specific:
 //!
-//! - `dbus`: D-Bus control interface (HAVE_DBUS)
-//! - `ubus`: OpenWrt ubus integration (HAVE_UBUS)
-//! - `idn`: Internationalized Domain Names (HAVE_LIBIDN2)
-//! - `lua`: Lua scripting (HAVE_LUASCRIPT, implies script)
-//! - `conntrack`: Linux connection tracking (HAVE_CONNTRACK)
-//! - `ipset`: Linux ipset integration (HAVE_IPSET)
-//! - `nftset`: nftables integration (HAVE_NFTSET)
-//! - `loop-detect`: DNS loop detection (HAVE_LOOP)
-//! - `dump`: PCAP packet dumping (HAVE_DUMPFILE)
-//! - `inotify`: Linux inotify file watching (HAVE_INOTIFY)
+//! - `dbus`: D-Bus control interface (`HAVE_DBUS`)
+//! - `ubus`: `OpenWrt` ubus integration (`HAVE_UBUS`)
+//! - `idn`: Internationalized Domain Names (`HAVE_LIBIDN2`)
+//! - `lua`: Lua scripting (`HAVE_LUASCRIPT`, implies script)
+//! - `conntrack`: Linux connection tracking (`HAVE_CONNTRACK`)
+//! - `ipset`: Linux ipset integration (`HAVE_IPSET`)
+//! - `nftset`: nftables integration (`HAVE_NFTSET`)
+//! - `loop-detect`: DNS loop detection (`HAVE_LOOP`)
+//! - `dump`: PCAP packet dumping (`HAVE_DUMPFILE`)
+//! - `inotify`: Linux inotify file watching (`HAVE_INOTIFY`)
 //! - `prometheus-metrics`: Prometheus metrics export
 //!
 //! ## Platform Features (Auto-Detected)
 //!
 //! These are automatically enabled based on target platform:
 //!
-//! - `linux`: Linux-specific code (HAVE_LINUX_NETWORK)
-//! - `bsd`: BSD-specific code (HAVE_BSD_NETWORK)
+//! - `linux`: Linux-specific code (`HAVE_LINUX_NETWORK`)
+//! - `bsd`: BSD-specific code (`HAVE_BSD_NETWORK`)
 //! - `macos`: macOS-specific code
-//! - `solaris`: Solaris-specific code (HAVE_SOLARIS_NETWORK)
+//! - `solaris`: Solaris-specific code (`HAVE_SOLARIS_NETWORK`)
 //!
 //! ## Using Features
 //!
@@ -127,7 +127,7 @@
 //! ## Checking Feature Status at Runtime
 //!
 //! Use the `compile_options()` function to get a string listing enabled features,
-//! matching the C implementation's compile_opts behavior.
+//! matching the C implementation's `compile_opts` behavior.
 //!
 //! # Examples
 //!
@@ -278,7 +278,7 @@ pub const SAFE_PKTSZ: usize = 1232;
 ///
 /// # Memory Impact
 ///
-/// Each key requires ceil(key_size / 40) blocks.
+/// Each key requires `ceil(key_size / 40)` blocks.
 ///
 /// # Feature Gate
 ///
@@ -301,7 +301,7 @@ pub const KEYBLOCK_LEN: usize = 40;
 ///
 /// # Security
 ///
-/// Prevents DNSSEC validation DoS attacks.
+/// Prevents DNSSEC validation `DoS` attacks.
 pub const DNSSEC_WORK: usize = 50;
 
 /// Upstream query timeout before dropping UDP queries (default: 10 seconds)
@@ -328,7 +328,7 @@ pub const FORWARD_TEST: usize = 50;
 
 /// Time interval for testing all upstream servers (default: 20 seconds)
 ///
-/// Alternative trigger to FORWARD_TEST: tests all upstream servers after this
+/// Alternative trigger to `FORWARD_TEST`: tests all upstream servers after this
 /// many seconds elapse, whichever comes first (50 queries or 20 seconds).
 ///
 /// # Purpose
@@ -409,7 +409,7 @@ pub const TTL_FLOOR_LIMIT: u32 = 3600;
 
 /// Maximum number of DHCP leases (default: 1000)
 ///
-/// Hard limit on total DHCP leases (both DHCPv4 and DHCPv6) that dnsmasq can
+/// Hard limit on total DHCP leases (both `DHCPv4` and `DHCPv6`) that dnsmasq can
 /// manage concurrently. Prevents unbounded memory growth from lease database.
 ///
 /// # Memory Impact
@@ -458,7 +458,7 @@ pub const DECLINE_BACKOFF: Duration = Duration::from_secs(600);
 
 /// Hard limit on DHCP packet size (default: 16384 bytes / 16KB)
 ///
-/// Maximum size for DHCP packets (both DHCPv4 and DHCPv6), preventing memory
+/// Maximum size for DHCP packets (both `DHCPv4` and `DHCPv6`), preventing memory
 /// exhaustion from malformed packets claiming excessive lengths.
 ///
 /// # Typical Sizes
@@ -467,7 +467,7 @@ pub const DECLINE_BACKOFF: Duration = Duration::from_secs(600);
 ///
 /// # Security
 ///
-/// Prevents memory exhaustion DoS attacks.
+/// Prevents memory exhaustion `DoS` attacks.
 pub const DHCP_PACKET_MAX: usize = 16384;
 
 /// Stack buffer size for common domain names (default: 50 bytes)
@@ -533,9 +533,9 @@ pub const HOSTSFILE: &str = "/etc/hosts";
 /// Used when --read-ethers option is enabled.
 pub const ETHERSFILE: &str = "/etc/ethers";
 
-/// Default DHCPv4 lease time (default: 3600 seconds / 1 hour)
+/// Default `DHCPv4` lease time (default: 3600 seconds / 1 hour)
 ///
-/// Default duration for DHCPv4 address leases when not explicitly configured.
+/// Default duration for `DHCPv4` address leases when not explicitly configured.
 /// After lease expiration, clients must renew or release addresses.
 ///
 /// # Typical Deployments
@@ -552,13 +552,13 @@ pub const ETHERSFILE: &str = "/etc/ethers";
 /// RFC 2131 Section 3.3 allows any lease duration.
 pub const DEFLEASE: u32 = 3600;
 
-/// Default DHCPv6 lease time (default: 86400 seconds / 24 hours)
+/// Default `DHCPv6` lease time (default: 86400 seconds / 24 hours)
 ///
-/// Default duration for DHCPv6 address leases when not explicitly configured.
-/// DHCPv6 typically uses longer leases than DHCPv4 because IPv6 addresses are
+/// Default duration for `DHCPv6` address leases when not explicitly configured.
+/// `DHCPv6` typically uses longer leases than `DHCPv4` because IPv6 addresses are
 /// more plentiful and address exhaustion is rare.
 ///
-/// # DHCPv6 Timers
+/// # `DHCPv6` Timers
 ///
 /// - T1 (renewal): Typically 50% of lease
 /// - T2 (rebind): Typically 80% of lease
@@ -778,9 +778,9 @@ pub const CHGRP: &str = "dnsmasq";
 /// # Feature Categories
 ///
 /// - **Platform**: IPv6, GNU-getopt, Linux/BSD/Solaris network backend
-/// - **Core Protocols**: DHCP, DHCPv6, TFTP
+/// - **Core Protocols**: DHCP, `DHCPv6`, TFTP
 /// - **Security**: DNSSEC, cryptohash, auth
-/// - **Integration**: DBus, UBus, conntrack, ipset, nftset
+/// - **Integration**: `DBus`, `UBus`, conntrack, ipset, nftset
 /// - **Advanced**: scripts, Lua, loop-detect, inotify, dumpfile
 ///
 /// # Usage
@@ -801,14 +801,11 @@ pub const CHGRP: &str = "dnsmasq";
 ///
 /// IPv6 is always enabled in Rust (unlike C which can be built without IPv6).
 /// GNU-style long options are always supported via clap crate.
+#[must_use] 
 pub fn compile_options() -> String {
-    let mut opts = Vec::new();
-
     // IPv6 is always enabled in Rust (no build configuration to disable it)
-    opts.push("IPv6");
-
     // GNU getopt is always available (via clap crate)
-    opts.push("GNU-getopt");
+    let mut opts = vec!["IPv6", "GNU-getopt"];
 
     // Platform network backend
     #[cfg(target_os = "linux")]
@@ -964,6 +961,7 @@ pub fn compile_options() -> String {
 /// println!("dnsmasq version {}", version());
 /// // Output: "dnsmasq version 2.90.0-rust"
 /// ```
+#[must_use] 
 pub fn version() -> &'static str {
     VERSION
 }
@@ -1027,7 +1025,7 @@ pub const SOA_RETRY: Duration = Duration::from_secs(180);
 /// # RFC Compliance
 ///
 /// RFC 1035 Section 3.3.13 defines SOA record format.
-pub const SOA_EXPIRY: Duration = Duration::from_secs(1209600);
+pub const SOA_EXPIRY: Duration = Duration::from_secs(1_209_600);
 
 #[cfg(test)]
 mod tests {

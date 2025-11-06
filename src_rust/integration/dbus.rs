@@ -23,20 +23,21 @@
 use std::fmt;
 
 /// D-Bus control interface
+#[derive(Default)]
 pub struct DbusInterface {}
 
 impl DbusInterface {
     /// Create new D-Bus interface
+    /// 
+    /// # Errors
+    /// 
+    /// Returns `DbusError` if D-Bus connection cannot be established.
+    /// Currently placeholder implementation.
     pub fn new() -> Result<Self, DbusError> {
         Ok(Self {})
     }
 }
 
-impl Default for DbusInterface {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 /// D-Bus integration error type
 #[derive(Debug)]
@@ -54,10 +55,10 @@ pub enum DbusError {
 impl fmt::Display for DbusError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DbusError::ConnectionFailed(msg) => write!(f, "D-Bus connection failed: {}", msg),
-            DbusError::MethodCallFailed(msg) => write!(f, "D-Bus method call failed: {}", msg),
-            DbusError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
-            DbusError::Other(msg) => write!(f, "D-Bus error: {}", msg),
+            DbusError::ConnectionFailed(msg) => write!(f, "D-Bus connection failed: {msg}"),
+            DbusError::MethodCallFailed(msg) => write!(f, "D-Bus method call failed: {msg}"),
+            DbusError::InvalidArgument(msg) => write!(f, "Invalid argument: {msg}"),
+            DbusError::Other(msg) => write!(f, "D-Bus error: {msg}"),
         }
     }
 }
@@ -65,6 +66,11 @@ impl fmt::Display for DbusError {
 impl std::error::Error for DbusError {}
 
 /// Initialize D-Bus integration
+/// 
+/// # Errors
+/// 
+/// Returns `DbusError` if D-Bus system bus connection cannot be established
+/// or if the dnsmasq D-Bus service registration fails.
 pub fn init_dbus() -> Result<DbusInterface, DbusError> {
     DbusInterface::new()
 }

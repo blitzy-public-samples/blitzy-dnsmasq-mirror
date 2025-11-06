@@ -259,6 +259,7 @@ pub enum DnsOpcode {
 
 impl DnsOpcode {
     /// Convert opcode value to enum variant
+    #[must_use] 
     pub fn from_code(code: u8) -> Option<Self> {
         match code {
             QUERY => Some(DnsOpcode::Query),
@@ -267,6 +268,7 @@ impl DnsOpcode {
     }
 
     /// Convert enum variant to opcode value
+    #[must_use] 
     pub fn to_code(self) -> u8 {
         match self {
             DnsOpcode::Query => QUERY,
@@ -327,6 +329,7 @@ pub enum DnsRrType {
 
 impl DnsRrType {
     /// Convert RR type value to enum variant
+    #[must_use] 
     pub fn from_code(code: u16) -> Self {
         match code {
             T_A => DnsRrType::A,
@@ -353,6 +356,7 @@ impl DnsRrType {
     }
 
     /// Convert enum variant to RR type value
+    #[must_use] 
     pub fn to_code(self) -> u16 {
         match self {
             DnsRrType::A => T_A,
@@ -455,6 +459,7 @@ pub enum EdnsOption {
 
 impl EdnsOption {
     /// Convert option code to enum variant
+    #[must_use] 
     pub fn from_code(code: u16) -> Option<Self> {
         match code {
             EDNS0_OPTION_CLIENT_SUBNET => Some(EdnsOption::ClientSubnet),
@@ -468,6 +473,7 @@ impl EdnsOption {
     }
 
     /// Convert enum variant to option code
+    #[must_use] 
     pub fn to_code(self) -> u16 {
         match self {
             EdnsOption::ClientSubnet => EDNS0_OPTION_CLIENT_SUBNET,
@@ -503,6 +509,7 @@ pub enum ResponseCode {
 
 impl ResponseCode {
     /// Convert RCODE value to enum variant
+    #[must_use] 
     pub fn from_code(code: u8) -> Option<Self> {
         match code {
             NOERROR => Some(ResponseCode::NoError),
@@ -516,6 +523,7 @@ impl ResponseCode {
     }
 
     /// Convert enum variant to RCODE value
+    #[must_use] 
     pub fn to_code(self) -> u8 {
         match self {
             ResponseCode::NoError => NOERROR,
@@ -594,6 +602,7 @@ pub enum ExtendedDnsError {
 
 impl ExtendedDnsError {
     /// Convert EDE code to enum variant
+    #[must_use] 
     pub fn from_code(code: i16) -> Self {
         match code {
             -1 => ExtendedDnsError::Unset,
@@ -627,6 +636,7 @@ impl ExtendedDnsError {
     }
 
     /// Convert enum variant to EDE code
+    #[must_use] 
     pub fn to_code(self) -> i16 {
         match self {
             ExtendedDnsError::Unset => -1,
@@ -709,6 +719,7 @@ impl DnsHeader {
     /// # Returns
     ///
     /// A new `DnsHeader` with all fields initialized to zero
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             id: 0,
@@ -731,6 +742,10 @@ impl DnsHeader {
     ///
     /// * `Ok(DnsHeader)` - Successfully parsed header
     /// * `Err(&str)` - Error message if buffer is too small
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the buffer is smaller than the required DNS header size (12 bytes).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
         if bytes.len() < Self::SIZE {
             return Err("Buffer too small for DNS header");
@@ -752,6 +767,7 @@ impl DnsHeader {
     /// # Returns
     ///
     /// 12-byte array containing the serialized header in network byte order
+    #[must_use] 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut bytes = [0u8; Self::SIZE];
         bytes[0..2].copy_from_slice(&self.id.to_be_bytes());
@@ -765,6 +781,7 @@ impl DnsHeader {
     }
 
     /// Get transaction ID
+    #[must_use] 
     pub fn id(&self) -> u16 {
         u16::from_be(self.id)
     }
@@ -780,6 +797,7 @@ impl DnsHeader {
     ///
     /// * `false` - Query (QR=0)
     /// * `true` - Response (QR=1)
+    #[must_use] 
     pub fn qr(&self) -> bool {
         (self.hb3 & HB3_QR) != 0
     }
@@ -802,6 +820,7 @@ impl DnsHeader {
     /// # Returns
     ///
     /// OPCODE value (0=QUERY, 1=IQUERY, 2=STATUS)
+    #[must_use] 
     pub fn opcode(&self) -> u8 {
         (self.hb3 & HB3_OPCODE) >> 3
     }
@@ -816,6 +835,7 @@ impl DnsHeader {
     }
 
     /// Get AA (Authoritative Answer) flag
+    #[must_use] 
     pub fn aa(&self) -> bool {
         (self.hb3 & HB3_AA) != 0
     }
@@ -830,6 +850,7 @@ impl DnsHeader {
     }
 
     /// Get TC (Truncation) flag
+    #[must_use] 
     pub fn tc(&self) -> bool {
         (self.hb3 & HB3_TC) != 0
     }
@@ -844,6 +865,7 @@ impl DnsHeader {
     }
 
     /// Get RD (Recursion Desired) flag
+    #[must_use] 
     pub fn rd(&self) -> bool {
         (self.hb3 & HB3_RD) != 0
     }
@@ -858,6 +880,7 @@ impl DnsHeader {
     }
 
     /// Get RA (Recursion Available) flag
+    #[must_use] 
     pub fn ra(&self) -> bool {
         (self.hb4 & HB4_RA) != 0
     }
@@ -872,6 +895,7 @@ impl DnsHeader {
     }
 
     /// Get AD (Authenticated Data) flag
+    #[must_use] 
     pub fn ad(&self) -> bool {
         (self.hb4 & HB4_AD) != 0
     }
@@ -886,6 +910,7 @@ impl DnsHeader {
     }
 
     /// Get CD (Checking Disabled) flag
+    #[must_use] 
     pub fn cd(&self) -> bool {
         (self.hb4 & HB4_CD) != 0
     }
@@ -900,6 +925,7 @@ impl DnsHeader {
     }
 
     /// Get RCODE (Response Code) field value
+    #[must_use] 
     pub fn rcode(&self) -> u8 {
         self.hb4 & HB4_RCODE
     }
@@ -914,6 +940,7 @@ impl DnsHeader {
     }
 
     /// Get question count
+    #[must_use] 
     pub fn qdcount(&self) -> u16 {
         u16::from_be(self.qdcount)
     }
@@ -924,6 +951,7 @@ impl DnsHeader {
     }
 
     /// Get answer count
+    #[must_use] 
     pub fn ancount(&self) -> u16 {
         u16::from_be(self.ancount)
     }
@@ -934,6 +962,7 @@ impl DnsHeader {
     }
 
     /// Get authority count
+    #[must_use] 
     pub fn nscount(&self) -> u16 {
         u16::from_be(self.nscount)
     }
@@ -944,6 +973,7 @@ impl DnsHeader {
     }
 
     /// Get additional count
+    #[must_use] 
     pub fn arcount(&self) -> u16 {
         u16::from_be(self.arcount)
     }

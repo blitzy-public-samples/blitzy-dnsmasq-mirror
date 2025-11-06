@@ -22,6 +22,11 @@ pub struct IpsetManager {}
 
 impl IpsetManager {
     /// Create new ipset manager
+    ///
+    /// # Errors
+    ///
+    /// Currently returns `Ok` in all cases. Future implementation may return errors
+    /// if ipset initialization fails.
     pub fn new() -> Result<Self, IpsetError> {
         Ok(Self {})
     }
@@ -51,11 +56,11 @@ pub enum IpsetError {
 impl fmt::Display for IpsetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IpsetError::ConnectionFailed(msg) => write!(f, "ipset connection failed: {}", msg),
-            IpsetError::OperationFailed(msg) => write!(f, "ipset operation failed: {}", msg),
-            IpsetError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
-            IpsetError::SetNotFound(msg) => write!(f, "ipset not found: {}", msg),
-            IpsetError::Other(msg) => write!(f, "ipset error: {}", msg),
+            IpsetError::ConnectionFailed(msg) => write!(f, "ipset connection failed: {msg}"),
+            IpsetError::OperationFailed(msg) => write!(f, "ipset operation failed: {msg}"),
+            IpsetError::InvalidArgument(msg) => write!(f, "Invalid argument: {msg}"),
+            IpsetError::SetNotFound(msg) => write!(f, "ipset not found: {msg}"),
+            IpsetError::Other(msg) => write!(f, "ipset error: {msg}"),
         }
     }
 }

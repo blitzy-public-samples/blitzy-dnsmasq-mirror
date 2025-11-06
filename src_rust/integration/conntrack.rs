@@ -22,6 +22,11 @@ pub struct ConntrackManager {}
 
 impl ConntrackManager {
     /// Create new conntrack manager
+    ///
+    /// # Errors
+    ///
+    /// Currently returns `Ok` in all cases. Future implementation may return errors
+    /// if conntrack initialization fails.
     pub fn new() -> Result<Self, ConntrackError> {
         Ok(Self {})
     }
@@ -49,10 +54,10 @@ pub enum ConntrackError {
 impl fmt::Display for ConntrackError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConntrackError::ConnectionFailed(msg) => write!(f, "conntrack connection failed: {}", msg),
-            ConntrackError::OperationFailed(msg) => write!(f, "conntrack operation failed: {}", msg),
-            ConntrackError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
-            ConntrackError::Other(msg) => write!(f, "conntrack error: {}", msg),
+            ConntrackError::ConnectionFailed(msg) => write!(f, "conntrack connection failed: {msg}"),
+            ConntrackError::OperationFailed(msg) => write!(f, "conntrack operation failed: {msg}"),
+            ConntrackError::InvalidArgument(msg) => write!(f, "Invalid argument: {msg}"),
+            ConntrackError::Other(msg) => write!(f, "conntrack error: {msg}"),
         }
     }
 }

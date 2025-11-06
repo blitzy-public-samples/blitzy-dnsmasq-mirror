@@ -270,7 +270,7 @@ pub struct IntegrationManager {
     #[cfg(feature = "dbus")]
     dbus_interface: Option<DbusInterface>,
 
-    /// OpenWrt ubus control interface handle (if feature enabled and initialized)
+    /// `OpenWrt` ubus control interface handle (if feature enabled and initialized)
     #[cfg(feature = "ubus")]
     ubus_manager: Option<UbusManager>,
 
@@ -311,6 +311,7 @@ impl IntegrationManager {
     /// # Returns
     ///
     /// A new `IntegrationManager` with all optional integration handles set to `None`.
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -334,6 +335,7 @@ impl IntegrationManager {
     /// # Ok(())
     /// # }
     /// ```
+    #[must_use] 
     pub fn builder() -> IntegrationManagerBuilder {
         IntegrationManagerBuilder::new()
     }
@@ -349,6 +351,7 @@ impl IntegrationManager {
     /// `true` if the `dbus` feature is enabled and D-Bus was successfully initialized,
     /// `false` otherwise.
     #[cfg(feature = "dbus")]
+    #[must_use] 
     pub fn has_dbus(&self) -> bool {
         self.dbus_interface.is_some()
     }
@@ -366,6 +369,7 @@ impl IntegrationManager {
     /// `true` if the `ubus` feature is enabled and ubus was successfully initialized,
     /// `false` otherwise.
     #[cfg(feature = "ubus")]
+    #[must_use] 
     pub fn has_ubus(&self) -> bool {
         self.ubus_manager.is_some()
     }
@@ -383,6 +387,7 @@ impl IntegrationManager {
     /// `true` if the `conntrack` feature is enabled on Linux and conntrack was
     /// successfully initialized, `false` otherwise.
     #[cfg(all(feature = "conntrack", target_os = "linux"))]
+    #[must_use] 
     pub fn has_conntrack(&self) -> bool {
         self.conntrack_manager.is_some()
     }
@@ -400,6 +405,7 @@ impl IntegrationManager {
     /// `true` if the `ipset` feature is enabled on Linux and ipset was successfully
     /// initialized, `false` otherwise.
     #[cfg(all(feature = "ipset", target_os = "linux"))]
+    #[must_use] 
     pub fn has_ipset(&self) -> bool {
         self.ipset_manager.is_some()
     }
@@ -417,6 +423,7 @@ impl IntegrationManager {
     /// `true` if the `nftset` feature is enabled on Linux and nftables was successfully
     /// initialized, `false` otherwise.
     #[cfg(all(feature = "nftset", target_os = "linux"))]
+    #[must_use] 
     pub fn has_nftset(&self) -> bool {
         self.nftset_manager.is_some()
     }
@@ -454,6 +461,7 @@ impl IntegrationManager {
             target_os = "netbsd"
         )
     )))]
+    #[must_use] 
     pub fn has_pf_tables(&self) -> bool {
         false
     }
@@ -465,6 +473,7 @@ impl IntegrationManager {
     /// `true` if the `inotify` feature is enabled on Linux and inotify was successfully
     /// initialized, `false` otherwise.
     #[cfg(all(feature = "inotify", target_os = "linux"))]
+    #[must_use] 
     pub fn has_inotify(&self) -> bool {
         self.inotify_watcher.is_some()
     }
@@ -495,6 +504,7 @@ impl IntegrationManager {
     /// }
     /// ```
     #[cfg(feature = "dbus")]
+    #[must_use] 
     pub fn dbus(&self) -> Option<&DbusInterface> {
         self.dbus_interface.as_ref()
     }
@@ -505,6 +515,7 @@ impl IntegrationManager {
     ///
     /// `Some(&UbusManager)` if ubus is available and initialized, `None` otherwise.
     #[cfg(feature = "ubus")]
+    #[must_use] 
     pub fn ubus(&self) -> Option<&UbusManager> {
         self.ubus_manager.as_ref()
     }
@@ -515,6 +526,7 @@ impl IntegrationManager {
     ///
     /// `Some(&ConntrackManager)` if conntrack is available and initialized, `None` otherwise.
     #[cfg(all(feature = "conntrack", target_os = "linux"))]
+    #[must_use] 
     pub fn conntrack(&self) -> Option<&ConntrackManager> {
         self.conntrack_manager.as_ref()
     }
@@ -525,6 +537,7 @@ impl IntegrationManager {
     ///
     /// `Some(&IpsetManager)` if ipset is available and initialized, `None` otherwise.
     #[cfg(all(feature = "ipset", target_os = "linux"))]
+    #[must_use] 
     pub fn ipset(&self) -> Option<&IpsetManager> {
         self.ipset_manager.as_ref()
     }
@@ -535,6 +548,7 @@ impl IntegrationManager {
     ///
     /// `Some(&NftsetManager)` if nftables is available and initialized, `None` otherwise.
     #[cfg(all(feature = "nftset", target_os = "linux"))]
+    #[must_use] 
     pub fn nftset(&self) -> Option<&NftsetManager> {
         self.nftset_manager.as_ref()
     }
@@ -562,6 +576,7 @@ impl IntegrationManager {
     ///
     /// `Some(&InotifyWatcher)` if inotify is available and initialized, `None` otherwise.
     #[cfg(all(feature = "inotify", target_os = "linux"))]
+    #[must_use] 
     pub fn inotify(&self) -> Option<&InotifyWatcher> {
         self.inotify_watcher.as_ref()
     }
@@ -633,6 +648,7 @@ impl Debug for IntegrationManager {
 /// # }
 /// ```
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools)] // Builder pattern naturally uses flags for each feature
 pub struct IntegrationManagerBuilder {
     /// Whether to enable D-Bus integration (if feature enabled)
     #[cfg(feature = "dbus")]
@@ -676,6 +692,7 @@ impl IntegrationManagerBuilder {
     /// # Returns
     ///
     /// A new `IntegrationManagerBuilder` with all integrations set to disabled.
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -695,6 +712,7 @@ impl IntegrationManagerBuilder {
     /// This method is only available when the `dbus` feature is enabled. If the feature
     /// is disabled, this method is a no-op.
     #[cfg(feature = "dbus")]
+    #[must_use] 
     pub fn with_dbus(mut self, enable: bool) -> Self {
         self.enable_dbus = enable;
         self
@@ -716,6 +734,7 @@ impl IntegrationManagerBuilder {
     ///
     /// Self for method chaining.
     #[cfg(feature = "ubus")]
+    #[must_use] 
     pub fn with_ubus(mut self, enable: bool) -> Self {
         self.enable_ubus = enable;
         self
@@ -737,6 +756,7 @@ impl IntegrationManagerBuilder {
     ///
     /// Self for method chaining.
     #[cfg(all(feature = "conntrack", target_os = "linux"))]
+    #[must_use] 
     pub fn with_conntrack(mut self, enable: bool) -> Self {
         self.enable_conntrack = enable;
         self
@@ -758,6 +778,7 @@ impl IntegrationManagerBuilder {
     ///
     /// Self for method chaining.
     #[cfg(all(feature = "ipset", target_os = "linux"))]
+    #[must_use] 
     pub fn with_ipset(mut self, enable: bool) -> Self {
         self.enable_ipset = enable;
         self
@@ -779,6 +800,7 @@ impl IntegrationManagerBuilder {
     ///
     /// Self for method chaining.
     #[cfg(all(feature = "nftset", target_os = "linux"))]
+    #[must_use] 
     pub fn with_nftset(mut self, enable: bool) -> Self {
         self.enable_nftset = enable;
         self
@@ -821,6 +843,7 @@ impl IntegrationManagerBuilder {
             target_os = "netbsd"
         )
     )))]
+    #[must_use] 
     pub fn with_pf_tables(self, _enable: bool) -> Self {
         self
     }
@@ -835,6 +858,7 @@ impl IntegrationManagerBuilder {
     ///
     /// Self for method chaining.
     #[cfg(all(feature = "inotify", target_os = "linux"))]
+    #[must_use] 
     pub fn with_inotify(mut self, enable: bool) -> Self {
         self.enable_inotify = enable;
         self
@@ -852,6 +876,12 @@ impl IntegrationManagerBuilder {
     /// to initialize, it will be disabled (set to `None`) and a warning may be logged, but
     /// the build process will continue. This ensures graceful degradation when optional
     /// features are not supported by the system.
+    ///
+    /// # Errors
+    ///
+    /// Returns `crate::Error` if a critical initialization failure occurs that prevents
+    /// the manager from being created. Most integration failures result in graceful
+    /// degradation rather than errors.
     ///
     /// # Returns
     ///
@@ -885,7 +915,7 @@ impl IntegrationManagerBuilder {
                 }
                 Err(e) => {
                     // Log warning but continue - D-Bus is optional
-                    eprintln!("Warning: Failed to initialize D-Bus integration: {}", e);
+                    eprintln!("Warning: Failed to initialize D-Bus integration: {e}");
                 }
             }
         }
@@ -898,7 +928,7 @@ impl IntegrationManagerBuilder {
                     manager.ubus_manager = Some(ubus_mgr);
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to initialize ubus integration: {}", e);
+                    eprintln!("Warning: Failed to initialize ubus integration: {e}");
                 }
             }
         }
@@ -911,7 +941,7 @@ impl IntegrationManagerBuilder {
                     manager.conntrack_manager = Some(conntrack_mgr);
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to initialize conntrack integration: {}", e);
+                    eprintln!("Warning: Failed to initialize conntrack integration: {e}");
                 }
             }
         }
@@ -924,7 +954,7 @@ impl IntegrationManagerBuilder {
                     manager.ipset_manager = Some(ipset_mgr);
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to initialize ipset integration: {}", e);
+                    eprintln!("Warning: Failed to initialize ipset integration: {e}");
                 }
             }
         }
@@ -937,7 +967,7 @@ impl IntegrationManagerBuilder {
                     manager.nftset_manager = Some(nftset_mgr);
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to initialize nftables integration: {}", e);
+                    eprintln!("Warning: Failed to initialize nftables integration: {e}");
                 }
             }
         }
@@ -970,7 +1000,7 @@ impl IntegrationManagerBuilder {
                     manager.inotify_watcher = Some(inotify_watcher);
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to initialize inotify integration: {}", e);
+                    eprintln!("Warning: Failed to initialize inotify integration: {e}");
                 }
             }
         }

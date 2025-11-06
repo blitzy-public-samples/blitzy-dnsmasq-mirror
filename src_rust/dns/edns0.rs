@@ -29,6 +29,7 @@ pub enum Edns0OptionCode {
 
 impl Edns0OptionCode {
     /// Convert option code value to enum
+    #[must_use] 
     pub fn from_code(code: u16) -> Self {
         match code {
             8 => Edns0OptionCode::ClientSubnet,
@@ -41,6 +42,7 @@ impl Edns0OptionCode {
     }
 
     /// Convert enum to option code value
+    #[must_use] 
     pub fn to_code(self) -> u16 {
         match self {
             Edns0OptionCode::ClientSubnet => 8,
@@ -65,12 +67,13 @@ pub struct ClientSubnet {
     /// Scope prefix length (set in response)
     pub scope_prefix_len: u8,
     
-    /// Client IP address (truncated to source_prefix_len bits)
+    /// Client IP address (truncated to `source_prefix_len` bits)
     pub address: IpAddr,
 }
 
 impl ClientSubnet {
     /// Create a new client subnet from IPv4 address
+    #[must_use] 
     pub fn from_ipv4(addr: Ipv4Addr, prefix_len: u8) -> Self {
         Self {
             family: 1,
@@ -81,6 +84,7 @@ impl ClientSubnet {
     }
 
     /// Create a new client subnet from IPv6 address
+    #[must_use] 
     pub fn from_ipv6(addr: Ipv6Addr, prefix_len: u8) -> Self {
         Self {
             family: 2,
@@ -91,6 +95,7 @@ impl ClientSubnet {
     }
 
     /// Serialize to wire format
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         
@@ -110,7 +115,7 @@ impl ClientSubnet {
         };
         
         // Calculate how many bytes we need
-        let bytes_needed = ((self.source_prefix_len + 7) / 8) as usize;
+        let bytes_needed = self.source_prefix_len.div_ceil(8) as usize;
         bytes.extend_from_slice(&addr_bytes[..bytes_needed.min(addr_bytes.len())]);
         
         bytes
@@ -129,12 +134,14 @@ pub struct Edns0Option {
 
 impl Edns0Option {
     /// Create a new EDNS0 option
+    #[must_use] 
     pub fn new(code: Edns0OptionCode, data: Vec<u8>) -> Self {
         Self { code, data }
     }
 
     /// Create a client subnet option
-    pub fn client_subnet(subnet: ClientSubnet) -> Self {
+    #[must_use] 
+    pub fn client_subnet(subnet: &ClientSubnet) -> Self {
         Self {
             code: Edns0OptionCode::ClientSubnet,
             data: subnet.to_bytes(),
@@ -142,6 +149,7 @@ impl Edns0Option {
     }
 
     /// Serialize to wire format
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         
@@ -149,6 +157,8 @@ impl Edns0Option {
         bytes.extend_from_slice(&self.code.to_code().to_be_bytes());
         
         // Option length (2 bytes)
+        // EDNS0 option length is a u16 field, data should never exceed 65535 bytes
+        #[allow(clippy::cast_possible_truncation)]
         let len = self.data.len() as u16;
         bytes.extend_from_slice(&len.to_be_bytes());
         
@@ -180,6 +190,7 @@ pub struct Edns0Record {
 
 impl Edns0Record {
     /// Create a new EDNS0 record with default settings
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             payload_size: EDNS0_DEFAULT_PAYLOAD_SIZE,
@@ -191,6 +202,7 @@ impl Edns0Record {
     }
 
     /// Create an EDNS0 record with custom payload size
+    #[must_use] 
     pub fn with_payload_size(payload_size: u16) -> Self {
         Self {
             payload_size: payload_size.min(EDNS0_MAX_PAYLOAD_SIZE),
@@ -202,6 +214,7 @@ impl Edns0Record {
     }
 
     /// Enable DNSSEC OK flag
+    #[must_use] 
     pub fn with_dnssec_ok(mut self) -> Self {
         self.dnssec_ok = true;
         self
@@ -213,6 +226,7 @@ impl Edns0Record {
     }
 
     /// Get the flags value for the OPT record
+    #[must_use] 
     pub fn flags(&self) -> u16 {
         let mut flags = 0u16;
         if self.dnssec_ok {
@@ -246,6 +260,7 @@ pub struct Edns0Config {
 
 impl Edns0Config {
     /// Create default EDNS0 configuration
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             enabled: true,
@@ -256,6 +271,7 @@ impl Edns0Config {
     }
 
     /// Create configuration with DNSSEC enabled
+    #[must_use] 
     pub fn with_dnssec() -> Self {
         Self {
             enabled: true,
@@ -324,7 +340,7 @@ mod tests {
     #[test]
     fn test_edns0_option() {
         let subnet = ClientSubnet::from_ipv4(Ipv4Addr::new(192, 168, 1, 1), 24);
-        let option = Edns0Option::client_subnet(subnet);
+        let option = Edns0Option::client_subnet(&subnet);
         
         assert_eq!(option.code, Edns0OptionCode::ClientSubnet);
         

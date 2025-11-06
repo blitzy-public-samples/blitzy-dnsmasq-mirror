@@ -10,9 +10,9 @@
 //! # Security Model
 //!
 //! On Linux, the module uses capabilities to retain only the minimum required privileges:
-//! - CAP_NET_BIND_SERVICE: Bind to ports < 1024 (DNS port 53, DHCP ports 67/68)
-//! - CAP_NET_RAW: Send raw packets (DHCP broadcast, ARP)
-//! - CAP_NET_ADMIN: Configure network interfaces (optional)
+//! - `CAP_NET_BIND_SERVICE`: Bind to ports < 1024 (DNS port 53, DHCP ports 67/68)
+//! - `CAP_NET_RAW`: Send raw packets (DHCP broadcast, ARP)
+//! - `CAP_NET_ADMIN`: Configure network interfaces (optional)
 //!
 //! On BSD/macOS/Solaris, privilege dropping is simpler (setuid/setgid only) as these
 //! platforms don't have Linux capabilities.
@@ -55,19 +55,19 @@ impl std::fmt::Display for PrivilegeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PrivilegeError::UserLookupFailed(user, reason) => {
-                write!(f, "Failed to lookup user '{}': {}", user, reason)
+                write!(f, "Failed to lookup user '{user}': {reason}")
             }
             PrivilegeError::GroupLookupFailed(group, reason) => {
-                write!(f, "Failed to lookup group '{}': {}", group, reason)
+                write!(f, "Failed to lookup group '{group}': {reason}")
             }
             PrivilegeError::SetGidFailed(gid, reason) => {
-                write!(f, "Failed to set GID to {}: {}", gid, reason)
+                write!(f, "Failed to set GID to {gid}: {reason}")
             }
             PrivilegeError::SetUidFailed(uid, reason) => {
-                write!(f, "Failed to set UID to {}: {}", uid, reason)
+                write!(f, "Failed to set UID to {uid}: {reason}")
             }
             PrivilegeError::CapabilityFailed(reason) => {
-                write!(f, "Failed to set capabilities: {}", reason)
+                write!(f, "Failed to set capabilities: {reason}")
             }
             PrivilegeError::InvalidName => {
                 write!(f, "Invalid username or group name")
@@ -87,9 +87,9 @@ impl std::error::Error for PrivilegeError {}
 /// Drop privileges to the specified user and group
 ///
 /// # Arguments
-/// * `username` - Username to switch to (e.g., "dnsmasq", "nobody")
-/// * `groupname` - Group name to switch to (e.g., "dnsmasq", "nogroup")
-/// * `capabilities` - List of Linux capability names to retain (e.g., ["NET_BIND_SERVICE", "NET_RAW"])
+/// * `username` - Username to switch to (e.g., `"dnsmasq"`, `"nobody"`)
+/// * `groupname` - Group name to switch to (e.g., `"dnsmasq"`, `"nogroup"`)
+/// * `capabilities` - List of Linux capability names to retain (e.g., `["NET_BIND_SERVICE", "NET_RAW"]`)
 ///
 /// # Security
 /// This operation is irreversible - once privileges are dropped, they cannot be regained.
@@ -206,8 +206,7 @@ fn configure_capabilities(capabilities: Vec<&str>) -> Result<(), PrivilegeError>
             }
             _ => {
                 return Err(PrivilegeError::CapabilityFailed(format!(
-                    "Unknown capability: {}",
-                    cap
+                    "Unknown capability: {cap}"
                 )));
             }
         }

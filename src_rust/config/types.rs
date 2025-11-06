@@ -146,7 +146,7 @@ impl Default for DaemonOptions {
 
 /// MAC address type (6 bytes)
 ///
-/// Represents hardware addresses for DHCP, replacing C's unsigned char hwaddr[DHCP_CHADDR_MAX]
+/// Represents hardware addresses for DHCP, replacing C's unsigned char hwaddr[`DHCP_CHADDR_MAX`]
 pub type MacAddr = [u8; 6];
 
 /// Interface name wrapper
@@ -168,6 +168,7 @@ impl InterfaceName {
     /// # Arguments
     ///
     /// * `name` - The interface name (e.g., "eth0", "wlan0")
+    #[must_use] 
     pub fn new(name: String) -> Self {
         Self { name, addr: None }
     }
@@ -178,6 +179,7 @@ impl InterfaceName {
     ///
     /// * `name` - The interface name (e.g., "eth0", "wlan0")
     /// * `addr` - The IP address bound to this interface
+    #[must_use] 
     pub fn with_addr(name: String, addr: IpAddr) -> Self {
         Self {
             name,
@@ -197,7 +199,7 @@ pub struct DnsConfig {
     pub upstream_servers: Vec<UpstreamServer>,
 
     /// Local domain specifications
-    /// Original C field: local_domains in struct daemon (line 4107)
+    /// Original C field: `local_domains` in struct daemon (line 4107)
     pub local_domains: Vec<LocalDomain>,
 
     /// DNS cache size in entries
@@ -213,47 +215,47 @@ pub struct DnsConfig {
     pub port: u16,
 
     /// Query port for outbound queries (None = random)
-    /// Original C field: query_port in struct daemon (line 4118)
+    /// Original C field: `query_port` in struct daemon (line 4118)
     pub query_port: Option<u16>,
 
     /// Minimum port for random port range
-    /// Original C field: min_port in struct daemon (line 4118)
+    /// Original C field: `min_port` in struct daemon (line 4118)
     pub min_port: u16,
 
     /// Maximum port for random port range
-    /// Original C field: max_port in struct daemon (line 4118)
+    /// Original C field: `max_port` in struct daemon (line 4118)
     pub max_port: u16,
 
     /// TTL for local answers (seconds)
-    /// Original C field: local_ttl in struct daemon (line 4119)
+    /// Original C field: `local_ttl` in struct daemon (line 4119)
     pub local_ttl: u64,
 
     /// Negative cache TTL (seconds)
-    /// Original C field: neg_ttl in struct daemon (line 4119)
+    /// Original C field: `neg_ttl` in struct daemon (line 4119)
     pub neg_ttl: u64,
 
     /// Maximum TTL to hand out
-    /// Original C field: max_ttl in struct daemon (line 4119)
+    /// Original C field: `max_ttl` in struct daemon (line 4119)
     pub max_ttl: u64,
 
     /// Minimum cache TTL
-    /// Original C field: min_cache_ttl in struct daemon (line 4119)
+    /// Original C field: `min_cache_ttl` in struct daemon (line 4119)
     pub min_cache_ttl: u64,
 
     /// Maximum cache TTL
-    /// Original C field: max_cache_ttl in struct daemon (line 4119)
+    /// Original C field: `max_cache_ttl` in struct daemon (line 4119)
     pub max_cache_ttl: u64,
 
     /// EDNS packet size
-    /// Original C field: edns_pktsz in struct daemon (line 4150)
+    /// Original C field: `edns_pktsz` in struct daemon (line 4150)
     pub edns_packet_max: u16,
 
     /// Path to resolv.conf for upstream servers
-    /// Original C field: default_resolv in struct daemon (line 4080)
+    /// Original C field: `default_resolv` in struct daemon (line 4080)
     pub resolv_file: Option<PathBuf>,
 
     /// Additional servers file
-    /// Original C field: servers_file in struct daemon (line 4082)
+    /// Original C field: `servers_file` in struct daemon (line 4082)
     pub servers_file: Option<PathBuf>,
 
     /// MX records
@@ -269,11 +271,11 @@ pub struct DnsConfig {
     pub cname_records: Vec<CnameRecord>,
 
     /// Host records (A/AAAA)
-    /// Original C field: host_records in struct daemon (line 4087)
+    /// Original C field: `host_records` in struct daemon (line 4087)
     pub host_records: Vec<HostRecord>,
 
     /// Bogus IP addresses to filter
-    /// Original C field: bogus_addr in struct daemon (line 4106)
+    /// Original C field: `bogus_addr` in struct daemon (line 4106)
     pub bogus_addresses: Vec<IpAddr>,
 }
 
@@ -319,11 +321,11 @@ pub struct UpstreamServer {
     pub domain: Option<String>,
 
     /// Server port override
-    /// Original C field: addr.sa.sa_port in struct server
+    /// Original C field: `addr.sa.sa_port` in struct server
     pub port: u16,
 
     /// Source address for queries
-    /// Original C field: source_addr in struct server
+    /// Original C field: `source_addr` in struct server
     pub source_addr: Option<IpAddr>,
 
     /// Interface to use for queries
@@ -333,7 +335,7 @@ pub struct UpstreamServer {
 
 /// Local domain specification
 ///
-/// Replaces domain entries in C's server list with SERV_LITERAL_ADDRESS flag
+/// Replaces domain entries in C's server list with `SERV_LITERAL_ADDRESS` flag
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalDomain {
     /// Domain name
@@ -348,13 +350,13 @@ pub struct LocalDomain {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MxRecord {
     /// Domain name
-    /// Original C field: name in struct mx_srv_record
+    /// Original C field: name in struct `mx_srv_record`
     pub domain: String,
     /// Target mail server
-    /// Original C field: target in struct mx_srv_record
+    /// Original C field: target in struct `mx_srv_record`
     pub target: String,
     /// MX priority
-    /// Original C field: priority in struct mx_srv_record
+    /// Original C field: priority in struct `mx_srv_record`
     pub priority: u16,
 }
 
@@ -364,10 +366,10 @@ pub struct MxRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TxtRecord {
     /// Domain name
-    /// Original C field: name in struct txt_record
+    /// Original C field: name in struct `txt_record`
     pub domain: String,
     /// TXT data
-    /// Original C field: txt in struct txt_record
+    /// Original C field: txt in struct `txt_record`
     pub text: String,
 }
 
@@ -390,73 +392,73 @@ pub struct CnameRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostRecord {
     /// Hostnames
-    /// Original C field: names in struct host_record
+    /// Original C field: names in struct `host_record`
     pub names: Vec<String>,
     /// IP addresses
-    /// Original C field: addr in struct host_record
+    /// Original C field: addr in struct `host_record`
     pub addresses: Vec<IpAddr>,
 }
 
 /// DHCP configuration subsystem
 ///
 /// Consolidates DHCP-related configuration from struct daemon fields in dnsmasq.h.
-/// Handles DHCPv4, DHCPv6, lease management, and options.
+/// Handles `DHCPv4`, `DHCPv6`, lease management, and options.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhcpConfig {
-    /// DHCPv4 address ranges
+    /// `DHCPv4` address ranges
     /// Original C field: dhcp in struct daemon (line 4125)
     pub dhcp_ranges: Vec<DhcpRange>,
 
-    /// DHCPv6 address ranges
+    /// `DHCPv6` address ranges
     /// Original C field: dhcp6 in struct daemon (line 4125)
     pub dhcp6_ranges: Vec<Dhcp6Range>,
 
     /// Static DHCP leases (MAC -> lease config)
-    /// Original C field: dhcp_conf in struct daemon (line 4127)
+    /// Original C field: `dhcp_conf` in struct daemon (line 4127)
     pub static_leases: HashMap<MacAddr, StaticLease>,
 
     /// DHCP options
-    /// Original C field: dhcp_opts in struct daemon (line 4128)
+    /// Original C field: `dhcp_opts` in struct daemon (line 4128)
     pub dhcp_options: Vec<DhcpOption>,
 
-    /// DHCPv6 options
-    /// Original C field: dhcp_opts6 in struct daemon (line 4128)
+    /// `DHCPv6` options
+    /// Original C field: `dhcp_opts6` in struct daemon (line 4128)
     pub dhcp6_options: Vec<Dhcp6Option>,
 
     /// Lease file path
-    /// Original C field: lease_file in struct daemon (line 4094)
+    /// Original C field: `lease_file` in struct daemon (line 4094)
     pub lease_file: PathBuf,
 
     /// Maximum number of leases
-    /// Original C field: dhcp_max in struct daemon (line 4145)
+    /// Original C field: `dhcp_max` in struct daemon (line 4145)
     pub lease_max: usize,
 
     /// DHCP server port
-    /// Original C field: dhcp_server_port in struct daemon (line 4146)
+    /// Original C field: `dhcp_server_port` in struct daemon (line 4146)
     pub server_port: u16,
 
     /// DHCP client port
-    /// Original C field: dhcp_client_port in struct daemon (line 4146)
+    /// Original C field: `dhcp_client_port` in struct daemon (line 4146)
     pub client_port: u16,
 
     /// Minimum lease time
-    /// Original C field: min_leasetime in struct daemon (line 4148)
+    /// Original C field: `min_leasetime` in struct daemon (line 4148)
     pub min_lease_time: Duration,
 
     /// DHCP script path
-    /// Original C field: lease_change_command in struct daemon (line 4104)
+    /// Original C field: `lease_change_command` in struct daemon (line 4104)
     pub dhcp_script: Option<PathBuf>,
 
     /// Authoritative DHCP mode
-    /// Derived from OPT_AUTHORITATIVE flag
+    /// Derived from `OPT_AUTHORITATIVE` flag
     pub authoritative: bool,
 
     /// DHCP hosts files
-    /// Original C field: dhcp_hosts_file in struct daemon (line 4144)
+    /// Original C field: `dhcp_hosts_file` in struct daemon (line 4144)
     pub dhcp_hosts_files: Vec<PathBuf>,
 
     /// DHCP options files
-    /// Original C field: dhcp_opts_file in struct daemon (line 4144)
+    /// Original C field: `dhcp_opts_file` in struct daemon (line 4144)
     pub dhcp_opts_files: Vec<PathBuf>,
 }
 
@@ -481,55 +483,55 @@ impl Default for DhcpConfig {
     }
 }
 
-/// DHCPv4 address range
+/// `DHCPv4` address range
 ///
 /// Replaces C's `struct dhcp_context` for IPv4 ranges (dnsmasq.h line 994)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DhcpRange {
     /// Range start address
-    /// Original C field: start in struct dhcp_context
+    /// Original C field: start in struct `dhcp_context`
     pub start: Ipv4Addr,
 
     /// Range end address
-    /// Original C field: end in struct dhcp_context
+    /// Original C field: end in struct `dhcp_context`
     pub end: Ipv4Addr,
 
     /// Lease time
-    /// Original C field: lease_time in struct dhcp_context
+    /// Original C field: `lease_time` in struct `dhcp_context`
     pub lease_time: Duration,
 
     /// Range flags
-    /// Original C field: flags in struct dhcp_context
+    /// Original C field: flags in struct `dhcp_context`
     pub flags: u32,
 }
 
-/// DHCPv6 address range with context
+/// `DHCPv6` address range with context
 ///
 /// Replaces C's `struct dhcp_context` for IPv6 ranges (dnsmasq.h line 994)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dhcp6Range {
     /// Range start address
-    /// Original C field: start6 in struct dhcp_context
+    /// Original C field: start6 in struct `dhcp_context`
     pub start: Ipv6Addr,
 
     /// Range end address
-    /// Original C field: end6 in struct dhcp_context
+    /// Original C field: end6 in struct `dhcp_context`
     pub end: Ipv6Addr,
 
     /// Prefix length for prefix delegation
-    /// Original C field: prefix_len in struct dhcp_context
+    /// Original C field: `prefix_len` in struct `dhcp_context`
     pub prefix_len: u8,
 
     /// Lease time
-    /// Original C field: lease_time in struct dhcp_context
+    /// Original C field: `lease_time` in struct `dhcp_context`
     pub lease_time: Duration,
 
     /// Range flags
-    /// Original C field: flags in struct dhcp_context
+    /// Original C field: flags in struct `dhcp_context`
     pub flags: u32,
 }
 
-/// Context for DHCPv6 (replaces struct dhcp_context fields for v6)
+/// Context for `DHCPv6` (replaces struct `dhcp_context` fields for v6)
 ///
 /// Minimal representation needed for exports schema compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -550,19 +552,19 @@ pub struct DhcpContext {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StaticLease {
     /// Hardware address
-    /// Original C field: hwaddr in struct dhcp_config
+    /// Original C field: hwaddr in struct `dhcp_config`
     pub hwaddr: MacAddr,
 
     /// Assigned IP address
-    /// Original C field: addr in struct dhcp_config
+    /// Original C field: addr in struct `dhcp_config`
     pub addr: IpAddr,
 
     /// Hostname
-    /// Original C field: hostname in struct dhcp_config
+    /// Original C field: hostname in struct `dhcp_config`
     pub hostname: Option<String>,
 
     /// Client identifier
-    /// Original C field: clid in struct dhcp_config
+    /// Original C field: clid in struct `dhcp_config`
     pub client_id: Option<Vec<u8>>,
 }
 
@@ -572,19 +574,19 @@ pub struct StaticLease {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DhcpOption {
     /// Option code
-    /// Original C field: opt in struct dhcp_opt
+    /// Original C field: opt in struct `dhcp_opt`
     pub code: u8,
 
     /// Option data
-    /// Original C field: val in struct dhcp_opt
+    /// Original C field: val in struct `dhcp_opt`
     pub data: Vec<u8>,
 
     /// Vendor class match
-    /// Original C field: netid in struct dhcp_opt (for vendor match)
+    /// Original C field: netid in struct `dhcp_opt` (for vendor match)
     pub vendor_class: Option<String>,
 }
 
-/// DHCPv6 option specification
+/// `DHCPv6` option specification
 ///
 /// Replaces C's `struct dhcp_opt` for IPv6 options
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -603,29 +605,30 @@ pub struct Dhcp6Option {
 ///
 /// Consolidates TFTP-related configuration from struct daemon fields in dnsmasq.h.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct TftpConfig {
     /// TFTP root directory
-    /// Original C field: tftp_prefix in struct daemon (line 4151)
+    /// Original C field: `tftp_prefix` in struct daemon (line 4151)
     pub tftp_root: Option<PathBuf>,
 
-    /// Secure mode (chroot to tftp_root)
+    /// Secure mode (chroot to `tftp_root`)
     /// Derived from TFTP server flags
     pub secure_mode: bool,
 
     /// Single port mode
-    /// Derived from OPT_SINGLE_PORT flag
+    /// Derived from `OPT_SINGLE_PORT` flag
     pub single_port: bool,
 
     /// Port range for TFTP
-    /// Original C fields: start_tftp_port, end_tftp_port in struct daemon (line 4147)
+    /// Original C fields: `start_tftp_port`, `end_tftp_port` in struct daemon (line 4147)
     pub port_range: Option<(u16, u16)>,
 
     /// MTU for TFTP transfers
-    /// Original C field: tftp_mtu in struct daemon (line 4145)
+    /// Original C field: `tftp_mtu` in struct daemon (line 4145)
     pub tftp_mtu: Option<u16>,
 
     /// Maximum concurrent connections
-    /// Original C field: tftp_max in struct daemon (line 4145)
+    /// Original C field: `tftp_max` in struct daemon (line 4145)
     pub tftp_max_connections: usize,
 
     /// Convert to lowercase
@@ -656,21 +659,22 @@ impl Default for TftpConfig {
 ///
 /// Consolidates network-related configuration from struct daemon fields in dnsmasq.h.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct NetworkConfig {
     /// Interfaces to listen on
-    /// Original C field: if_names in struct daemon (line 4105)
+    /// Original C field: `if_names` in struct daemon (line 4105)
     pub interfaces: Vec<InterfaceName>,
 
     /// Addresses to listen on
-    /// Original C field: if_addrs in struct daemon (line 4105)
+    /// Original C field: `if_addrs` in struct daemon (line 4105)
     pub listen_addresses: Vec<IpAddr>,
 
     /// Interfaces to exclude
-    /// Original C field: if_except in struct daemon (line 4105)
+    /// Original C field: `if_except` in struct daemon (line 4105)
     pub except_interfaces: Vec<InterfaceName>,
 
     /// Bind to specific interfaces
-    /// Derived from OPT_BIND_INTERFACES flag
+    /// Derived from `OPT_BIND_INTERFACES` flag
     pub bind_interfaces: bool,
 
     /// Bind dynamically as interfaces come up
@@ -678,17 +682,6 @@ pub struct NetworkConfig {
     pub bind_dynamic: bool,
 }
 
-impl Default for NetworkConfig {
-    fn default() -> Self {
-        Self {
-            interfaces: Vec::new(),
-            listen_addresses: Vec::new(),
-            except_interfaces: Vec::new(),
-            bind_interfaces: false,
-            bind_dynamic: false,
-        }
-    }
-}
 
 /// Process management configuration
 ///
@@ -712,7 +705,7 @@ pub struct ProcessConfig {
     pub script_user: Option<String>,
 
     /// Daemonize (fork to background)
-    /// Derived from OPT_NO_FORK flag (inverted)
+    /// Derived from `OPT_NO_FORK` flag (inverted)
     pub daemonize: bool,
 }
 
@@ -734,19 +727,19 @@ impl Default for ProcessConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
     /// Syslog facility
-    /// Original C field: log_fac in struct daemon (line 4114)
+    /// Original C field: `log_fac` in struct daemon (line 4114)
     pub log_facility: Option<String>,
 
     /// Log file path
-    /// Original C field: log_file in struct daemon (line 4115)
+    /// Original C field: `log_file` in struct daemon (line 4115)
     pub log_file: Option<PathBuf>,
 
     /// Async log queue size
-    /// Original C field: max_logs in struct daemon (line 4116)
+    /// Original C field: `max_logs` in struct daemon (line 4116)
     pub log_async_max: Option<usize>,
 
     /// Log DNS queries
-    /// Derived from OPT_LOG flag
+    /// Derived from `OPT_LOG` flag
     pub log_queries: bool,
 
     /// Log DHCP transactions
@@ -771,50 +764,38 @@ impl Default for LoggingConfig {
 /// Consolidates integration-related configuration from struct daemon fields in dnsmasq.h.
 /// Optional features are controlled by Cargo features.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct IntegrationConfig {
     /// D-Bus service name
-    /// Original C field: dbus_name in struct daemon (line 4155)
+    /// Original C field: `dbus_name` in struct daemon (line 4155)
     #[cfg(feature = "dbus")]
     pub dbus_name: Option<String>,
 
-    /// UBus service name
-    /// Original C field: ubus_name in struct daemon (line 4156)
+    /// `UBus` service name
+    /// Original C field: `ubus_name` in struct daemon (line 4156)
     #[cfg(feature = "ubus")]
     pub ubus_name: Option<String>,
 
-    /// IPSet configurations
+    /// `IPSet` configurations
     /// Original C field: ipsets in struct daemon (line 4111)
     pub ipsets: Vec<IpsetConfig>,
 
-    /// NFTables set configurations
+    /// `NFTables` set configurations
     /// Original C field: nftsets in struct daemon (line 4111)
     pub nftsets: Vec<NftsetConfig>,
 
     /// Enable connection tracking
-    /// Derived from OPT_CONNTRACK flag
+    /// Derived from `OPT_CONNTRACK` flag
     pub conntrack_enabled: bool,
 }
 
-impl Default for IntegrationConfig {
-    fn default() -> Self {
-        Self {
-            #[cfg(feature = "dbus")]
-            dbus_name: None,
-            #[cfg(feature = "ubus")]
-            ubus_name: None,
-            ipsets: Vec::new(),
-            nftsets: Vec::new(),
-            conntrack_enabled: false,
-        }
-    }
-}
 
-/// IPSet configuration
+/// `IPSet` configuration
 ///
 /// Replaces C's `struct ipsets` (dnsmasq.h line 621)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpsetConfig {
-    /// IPSet name
+    /// `IPSet` name
     pub name: String,
     /// Domain pattern
     pub domain: Option<String>,
@@ -822,7 +803,7 @@ pub struct IpsetConfig {
     pub ipsets: Vec<String>,
 }
 
-/// NFTables set configuration
+/// `NFTables` set configuration
 ///
 /// Replaces C's `struct ipsets` with nftables variant (dnsmasq.h line 621)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -843,7 +824,7 @@ pub struct NftsetConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     /// Authoritative zones
-    /// Original C field: auth_zones in struct daemon (line 4089)
+    /// Original C field: `auth_zones` in struct daemon (line 4089)
     pub auth_zones: Vec<AuthZone>,
 
     /// Authoritative server hostname
@@ -851,23 +832,23 @@ pub struct AuthConfig {
     pub auth_server: Option<String>,
 
     /// Authoritative TTL
-    /// Original C field: auth_ttl in struct daemon (line 4119)
+    /// Original C field: `auth_ttl` in struct daemon (line 4119)
     pub auth_ttl: u64,
 
     /// SOA serial number
-    /// Original C field: soa_sn in struct daemon (line 4159)
+    /// Original C field: `soa_sn` in struct daemon (line 4159)
     pub soa_serial: u64,
 
     /// SOA refresh
-    /// Original C field: soa_refresh in struct daemon (line 4159)
+    /// Original C field: `soa_refresh` in struct daemon (line 4159)
     pub soa_refresh: u64,
 
     /// SOA retry
-    /// Original C field: soa_retry in struct daemon (line 4159)
+    /// Original C field: `soa_retry` in struct daemon (line 4159)
     pub soa_retry: u64,
 
     /// SOA expiry
-    /// Original C field: soa_expiry in struct daemon (line 4159)
+    /// Original C field: `soa_expiry` in struct daemon (line 4159)
     pub soa_expiry: u64,
 }
 
@@ -880,7 +861,7 @@ impl Default for AuthConfig {
             soa_serial: 1,
             soa_refresh: 7200,
             soa_retry: 1800,
-            soa_expiry: 1209600,
+            soa_expiry: 1_209_600,
         }
     }
 }
@@ -891,19 +872,19 @@ impl Default for AuthConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthZone {
     /// Zone domain name
-    /// Original C field: domain in struct auth_zone
+    /// Original C field: domain in struct `auth_zone`
     pub domain: String,
 
     /// Subnet for this zone
-    /// Original C field: subnet in struct auth_zone
+    /// Original C field: subnet in struct `auth_zone`
     pub subnet: Option<String>,
 
     /// Excluded subnets
-    /// Original C field: exclude in struct auth_zone
+    /// Original C field: exclude in struct `auth_zone`
     pub exclude: Vec<String>,
 
     /// Interface for this zone
-    /// Original C field: interface_names in struct auth_zone
+    /// Original C field: `interface_names` in struct `auth_zone`
     pub interface: Option<String>,
 }
 
@@ -912,6 +893,7 @@ pub struct AuthZone {
 /// Root configuration container that aggregates all subsystem configurations.
 /// Replaces C's global `struct daemon` (dnsmasq.h line 4074) with organized subsections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Config {
     /// DNS subsystem configuration
     pub dns: DnsConfig,
@@ -938,12 +920,13 @@ pub struct Config {
     pub auth: AuthConfig,
 
     /// Runtime option flags
-    /// Original C field: options[OPTION_SIZE] in struct daemon (line 4079)
+    /// Original C field: options[`OPTION_SIZE`] in struct daemon (line 4079)
     pub options: DaemonOptions,
 }
 
 impl Config {
     /// Creates a new configuration with default values
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -955,6 +938,7 @@ impl Config {
     /// - DHCP range overlaps
     /// - File path accessibility
     /// - Network interface validity
+    #[must_use] 
     pub fn is_valid(&self) -> bool {
         // DNS port validation
         if self.dns.port != 0 && self.dns.port < 1024 && self.process.username.is_some() {
@@ -982,6 +966,7 @@ impl Config {
     /// Checks for configuration conflicts
     ///
     /// Returns a list of warning messages for potentially problematic settings
+    #[must_use] 
     pub fn check_conflicts(&self) -> Vec<String> {
         let mut warnings = Vec::new();
 
@@ -1004,21 +989,6 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            dns: DnsConfig::default(),
-            dhcp: DhcpConfig::default(),
-            network: NetworkConfig::default(),
-            tftp: TftpConfig::default(),
-            process: ProcessConfig::default(),
-            logging: LoggingConfig::default(),
-            integration: IntegrationConfig::default(),
-            auth: AuthConfig::default(),
-            options: DaemonOptions::default(),
-        }
-    }
-}
 
 /// Configuration builder for gradual construction
 ///
@@ -1040,59 +1010,69 @@ pub struct ConfigBuilder {
 
 impl ConfigBuilder {
     /// Creates a new empty configuration builder
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Sets DNS configuration
+    #[must_use] 
     pub fn dns(mut self, dns: DnsConfig) -> Self {
         self.dns = Some(dns);
         self
     }
 
     /// Sets DHCP configuration
+    #[must_use] 
     pub fn dhcp(mut self, dhcp: DhcpConfig) -> Self {
         self.dhcp = Some(dhcp);
         self
     }
 
     /// Sets network configuration
+    #[must_use] 
     pub fn network(mut self, network: NetworkConfig) -> Self {
         self.network = Some(network);
         self
     }
 
     /// Sets TFTP configuration
+    #[must_use] 
     pub fn tftp(mut self, tftp: TftpConfig) -> Self {
         self.tftp = Some(tftp);
         self
     }
 
     /// Sets process configuration
+    #[must_use] 
     pub fn process(mut self, process: ProcessConfig) -> Self {
         self.process = Some(process);
         self
     }
 
     /// Sets logging configuration
+    #[must_use] 
     pub fn logging(mut self, logging: LoggingConfig) -> Self {
         self.logging = Some(logging);
         self
     }
 
     /// Sets integration configuration
+    #[must_use] 
     pub fn integration(mut self, integration: IntegrationConfig) -> Self {
         self.integration = Some(integration);
         self
     }
 
     /// Sets authoritative DNS configuration
+    #[must_use] 
     pub fn auth(mut self, auth: AuthConfig) -> Self {
         self.auth = Some(auth);
         self
     }
 
     /// Sets daemon option flags
+    #[must_use] 
     pub fn options(mut self, options: DaemonOptions) -> Self {
         self.options = options;
         self
@@ -1101,6 +1081,7 @@ impl ConfigBuilder {
     /// Builds the final configuration
     ///
     /// Uses provided values or defaults for unset subsections
+    #[must_use] 
     pub fn build(self) -> Config {
         Config {
             dns: self.dns.unwrap_or_default(),
@@ -1116,6 +1097,7 @@ impl ConfigBuilder {
     }
 
     /// Creates a builder with default values
+    #[must_use] 
     pub fn with_defaults() -> Self {
         Self {
             dns: Some(DnsConfig::default()),

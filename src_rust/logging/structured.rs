@@ -5,13 +5,13 @@
 //!
 //! This module provides formatters for tracing log events supporting both JSON and
 //! plain text output formats. The JSON formatter enables integration with log
-//! aggregation systems (ELK, Splunk, CloudWatch) while the plain text formatter
+//! aggregation systems (ELK, Splunk, `CloudWatch`) while the plain text formatter
 //! maintains backward compatibility with the C implementation's log format.
 //!
 //! # Key Features
 //!
 //! - **JSON Formatter**: Serializes log events into JSON with structured fields
-//!   (timestamp, level, target, message, custom attributes like client_ip, query_type)
+//!   (timestamp, level, target, message, custom attributes like `client_ip`, `query_type`)
 //! - **Plain Text Formatter**: Produces C-compatible output matching the format:
 //!   `Jan  1 12:34:56 dnsmasq[pid]: message`
 //! - **Runtime Format Selection**: Configurable via `DNSMASQ_LOG_FORMAT` environment
@@ -25,7 +25,7 @@
 //! The module implements `tracing_subscriber::fmt::FormatEvent` and `FormatFields`
 //! traits to customize log output. Both formatters extract event metadata (level,
 //! target, timestamp) and format them appropriately. The JSON formatter serializes
-//! all data using serde_json, while the plain text formatter mimics C's ctime-based
+//! all data using `serde_json`, while the plain text formatter mimics C's ctime-based
 //! timestamp format for operational continuity.
 //!
 //! # Usage Example
@@ -57,7 +57,7 @@
 //!
 //! # Integration with C Log Format
 //!
-//! The PlainTextFormatter replicates the C implementation's log format from src/log.c
+//! The `PlainTextFormatter` replicates the C implementation's log format from src/log.c
 //! line 770: `sprintf(p, "%.15s ", ctime(&time_now) + 4)` which produces timestamps
 //! like "Jan  1 12:34:56 ". This ensures log parsers and monitoring tools expecting
 //! the legacy format continue to work without modification.
@@ -79,10 +79,12 @@ use tracing_subscriber::registry::LookupSpan;
 /// Determines whether logs are formatted as JSON (for machine parsing and log
 /// aggregation) or plain text (for backward compatibility with C implementation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum LogFormat {
     /// JSON structured logging with machine-parseable fields
     Json,
     /// Plain text logging matching C's format: "Jan  1 12:34:56 dnsmasq[pid]: message"
+    #[default]
     PlainText,
 }
 
@@ -109,6 +111,7 @@ impl LogFormat {
     /// unset DNSMASQ_LOG_FORMAT
     /// # Program will use plain text formatting (default)
     /// ```
+    #[must_use] 
     pub fn from_env() -> Self {
         match env::var("DNSMASQ_LOG_FORMAT") {
             Ok(val) if val.eq_ignore_ascii_case("json") => LogFormat::Json,
@@ -117,15 +120,10 @@ impl LogFormat {
     }
 }
 
-impl Default for LogFormat {
-    fn default() -> Self {
-        LogFormat::PlainText
-    }
-}
 
 /// Visitor for extracting structured fields from tracing events
 ///
-/// Collects custom fields (like client_ip, query_type, domain) from log events
+/// Collects custom fields (like `client_ip`, `query_type`, domain) from log events
 /// and stores them as key-value pairs for JSON serialization or plain text rendering.
 struct FieldVisitor {
     fields: HashMap<String, String>,
@@ -148,7 +146,7 @@ impl Visit for FieldVisitor {
         // Skip the "message" field as it's handled separately
         if field.name() != "message" {
             self.fields
-                .insert(field.name().to_string(), format!("{:?}", value));
+                .insert(field.name().to_string(), format!("{value:?}"));
         }
     }
 
@@ -184,7 +182,7 @@ impl Visit for FieldVisitor {
 /// - `level`: Log level (ERROR, WARN, INFO, DEBUG, TRACE)
 /// - `target`: Module path where log originated
 /// - `message`: Log message text
-/// - Custom fields: Any additional structured attributes (e.g., client_ip, query_type)
+/// - Custom fields: Any additional structured attributes (e.g., `client_ip`, `query_type`)
 ///
 /// # Output Format
 ///
@@ -193,10 +191,10 @@ impl Visit for FieldVisitor {
 /// ```
 ///
 /// Each log line is a complete JSON object on a single line (JSON Lines format),
-/// suitable for log aggregation systems like ELK, Splunk, or CloudWatch Logs.
+/// suitable for log aggregation systems like ELK, Splunk, or `CloudWatch` Logs.
 #[derive(Debug, Clone)]
 pub struct JsonFormatter {
-    /// Process ID for log attribution (replaces C's getpid())
+    /// Process ID for log attribution (replaces C's `getpid()`)
     pid: u32,
 }
 
@@ -209,7 +207,8 @@ impl JsonFormatter {
     ///
     /// # Returns
     ///
-    /// A new `JsonFormatter` instance ready for use with tracing_subscriber
+    /// A new `JsonFormatter` instance ready for use with `tracing_subscriber`
+    #[must_use] 
     pub fn new() -> Self {
         JsonFormatter {
             pid: std::process::id(),
@@ -219,12 +218,16 @@ impl JsonFormatter {
     /// Format a tracing event as JSON
     ///
     /// Converts a tracing event into a JSON object with all metadata and custom fields.
-    /// This method is called by tracing_subscriber when log events are emitted.
+    /// This method is called by `tracing_subscriber` when log events are emitted.
     ///
     /// # Arguments
     ///
     /// * `event` - The tracing event containing log data
     /// * `writer` - Output destination for formatted JSON
+    ///
+    /// # Errors
+    ///
+    /// Returns `std::io::Error` if writing to the output destination fails.
     ///
     /// # Returns
     ///
@@ -260,7 +263,7 @@ impl JsonFormatter {
 
         // Add custom fields (excluding message which we already added)
         if let Some(obj) = json_obj.as_object_mut() {
-            for (key, value) in fields.iter() {
+            for (key, value) in &fields {
                 if key != "message" {
                     obj.insert(key.clone(), Value::String(value.clone()));
                 }
@@ -311,7 +314,8 @@ impl PlainTextFormatter {
     ///
     /// # Returns
     ///
-    /// A new `PlainTextFormatter` instance ready for use with tracing_subscriber
+    /// A new `PlainTextFormatter` instance ready for use with `tracing_subscriber`
+    #[must_use] 
     pub fn new() -> Self {
         PlainTextFormatter {
             pid: std::process::id(),
@@ -328,6 +332,10 @@ impl PlainTextFormatter {
     ///
     /// * `event` - The tracing event containing log data
     /// * `writer` - Output destination for formatted text
+    ///
+    /// # Errors
+    ///
+    /// Returns `std::io::Error` if writing to the output destination fails.
     ///
     /// # Returns
     ///
@@ -356,17 +364,17 @@ impl PlainTextFormatter {
 
         // Add level prefix for non-info messages (helps with filtering)
         if *level != Level::INFO {
-            write!(buf_writer, "[{}] ", level)?;
+            write!(buf_writer, "[{level}] ")?;
         }
 
         // Write message
-        write!(buf_writer, "{}", message)?;
+        write!(buf_writer, "{message}")?;
 
         // Append custom fields in key=value format if present
         let mut field_strs: Vec<String> = fields
             .iter()
             .filter(|(k, _)| k.as_str() != "message")
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{k}={v}"))
             .collect();
         field_strs.sort(); // Ensure consistent ordering
 
@@ -386,9 +394,9 @@ impl Default for PlainTextFormatter {
     }
 }
 
-/// Implement FormatEvent trait for JsonFormatter to integrate with tracing_subscriber
+/// Implement `FormatEvent` trait for `JsonFormatter` to integrate with `tracing_subscriber`
 ///
-/// This allows JsonFormatter to be used as the event formatter in tracing_subscriber's
+/// This allows `JsonFormatter` to be used as the event formatter in `tracing_subscriber`'s
 /// fmt layer: `fmt().event_format(JsonFormatter::new()).init()`
 impl<S, N> FormatEvent<S, N> for JsonFormatter
 where
@@ -415,9 +423,9 @@ where
     }
 }
 
-/// Implement FormatEvent trait for PlainTextFormatter to integrate with tracing_subscriber
+/// Implement `FormatEvent` trait for `PlainTextFormatter` to integrate with `tracing_subscriber`
 ///
-/// This allows PlainTextFormatter to be used as the event formatter in tracing_subscriber's
+/// This allows `PlainTextFormatter` to be used as the event formatter in `tracing_subscriber`'s
 /// fmt layer: `fmt().event_format(PlainTextFormatter::new()).init()`
 impl<S, N> FormatEvent<S, N> for PlainTextFormatter
 where

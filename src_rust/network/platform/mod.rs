@@ -2,16 +2,16 @@
 //!
 //! This module provides a unified API for platform-specific network interface operations
 //! across Linux, BSD variants, and Solaris. It replaces the C implementation's preprocessor-based
-//! platform selection (#ifdef HAVE_LINUX_NETWORK, HAVE_BSD_NETWORK, HAVE_SOLARIS_NETWORK)
+//! platform selection (#ifdef `HAVE_LINUX_NETWORK`, `HAVE_BSD_NETWORK`, `HAVE_SOLARIS_NETWORK`)
 //! with Rust's cfg attributes and trait-based polymorphism.
 //!
 //! # Supported Platforms
 //!
 //! - **Linux 2.6+**: Uses netlink sockets for interface enumeration and monitoring
-//! - **FreeBSD 10+**: Uses routing sockets and getifaddrs()
-//! - **OpenBSD 6.0+**: Uses routing sockets and getifaddrs()
-//! - **NetBSD 7.0+**: Uses routing sockets and getifaddrs()
-//! - **macOS 10.10+**: Uses routing sockets and getifaddrs()
+//! - **FreeBSD 10+**: Uses routing sockets and `getifaddrs()`
+//! - **OpenBSD 6.0+**: Uses routing sockets and `getifaddrs()`
+//! - **NetBSD 7.0+**: Uses routing sockets and `getifaddrs()`
+//! - **macOS 10.10+**: Uses routing sockets and `getifaddrs()`
 //! - **Solaris 11+**: Uses ioctl-based interface enumeration
 //!
 //! # Architecture
@@ -80,7 +80,7 @@ pub struct InterfaceInfo {
     /// System interface index
     pub index: u32,
     
-    /// Interface flags (IFF_UP, IFF_BROADCAST, IFF_LOOPBACK, etc.)
+    /// Interface flags (`IFF_UP`, `IFF_BROADCAST`, `IFF_LOOPBACK`, etc.)
     pub flags: u32,
     
     /// Network prefix length (CIDR notation)
@@ -92,24 +92,28 @@ pub struct InterfaceInfo {
 
 impl InterfaceInfo {
     /// Check if interface is up and running
+    #[must_use] 
     pub fn is_up(&self) -> bool {
         const IFF_UP: u32 = 0x1;
         (self.flags & IFF_UP) != 0
     }
     
     /// Check if interface supports broadcast
+    #[must_use] 
     pub fn is_broadcast(&self) -> bool {
         const IFF_BROADCAST: u32 = 0x2;
         (self.flags & IFF_BROADCAST) != 0
     }
     
     /// Check if interface is loopback
+    #[must_use] 
     pub fn is_loopback(&self) -> bool {
         const IFF_LOOPBACK: u32 = 0x8;
         (self.flags & IFF_LOOPBACK) != 0
     }
     
     /// Check if interface is point-to-point
+    #[must_use] 
     pub fn is_point_to_point(&self) -> bool {
         const IFF_POINTOPOINT: u32 = 0x10;
         (self.flags & IFF_POINTOPOINT) != 0
@@ -128,7 +132,7 @@ pub struct ArpEntry {
     /// Hardware (MAC) address
     pub hwaddr: [u8; 6],
     
-    /// Address family (AF_INET or AF_INET6)
+    /// Address family (`AF_INET` or `AF_INET6`)
     pub family: i32,
     
     /// Interface index
@@ -140,6 +144,7 @@ pub struct ArpEntry {
 
 impl ArpEntry {
     /// Create a new ARP entry
+    #[must_use] 
     pub fn new(addr: IpAddr, hwaddr: [u8; 6], if_index: u32) -> Self {
         let family = match addr {
             IpAddr::V4(_) => AF_INET,
@@ -156,6 +161,7 @@ impl ArpEntry {
     }
     
     /// Format hardware address as string (e.g., "00:11:22:33:44:55")
+    #[must_use] 
     pub fn hwaddr_string(&self) -> String {
         format!(
             "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
@@ -259,7 +265,7 @@ impl fmt::Display for PlatformError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.kind, self.message)?;
         if let Some(ref source) = self.source {
-            write!(f, " (caused by: {})", source)?;
+            write!(f, " (caused by: {source})")?;
         }
         Ok(())
     }
@@ -338,8 +344,8 @@ pub trait Platform: Send + Sync {
     ///
     /// # Implementation Notes
     ///
-    /// - **Linux**: Uses netlink RTM_GETLINK and RTM_GETADDR messages
-    /// - **BSD**: Uses getifaddrs() system call
+    /// - **Linux**: Uses netlink `RTM_GETLINK` and `RTM_GETADDR` messages
+    /// - **BSD**: Uses `getifaddrs()` system call
     /// - **Solaris**: Uses SIOCGIFCONF ioctl
     async fn enumerate_interfaces(&self) -> Result<Vec<InterfaceInfo>, PlatformError>;
     
@@ -364,8 +370,8 @@ pub trait Platform: Send + Sync {
     ///
     /// # Implementation Notes
     ///
-    /// - **Linux**: Uses netlink RTMGRP_LINK, RTMGRP_IPV4_IFADDR, RTMGRP_IPV6_IFADDR multicast groups
-    /// - **BSD**: Uses routing socket with RTM_IFINFO, RTM_NEWADDR, RTM_DELADDR messages
+    /// - **Linux**: Uses netlink `RTMGRP_LINK`, `RTMGRP_IPV4_IFADDR`, `RTMGRP_IPV6_IFADDR` multicast groups
+    /// - **BSD**: Uses routing socket with `RTM_IFINFO`, `RTM_NEWADDR`, `RTM_DELADDR` messages
     /// - **Solaris**: Polls via periodic interface enumeration (no native event mechanism)
     ///
     /// # Cancellation Safety
@@ -387,8 +393,8 @@ pub trait Platform: Send + Sync {
     ///
     /// # Implementation Notes
     ///
-    /// - **Linux**: Reads /proc/net/arp or uses netlink RTM_GETNEIGH
-    /// - **BSD**: Uses sysctl net.link.ether.inet.host or routing socket RTM_GET
+    /// - **Linux**: Reads /proc/net/arp or uses netlink `RTM_GETNEIGH`
+    /// - **BSD**: Uses sysctl net.link.ether.inet.host or routing socket `RTM_GET`
     /// - **Solaris**: Reads ARP cache via ioctl or /dev/arp
     ///
     /// # Platform Availability
@@ -477,7 +483,7 @@ pub fn create_platform() -> Result<Box<dyn Platform>, PlatformError> {
     }
 }
 
-/// Helper function to convert libc errors to PlatformError
+/// Helper function to convert libc errors to `PlatformError`
 ///
 /// Provides consistent error mapping across platform implementations.
 pub(crate) fn io_error_to_platform_error(

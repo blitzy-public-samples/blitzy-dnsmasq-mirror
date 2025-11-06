@@ -49,12 +49,12 @@ pub enum HelperError {
 impl std::fmt::Display for HelperError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HelperError::ForkFailed(e) => write!(f, "Failed to fork helper process: {}", e),
-            HelperError::SocketCreationFailed(e) => write!(f, "Failed to create IPC socket: {}", e),
-            HelperError::SendFailed(e) => write!(f, "Failed to send event to helper: {}", e),
+            HelperError::ForkFailed(e) => write!(f, "Failed to fork helper process: {e}"),
+            HelperError::SocketCreationFailed(e) => write!(f, "Failed to create IPC socket: {e}"),
+            HelperError::SendFailed(e) => write!(f, "Failed to send event to helper: {e}"),
             HelperError::HelperDied => write!(f, "Helper process terminated unexpectedly"),
-            HelperError::SerializationFailed(msg) => write!(f, "Event serialization failed: {}", msg),
-            HelperError::InvalidScriptPath(msg) => write!(f, "Invalid script path: {}", msg),
+            HelperError::SerializationFailed(msg) => write!(f, "Event serialization failed: {msg}"),
+            HelperError::InvalidScriptPath(msg) => write!(f, "Invalid script path: {msg}"),
         }
     }
 }
@@ -80,8 +80,12 @@ pub struct HelperHandle {
 
 impl HelperHandle {
     /// Queue an event for processing by the helper
-    pub async fn queue_event(&mut self, data: ScriptData) -> Result<(), HelperError> {
-        let serialized = Self::serialize_event(&data)?;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the helper process has terminated or the event cannot be queued
+    pub fn queue_event(&mut self, data: &ScriptData) -> Result<(), HelperError> {
+        let serialized = Self::serialize_event(data);
         self.event_tx
             .send(serialized)
             .map_err(|_| HelperError::HelperDied)?;
@@ -89,7 +93,11 @@ impl HelperHandle {
     }
 
     /// Shutdown the helper process gracefully
-    pub async fn shutdown(self) -> Result<(), HelperError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shutdown process fails (currently always succeeds)
+    pub fn shutdown(self) -> Result<(), HelperError> {
         drop(self.event_tx); // Close channel
         if let Some(mut child) = self.child {
             let _ = child.wait();
@@ -98,18 +106,18 @@ impl HelperHandle {
     }
 
     /// Serialize event data to wire format
-    fn serialize_event(data: &ScriptData) -> Result<Vec<u8>, HelperError> {
+    fn serialize_event(data: &ScriptData) -> Vec<u8> {
         // Simplified serialization using format string
         // Production implementation would use proper binary protocol matching C struct script_data
-        let serialized = format!("{:?}", data);
-        Ok(serialized.into_bytes())
+        let serialized = format!("{data:?}");
+        serialized.into_bytes()
     }
 }
 
 /// Event data sent to helper process for script execution
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ScriptData {
-    /// DHCPv4 lease event
+    /// `DHCPv4` lease event
     DhcpLease {
         /// Action type: "add", "del", "old"
         action: String,
@@ -129,7 +137,7 @@ pub enum ScriptData {
         interface: String,
     },
 
-    /// DHCPv6 lease event
+    /// `DHCPv6` lease event
     Dhcp6Lease {
         /// Action type: "add", "del", "old"
         action: String,
@@ -181,8 +189,12 @@ pub enum ScriptData {
 ///
 /// # Returns
 /// A handle to the helper process and the control socket
+///
+/// # Errors
+///
+/// Returns an error if the script path is invalid or socket creation fails
 pub fn create_helper(
-    script_path: PathBuf,
+    script_path: &std::path::Path,
     _script_uid: u32,
     _script_gid: u32,
 ) -> Result<(HelperHandle, UnixStream), HelperError> {
@@ -221,17 +233,25 @@ pub fn create_helper(
 /// # Arguments
 /// * `handle` - Helper process handle
 /// * `data` - Script event data
+///
+/// # Errors
+///
+/// Returns an error if the event cannot be queued or the helper has terminated
 pub async fn queue_script(
     handle: &mut HelperHandle,
     data: ScriptData,
 ) -> Result<(), HelperError> {
-    handle.queue_event(data).await
+    handle.queue_event(&data)
 }
 
 /// Queue a TFTP event for processing
 ///
 /// # Arguments
 /// * `data` - TFTP event data
+///
+/// # Errors
+///
+/// Returns an error if the data is not a TFTP transfer event
 pub async fn queue_tftp(data: ScriptData) -> Result<(), HelperError> {
     // In full implementation, this would queue to active helper
     // For now, just validate the data
@@ -247,6 +267,10 @@ pub async fn queue_tftp(data: ScriptData) -> Result<(), HelperError> {
 ///
 /// # Arguments
 /// * `data` - ARP event data
+///
+/// # Errors
+///
+/// Returns an error if the data is not an ARP event
 pub async fn queue_arp(data: ScriptData) -> Result<(), HelperError> {
     // In full implementation, this would queue to active helper
     // For now, just validate the data
@@ -263,6 +287,10 @@ pub async fn queue_arp(data: ScriptData) -> Result<(), HelperError> {
 /// # Arguments
 /// * `handle` - Helper process handle
 /// * `data` - Serialized event data
+///
+/// # Errors
+///
+/// Returns an error if the write operation fails
 pub async fn helper_write(
     handle: &mut HelperHandle,
     data: &[u8],
@@ -293,7 +321,7 @@ mod tests {
         };
 
         let serialized = HelperHandle::serialize_event(&data);
-        assert!(serialized.is_ok());
+        assert!(!serialized.is_empty());
     }
 
     #[test]

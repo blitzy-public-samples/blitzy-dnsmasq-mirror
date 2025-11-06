@@ -328,8 +328,10 @@ impl ConfigValidator {
 
     /// Validate entire configuration
     fn validate(&self, config: &Config) -> ValidationResult {
-        let mut result = ValidationResult::default();
-        result.total_options = config.options.len();
+        let mut result = ValidationResult {
+            total_options: config.options.len(),
+            ..Default::default()
+        };
 
         let mut option_counts: HashMap<String, usize> = HashMap::new();
         let mut dhcp_ranges: Vec<DhcpRange> = Vec::new();
@@ -570,14 +572,14 @@ impl ConfigValidator {
         }
 
         // Check for suffix
-        let (num_part, multiplier) = if value.ends_with('d') {
-            (&value[..value.len() - 1], 86400)
-        } else if value.ends_with('h') {
-            (&value[..value.len() - 1], 3600)
-        } else if value.ends_with('m') {
-            (&value[..value.len() - 1], 60)
-        } else if value.ends_with('s') {
-            (&value[..value.len() - 1], 1)
+        let (num_part, multiplier) = if let Some(stripped) = value.strip_suffix('d') {
+            (stripped, 86400)
+        } else if let Some(stripped) = value.strip_suffix('h') {
+            (stripped, 3600)
+        } else if let Some(stripped) = value.strip_suffix('m') {
+            (stripped, 60)
+        } else if let Some(stripped) = value.strip_suffix('s') {
+            (stripped, 1)
         } else {
             (value, 1) // Assume seconds if no suffix
         };

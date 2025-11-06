@@ -61,11 +61,11 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use tracing::{debug, error, info, warn};
 
-/// PCAP magic number indicating native byte order (little-endian on x86_64)
+/// PCAP magic number indicating native byte order (little-endian on `x86_64`)
 /// Magic value 0xa1b2c3d4 tells pcap readers to use native endianness
 pub const PCAP_MAGIC_NUMBER: u32 = 0xa1b2_c3d4;
 
-/// DLT_RAW link type - raw IP packets without link-layer headers
+/// `DLT_RAW` link type - raw IP packets without link-layer headers
 /// See <http://www.tcpdump.org/linktypes.html>
 pub const DLT_RAW: u32 = 101;
 
@@ -103,7 +103,7 @@ const IPV6_DEFAULT_HOPS: u8 = 64;
 /// - `thiszone`: GMT to local correction (0 = UTC)
 /// - `sigfigs`: Timestamp accuracy (0 = microsecond precision)
 /// - `snaplen`: Maximum packet capture length
-/// - `network`: Data link type (101 = DLT_RAW)
+/// - `network`: Data link type (101 = `DLT_RAW`)
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PcapGlobalHeader {
@@ -115,7 +115,7 @@ pub struct PcapGlobalHeader {
     pub version_minor: u16,
     /// Maximum packet capture length
     pub snaplen: u32,
-    /// Data link type (101 = DLT_RAW)
+    /// Data link type (101 = `DLT_RAW`)
     pub network: u32,
 }
 
@@ -129,6 +129,7 @@ impl PcapGlobalHeader {
     /// # Returns
     ///
     /// A new `PcapGlobalHeader` initialized with libpcap-compatible values
+    #[must_use] 
     pub fn new(snaplen: u32) -> Self {
         Self {
             magic_number: PCAP_MAGIC_NUMBER,
@@ -140,7 +141,7 @@ impl PcapGlobalHeader {
     }
 
     /// Serialize header to bytes in native byte order
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(24);
         bytes.extend_from_slice(&self.magic_number.to_ne_bytes());
         bytes.extend_from_slice(&self.version_major.to_ne_bytes());
@@ -188,7 +189,7 @@ impl PcapGlobalHeader {
 /// - `ts_sec`: Timestamp seconds since Unix epoch
 /// - `ts_usec`: Timestamp microseconds
 /// - `incl_len`: Number of octets saved in file
-/// - `orig_len`: Original packet length (same as incl_len, no truncation)
+/// - `orig_len`: Original packet length (same as `incl_len`, no truncation)
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PcapRecordHeader {
@@ -198,7 +199,7 @@ pub struct PcapRecordHeader {
     pub ts_usec: u32,
     /// Number of octets saved in file
     pub incl_len: u32,
-    /// Original packet length (same as incl_len, no truncation)
+    /// Original packet length (same as `incl_len`, no truncation)
     pub orig_len: u32,
 }
 
@@ -212,6 +213,8 @@ impl PcapRecordHeader {
     /// # Returns
     ///
     /// A new `PcapRecordHeader` with microsecond-precision timestamp
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn new(packet_len: u32) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -226,7 +229,7 @@ impl PcapRecordHeader {
     }
 
     /// Serialize header to bytes in native byte order
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(16);
         bytes.extend_from_slice(&self.ts_sec.to_ne_bytes());
         bytes.extend_from_slice(&self.ts_usec.to_ne_bytes());
@@ -405,7 +408,7 @@ impl PacketDumper {
                 Ok(_) => {
                     let record = PcapRecordHeader::from_bytes(&header_bytes)?;
                     // Skip packet data
-                    file.seek(std::io::SeekFrom::Current(record.incl_len as i64))
+                    file.seek(std::io::SeekFrom::Current(i64::from(record.incl_len)))
                         .await?;
                     count += 1;
                 }
@@ -472,6 +475,7 @@ impl PacketDumper {
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(clippy::cast_possible_truncation)]
     pub async fn dump_packet(
         &mut self,
         mask: u16,
@@ -494,10 +498,10 @@ impl PacketDumper {
         // Construct packet with IP and transport headers
         let full_packet = match family {
             SocketAddr::V4(_) => {
-                self.build_ipv4_packet(packet, src, dst, port).await?
+                Self::build_ipv4_packet(packet, src, dst, port)
             }
             SocketAddr::V6(_) => {
-                self.build_ipv6_packet(packet, src, dst, port).await?
+                Self::build_ipv6_packet(packet, src, dst, port)
             }
         };
 
@@ -531,13 +535,13 @@ impl PacketDumper {
     /// # Returns
     ///
     /// Complete packet bytes with IP header + transport header + payload
-    async fn build_ipv4_packet(
-        &self,
+    #[allow(clippy::cast_possible_truncation)]
+    fn build_ipv4_packet(
         payload: &[u8],
         src: Option<SocketAddr>,
         dst: Option<SocketAddr>,
         port: Option<u16>,
-    ) -> IoResult<Vec<u8>> {
+    ) -> Vec<u8> {
         let is_icmp = port.is_none();
         let transport_hdr_len = if is_icmp { 0 } else { 8 }; // UDP header is 8 bytes
         let total_len = 20 + transport_hdr_len + payload.len(); // 20-byte IP header
@@ -547,16 +551,16 @@ impl PacketDumper {
         // Extract IPv4 addresses
         let src_ip = src.and_then(|s| match s {
             SocketAddr::V4(v4) => Some(*v4.ip()),
-            _ => None,
+            SocketAddr::V6(_) => None,
         }).unwrap_or(Ipv4Addr::UNSPECIFIED);
 
         let dst_ip = dst.and_then(|d| match d {
             SocketAddr::V4(v4) => Some(*v4.ip()),
-            _ => None,
+            SocketAddr::V6(_) => None,
         }).unwrap_or(Ipv4Addr::UNSPECIFIED);
 
-        let src_port = src.map(|s| s.port()).unwrap_or(0);
-        let dst_port = dst.map(|d| d.port()).unwrap_or(0);
+        let src_port = src.map_or(0, |s| s.port());
+        let dst_port = dst.map_or(0, |d| d.port());
 
         // Build IPv4 header (20 bytes)
         packet.push((IP_VERSION_4 << 4) | IP_HEADER_LEN); // Version and IHL
@@ -608,8 +612,8 @@ impl PacketDumper {
 
             // Calculate UDP checksum with pseudoheader
             let udp_checksum = Self::calculate_udp_checksum_ipv4(
-                &src_ip,
-                &dst_ip,
+                src_ip,
+                dst_ip,
                 &udp_header,
                 payload,
             );
@@ -620,7 +624,7 @@ impl PacketDumper {
             packet.extend_from_slice(payload);
         }
 
-        Ok(packet)
+        packet
     }
 
     /// Build IPv6 packet with IP and UDP/ICMPv6 headers
@@ -632,18 +636,18 @@ impl PacketDumper {
     /// * `payload` - Packet payload (DNS, DHCP, etc.)
     /// * `src` - Source address (optional)
     /// * `dst` - Destination address (optional)
-    /// * `port` - UDP port or None for ICMPv6
+    /// * `port` - UDP port or None for `ICMPv6`
     ///
     /// # Returns
     ///
     /// Complete packet bytes with IPv6 header + transport header + payload
-    async fn build_ipv6_packet(
-        &self,
+    #[allow(clippy::cast_possible_truncation)]
+    fn build_ipv6_packet(
         payload: &[u8],
         src: Option<SocketAddr>,
         dst: Option<SocketAddr>,
         port: Option<u16>,
-    ) -> IoResult<Vec<u8>> {
+    ) -> Vec<u8> {
         let is_icmpv6 = port.is_none();
         let transport_hdr_len = if is_icmpv6 { 0 } else { 8 }; // UDP header is 8 bytes
         let payload_len = transport_hdr_len + payload.len();
@@ -654,19 +658,19 @@ impl PacketDumper {
         // Extract IPv6 addresses
         let src_ip = src.and_then(|s| match s {
             SocketAddr::V6(v6) => Some(*v6.ip()),
-            _ => None,
+            SocketAddr::V4(_) => None,
         }).unwrap_or(Ipv6Addr::UNSPECIFIED);
 
         let dst_ip = dst.and_then(|d| match d {
             SocketAddr::V6(v6) => Some(*v6.ip()),
-            _ => None,
+            SocketAddr::V4(_) => None,
         }).unwrap_or(Ipv6Addr::UNSPECIFIED);
 
-        let src_port = src.map(|s| s.port()).unwrap_or(0);
-        let dst_port = dst.map(|d| d.port()).unwrap_or(0);
+        let src_port = src.map_or(0, |s| s.port());
+        let dst_port = dst.map_or(0, |d| d.port());
 
         // Build IPv6 header (40 bytes)
-        packet.extend_from_slice(&((IP_VERSION_6 as u32) << 28).to_be_bytes()); // Version, traffic class, flow label
+        packet.extend_from_slice(&(u32::from(IP_VERSION_6) << 28).to_be_bytes()); // Version, traffic class, flow label
         packet.extend_from_slice(&(payload_len as u16).to_be_bytes()); // Payload length
         packet.push(if is_icmpv6 { IPPROTO_ICMPV6 } else { IPPROTO_UDP }); // Next header
         packet.push(IPV6_DEFAULT_HOPS); // Hop limit
@@ -713,7 +717,7 @@ impl PacketDumper {
             packet.extend_from_slice(payload);
         }
 
-        Ok(packet)
+        packet
     }
 
     /// Calculate Internet checksum (RFC 1071)
@@ -727,16 +731,17 @@ impl PacketDumper {
     /// # Returns
     ///
     /// 16-bit checksum value
+    #[allow(clippy::cast_possible_truncation)]
     fn calculate_checksum(data: &[u8]) -> u16 {
         let mut sum = 0u32;
         
         // Sum 16-bit words
         for chunk in data.chunks(2) {
             let word = if chunk.len() == 2 {
-                u16::from_be_bytes([chunk[0], chunk[1]]) as u32
+                u32::from(u16::from_be_bytes([chunk[0], chunk[1]]))
             } else {
                 // Odd length - pad with zero
-                (chunk[0] as u32) << 8
+                u32::from(chunk[0]) << 8
             };
             sum += word;
         }
@@ -769,9 +774,10 @@ impl PacketDumper {
     /// # Returns
     ///
     /// 16-bit UDP checksum
+    #[allow(clippy::cast_possible_truncation)]
     fn calculate_udp_checksum_ipv4(
-        src_ip: &Ipv4Addr,
-        dst_ip: &Ipv4Addr,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
         udp_header: &[u8],
         payload: &[u8],
     ) -> u16 {
@@ -781,25 +787,25 @@ impl PacketDumper {
         let src_octets = src_ip.octets();
         let dst_octets = dst_ip.octets();
         
-        sum += u16::from_be_bytes([src_octets[0], src_octets[1]]) as u32;
-        sum += u16::from_be_bytes([src_octets[2], src_octets[3]]) as u32;
-        sum += u16::from_be_bytes([dst_octets[0], dst_octets[1]]) as u32;
-        sum += u16::from_be_bytes([dst_octets[2], dst_octets[3]]) as u32;
-        sum += IPPROTO_UDP as u32;
+        sum += u32::from(u16::from_be_bytes([src_octets[0], src_octets[1]]));
+        sum += u32::from(u16::from_be_bytes([src_octets[2], src_octets[3]]));
+        sum += u32::from(u16::from_be_bytes([dst_octets[0], dst_octets[1]]));
+        sum += u32::from(u16::from_be_bytes([dst_octets[2], dst_octets[3]]));
+        sum += u32::from(IPPROTO_UDP);
         sum += (udp_header.len() + payload.len()) as u32;
 
         // UDP header
         for chunk in udp_header.chunks(2) {
-            let word = u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+            let word = u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
             sum += word;
         }
 
         // Payload
         for chunk in payload.chunks(2) {
             let word = if chunk.len() == 2 {
-                u16::from_be_bytes([chunk[0], chunk[1]]) as u32
+                u32::from(u16::from_be_bytes([chunk[0], chunk[1]]))
             } else {
-                (chunk[0] as u32) << 8
+                u32::from(chunk[0]) << 8
             };
             sum += word;
         }
@@ -831,6 +837,7 @@ impl PacketDumper {
     /// # Returns
     ///
     /// 16-bit UDP checksum
+    #[allow(clippy::cast_possible_truncation)]
     fn calculate_udp_checksum_ipv6(
         src_ip: &Ipv6Addr,
         dst_ip: &Ipv6Addr,
@@ -844,27 +851,27 @@ impl PacketDumper {
         let dst_octets = dst_ip.octets();
         
         for chunk in src_octets.chunks(2) {
-            sum += u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+            sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
         for chunk in dst_octets.chunks(2) {
-            sum += u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+            sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
         
         sum += (udp_header.len() + payload.len()) as u32;
-        sum += IPPROTO_UDP as u32;
+        sum += u32::from(IPPROTO_UDP);
 
         // UDP header
         for chunk in udp_header.chunks(2) {
-            let word = u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+            let word = u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
             sum += word;
         }
 
         // Payload
         for chunk in payload.chunks(2) {
             let word = if chunk.len() == 2 {
-                u16::from_be_bytes([chunk[0], chunk[1]]) as u32
+                u32::from(u16::from_be_bytes([chunk[0], chunk[1]]))
             } else {
-                (chunk[0] as u32) << 8
+                u32::from(chunk[0]) << 8
             };
             sum += word;
         }
@@ -882,7 +889,7 @@ impl PacketDumper {
         }
     }
 
-    /// Calculate ICMPv6 checksum
+    /// Calculate `ICMPv6` checksum
     ///
     /// Includes IPv6 pseudoheader per RFC 4443.
     ///
@@ -890,11 +897,12 @@ impl PacketDumper {
     ///
     /// * `src_ip` - Source IPv6 address
     /// * `dst_ip` - Destination IPv6 address
-    /// * `icmpv6_data` - Complete ICMPv6 packet (checksum field zeroed)
+    /// * `icmpv6_data` - Complete `ICMPv6` packet (checksum field zeroed)
     ///
     /// # Returns
     ///
-    /// 16-bit ICMPv6 checksum
+    /// 16-bit `ICMPv6` checksum
+    #[allow(clippy::cast_possible_truncation)]
     fn calculate_icmpv6_checksum(
         src_ip: &Ipv6Addr,
         dst_ip: &Ipv6Addr,
@@ -907,21 +915,21 @@ impl PacketDumper {
         let dst_octets = dst_ip.octets();
         
         for chunk in src_octets.chunks(2) {
-            sum += u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+            sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
         for chunk in dst_octets.chunks(2) {
-            sum += u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+            sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
         }
         
         sum += icmpv6_data.len() as u32;
-        sum += IPPROTO_ICMPV6 as u32;
+        sum += u32::from(IPPROTO_ICMPV6);
 
         // ICMPv6 data
         for chunk in icmpv6_data.chunks(2) {
             let word = if chunk.len() == 2 {
-                u16::from_be_bytes([chunk[0], chunk[1]]) as u32
+                u32::from(u16::from_be_bytes([chunk[0], chunk[1]]))
             } else {
-                (chunk[0] as u32) << 8
+                u32::from(chunk[0]) << 8
             };
             sum += word;
         }
@@ -944,6 +952,10 @@ impl PacketDumper {
     /// Flushes any pending writes and closes the file handle.
     /// File is also automatically closed when `PacketDumper` is dropped.
     ///
+    /// # Errors
+    ///
+    /// Returns `Err` if flushing pending writes fails
+    ///
     /// # Returns
     ///
     /// `Ok(())` on success, or `Err(IoError)` on failure
@@ -962,6 +974,10 @@ impl PacketDumper {
 /// # Arguments
 ///
 /// * `file_path` - Path to the PCAP dump file
+///
+/// # Errors
+///
+/// Returns `Err` if the file cannot be created or the PCAP header cannot be written
 ///
 /// # Returns
 ///

@@ -18,7 +18,11 @@ pub struct DnsParser;
 impl DnsParser {
     /// Parse a DNS packet from raw bytes
     ///
-    /// This is a wrapper around parse_dns_packet for use with the DnsParser type.
+    /// This is a wrapper around `parse_dns_packet` for use with the `DnsParser` type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the packet is malformed, truncated, or violates DNS protocol constraints.
     pub fn parse(data: &[u8]) -> Result<DnsMessage, Box<dyn std::error::Error>> {
         parse_dns_packet(data)
     }

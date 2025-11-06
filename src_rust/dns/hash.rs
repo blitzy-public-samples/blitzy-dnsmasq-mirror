@@ -29,7 +29,8 @@ impl DnsQuestion {
     /// * `name` - Domain name (normalized to lowercase)
     /// * `qtype` - Query type
     /// * `qclass` - Query class (typically 1 for IN)
-    pub fn new(name: String, qtype: u16, qclass: u16) -> Self {
+    #[must_use] 
+    pub fn new(name: &str, qtype: u16, qclass: u16) -> Self {
         Self {
             name: name.to_lowercase(), // Normalize for case-insensitive matching
             qtype,
@@ -38,6 +39,7 @@ impl DnsQuestion {
     }
 
     /// Compute hash value for this question
+    #[must_use] 
     pub fn hash_value(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
@@ -55,6 +57,7 @@ pub struct QuestionHashTable {
 
 impl QuestionHashTable {
     /// Create a new empty hash table
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             pending: std::collections::HashMap::new(),
@@ -70,6 +73,7 @@ impl QuestionHashTable {
     /// # Returns
     ///
     /// Returns true if this question already has a pending query.
+    #[must_use] 
     pub fn is_pending(&self, question: &DnsQuestion) -> bool {
         let hash = question.hash_value();
         self.pending.contains_key(&hash)
@@ -88,7 +92,7 @@ impl QuestionHashTable {
     /// false if there were already pending queries.
     pub fn add_pending(&mut self, question: &DnsQuestion, query_id: u16) -> bool {
         let hash = question.hash_value();
-        let entry = self.pending.entry(hash).or_insert_with(Vec::new);
+        let entry = self.pending.entry(hash).or_default();
         
         let is_first = entry.is_empty();
         entry.push(query_id);
@@ -118,17 +122,20 @@ impl QuestionHashTable {
     /// # Returns
     ///
     /// Returns reference to list of pending query IDs, or None if not pending.
+    #[must_use] 
     pub fn get_pending(&self, question: &DnsQuestion) -> Option<&Vec<u16>> {
         let hash = question.hash_value();
         self.pending.get(&hash)
     }
 
     /// Get the number of unique pending questions
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.pending.len()
     }
 
     /// Check if there are no pending questions
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
@@ -139,8 +146,9 @@ impl QuestionHashTable {
     }
 
     /// Get total number of pending queries (across all questions)
+    #[must_use] 
     pub fn total_pending_queries(&self) -> usize {
-        self.pending.values().map(|v| v.len()).sum()
+        self.pending.values().map(std::vec::Vec::len).sum()
     }
 }
 
@@ -156,8 +164,8 @@ mod tests {
 
     #[test]
     fn test_dns_question_basic() {
-        let q1 = DnsQuestion::new("example.com".to_string(), 1, 1);
-        let q2 = DnsQuestion::new("example.com".to_string(), 1, 1);
+        let q1 = DnsQuestion::new("example.com", 1, 1);
+        let q2 = DnsQuestion::new("example.com", 1, 1);
         
         assert_eq!(q1, q2);
         assert_eq!(q1.hash_value(), q2.hash_value());
@@ -165,8 +173,8 @@ mod tests {
 
     #[test]
     fn test_dns_question_case_insensitive() {
-        let q1 = DnsQuestion::new("example.com".to_string(), 1, 1);
-        let q2 = DnsQuestion::new("EXAMPLE.COM".to_string(), 1, 1);
+        let q1 = DnsQuestion::new("example.com", 1, 1);
+        let q2 = DnsQuestion::new("EXAMPLE.COM", 1, 1);
         
         // Names should be normalized to lowercase
         assert_eq!(q1, q2);
@@ -175,8 +183,8 @@ mod tests {
 
     #[test]
     fn test_dns_question_different_types() {
-        let q1 = DnsQuestion::new("example.com".to_string(), 1, 1); // A record
-        let q2 = DnsQuestion::new("example.com".to_string(), 28, 1); // AAAA record
+        let q1 = DnsQuestion::new("example.com", 1, 1); // A record
+        let q2 = DnsQuestion::new("example.com", 28, 1); // AAAA record
         
         assert_ne!(q1, q2);
         assert_ne!(q1.hash_value(), q2.hash_value());
@@ -194,7 +202,7 @@ mod tests {
     #[test]
     fn test_question_hash_table_add_pending() {
         let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com".to_string(), 1, 1);
+        let question = DnsQuestion::new("example.com", 1, 1);
         
         assert!(!table.is_pending(&question));
         
@@ -208,7 +216,7 @@ mod tests {
     #[test]
     fn test_question_hash_table_duplicate_queries() {
         let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com".to_string(), 1, 1);
+        let question = DnsQuestion::new("example.com", 1, 1);
         
         let is_first = table.add_pending(&question, 0x1234);
         assert!(is_first);
@@ -228,7 +236,7 @@ mod tests {
     #[test]
     fn test_question_hash_table_remove_pending() {
         let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com".to_string(), 1, 1);
+        let question = DnsQuestion::new("example.com", 1, 1);
         
         table.add_pending(&question, 0x1234);
         table.add_pending(&question, 0x5678);
@@ -246,8 +254,8 @@ mod tests {
     fn test_question_hash_table_multiple_questions() {
         let mut table = QuestionHashTable::new();
         
-        let q1 = DnsQuestion::new("example.com".to_string(), 1, 1);
-        let q2 = DnsQuestion::new("example.org".to_string(), 1, 1);
+        let q1 = DnsQuestion::new("example.com", 1, 1);
+        let q2 = DnsQuestion::new("example.org", 1, 1);
         
         table.add_pending(&q1, 0x1234);
         table.add_pending(&q2, 0x5678);
@@ -261,7 +269,7 @@ mod tests {
     #[test]
     fn test_question_hash_table_clear() {
         let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com".to_string(), 1, 1);
+        let question = DnsQuestion::new("example.com", 1, 1);
         
         table.add_pending(&question, 0x1234);
         assert!(!table.is_empty());

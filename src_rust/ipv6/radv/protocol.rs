@@ -15,14 +15,14 @@
 
 //! IPv6 Router Advertisement Protocol Structures and Constants
 //!
-//! This module provides type-safe Rust equivalents of the ICMPv6 protocol structures
+//! This module provides type-safe Rust equivalents of the `ICMPv6` protocol structures
 //! defined in `src/radv-protocol.h`, implementing RFC 4861 (Neighbor Discovery for IPv6)
 //! and RFC 4862 (IPv6 Stateless Address Autoconfiguration) wire formats.
 //!
 //! # Purpose
 //!
 //! The C implementation uses packed structs with manual network byte order conversion
-//! (htons/htonl) for ICMPv6 packet construction. This Rust implementation provides:
+//! (htons/htonl) for `ICMPv6` packet construction. This Rust implementation provides:
 //!
 //! - Type-safe packet structures with safe serialization/deserialization
 //! - Automatic bounds checking preventing buffer overflows
@@ -63,13 +63,13 @@
 //! creating aliasing and alignment issues. Rust's ownership system prevents multiple
 //! mutable references, and explicit serialization avoids pointer casts entirely.
 //!
-//! # ICMPv6 Message Types Implemented
+//! # `ICMPv6` Message Types Implemented
 //!
 //! - **Router Advertisement (Type 134)**: Periodic router announcements for SLAAC
 //! - **Router Solicitation (Type 133)**: Host requests for immediate RA
 //! - **Neighbor Solicitation (Type 135)**: IPv6 equivalent of ARP request
 //! - **Neighbor Advertisement (Type 136)**: IPv6 equivalent of ARP reply
-//! - **Echo Request/Reply (Types 128/129)**: ICMPv6 ping for DAD
+//! - **Echo Request/Reply (Types 128/129)**: `ICMPv6` ping for DAD
 //!
 //! # Wire Format Serialization
 //!
@@ -85,119 +85,119 @@
 //!
 //! - RFC 4861: Neighbor Discovery for IPv6
 //! - RFC 4862: IPv6 Stateless Address Autoconfiguration
-//! - RFC 4443: ICMPv6 for IPv6
+//! - RFC 4443: `ICMPv6` for IPv6
 //! - RFC 8106: IPv6 Router Advertisement Options for DNS Configuration
 //! - RFC 4191: Default Router Preferences and More-Specific Routes
 //! - RFC 6275: Mobility Support in IPv6 (Advertisement Interval option)
 
 use std::net::Ipv6Addr;
 
-/// IPv6 multicast address for all-nodes group (FF02::1)
+/// IPv6 multicast address for all-nodes group (`FF02::1`)
 ///
 /// Per RFC 4291 Section 2.7.1, this link-local scope multicast address reaches
 /// all IPv6-capable nodes on the local link. Router Advertisement messages are
 /// sent to this address to announce router presence and configuration parameters.
 ///
-/// This replaces the C implementation's string literal "FF02::1" with a compile-time
-/// constant Ipv6Addr value, eliminating runtime parsing overhead and enabling const
+/// This replaces the C implementation's string literal "`FF02::1`" with a compile-time
+/// constant `Ipv6Addr` value, eliminating runtime parsing overhead and enabling const
 /// evaluation for multicast destinations used by Router Advertisement transmission.
 pub const ALL_NODES: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x0001);
 
-/// IPv6 multicast address for all-routers group (FF02::2)
+/// IPv6 multicast address for all-routers group (`FF02::2`)
 ///
 /// Per RFC 4291 Section 2.7.1, this link-local scope multicast address reaches
 /// only nodes configured as IPv6 routers. Hosts send Router Solicitation messages
 /// to this address to request immediate Router Advertisement.
 ///
-/// This replaces the C implementation's string literal "FF02::2" with a compile-time
-/// constant Ipv6Addr value, providing type safety and const evaluation capability.
+/// This replaces the C implementation's string literal "`FF02::2`" with a compile-time
+/// constant `Ipv6Addr` value, providing type safety and const evaluation capability.
 pub const ALL_ROUTERS: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x0002);
 
-/// ICMPv6 message type: Echo Request
+/// `ICMPv6` message type: Echo Request
 pub const ICMP6_ECHO_REQUEST: u8 = 128;
 
-/// ICMPv6 message type: Echo Reply
+/// `ICMPv6` message type: Echo Reply
 pub const ICMP6_ECHO_REPLY: u8 = 129;
 
-/// ICMPv6 message type: Router Solicitation
+/// `ICMPv6` message type: Router Solicitation
 pub const ICMP6_ROUTER_SOLICITATION: u8 = 133;
 
-/// ICMPv6 message type: Router Advertisement
+/// `ICMPv6` message type: Router Advertisement
 pub const ICMP6_ROUTER_ADVERTISEMENT: u8 = 134;
 
-/// ICMPv6 message type: Neighbor Solicitation
+/// `ICMPv6` message type: Neighbor Solicitation
 pub const ICMP6_NEIGHBOR_SOLICITATION: u8 = 135;
 
-/// ICMPv6 message type: Neighbor Advertisement
+/// `ICMPv6` message type: Neighbor Advertisement
 pub const ICMP6_NEIGHBOR_ADVERTISEMENT: u8 = 136;
 
-/// ICMPv6 option type: Source Link-Layer Address (MAC address)
+/// `ICMPv6` option type: Source Link-Layer Address (MAC address)
 pub const ICMP6_OPT_SOURCE_MAC: u8 = 1;
 
-/// ICMPv6 option type: Prefix Information for SLAAC
+/// `ICMPv6` option type: Prefix Information for SLAAC
 pub const ICMP6_OPT_PREFIX: u8 = 3;
 
-/// ICMPv6 option type: MTU
+/// `ICMPv6` option type: MTU
 pub const ICMP6_OPT_MTU: u8 = 5;
 
-/// ICMPv6 option type: Advertisement Interval (RFC 6275)
+/// `ICMPv6` option type: Advertisement Interval (RFC 6275)
 pub const ICMP6_OPT_ADV_INTERVAL: u8 = 7;
 
-/// ICMPv6 option type: Route Information (RFC 4191)
+/// `ICMPv6` option type: Route Information (RFC 4191)
 pub const ICMP6_OPT_RT_INFO: u8 = 24;
 
-/// ICMPv6 option type: Recursive DNS Server (RFC 8106)
+/// `ICMPv6` option type: Recursive DNS Server (RFC 8106)
 pub const ICMP6_OPT_RDNSS: u8 = 25;
 
-/// ICMPv6 option type: DNS Search List (RFC 8106)
+/// `ICMPv6` option type: DNS Search List (RFC 8106)
 pub const ICMP6_OPT_DNSSL: u8 = 31;
 
 /// Special lifetime value indicating infinite lifetime
 ///
-/// Per RFC 4861 Section 4.6.2, the value 0xFFFFFFFF in valid_lifetime or
-/// preferred_lifetime fields indicates that the lifetime is infinite (no expiration).
+/// Per RFC 4861 Section 4.6.2, the value 0xFFFFFFFF in `valid_lifetime` or
+/// `preferred_lifetime` fields indicates that the lifetime is infinite (no expiration).
 /// This is used for permanent prefixes that should never be deprecated or invalidated.
-pub const INFINITE_LIFETIME: u32 = 0xFFFFFFFF;
+pub const INFINITE_LIFETIME: u32 = 0xFFFF_FFFF;
 
 /// Router Advertisement flag: Managed address configuration (M-bit)
 ///
-/// When set (0x80), indicates that addresses are available via DHCPv6 stateful
-/// address configuration. Hosts should use DHCPv6 to obtain addresses rather than
+/// When set (0x80), indicates that addresses are available via `DHCPv6` stateful
+/// address configuration. Hosts should use `DHCPv6` to obtain addresses rather than
 /// relying solely on SLAAC.
 ///
-/// # DHCPv6 Integration
+/// # `DHCPv6` Integration
 ///
-/// When M-bit is set, dnsmasq's DHCPv6 server expects clients to perform full
-/// stateful DHCPv6 address acquisition using SOLICIT/ADVERTISE/REQUEST/REPLY
+/// When M-bit is set, dnsmasq's `DHCPv6` server expects clients to perform full
+/// stateful `DHCPv6` address acquisition using SOLICIT/ADVERTISE/REQUEST/REPLY
 /// message exchange per RFC 8415. This flag coordinates Router Advertisement
-/// behavior with the DHCPv6 server to prevent address conflicts between SLAAC
+/// behavior with the `DHCPv6` server to prevent address conflicts between SLAAC
 /// and DHCPv6-assigned addresses.
 ///
 /// # RFC Compliance
 ///
 /// Per RFC 4861 Section 4.2, the M-bit is bit 7 (0x80) of the flags field.
-/// When both M-bit and O-bit are set, clients should use DHCPv6 for both
+/// When both M-bit and O-bit are set, clients should use `DHCPv6` for both
 /// addresses and other configuration.
 pub const RA_FLAG_MANAGED: u8 = 0x80;
 
 /// Router Advertisement flag: Other configuration (O-bit)
 ///
 /// When set (0x40), indicates that other configuration information (DNS servers,
-/// NTP servers, etc.) is available via DHCPv6. Hosts may use SLAAC for addresses
-/// but should query DHCPv6 for additional configuration.
+/// NTP servers, etc.) is available via `DHCPv6`. Hosts may use SLAAC for addresses
+/// but should query `DHCPv6` for additional configuration.
 ///
-/// # DHCPv6 Integration
+/// # `DHCPv6` Integration
 ///
 /// When O-bit is set without M-bit, clients use SLAAC for address configuration
-/// but query DHCPv6 for additional parameters using INFORMATION-REQUEST messages
-/// per RFC 8415 Section 18.2.6. This enables stateless DHCPv6 configuration
+/// but query `DHCPv6` for additional parameters using INFORMATION-REQUEST messages
+/// per RFC 8415 Section 18.2.6. This enables stateless `DHCPv6` configuration
 /// where dnsmasq provides DNS servers, domain search lists, and other options
 /// without maintaining address state.
 ///
 /// # RFC Compliance
 ///
 /// Per RFC 4861 Section 4.2, the O-bit is bit 6 (0x40) of the flags field.
-/// Common configuration: M=0, O=1 for SLAAC + stateless DHCPv6.
+/// Common configuration: M=0, O=1 for SLAAC + stateless `DHCPv6`.
 pub const RA_FLAG_OTHER: u8 = 0x40;
 
 /// Prefix Information flag: On-link (L-bit)
@@ -228,7 +228,7 @@ pub const PREFIX_FLAG_ONLINK: u8 = 0x80;
 ///
 /// When set (0x40), indicates that this prefix can be used for SLAAC. Hosts should
 /// combine the prefix with their interface identifier (EUI-64 or privacy extension)
-/// to generate IPv6 addresses without DHCPv6 server interaction.
+/// to generate IPv6 addresses without `DHCPv6` server interaction.
 ///
 /// # SLAAC Operation
 ///
@@ -239,11 +239,11 @@ pub const PREFIX_FLAG_ONLINK: u8 = 0x80;
 /// 3. Performing Duplicate Address Detection (DAD) on generated address
 /// 4. Assigning address with valid/preferred lifetimes from this option
 ///
-/// # DHCPv6 Coordination
+/// # `DHCPv6` Coordination
 ///
 /// When M-bit is set in Router Advertisement flags, the A-bit should typically be
-/// cleared (0) to prevent SLAAC, forcing clients to use DHCPv6 for addresses. When
-/// M-bit is clear, A-bit enables pure SLAAC or hybrid SLAAC + stateless DHCPv6.
+/// cleared (0) to prevent SLAAC, forcing clients to use `DHCPv6` for addresses. When
+/// M-bit is clear, A-bit enables pure SLAAC or hybrid SLAAC + stateless `DHCPv6`.
 ///
 /// # RFC Compliance
 ///
@@ -251,9 +251,9 @@ pub const PREFIX_FLAG_ONLINK: u8 = 0x80;
 /// Per RFC 4862, A-bit=1 is required for SLAAC operation.
 pub const PREFIX_FLAG_AUTO: u8 = 0x40;
 
-/// ICMPv6 Echo Request/Reply packet structure
+/// `ICMPv6` Echo Request/Reply packet structure
 ///
-/// Used for ICMPv6 ping operations during DHCPv6 Duplicate Address Detection (DAD).
+/// Used for `ICMPv6` ping operations during `DHCPv6` Duplicate Address Detection (DAD).
 /// Equivalent to C `struct ping_packet` from radv-protocol.h.
 ///
 /// # Wire Format
@@ -281,11 +281,11 @@ pub const PREFIX_FLAG_AUTO: u8 = 0x40;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PingPacket {
-    /// ICMPv6 message type (128 for Echo Request, 129 for Echo Reply)
+    /// `ICMPv6` message type (128 for Echo Request, 129 for Echo Reply)
     pub icmp_type: u8,
-    /// ICMPv6 code (always 0 for Echo Request/Reply)
+    /// `ICMPv6` code (always 0 for Echo Request/Reply)
     pub code: u8,
-    /// ICMPv6 checksum covering entire packet plus IPv6 pseudo-header
+    /// `ICMPv6` checksum covering entire packet plus IPv6 pseudo-header
     pub checksum: u16,
     /// Echo identifier for matching request/reply pairs
     pub identifier: u16,
@@ -293,11 +293,11 @@ pub struct PingPacket {
     pub sequence_no: u16,
 }
 
-/// ICMPv6 Router Advertisement packet structure
+/// `ICMPv6` Router Advertisement packet structure
 ///
 /// Wire-format structure for Router Advertisement messages (type 134) per RFC 4861.
 /// Contains router lifetime, reachability parameters, and M/O flags indicating
-/// DHCPv6 configuration availability.
+/// `DHCPv6` configuration availability.
 ///
 /// # Wire Format
 ///
@@ -333,11 +333,11 @@ pub struct PingPacket {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaPacket {
-    /// ICMPv6 message type (134 for Router Advertisement)
+    /// `ICMPv6` message type (134 for Router Advertisement)
     pub icmp_type: u8,
-    /// ICMPv6 code (always 0 for RA)
+    /// `ICMPv6` code (always 0 for RA)
     pub code: u8,
-    /// ICMPv6 checksum
+    /// `ICMPv6` checksum
     pub checksum: u16,
     /// Current hop limit for outgoing packets (0 = unspecified)
     pub hop_limit: u8,
@@ -351,7 +351,7 @@ pub struct RaPacket {
     pub retrans_time: u32,
 }
 
-/// ICMPv6 Neighbor Solicitation/Advertisement packet structure
+/// `ICMPv6` Neighbor Solicitation/Advertisement packet structure
 ///
 /// Used for address resolution (IPv6 equivalent of ARP) and Duplicate Address
 /// Detection (DAD). Type 135 for Neighbor Solicitation, 136 for Advertisement.
@@ -379,11 +379,11 @@ pub struct RaPacket {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NeighPacket {
-    /// ICMPv6 message type (135 for NS, 136 for NA)
+    /// `ICMPv6` message type (135 for NS, 136 for NA)
     pub icmp_type: u8,
-    /// ICMPv6 code (always 0)
+    /// `ICMPv6` code (always 0)
     pub code: u8,
-    /// ICMPv6 checksum
+    /// `ICMPv6` checksum
     pub checksum: u16,
     /// Reserved (NS) or flags (NA: R-bit, S-bit, O-bit)
     pub reserved: u16,
@@ -400,6 +400,7 @@ impl NeighPacket {
     /// # Arguments
     ///
     /// * `target` - IPv6 address being queried
+    #[must_use] 
     pub fn new_solicitation(target: Ipv6Addr) -> Self {
         Self {
             icmp_type: ICMP6_NEIGHBOR_SOLICITATION,
@@ -418,6 +419,7 @@ impl NeighPacket {
     ///
     /// * `target` - IPv6 address being announced
     /// * `flags` - NA flags (R-bit: router, S-bit: solicited, O-bit: override)
+    #[must_use] 
     pub fn new_advertisement(target: Ipv6Addr, flags: u16) -> Self {
         Self {
             icmp_type: ICMP6_NEIGHBOR_ADVERTISEMENT,
@@ -429,7 +431,7 @@ impl NeighPacket {
     }
 }
 
-/// ICMPv6 Prefix Information option for SLAAC
+/// `ICMPv6` Prefix Information option for SLAAC
 ///
 /// Advertises IPv6 prefixes in Router Advertisement messages for on-link determination
 /// and stateless address autoconfiguration per RFC 4862.
@@ -454,12 +456,12 @@ impl NeighPacket {
 /// - Infinite prefix: valid=0xFFFFFFFF, preferred=0xFFFFFFFF
 /// - Deprecating prefix: valid=2592000, preferred=0 (immediate deprecation)
 ///
-/// # DHCPv6 Integration
+/// # `DHCPv6` Integration
 ///
 /// When Router Advertisement M-bit is set, prefix options should typically have
-/// A-bit cleared to disable SLAAC, forcing DHCPv6 address assignment. When M-bit
+/// A-bit cleared to disable SLAAC, forcing `DHCPv6` address assignment. When M-bit
 /// is clear and A-bit is set, hosts use SLAAC with these lifetime values to
-/// manage address lifecycle without DHCPv6 state.
+/// manage address lifecycle without `DHCPv6` state.
 ///
 /// # Wire Format
 ///
@@ -509,7 +511,7 @@ impl NeighPacket {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrefixOption {
-    /// ICMPv6 option type (3 for Prefix Information)
+    /// `ICMPv6` option type (3 for Prefix Information)
     pub option_type: u8,
     /// Option length in units of 8 bytes (4 for this option = 32 bytes)
     pub len: u8,
@@ -519,7 +521,7 @@ pub struct PrefixOption {
     pub flags: u8,
     /// Valid lifetime in seconds (0xFFFFFFFF = infinity)
     pub valid_lifetime: u32,
-    /// Preferred lifetime in seconds (must be <= valid_lifetime)
+    /// Preferred lifetime in seconds (must be <= `valid_lifetime`)
     pub preferred_lifetime: u32,
     /// Reserved field (must be 0)
     pub reserved: u32,
@@ -528,9 +530,10 @@ pub struct PrefixOption {
 }
 
 impl PingPacket {
-    /// Create a new ICMPv6 Echo Request packet
+    /// Create a new `ICMPv6` Echo Request packet
     ///
     /// Checksum must be calculated separately after packet construction.
+    #[must_use] 
     pub fn new_echo_request(identifier: u16, sequence_no: u16) -> Self {
         Self {
             icmp_type: ICMP6_ECHO_REQUEST,
@@ -541,7 +544,8 @@ impl PingPacket {
         }
     }
 
-    /// Create a new ICMPv6 Echo Reply packet
+    /// Create a new `ICMPv6` Echo Reply packet
+    #[must_use] 
     pub fn new_echo_reply(identifier: u16, sequence_no: u16) -> Self {
         Self {
             icmp_type: ICMP6_ECHO_REPLY,
@@ -558,10 +562,11 @@ impl RaPacket {
     ///
     /// Default configuration:
     /// - Hop limit: 64 (typical value per RFC 4861)
-    /// - No M-bit or O-bit (SLAAC only, no DHCPv6)
+    /// - No M-bit or O-bit (SLAAC only, no `DHCPv6`)
     /// - Router lifetime: 1800 seconds (30 minutes)
     /// - Reachable time: unspecified (0)
     /// - Retrans time: unspecified (0)
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             icmp_type: ICMP6_ROUTER_ADVERTISEMENT,
@@ -577,7 +582,8 @@ impl RaPacket {
 
     /// Set the Managed address configuration flag (M-bit)
     ///
-    /// When enabled, instructs clients to use DHCPv6 for stateful address configuration.
+    /// When enabled, instructs clients to use `DHCPv6` for stateful address configuration.
+    #[must_use] 
     pub fn with_managed_flag(mut self) -> Self {
         self.flags |= RA_FLAG_MANAGED;
         self
@@ -585,8 +591,9 @@ impl RaPacket {
 
     /// Set the Other configuration flag (O-bit)
     ///
-    /// When enabled, instructs clients to use DHCPv6 for additional configuration
+    /// When enabled, instructs clients to use `DHCPv6` for additional configuration
     /// (DNS servers, NTP servers, etc.) via INFORMATION-REQUEST.
+    #[must_use] 
     pub fn with_other_flag(mut self) -> Self {
         self.flags |= RA_FLAG_OTHER;
         self
@@ -603,6 +610,7 @@ impl RaPacket {
     ///
     /// Per RFC 4861 Section 4.2, values > 9000 seconds may be used but are
     /// uncommon. Recommended range is 0-9000.
+    #[must_use] 
     pub fn with_lifetime(mut self, lifetime: u16) -> Self {
         self.lifetime = lifetime;
         self
@@ -611,6 +619,7 @@ impl RaPacket {
     /// Set the current hop limit
     ///
     /// Suggests the hop limit value for outgoing IPv6 packets. Use 0 for unspecified.
+    #[must_use] 
     pub fn with_hop_limit(mut self, hop_limit: u8) -> Self {
         self.hop_limit = hop_limit;
         self
@@ -620,6 +629,7 @@ impl RaPacket {
     ///
     /// Time a neighbor is considered reachable after receiving reachability confirmation.
     /// Use 0 for unspecified (host should use its own value).
+    #[must_use] 
     pub fn with_reachable_time(mut self, reachable_time: u32) -> Self {
         self.reachable_time = reachable_time;
         self
@@ -629,17 +639,20 @@ impl RaPacket {
     ///
     /// Time between retransmitted Neighbor Solicitation messages.
     /// Use 0 for unspecified (host should use its own value).
+    #[must_use] 
     pub fn with_retrans_time(mut self, retrans_time: u32) -> Self {
         self.retrans_time = retrans_time;
         self
     }
     
     /// Check if M-bit (Managed address configuration) is set
+    #[must_use] 
     pub fn is_managed(&self) -> bool {
         (self.flags & RA_FLAG_MANAGED) != 0
     }
     
     /// Check if O-bit (Other configuration) is set
+    #[must_use] 
     pub fn is_other_config(&self) -> bool {
         (self.flags & RA_FLAG_OTHER) != 0
     }
@@ -658,12 +671,13 @@ impl PrefixOption {
     ///
     /// * `prefix` - IPv6 prefix to advertise
     /// * `prefix_len` - Prefix length in bits (typically 64)
-    /// * `valid_lifetime` - Valid lifetime in seconds (use INFINITE_LIFETIME for permanent)
-    /// * `preferred_lifetime` - Preferred lifetime in seconds (must be ≤ valid_lifetime)
+    /// * `valid_lifetime` - Valid lifetime in seconds (use `INFINITE_LIFETIME` for permanent)
+    /// * `preferred_lifetime` - Preferred lifetime in seconds (must be ≤ `valid_lifetime`)
     ///
     /// # Panics
     ///
     /// Panics if `preferred_lifetime > valid_lifetime` (violates RFC 4861 Section 4.6.2)
+    #[must_use] 
     pub fn new(
         prefix: Ipv6Addr,
         prefix_len: u8,
@@ -673,9 +687,7 @@ impl PrefixOption {
         // RFC 4861 requires preferred_lifetime <= valid_lifetime
         assert!(
             preferred_lifetime <= valid_lifetime,
-            "preferred_lifetime ({}) must be <= valid_lifetime ({})",
-            preferred_lifetime,
-            valid_lifetime
+            "preferred_lifetime ({preferred_lifetime}) must be <= valid_lifetime ({valid_lifetime})"
         );
         
         Self {
@@ -694,6 +706,7 @@ impl PrefixOption {
     ///
     /// Useful for permanent network prefixes that should never expire.
     /// Sets both valid and preferred lifetimes to 0xFFFFFFFF.
+    #[must_use] 
     pub fn new_infinite(prefix: Ipv6Addr, prefix_len: u8) -> Self {
         Self::new(prefix, prefix_len, INFINITE_LIFETIME, INFINITE_LIFETIME)
     }
@@ -702,6 +715,7 @@ impl PrefixOption {
     ///
     /// When enabled, hosts consider addresses matching this prefix to be on-link
     /// (directly reachable without routing).
+    #[must_use] 
     pub fn with_onlink(mut self, onlink: bool) -> Self {
         if onlink {
             self.flags |= PREFIX_FLAG_ONLINK;
@@ -715,6 +729,7 @@ impl PrefixOption {
     ///
     /// When enabled, hosts use this prefix for SLAAC (Stateless Address
     /// Autoconfiguration) per RFC 4862.
+    #[must_use] 
     pub fn with_auto(mut self, auto: bool) -> Self {
         if auto {
             self.flags |= PREFIX_FLAG_AUTO;
@@ -725,16 +740,19 @@ impl PrefixOption {
     }
     
     /// Check if this prefix is configured for SLAAC (A-bit set)
+    #[must_use] 
     pub fn is_autonomous(&self) -> bool {
         (self.flags & PREFIX_FLAG_AUTO) != 0
     }
     
     /// Check if this prefix is on-link (L-bit set)
+    #[must_use] 
     pub fn is_onlink(&self) -> bool {
         (self.flags & PREFIX_FLAG_ONLINK) != 0
     }
     
     /// Check if this prefix has infinite lifetime
+    #[must_use] 
     pub fn is_infinite(&self) -> bool {
         self.valid_lifetime == INFINITE_LIFETIME
     }

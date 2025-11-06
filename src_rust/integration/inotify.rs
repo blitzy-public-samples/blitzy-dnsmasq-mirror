@@ -68,40 +68,38 @@
 //! event loop, enabling non-blocking event processing without stalling DNS/DHCP
 //! request handling.
 
-use nix::fcntl::OFlag;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify, InotifyEvent, WatchDescriptor};
 use std::collections::HashMap;
-use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+use std::io::{Error as IoError, ErrorKind};
 use std::option::Option;
 use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result;
-use std::sync::Arc;
 use std::{fs, io};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 /// Maximum number of symbolic links to follow before giving up (prevents infinite loops)
 const MAXSYMLINKS: u32 = 20;
 
-/// Size of buffer for reading inotify events (struct inotify_event + NAME_MAX + 1)
-/// NAME_MAX is typically 255, sizeof(struct inotify_event) is 16
-const INOTIFY_BUFFER_SIZE: usize = 4096;
+/// Size of buffer for reading inotify events (struct `inotify_event` + `NAME_MAX` + 1)
+/// `NAME_MAX` is typically 255, sizeof(struct `inotify_event`) is 16
+const _INOTIFY_BUFFER_SIZE: usize = 4096;
 
 /// File event types that trigger configuration reloads
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileEventType {
-    /// File was closed after being written (IN_CLOSE_WRITE)
+    /// File was closed after being written (`IN_CLOSE_WRITE`)
     CloseWrite,
-    /// File was moved into watched directory (IN_MOVED_TO)
+    /// File was moved into watched directory (`IN_MOVED_TO`)
     MovedTo,
-    /// File was created in watched directory (IN_CREATE)
+    /// File was created in watched directory (`IN_CREATE`)
     Create,
-    /// File was deleted from watched directory (IN_DELETE)
+    /// File was deleted from watched directory (`IN_DELETE`)
     Delete,
 }
 
@@ -138,6 +136,7 @@ pub enum InotifyError {
     /// Failed to initialize inotify instance
     #[error("failed to create inotify: {source}")]
     InitFailed {
+        /// Underlying nix error
         #[source]
         source: nix::Error,
     },
@@ -145,7 +144,9 @@ pub enum InotifyError {
     /// Failed to add watch for a specific path
     #[error("failed to create inotify for {path}: {source}")]
     AddWatchFailed {
+        /// Path that failed to be watched
         path: PathBuf,
+        /// Underlying nix error
         #[source]
         source: nix::Error,
     },
@@ -153,7 +154,9 @@ pub enum InotifyError {
     /// Failed to remove an existing watch
     #[error("failed to remove inotify watch for descriptor {wd:?}: {source}")]
     RemoveWatchFailed {
+        /// Watch descriptor that failed to be removed
         wd: WatchDescriptor,
+        /// Underlying nix error
         #[source]
         source: nix::Error,
     },
@@ -161,21 +164,35 @@ pub enum InotifyError {
     /// Failed to read events from inotify file descriptor
     #[error("failed to read inotify events: {source}")]
     ReadEventsFailed {
+        /// Underlying nix error
         #[source]
         source: nix::Error,
     },
 
     /// Symbolic link chain exceeded MAXSYMLINKS depth
     #[error("too many symlinks following {path} (exceeded {max} depth)")]
-    TooManySymlinks { path: PathBuf, max: u32 },
+    TooManySymlinks {
+        /// Path with too many symlinks
+        path: PathBuf,
+        /// Maximum symlink depth allowed
+        max: u32,
+    },
 
     /// Path is invalid (not a file or directory)
     #[error("invalid path {path}: {reason}")]
-    InvalidPath { path: PathBuf, reason: String },
+    InvalidPath {
+        /// Invalid path
+        path: PathBuf,
+        /// Reason path is invalid
+        reason: String,
+    },
 
     /// Directory does not exist at specified path
     #[error("directory {path} for config file is missing, cannot monitor")]
-    DirectoryNotFound { path: PathBuf },
+    DirectoryNotFound {
+        /// Directory path that was not found
+        path: PathBuf,
+    },
 
     /// I/O error occurred during file operations
     #[error("I/O error: {0}")]
@@ -192,7 +209,7 @@ pub type InotifyResult<T> = Result<T, InotifyError>;
 /// - Initialize inotify file descriptor with non-blocking mode
 /// - Add watches for directories containing configuration files
 /// - Track watch descriptors and associated paths
-/// - Process inotify events and generate FileChangeEvent notifications
+/// - Process inotify events and generate `FileChangeEvent` notifications
 /// - Provide async event stream for integration with tokio event loop
 ///
 /// # Watch Strategy
@@ -208,7 +225,7 @@ pub type InotifyResult<T> = Result<T, InotifyError>;
 ///
 /// # Thread Safety
 ///
-/// InotifyWatcher is designed to be wrapped in Arc for safe sharing across async
+/// `InotifyWatcher` is designed to be wrapped in Arc for safe sharing across async
 /// tasks. The internal Inotify handle is not Sync, so we must ensure single-threaded
 /// access or use appropriate synchronization.
 pub struct InotifyWatcher {
@@ -224,13 +241,17 @@ pub struct InotifyWatcher {
 impl InotifyWatcher {
     /// Create a new inotify watcher instance
     ///
-    /// Initializes inotify file descriptor with IN_NONBLOCK (non-blocking reads) and
-    /// IN_CLOEXEC (close-on-exec flag for security).
+    /// Initializes inotify file descriptor with `IN_NONBLOCK` (non-blocking reads) and
+    /// `IN_CLOEXEC` (close-on-exec flag for security).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if inotify initialization fails
     ///
     /// # Returns
     ///
     /// - `Ok(InotifyWatcher)` on successful initialization
-    /// - `Err(InotifyError::InitFailed)` if inotify_init1 fails (e.g., resource limits)
+    /// - `Err(InotifyError::InitFailed)` if `inotify_init1` fails (e.g., resource limits)
     ///
     /// # Example
     ///
@@ -264,25 +285,29 @@ impl InotifyWatcher {
     ///
     /// * `path` - Path to configuration file (may be a symlink)
     ///
+    /// # Errors
+    ///
+    /// Returns `Err` if symlink resolution fails, directory not found, or inotify watch creation fails
+    ///
     /// # Returns
     ///
     /// - `Ok(WatchDescriptor)` on success
     /// - `Err(InotifyError::TooManySymlinks)` if symlink chain exceeds MAXSYMLINKS
     /// - `Err(InotifyError::DirectoryNotFound)` if parent directory doesn't exist
-    /// - `Err(InotifyError::AddWatchFailed)` if inotify_add_watch fails
+    /// - `Err(InotifyError::AddWatchFailed)` if `inotify_add_watch` fails
     ///
     /// # Example
     ///
     /// ```no_run
     /// # use dnsmasq::integration::inotify::InotifyWatcher;
-    /// # use std::path::PathBuf;
+    /// # use std::path::Path;
     /// let mut watcher = InotifyWatcher::new()?;
-    /// let wd = watcher.add_watch(PathBuf::from("/etc/resolv.conf"))?;
+    /// let wd = watcher.add_watch(Path::new("/etc/resolv.conf"))?;
     /// # Ok::<(), dnsmasq::integration::inotify::InotifyError>(())
     /// ```
-    pub fn add_watch(&mut self, path: PathBuf) -> InotifyResult<WatchDescriptor> {
+    pub fn add_watch(&mut self, path: &Path) -> InotifyResult<WatchDescriptor> {
         // Follow symlinks to find actual file location
-        let resolved_path = self.resolve_symlinks(&path)?;
+        let resolved_path = Self::resolve_symlinks(path)?;
 
         trace!(
             "resolved path {} to {}",
@@ -336,7 +361,7 @@ impl InotifyWatcher {
         self.watches.insert(wd, dir_path);
         self.watch_files
             .entry(wd)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(filename);
 
         Ok(wd)
@@ -350,6 +375,10 @@ impl InotifyWatcher {
     /// # Arguments
     ///
     /// * `dir_path` - Path to directory to monitor
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if path is not a directory or inotify watch creation fails
     ///
     /// # Returns
     ///
@@ -404,6 +433,10 @@ impl InotifyWatcher {
     ///
     /// * `wd` - Watch descriptor to remove
     ///
+    /// # Errors
+    ///
+    /// Returns `Err` if inotify watch removal fails
+    ///
     /// # Returns
     ///
     /// - `Ok(())` on success
@@ -424,7 +457,7 @@ impl InotifyWatcher {
     /// Process pending inotify events and generate file change notifications
     ///
     /// Reads all available events from inotify file descriptor (non-blocking) and
-    /// generates FileChangeEvent for each relevant file change. Filters out:
+    /// generates `FileChangeEvent` for each relevant file change. Filters out:
     /// - Emacs backup files (ending with ~)
     /// - Lock files (#file#)
     /// - Dotfiles (starting with .)
@@ -432,7 +465,7 @@ impl InotifyWatcher {
     ///
     /// # Returns
     ///
-    /// Vector of FileChangeEvent notifications for configuration file changes.
+    /// Vector of `FileChangeEvent` notifications for configuration file changes.
     /// Empty vector if no relevant events occurred or EAGAIN/EWOULDBLOCK on read.
     ///
     /// # Errors
@@ -464,9 +497,9 @@ impl InotifyWatcher {
         Ok(events)
     }
 
-    /// Process a single inotify event and generate FileChangeEvent if relevant
+    /// Process a single inotify event and generate `FileChangeEvent` if relevant
     ///
-    /// Internal helper for process_events(). Applies filtering logic to ignore
+    /// Internal helper for `process_events()`. Applies filtering logic to ignore
     /// backup files, temporary files, and non-monitored files.
     fn process_single_event(&self, event: InotifyEvent) -> Option<FileChangeEvent> {
         let wd = event.wd;
@@ -539,7 +572,7 @@ impl InotifyWatcher {
 
     /// Create an async event stream for integration with tokio event loop
     ///
-    /// Returns a channel receiver that yields FileChangeEvent notifications as
+    /// Returns a channel receiver that yields `FileChangeEvent` notifications as
     /// configuration files change. A background task monitors the inotify file
     /// descriptor and sends events through the channel.
     ///
@@ -561,6 +594,7 @@ impl InotifyWatcher {
     /// # Ok(())
     /// # }
     /// ```
+    #[must_use] 
     pub fn event_stream(self) -> Receiver<FileChangeEvent> {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -576,7 +610,7 @@ impl InotifyWatcher {
 
     /// Async event loop that monitors inotify file descriptor and sends events
     ///
-    /// Internal helper for event_stream(). Wraps inotify fd in AsyncFd for async
+    /// Internal helper for `event_stream()`. Wraps inotify fd in `AsyncFd` for async
     /// I/O integration with tokio, processes events when fd becomes readable.
     async fn event_loop(
         mut watcher: InotifyWatcher,
@@ -586,14 +620,14 @@ impl InotifyWatcher {
         // SAFETY: We maintain exclusive ownership of the inotify fd
         let fd = watcher.inotify.as_fd().as_raw_fd();
         let async_fd = AsyncFd::new(fd)
-            .map_err(|e| InotifyError::Io(io::Error::new(ErrorKind::Other, e)))?;
+            .map_err(|e| InotifyError::Io(io::Error::other(e)))?;
 
         loop {
             // Wait for inotify fd to become readable
             let mut guard = async_fd
                 .readable()
                 .await
-                .map_err(|e| InotifyError::Io(io::Error::new(ErrorKind::Other, e)))?;
+                .map_err(|e| InotifyError::Io(io::Error::other(e)))?;
 
             // Process events
             match watcher.process_events() {
@@ -640,11 +674,10 @@ impl InotifyWatcher {
     /// ```ignore
     /// # use dnsmasq::integration::inotify::InotifyWatcher;
     /// # use std::path::PathBuf;
-    /// let watcher = InotifyWatcher::new()?;
-    /// let resolved = watcher.resolve_symlinks(&PathBuf::from("/etc/resolv.conf"))?;
+    /// let resolved = InotifyWatcher::resolve_symlinks(&PathBuf::from("/etc/resolv.conf"))?;
     /// # Ok::<(), dnsmasq::integration::inotify::InotifyError>(())
     /// ```
-    fn resolve_symlinks(&self, path: &Path) -> InotifyResult<PathBuf> {
+    fn resolve_symlinks(path: &Path) -> InotifyResult<PathBuf> {
         let mut current_path = path.to_path_buf();
         let mut links_followed = 0;
 
@@ -700,6 +733,7 @@ impl InotifyWatcher {
     ///
     /// Exposed for advanced use cases that need to integrate inotify fd with
     /// custom event loops or polling mechanisms.
+    #[must_use] 
     pub fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
         self.inotify.as_fd().as_raw_fd()
     }
@@ -708,11 +742,15 @@ impl InotifyWatcher {
 /// High-level convenience function to watch configuration files
 ///
 /// Sets up inotify watches for a list of configuration file paths, returning
-/// an InotifyWatcher instance ready for event processing.
+/// an `InotifyWatcher` instance ready for event processing.
 ///
 /// # Arguments
 ///
 /// * `paths` - Iterator of paths to configuration files (may include symlinks)
+///
+/// # Errors
+///
+/// Returns `Err` if inotify initialization fails or any watch creation fails
 ///
 /// # Returns
 ///
@@ -738,7 +776,7 @@ where
     let mut watcher = InotifyWatcher::new()?;
 
     for path in paths {
-        match watcher.add_watch(path.clone()) {
+        match watcher.add_watch(path) {
             Ok(wd) => {
                 info!("monitoring configuration file: {} (wd: {:?})", path.display(), wd);
             }
@@ -770,7 +808,7 @@ mod tests {
         let mut watcher = InotifyWatcher::new().unwrap();
         let path = PathBuf::from("/nonexistent/path/file.conf");
 
-        let result = watcher.add_watch(path);
+        let result = watcher.add_watch(&path);
         assert!(
             matches!(result, Err(InotifyError::DirectoryNotFound { .. })),
             "should fail for nonexistent directory"
@@ -793,12 +831,11 @@ mod tests {
 
     #[test]
     fn test_resolve_symlinks_absolute() {
-        let watcher = InotifyWatcher::new().unwrap();
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("real_file");
         File::create(&file_path).unwrap();
 
-        let result = watcher.resolve_symlinks(&file_path);
+        let result = InotifyWatcher::resolve_symlinks(&file_path);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), file_path);
     }

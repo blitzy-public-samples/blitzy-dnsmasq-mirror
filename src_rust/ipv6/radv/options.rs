@@ -13,9 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! ICMPv6 Router Advertisement Options
+//! `ICMPv6` Router Advertisement Options
 //!
-//! This module provides safe Rust implementations of ICMPv6 RA options defined
+//! This module provides safe Rust implementations of `ICMPv6` RA options defined
 //! in RFC 4861 (Neighbor Discovery), RFC 8106 (DNS Configuration), and RFC 4191
 //! (Route Information).
 //!
@@ -88,17 +88,22 @@ impl SourceLinkLayerOption {
     /// let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
     /// let option = SourceLinkLayerOption::new(mac);
     /// ```
+    #[must_use] 
     pub fn new(address: Vec<u8>) -> Self {
         // Calculate length in units of 8 bytes, rounding up
-        let len = ((address.len() + 2) + 7) / 8;
+        let len = (address.len() + 2).div_ceil(8);
+        // ICMP6 option length field is u8 by protocol definition (max 255*8 = 2040 bytes)
+        #[allow(clippy::cast_possible_truncation)]
+        let len_u8 = len as u8;
         Self {
             option_type: ICMP6_OPT_SOURCE_MAC,
-            len: len as u8,
+            len: len_u8,
             address,
         }
     }
 
     /// Serialize the option to bytes
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(self.option_type);
@@ -157,6 +162,7 @@ impl MtuOption {
     /// ```rust,ignore
     /// let option = MtuOption::new(1500); // Standard Ethernet MTU
     /// ```
+    #[must_use] 
     pub fn new(mtu: u32) -> Self {
         Self {
             option_type: ICMP6_OPT_MTU,
@@ -167,6 +173,7 @@ impl MtuOption {
     }
 
     /// Serialize the option to bytes
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(self.option_type);
@@ -180,7 +187,7 @@ impl MtuOption {
 /// Recursive DNS Server option (Type 25) per RFC 8106
 ///
 /// Advertises IPv6 addresses of DNS recursive resolvers for stateless
-/// DNS configuration without DHCPv6.
+/// DNS configuration without `DHCPv6`.
 ///
 /// # Wire Format
 ///
@@ -230,8 +237,11 @@ impl RdnssOption {
     /// ];
     /// let option = RdnssOption::new(dns_servers, 3600);
     /// ```
+    #[must_use] 
     pub fn new(addresses: Vec<Ipv6Addr>, lifetime: u32) -> Self {
         // Length = 1 (for type/len/reserved/lifetime) + 2 * number of addresses
+        // ICMP6 option length field is u8 by protocol definition
+        #[allow(clippy::cast_possible_truncation)]
         let len = 1 + (addresses.len() * 2) as u8;
         Self {
             option_type: ICMP6_OPT_RDNSS,
@@ -243,6 +253,7 @@ impl RdnssOption {
     }
 
     /// Serialize the option to bytes
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(self.option_type);
@@ -297,7 +308,7 @@ impl DnsslOption {
     ///
     /// # Arguments
     ///
-    /// * `domains` - List of domain names (e.g., ["example.com", "local.domain"])
+    /// * `domains` - List of domain names (e.g., `["example.com", "local.domain"]`)
     /// * `lifetime` - Lifetime in seconds
     ///
     /// # Examples
@@ -306,6 +317,7 @@ impl DnsslOption {
     /// let domains = vec!["example.com".to_string(), "corp.example.com".to_string()];
     /// let option = DnsslOption::new(domains, 3600);
     /// ```
+    #[must_use] 
     pub fn new(domains: Vec<String>, lifetime: u32) -> Self {
         // Calculate encoded domain name length
         let mut domain_bytes_len = 0;
@@ -314,11 +326,14 @@ impl DnsslOption {
         }
         
         // Length in units of 8 bytes (round up)
-        let len = ((8 + domain_bytes_len) + 7) / 8;
+        let len = (8 + domain_bytes_len).div_ceil(8);
+        // ICMP6 option length field is u8 by protocol definition
+        #[allow(clippy::cast_possible_truncation)]
+        let len_u8 = len as u8;
         
         Self {
             option_type: ICMP6_OPT_DNSSL,
-            len: len as u8,
+            len: len_u8,
             reserved: 0,
             lifetime,
             domains,
@@ -341,7 +356,10 @@ impl DnsslOption {
     fn encode_dns_name(domain: &str) -> Vec<u8> {
         let mut bytes = Vec::new();
         for label in domain.split('.') {
-            bytes.push(label.len() as u8);
+            // DNS label length is limited to 63 bytes by protocol
+            #[allow(clippy::cast_possible_truncation)]
+            let label_len = label.len() as u8;
+            bytes.push(label_len);
             bytes.extend_from_slice(label.as_bytes());
         }
         bytes.push(0); // Terminating 0
@@ -349,6 +367,7 @@ impl DnsslOption {
     }
 
     /// Serialize the option to bytes
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(self.option_type);
@@ -387,7 +406,7 @@ pub struct RouteInfoOption {
     pub pref_reserved: u8,
     /// Route lifetime in seconds
     pub route_lifetime: u32,
-    /// Prefix (significant bits determined by prefix_len)
+    /// Prefix (significant bits determined by `prefix_len`)
     pub prefix: Ipv6Addr,
 }
 
@@ -406,7 +425,8 @@ impl RouteInfoOption {
     /// * `prefix` - Route prefix
     /// * `prefix_len` - Prefix length in bits
     /// * `route_lifetime` - Route lifetime in seconds
-    /// * `preference` - Route preference (PREF_HIGH, PREF_MEDIUM, or PREF_LOW)
+    /// * `preference` - Route preference (`PREF_HIGH`, `PREF_MEDIUM`, or `PREF_LOW`)
+    #[must_use] 
     pub fn new(prefix: Ipv6Addr, prefix_len: u8, route_lifetime: u32, preference: u8) -> Self {
         // Length depends on prefix_len: 1, 2, or 3 (for 0-64, 65-128 bits)
         let len = if prefix_len == 0 {
@@ -428,12 +448,14 @@ impl RouteInfoOption {
     }
 
     /// Serialize the option to bytes
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.option_type);
-        bytes.push(self.len);
-        bytes.push(self.prefix_len);
-        bytes.push(self.pref_reserved);
+        let mut bytes = vec![
+            self.option_type,
+            self.len,
+            self.prefix_len,
+            self.pref_reserved,
+        ];
         bytes.extend_from_slice(&self.route_lifetime.to_be_bytes());
         
         // Include prefix bytes based on prefix_len

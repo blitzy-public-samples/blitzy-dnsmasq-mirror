@@ -20,19 +20,27 @@ impl Default for CacheConfig {
 
 /// DNS cache for storing resolved queries
 pub struct Cache {
-    config: CacheConfig,
+    _config: CacheConfig,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Cache {
     /// Create a new DNS cache instance with default configuration
+    #[must_use] 
     pub fn new() -> Self {
         Self {
-            config: CacheConfig::default(),
+            _config: CacheConfig::default(),
         }
     }
 
     /// Create a new DNS cache instance with custom configuration
+    #[must_use] 
     pub fn with_config(config: CacheConfig) -> Self {
-        Self { config }
+        Self { _config: config }
     }
 }

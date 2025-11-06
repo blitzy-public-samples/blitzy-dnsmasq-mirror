@@ -17,11 +17,16 @@
 
 use std::fmt;
 
-/// OpenWrt ubus manager
+/// `OpenWrt` ubus manager
 pub struct UbusManager {}
 
 impl UbusManager {
     /// Create new ubus manager
+    /// 
+    /// # Errors
+    /// 
+    /// Returns `UbusError` if ubus connection cannot be established.
+    /// Currently placeholder implementation.
     pub fn new() -> Result<Self, UbusError> {
         Ok(Self {})
     }
@@ -49,10 +54,10 @@ pub enum UbusError {
 impl fmt::Display for UbusError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UbusError::ConnectionFailed(msg) => write!(f, "ubus connection failed: {}", msg),
-            UbusError::MethodCallFailed(msg) => write!(f, "ubus method call failed: {}", msg),
-            UbusError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
-            UbusError::Other(msg) => write!(f, "ubus error: {}", msg),
+            UbusError::ConnectionFailed(msg) => write!(f, "ubus connection failed: {msg}"),
+            UbusError::MethodCallFailed(msg) => write!(f, "ubus method call failed: {msg}"),
+            UbusError::InvalidArgument(msg) => write!(f, "Invalid argument: {msg}"),
+            UbusError::Other(msg) => write!(f, "ubus error: {msg}"),
         }
     }
 }
@@ -60,6 +65,11 @@ impl fmt::Display for UbusError {
 impl std::error::Error for UbusError {}
 
 /// Initialize ubus integration
+/// 
+/// # Errors
+/// 
+/// Returns `UbusError` if ubus socket connection cannot be established
+/// or if the dnsmasq service registration fails.
 pub fn init_ubus() -> Result<UbusManager, UbusError> {
     UbusManager::new()
 }

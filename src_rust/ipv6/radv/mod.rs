@@ -15,7 +15,7 @@
 
 //! IPv6 Router Advertisement Subsystem
 //!
-//! This module implements ICMPv6 Router Advertisement per RFC 4861 (Neighbor Discovery
+//! This module implements `ICMPv6` Router Advertisement per RFC 4861 (Neighbor Discovery
 //! for IPv6) and RFC 4862 (IPv6 Stateless Address Autoconfiguration).
 //!
 //! # Purpose
@@ -31,24 +31,24 @@
 //! - **SLAAC Support**: Prefix Information options enabling Stateless Address
 //!   Autoconfiguration with Modified EUI-64 interface identifiers
 //!
-//! - **DHCPv6 Coordination**: M-bit (Managed) and O-bit (Other) flags indicating
-//!   DHCPv6 availability for address assignment and additional configuration
+//! - **`DHCPv6` Coordination**: M-bit (Managed) and O-bit (Other) flags indicating
+//!   `DHCPv6` availability for address assignment and additional configuration
 //!
 //! - **DNS Configuration**: RDNSS (Recursive DNS Server) and DNSSL (DNS Search List)
 //!   options per RFC 8106 for stateless DNS configuration
 //!
 //! # Module Organization
 //!
-//! - **protocol**: ICMPv6 packet structures and constants (wire format definitions)
+//! - **protocol**: `ICMPv6` packet structures and constants (wire format definitions)
 //! - **server**: Router Advertisement server state and periodic transmission logic
-//! - **options**: ICMPv6 RA option types (RDNSS, DNSSL, MTU, Route Info, etc.)
+//! - **options**: `ICMPv6` RA option types (RDNSS, DNSSL, MTU, Route Info, etc.)
 //!
 //! # Integration Points
 //!
-//! - **dhcp::v6**: DHCPv6 coordination via M-bit/O-bit flags
-//! - **network::sockets**: ICMPv6 raw socket handling for multicast transmission
-//! - **dns::cache**: Hostname resolution for RDNSS advertisements
-//! - **ipv6::slaac**: SLAAC address generation and DAD coordination
+//! - **`dhcp::v6`**: `DHCPv6` coordination via M-bit/O-bit flags
+//! - **`network::sockets`**: `ICMPv6` raw socket handling for multicast transmission
+//! - **`dns::cache`**: Hostname resolution for RDNSS advertisements
+//! - **`ipv6::slaac`**: SLAAC address generation and DAD coordination
 //!
 //! # RFC Compliance
 //!

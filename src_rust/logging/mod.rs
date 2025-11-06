@@ -24,6 +24,11 @@ pub use structured::{JsonFormatter, LogFormat, PlainTextFormatter};
 ///
 /// logging::init().expect("Failed to initialize logging");
 /// ```
+///
+/// # Errors
+///
+/// Currently returns `Ok` in all cases. Future implementation may return errors
+/// if logging initialization fails.
 pub fn init() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     Ok(())

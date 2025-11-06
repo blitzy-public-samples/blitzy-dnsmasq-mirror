@@ -37,24 +37,18 @@ impl DomainPattern {
     /// # Arguments
     ///
     /// * `pattern` - Pattern string (e.g., "*.example.com" or "example.com")
+    #[must_use] 
     pub fn new(pattern: &str) -> Self {
         let pattern = pattern.to_lowercase();
         
-        if pattern.starts_with("*.") {
-            // Wildcard pattern
-            let suffix = pattern[2..].to_string();
-            Self {
-                pattern,
-                is_wildcard: true,
-                suffix: Some(suffix),
-            }
-        } else {
-            // Exact match pattern
-            Self {
-                pattern,
-                is_wildcard: false,
-                suffix: None,
-            }
+        // Extract suffix if wildcard pattern
+        let suffix = pattern.strip_prefix("*.").map(ToString::to_string);
+        let is_wildcard = suffix.is_some();
+        
+        Self {
+            pattern,
+            is_wildcard,
+            suffix,
         }
     }
 
@@ -67,6 +61,7 @@ impl DomainPattern {
     /// # Returns
     ///
     /// Returns true if the domain matches the pattern.
+    #[must_use] 
     pub fn matches(&self, domain: &str) -> bool {
         let domain = domain.to_lowercase();
         
@@ -77,7 +72,7 @@ impl DomainPattern {
                 if domain == *suffix {
                     return false;
                 }
-                domain.ends_with(&format!(".{}", suffix))
+                domain.ends_with(&format!(".{suffix}"))
             } else {
                 false
             }
@@ -88,11 +83,13 @@ impl DomainPattern {
     }
 
     /// Get the pattern string
+    #[must_use] 
     pub fn pattern(&self) -> &str {
         &self.pattern
     }
 
     /// Check if this is a wildcard pattern
+    #[must_use] 
     pub fn is_wildcard(&self) -> bool {
         self.is_wildcard
     }
@@ -109,6 +106,7 @@ pub struct DomainPatternMatcher {
 
 impl DomainPatternMatcher {
     /// Create a new empty pattern matcher
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             exact_matches: std::collections::HashSet::new(),
@@ -140,6 +138,7 @@ impl DomainPatternMatcher {
     /// # Returns
     ///
     /// Returns true if the domain matches any pattern.
+    #[must_use] 
     pub fn matches(&self, domain: &str) -> bool {
         let domain_lower = domain.to_lowercase();
         
@@ -159,11 +158,13 @@ impl DomainPatternMatcher {
     }
 
     /// Get the number of patterns
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.exact_matches.len() + self.wildcard_patterns.len()
     }
 
     /// Check if matcher has no patterns
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.exact_matches.is_empty() && self.wildcard_patterns.is_empty()
     }

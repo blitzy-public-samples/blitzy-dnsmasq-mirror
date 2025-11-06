@@ -62,7 +62,7 @@ use tracing::{debug, error};
 /// more characters. The algorithm performs case-insensitive matching by converting both
 /// value and pattern characters to uppercase during comparison. Uses a backtracking
 /// approach optimized for common matching scenarios, as described by Russ Cox in
-/// "Glob Matching Can Be Simple And Fast Too" (https://research.swtch.com/glob).
+/// "Glob Matching Can Be Simple And Fast Too" (<https://research.swtch.com/glob>).
 /// The implementation handles multiple wildcards efficiently without exponential
 /// time complexity by maintaining restart positions for backtracking.
 ///
@@ -128,15 +128,14 @@ fn is_string_matching_glob_pattern(value: &str, pattern: &str) -> bool {
                     next_value_index = 0;
                 }
                 continue;
-            } else {
-                // ordinary character
-                if value_index < num_value_bytes {
-                    let value_character = (value_bytes[value_index] as char).to_ascii_uppercase();
-                    if value_character == pattern_character {
-                        pattern_index += 1;
-                        value_index += 1;
-                        continue;
-                    }
+            }
+            // ordinary character
+            if value_index < num_value_bytes {
+                let value_character = (value_bytes[value_index] as char).to_ascii_uppercase();
+                if value_character == pattern_character {
+                    pattern_index += 1;
+                    value_index += 1;
+                    continue;
                 }
             }
         }
@@ -250,11 +249,10 @@ pub fn is_valid_dns_name(value: &str) -> bool {
         
         // Within label processing
         if let Some(ch) = c {
-            if ch != '.' {
-                if !ch.is_ascii_digit() {
+            if ch != '.'
+                && !ch.is_ascii_digit() {
                     is_label_numeric = false;
                 }
-            }
         }
         
         // End of label processing
@@ -294,7 +292,7 @@ pub fn is_valid_dns_name(value: &str) -> bool {
                         }
                     }
                     
-                    if num_bytes < 1 || num_bytes > 253 {
+                    if !(1..=253).contains(&num_bytes) {
                         debug!("DNS name has invalid length ({}).", num_bytes);
                         return false;
                     }
@@ -474,7 +472,7 @@ pub fn is_valid_dns_name_pattern(value: &str) -> bool {
                         }
                     }
                     
-                    if num_bytes < 1 || num_bytes > 253 {
+                    if !(1..=253).contains(&num_bytes) {
                         debug!("DNS name pattern has invalid length after removing wildcards ({}).", num_bytes);
                         return false;
                     }

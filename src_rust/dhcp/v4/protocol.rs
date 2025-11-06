@@ -13,27 +13,27 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! DHCPv4 Protocol Constants and Wire Format Structures
+//! `DHCPv4` Protocol Constants and Wire Format Structures
 //!
-//! This module provides type-safe Rust implementations of DHCPv4 protocol constants,
+//! This module provides type-safe Rust implementations of `DHCPv4` protocol constants,
 //! message types, option codes, and the wire-format packet structure per RFC 2131
 //! and RFC 2132. All numeric values maintain byte-identical compatibility with the
 //! C implementation for network protocol compliance.
 //!
 //! # Core Components
 //!
-//! - **MessageType**: DHCP message type enum (DISCOVER, OFFER, REQUEST, etc.)
-//! - **OptionCode**: Type-safe DHCP option codes with exhaustive matching
-//! - **DhcpPacket**: Wire-format packet structure with repr(C) for binary compatibility
-//! - **SuboptionCode**: Relay agent information suboption codes
-//! - **PxeSuboption**: PXE boot suboption codes
+//! - **`MessageType`**: DHCP message type enum (DISCOVER, OFFER, REQUEST, etc.)
+//! - **`OptionCode`**: Type-safe DHCP option codes with exhaustive matching
+//! - **`DhcpPacket`**: Wire-format packet structure with repr(C) for binary compatibility
+//! - **`SuboptionCode`**: Relay agent information suboption codes
+//! - **`PxeSuboption`**: PXE boot suboption codes
 //!
 //! # Memory Safety
 //!
 //! Replaces C's preprocessor macros and manual bounds checking with:
 //! - Rust enums providing type safety and exhaustive pattern matching
 //! - Compile-time bounds checking for fixed-size arrays
-//! - Ipv4Addr type eliminating manual byte order conversions
+//! - `Ipv4Addr` type eliminating manual byte order conversions
 //! - No manual pointer arithmetic or buffer overflow vulnerabilities
 //!
 //! # RFC Compliance
@@ -72,7 +72,7 @@ pub const DHCP_SERVER_ALTPORT: u16 = 1067;
 
 /// Alternate DHCP client port (1068).
 ///
-/// Non-standard port paired with DHCP_SERVER_ALTPORT for alternate operation.
+/// Non-standard port paired with `DHCP_SERVER_ALTPORT` for alternate operation.
 pub const DHCP_CLIENT_ALTPORT: u16 = 1068;
 
 /// PXE (Pre-boot Execution Environment) server port (4011).
@@ -89,12 +89,12 @@ pub const PXE_PORT: u16 = 4011;
 ///
 /// First four bytes of options field must contain this value in network byte
 /// order (99, 130, 83, 99 decimal). Distinguishes DHCP packets from legacy BOOTP.
-pub const DHCP_COOKIE: u32 = 0x63825363;
+pub const DHCP_COOKIE: u32 = 0x6382_5363;
 
-/// Minimum DHCPv4 packet size (300 bytes).
+/// Minimum `DHCPv4` packet size (300 bytes).
 ///
 /// Enforced to work around Linux in-kernel DHCP client bug. Packets shorter
-/// than this are padded with OPTION_PAD bytes before transmission.
+/// than this are padded with `OPTION_PAD` bytes before transmission.
 pub const MIN_PACKETSZ: usize = 300;
 
 /// Maximum size for DHCP option value buffer (256 bytes).
@@ -115,7 +115,7 @@ pub const BOOTREPLY: u8 = 2;
 
 /// Maximum client hardware address length (16 bytes).
 ///
-/// Size of chaddr field in DhcpPacket per RFC 2131 Section 2.
+/// Size of chaddr field in `DhcpPacket` per RFC 2131 Section 2.
 pub const DHCP_CHADDR_MAX: usize = 16;
 
 /// Broadband Forum IANA enterprise number (3561).
@@ -129,7 +129,7 @@ pub const BRDBAND_FORUM_IANA: u32 = 3561;
 
 /// DHCP message types per RFC 2131 Section 3.1.
 ///
-/// Values carried in OPTION_MESSAGE_TYPE (53) to identify DHCP message purpose.
+/// Values carried in `OPTION_MESSAGE_TYPE` (53) to identify DHCP message purpose.
 /// Each message type defines specific required and optional options.
 ///
 /// Note: Variant names intentionally match RFC 2131 and C implementation naming.
@@ -156,7 +156,8 @@ pub enum MessageType {
 }
 
 impl MessageType {
-    /// Converts a u8 value to MessageType, returning None for invalid values.
+    /// Converts a u8 value to `MessageType`, returning None for invalid values.
+    #[must_use] 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(MessageType::DHCPDISCOVER),
@@ -171,7 +172,8 @@ impl MessageType {
         }
     }
 
-    /// Converts MessageType to u8 value for wire encoding.
+    /// Converts `MessageType` to u8 value for wire encoding.
+    #[must_use] 
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -262,7 +264,8 @@ pub enum OptionCode {
 }
 
 impl OptionCode {
-    /// Converts a u8 value to OptionCode, returning None for invalid values.
+    /// Converts a u8 value to `OptionCode`, returning None for invalid values.
+    #[must_use] 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             0 => Some(OptionCode::OPTION_PAD),
@@ -303,7 +306,8 @@ impl OptionCode {
         }
     }
 
-    /// Converts OptionCode to u8 value for wire encoding.
+    /// Converts `OptionCode` to u8 value for wire encoding.
+    #[must_use] 
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -315,7 +319,7 @@ impl OptionCode {
 
 /// Relay agent information suboption codes (option 82) per RFC 3027.
 ///
-/// Sub-options appear within OPTION_AGENT_ID data field, added by DHCP
+/// Sub-options appear within `OPTION_AGENT_ID` data field, added by DHCP
 /// relay agents to provide client location information.
 ///
 /// Note: Variant names intentionally match RFC 3027 and C implementation naming.
@@ -336,7 +340,8 @@ pub enum SuboptionCode {
 }
 
 impl SuboptionCode {
-    /// Converts a u8 value to SuboptionCode, returning None for invalid values.
+    /// Converts a u8 value to `SuboptionCode`, returning None for invalid values.
+    #[must_use] 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(SuboptionCode::SUBOPT_CIRCUIT_ID),
@@ -348,7 +353,8 @@ impl SuboptionCode {
         }
     }
 
-    /// Converts SuboptionCode to u8 value for wire encoding.
+    /// Converts `SuboptionCode` to u8 value for wire encoding.
+    #[must_use] 
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -360,7 +366,7 @@ impl SuboptionCode {
 
 /// PXE boot suboption codes (option 43) per PXE specification v2.1.
 ///
-/// Sub-options appear within OPTION_VENDOR_CLASS_OPT data field for PXE boot.
+/// Sub-options appear within `OPTION_VENDOR_CLASS_OPT` data field for PXE boot.
 ///
 /// Note: Variant names intentionally match PXE specification and C implementation naming.
 #[repr(u8)]
@@ -380,7 +386,8 @@ pub enum PxeSuboption {
 }
 
 impl PxeSuboption {
-    /// Converts a u8 value to PxeSuboption, returning None for invalid values.
+    /// Converts a u8 value to `PxeSuboption`, returning None for invalid values.
+    #[must_use] 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             6 => Some(PxeSuboption::SUBOPT_PXE_DISCOVERY),
@@ -392,7 +399,8 @@ impl PxeSuboption {
         }
     }
 
-    /// Converts PxeSuboption to u8 value for wire encoding.
+    /// Converts `PxeSuboption` to u8 value for wire encoding.
+    #[must_use] 
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -402,7 +410,7 @@ impl PxeSuboption {
 // DHCP Packet Wire Format Structure
 // ============================================================================
 
-/// DHCPv4 wire-format packet structure per RFC 2131 Section 2.
+/// `DHCPv4` wire-format packet structure per RFC 2131 Section 2.
 ///
 /// Represents the complete DHCPv4/BOOTP packet format transmitted over UDP,
 /// including 236-byte fixed header and 312-byte variable-length options field,
@@ -478,15 +486,16 @@ pub struct DhcpPacket {
     /// Boot filename (128 bytes, NUL-terminated ASCII).
     pub file: [u8; 128],
     
-    /// Options field (312 bytes): starts with DHCP_COOKIE, ends with OPTION_END.
+    /// Options field (312 bytes): starts with `DHCP_COOKIE`, ends with `OPTION_END`.
     pub options: [u8; 312],
 }
 
 impl DhcpPacket {
-    /// Creates a new zero-initialized DhcpPacket.
+    /// Creates a new zero-initialized `DhcpPacket`.
     ///
     /// All fields are set to zero/unspecified. Caller must populate required
     /// fields before transmission.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             op: 0,
@@ -507,7 +516,7 @@ impl DhcpPacket {
         }
     }
 
-    /// Deserializes a DhcpPacket from raw bytes received from network.
+    /// Deserializes a `DhcpPacket` from raw bytes received from network.
     ///
     /// # Arguments
     ///
@@ -517,6 +526,10 @@ impl DhcpPacket {
     ///
     /// - `Ok(DhcpPacket)` if bytes are valid and sufficient length
     /// - `Err(String)` if bytes are too short or invalid format
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the byte slice is shorter than the minimum DHCP packet size (236 bytes).
     ///
     /// # Safety
     ///
@@ -567,7 +580,7 @@ impl DhcpPacket {
         Ok(packet)
     }
 
-    /// Serializes DhcpPacket to raw bytes for network transmission.
+    /// Serializes `DhcpPacket` to raw bytes for network transmission.
     ///
     /// # Returns
     ///
@@ -576,8 +589,9 @@ impl DhcpPacket {
     ///
     /// # Padding
     ///
-    /// If packet would be smaller than MIN_PACKETSZ (300 bytes), caller should
-    /// pad options field with OPTION_PAD bytes before calling this method.
+    /// If packet would be smaller than `MIN_PACKETSZ` (300 bytes), caller should
+    /// pad options field with `OPTION_PAD` bytes before calling this method.
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(548);
 
@@ -617,7 +631,7 @@ impl DhcpPacket {
 }
 
 impl Default for DhcpPacket {
-    /// Returns a zero-initialized DhcpPacket.
+    /// Returns a zero-initialized `DhcpPacket`.
     ///
     /// Equivalent to `DhcpPacket::new()`.
     fn default() -> Self {
@@ -626,7 +640,7 @@ impl Default for DhcpPacket {
 }
 
 impl std::fmt::Debug for DhcpPacket {
-    /// Formats DhcpPacket for debug output with all field values.
+    /// Formats `DhcpPacket` for debug output with all field values.
     ///
     /// Provides human-readable representation of packet contents for logging
     /// and debugging purposes.

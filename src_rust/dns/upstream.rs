@@ -44,6 +44,7 @@ pub struct UpstreamStats {
 
 impl UpstreamStats {
     /// Create new empty statistics
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             queries_sent: 0,
@@ -57,11 +58,15 @@ impl UpstreamStats {
     }
 
     /// Calculate success rate (0.0 to 1.0)
+    #[must_use] 
     pub fn success_rate(&self) -> f64 {
         if self.queries_sent == 0 {
             0.0
         } else {
-            self.responses_received as f64 / self.queries_sent as f64
+            // Precision loss acceptable for ratio calculation
+            #[allow(clippy::cast_precision_loss)]
+            let rate = self.responses_received as f64 / self.queries_sent as f64;
+            rate
         }
     }
 
@@ -130,6 +135,7 @@ impl UpstreamServer {
     /// * `address` - Server socket address
     /// * `priority` - Server priority (0 = highest)
     /// * `timeout` - Query timeout duration
+    #[must_use] 
     pub fn new(address: SocketAddr, priority: u8, timeout: Duration) -> Self {
         Self {
             address,
@@ -141,6 +147,7 @@ impl UpstreamServer {
     }
 
     /// Check if the server is available for queries
+    #[must_use] 
     pub fn is_available(&self) -> bool {
         matches!(self.status, UpstreamStatus::Healthy | UpstreamStatus::Degraded)
     }
@@ -163,6 +170,7 @@ impl UpstreamServer {
     }
 
     /// Get the last time this server was successfully queried
+    #[must_use] 
     pub fn last_success(&self) -> Option<Instant> {
         self.stats.last_success
     }
@@ -181,6 +189,7 @@ pub struct UpstreamPool {
 
 impl UpstreamPool {
     /// Create a new empty upstream pool
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),
@@ -224,6 +233,7 @@ impl UpstreamPool {
     }
 
     /// Get all servers
+    #[must_use] 
     pub fn servers(&self) -> &[UpstreamServer] {
         &self.servers
     }
@@ -246,16 +256,19 @@ impl UpstreamPool {
     }
 
     /// Get number of servers in pool
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.servers.len()
     }
 
     /// Check if pool is empty
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.servers.is_empty()
     }
 
     /// Get count of healthy servers
+    #[must_use] 
     pub fn healthy_count(&self) -> usize {
         self.servers
             .iter()
