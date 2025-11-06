@@ -56,13 +56,13 @@ use std::time::{Duration, SystemTime};
 pub enum SlaacState {
     /// Address generated, awaiting DAD
     Tentative,
-    
+
     /// DAD in progress (ping sent)
     Validating,
-    
+
     /// DAD succeeded, address confirmed
     Confirmed,
-    
+
     /// DAD failed, duplicate detected
     Duplicate,
 }
@@ -72,19 +72,19 @@ pub enum SlaacState {
 pub struct SlaacAddress {
     /// IPv6 address
     pub address: Ipv6Addr,
-    
+
     /// Hardware address used to generate this address
     pub hwaddr: Vec<u8>,
-    
+
     /// State of address validation
     pub state: SlaacState,
-    
+
     /// Last ping time for DAD
     pub last_ping: Option<SystemTime>,
-    
+
     /// Ping retry count
     pub ping_count: u32,
-    
+
     /// Ping backoff (exponential)
     pub ping_backoff: Duration,
 }
@@ -130,7 +130,7 @@ impl SlaacAddress {
     pub fn mark_ping_sent(&mut self) {
         self.last_ping = Some(SystemTime::now());
         self.ping_count += 1;
-        
+
         // Exponential backoff: 1s, 2s, 4s, 8s, max 60s
         self.ping_backoff = Duration::from_secs((1u64 << self.ping_count).min(60));
         self.state = SlaacState::Validating;
@@ -151,7 +151,7 @@ impl SlaacAddress {
 pub struct SlaacManager {
     /// Tracked SLAAC addresses
     addresses: Vec<SlaacAddress>,
-    
+
     /// ICMPv6 Echo Request identifier
     ping_id: u16,
 }
@@ -170,7 +170,7 @@ impl SlaacManager {
             .unwrap_or(Duration::from_secs(0))
             .subsec_nanos();
         let ping_id = (nanos & 0xFFFF) as u16;
-        
+
         Self {
             addresses: Vec::new(),
             ping_id,
@@ -355,16 +355,16 @@ pub fn mac_to_eui64(mac: &[u8]) -> Option<Vec<u8>> {
     }
 
     let mut eui64 = Vec::with_capacity(8);
-    
+
     // First 3 bytes with flipped U/L bit
     eui64.push(mac[0] ^ 0x02); // Flip bit 7
     eui64.push(mac[1]);
     eui64.push(mac[2]);
-    
+
     // Insert FF:FE
     eui64.push(0xFF);
     eui64.push(0xFE);
-    
+
     // Last 3 bytes
     eui64.push(mac[3]);
     eui64.push(mac[4]);
@@ -381,7 +381,7 @@ mod tests {
     fn test_mac_to_eui64() {
         let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
         let eui64 = mac_to_eui64(&mac).unwrap();
-        
+
         assert_eq!(eui64.len(), 8);
         assert_eq!(eui64[0], 0x02); // U/L bit flipped
         assert_eq!(eui64[1], 0x11);
@@ -410,11 +410,11 @@ mod tests {
 
         let addr = addr.unwrap();
         assert_eq!(addr.state, SlaacState::Tentative);
-        
+
         // Verify prefix is preserved
         let octets = addr.address.octets();
         assert_eq!(octets[0..8], [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0]);
-        
+
         // Verify EUI-64 IID
         assert_eq!(octets[8], 0x02); // Flipped U/L bit
         assert_eq!(octets[11], 0xFF);
@@ -427,7 +427,7 @@ mod tests {
             Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
         );
-        
+
         assert!(addr.is_ping_due()); // No ping sent yet
     }
 
@@ -437,12 +437,12 @@ mod tests {
             Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
         );
-        
+
         assert_eq!(addr.state, SlaacState::Tentative);
-        
+
         addr.mark_ping_sent();
         assert_eq!(addr.state, SlaacState::Validating);
-        
+
         addr.confirm();
         assert_eq!(addr.state, SlaacState::Confirmed);
     }
@@ -455,10 +455,10 @@ mod tests {
 
         let addr = manager.generate_address(prefix, 64, &hwaddr).unwrap();
         let address = addr.address;
-        
+
         // Transition to validating state
         manager.addresses[0].mark_ping_sent();
-        
+
         // Simulate receiving echo reply (duplicate detected)
         let is_our_probe = manager.handle_ping_reply(address, manager.ping_id);
         assert!(is_our_probe);
@@ -497,14 +497,9 @@ fn get_slaac_manager() -> &'static Arc<Mutex<SlaacManager>> {
 /// # Returns
 /// * `true` if address was successfully added
 /// * `false` if address generation or addition failed
-pub fn slaac_add_addrs(
-    _iface: &str,
-    prefix: Ipv6Addr,
-    prefix_len: u8,
-    mac_addr: &[u8],
-) -> bool {
+pub fn slaac_add_addrs(_iface: &str, prefix: Ipv6Addr, prefix_len: u8, mac_addr: &[u8]) -> bool {
     let mut manager = get_slaac_manager().lock().unwrap();
-    
+
     // TODO: Implement full SLAAC address addition logic
     // This should:
     // 1. Generate EUI-64 based IID from MAC address
@@ -512,8 +507,10 @@ pub fn slaac_add_addrs(
     // 3. Perform Duplicate Address Detection (DAD) via ICMPv6 NS
     // 4. Add address to interface if DAD succeeds
     // 5. Track address lifecycle (tentative -> validating -> confirmed)
-    
-    manager.generate_address(prefix, prefix_len, mac_addr).is_some()
+
+    manager
+        .generate_address(prefix, prefix_len, mac_addr)
+        .is_some()
 }
 
 /// Handle received ICMPv6 Echo Reply for Duplicate Address Detection
@@ -530,7 +527,7 @@ pub fn slaac_add_addrs(
 /// * `false` if probe ID doesn't match (not our probe)
 pub fn slaac_ping_reply(addr: Ipv6Addr, ping_id: u16) -> bool {
     let mut manager = get_slaac_manager().lock().unwrap();
-    
+
     // TODO: Implement full ping reply handling
     // This should:
     // 1. Find the tentative address matching `addr`
@@ -538,7 +535,7 @@ pub fn slaac_ping_reply(addr: Ipv6Addr, ping_id: u16) -> bool {
     // 3. If match, mark address as duplicate (DAD failed)
     // 4. Trigger address regeneration or report conflict
     // 5. Update address state appropriately
-    
+
     manager.handle_ping_reply(addr, ping_id)
 }
 
@@ -554,7 +551,7 @@ pub fn slaac_ping_reply(addr: Ipv6Addr, ping_id: u16) -> bool {
 /// - Refreshing address lifetimes
 pub fn periodic_slaac() {
     let mut manager = get_slaac_manager().lock().unwrap();
-    
+
     // TODO: Implement periodic SLAAC maintenance
     // This should:
     // 1. Iterate through all tracked addresses
@@ -563,7 +560,7 @@ pub fn periodic_slaac() {
     // 4. Remove expired or failed addresses
     // 5. Update address preferred/valid lifetimes
     // 6. Handle address deprecation and regeneration
-    
+
     let _awaiting_dad = manager.periodic_dad();
     // TODO: Log or handle the number of addresses awaiting DAD
 }

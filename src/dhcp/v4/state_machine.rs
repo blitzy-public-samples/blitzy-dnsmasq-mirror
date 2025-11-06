@@ -19,22 +19,22 @@ use super::protocol::Dhcpv4MessageType;
 pub enum Dhcpv4State {
     /// Initial state - no configuration
     Init,
-    
+
     /// Client has sent DISCOVER, waiting for OFFER
     Selecting,
-    
+
     /// Client has received OFFER, sent REQUEST, waiting for ACK
     Requesting,
-    
+
     /// Client has valid lease (received ACK)
     Bound,
-    
+
     /// T1 timer expired, trying to renew with same server
     Renewing,
-    
+
     /// T2 timer expired, trying to rebind with any server
     Rebinding,
-    
+
     /// Lease released by client
     Released,
 }
@@ -139,9 +139,7 @@ impl Dhcpv4StateMachine {
             }
 
             // INFORM message (client has IP, wants configuration)
-            (_, Inform) => {
-                Some(Ack)
-            }
+            (_, Inform) => Some(Ack),
 
             // Invalid transitions
             _ => None,
@@ -178,21 +176,21 @@ mod tests {
     #[test]
     fn test_discover_offer_sequence() {
         let mut sm = Dhcpv4StateMachine::new();
-        
+
         // Client sends DISCOVER
         let response = sm.process_message(Dhcpv4MessageType::Discover);
         assert_eq!(response, Some(Dhcpv4MessageType::Offer));
         assert_eq!(sm.state(), Dhcpv4State::Selecting);
-        
+
         // Server sends OFFER
         let response = sm.process_message(Dhcpv4MessageType::Offer);
         assert_eq!(response, Some(Dhcpv4MessageType::Request));
-        
+
         // Client sends REQUEST
         let response = sm.process_message(Dhcpv4MessageType::Request);
         assert_eq!(response, Some(Dhcpv4MessageType::Ack));
         assert_eq!(sm.state(), Dhcpv4State::Requesting);
-        
+
         // Server sends ACK
         let response = sm.process_message(Dhcpv4MessageType::Ack);
         assert_eq!(response, None);
@@ -203,10 +201,10 @@ mod tests {
     #[test]
     fn test_nak_returns_to_init() {
         let mut sm = Dhcpv4StateMachine::new();
-        
+
         sm.process_message(Dhcpv4MessageType::Discover);
         sm.process_message(Dhcpv4MessageType::Request);
-        
+
         // NAK should return to INIT
         sm.process_message(Dhcpv4MessageType::Nak);
         assert_eq!(sm.state(), Dhcpv4State::Init);
@@ -215,13 +213,13 @@ mod tests {
     #[test]
     fn test_release() {
         let mut sm = Dhcpv4StateMachine::new();
-        
+
         // Get to BOUND state
         sm.process_message(Dhcpv4MessageType::Discover);
         sm.process_message(Dhcpv4MessageType::Request);
         sm.process_message(Dhcpv4MessageType::Ack);
         assert_eq!(sm.state(), Dhcpv4State::Bound);
-        
+
         // Release lease
         sm.process_message(Dhcpv4MessageType::Release);
         assert_eq!(sm.state(), Dhcpv4State::Released);
@@ -231,7 +229,7 @@ mod tests {
     fn test_reset() {
         let mut sm = Dhcpv4StateMachine::new();
         sm.process_message(Dhcpv4MessageType::Discover);
-        
+
         sm.reset();
         assert_eq!(sm.state(), Dhcpv4State::Init);
     }

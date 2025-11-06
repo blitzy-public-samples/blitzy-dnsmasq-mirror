@@ -293,50 +293,48 @@ pub mod slaac;
 // These exports provide the primary public API for Router Advertisement functionality.
 #[cfg(feature = "ipv6")]
 pub use radv::{
-    // Initialize ICMPv6 socket with packet filters for Router Solicitation and Echo Reply
-    ra_init,
-    
-    // Construct and transmit Router Advertisement packets with prefix options
-    send_ra,
-    
-    // Process incoming Router Solicitation messages and respond with solicited RAs
-    icmp6_packet,
-    
-    // Schedule and execute periodic unsolicited Router Advertisements per RFC 4861 timing
-    periodic_ra,
-    
-    // ICMPv6 Router Advertisement packet structure (RFC 4861 Section 4.2)
-    RaPacket,
-    
-    // Prefix Information option structure (RFC 4861 Section 4.6.2)
-    PrefixOpt,
-    
     // IPv6 multicast address "FF02::1" for all-nodes group (link-local scope)
     // All IPv6 nodes automatically join this group for receiving Router Advertisements
     ALL_NODES,
-    
+
     // IPv6 multicast address "FF02::2" for all-routers group (link-local scope)
     // Hosts send Router Solicitation messages to this address
     ALL_ROUTERS,
+    // Prefix Information option structure (RFC 4861 Section 4.6.2)
+    PrefixOpt,
+
+    // ICMPv6 Router Advertisement packet structure (RFC 4861 Section 4.2)
+    RaPacket,
+
+    // Process incoming Router Solicitation messages and respond with solicited RAs
+    icmp6_packet,
+
+    // Schedule and execute periodic unsolicited Router Advertisements per RFC 4861 timing
+    periodic_ra,
+
+    // Initialize ICMPv6 socket with packet filters for Router Solicitation and Echo Reply
+    ra_init,
+
+    // Construct and transmit Router Advertisement packets with prefix options
+    send_ra,
 };
 
 // Re-export key types and functions from the slaac module for convenient access.
 // These exports provide the primary public API for SLAAC functionality.
 #[cfg(feature = "ipv6")]
 pub use slaac::{
-    // Generate SLAAC IPv6 addresses from RA prefixes and hardware addresses
-    // Converts MAC-48 addresses to Modified EUI-64 interface identifiers
-    slaac_add_addrs,
-    
-    // Perform periodic Duplicate Address Detection via ICMPv6 Echo Request
-    // Returns time in seconds until next DAD check is needed
-    periodic_slaac,
-    
-    // Process ICMPv6 Echo Reply to detect address conflicts and confirm addresses
-    // Automatically registers confirmed SLAAC addresses in the DNS cache
-    slaac_ping_reply,
-    
     // SLAAC address tracking structure with ping timing and exponential backoff
     // Stores address state for Duplicate Address Detection and DNS registration
     SlaacAddress,
+    // Perform periodic Duplicate Address Detection via ICMPv6 Echo Request
+    // Returns time in seconds until next DAD check is needed
+    periodic_slaac,
+
+    // Generate SLAAC IPv6 addresses from RA prefixes and hardware addresses
+    // Converts MAC-48 addresses to Modified EUI-64 interface identifiers
+    slaac_add_addrs,
+
+    // Process ICMPv6 Echo Reply to detect address conflicts and confirm addresses
+    // Automatically registers confirmed SLAAC addresses in the DNS cache
+    slaac_ping_reply,
 };

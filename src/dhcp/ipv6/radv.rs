@@ -74,19 +74,19 @@ pub const ND_OPT_DNSSL: u8 = 31;
 pub struct PrefixInfo {
     /// Prefix address
     pub prefix: Ipv6Addr,
-    
+
     /// Prefix length
     pub prefix_len: u8,
-    
+
     /// On-link flag
     pub on_link: bool,
-    
+
     /// Autonomous address configuration flag
     pub autonomous: bool,
-    
+
     /// Valid lifetime (seconds)
     pub valid_lifetime: u32,
-    
+
     /// Preferred lifetime (seconds)
     pub preferred_lifetime: u32,
 }
@@ -96,28 +96,28 @@ pub struct PrefixInfo {
 pub struct RouterAdvertisement {
     /// Current hop limit
     pub cur_hop_limit: u8,
-    
+
     /// Managed address configuration flag
     pub managed: bool,
-    
+
     /// Other configuration flag
     pub other: bool,
-    
+
     /// Router lifetime (seconds)
     pub router_lifetime: u16,
-    
+
     /// Reachable time (milliseconds)
     pub reachable_time: u32,
-    
+
     /// Retransmit timer (milliseconds)
     pub retrans_timer: u32,
-    
+
     /// Prefix information options
     pub prefixes: Vec<PrefixInfo>,
-    
+
     /// DNS servers (RDNSS option)
     pub dns_servers: Vec<Ipv6Addr>,
-    
+
     /// DNS search list (DNSSL option)
     pub search_list: Vec<String>,
 }
@@ -166,7 +166,7 @@ impl RouterAdvertisement {
 
         // Router Advertisement fields
         buffer.push(self.cur_hop_limit);
-        
+
         let mut flags = 0u8;
         if self.managed {
             flags |= 0x80; // M flag
@@ -175,7 +175,7 @@ impl RouterAdvertisement {
             flags |= 0x40; // O flag
         }
         buffer.push(flags);
-        
+
         buffer.extend_from_slice(&self.router_lifetime.to_be_bytes());
         buffer.extend_from_slice(&self.reachable_time.to_be_bytes());
         buffer.extend_from_slice(&self.retrans_timer.to_be_bytes());
@@ -204,7 +204,7 @@ impl RouterAdvertisement {
         buffer.push(4); // Length (in 8-byte units) = 32 bytes / 8 = 4
 
         buffer.push(prefix.prefix_len);
-        
+
         let mut flags = 0u8;
         if prefix.on_link {
             flags |= 0x80; // L flag
@@ -225,7 +225,7 @@ impl RouterAdvertisement {
     /// Encode RDNSS option (RFC 6106)
     fn encode_rdnss_option(&self, buffer: &mut Vec<u8>) {
         buffer.push(ND_OPT_RDNSS); // Type
-        
+
         // Length = 1 + 2 * num_servers (in 8-byte units)
         let length = 1 + (self.dns_servers.len() * 2) as u8;
         buffer.push(length);
@@ -242,18 +242,18 @@ impl RouterAdvertisement {
     /// Encode DNSSL option (RFC 6106)
     fn encode_dnssl_option(&self, buffer: &mut Vec<u8>) {
         buffer.push(ND_OPT_DNSSL); // Type
-        
+
         // Calculate total length
         let mut domain_bytes = Vec::new();
         for domain in &self.search_list {
             self.encode_domain_name(&mut domain_bytes, domain);
         }
-        
+
         // Pad to 8-byte boundary
         while domain_bytes.len() % 8 != 0 {
             domain_bytes.push(0);
         }
-        
+
         let length = 1 + (domain_bytes.len() / 8) as u8;
         buffer.push(length);
 
@@ -283,13 +283,13 @@ impl Default for RouterAdvertisement {
 pub struct RouterAdvertiser {
     /// Interface name
     interface: String,
-    
+
     /// Link-local address
     link_local: Ipv6Addr,
-    
+
     /// Last advertisement time
     last_advertisement: SystemTime,
-    
+
     /// Advertisement interval (seconds)
     adv_interval: Duration,
 }
@@ -338,10 +338,10 @@ impl RouterAdvertiser {
     /// Ok(()) if sent successfully, error otherwise
     pub fn send_advertisement(&mut self, ra: &RouterAdvertisement) -> std::io::Result<()> {
         let _packet = ra.encode();
-        
+
         // TODO: Send via ICMPv6 socket to ff02::1 (all-nodes multicast)
         // This requires platform-specific socket code
-        
+
         self.last_advertisement = SystemTime::now();
         Ok(())
     }
@@ -517,7 +517,7 @@ pub fn periodic_ra() -> std::io::Result<Option<Duration>> {
     // TODO: Check if advertisement is due on each interface
     // TODO: Send RA if due
     // TODO: Calculate and return time until next RA
-    
+
     // For now, return a default interval (200 seconds per RFC 4861)
     Ok(Some(Duration::from_secs(200)))
 }
@@ -546,7 +546,7 @@ mod tests {
             valid_lifetime: 2592000,
             preferred_lifetime: 604800,
         };
-        
+
         ra.add_prefix(prefix);
         assert_eq!(ra.prefixes.len(), 1);
     }
@@ -555,13 +555,13 @@ mod tests {
     fn test_encode_ra() {
         let ra = RouterAdvertisement::new();
         let encoded = ra.encode();
-        
+
         // Check ICMPv6 type
         assert_eq!(encoded[0], ICMPV6_ROUTER_ADVERTISEMENT);
-        
+
         // Check code
         assert_eq!(encoded[1], 0);
-        
+
         // Check hop limit
         assert_eq!(encoded[4], 64);
     }
@@ -572,7 +572,7 @@ mod tests {
             "eth0".to_string(),
             Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1),
         );
-        
+
         assert_eq!(advertiser.interface(), "eth0");
         assert!(advertiser.is_advertisement_due());
     }

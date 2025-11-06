@@ -96,10 +96,10 @@ use std::io::Write;
 pub enum PacketBuildError {
     /// Buffer size exceeded maximum limit
     BufferOverflow,
-    
+
     /// Attempted to end option without starting one
     OptionNotStarted,
-    
+
     /// Invalid option nesting structure
     InvalidOptionNesting,
 }
@@ -144,13 +144,13 @@ pub struct OutPacketBuilder {
     /// Replaces C's `daemon->outpacket.iov_base` pointer with safe owned memory.
     /// Grows automatically when capacity exceeded, eliminating manual `expand_buf()` calls.
     buffer: Vec<u8>,
-    
+
     /// Current write position in buffer
     ///
     /// Replaces C's static `outpacket_counter` variable. Tracks next byte to write.
     /// Always satisfies invariant: `position <= buffer.len()`
     position: usize,
-    
+
     /// Maximum buffer size limit (safety bounds)
     ///
     /// Prevents unbounded memory growth. Set to 64KB (typical DHCPv6 max packet size).
@@ -160,7 +160,7 @@ pub struct OutPacketBuilder {
 impl OutPacketBuilder {
     /// Maximum packet size (64KB - typical DHCPv6 limit)
     const MAX_PACKET_SIZE: usize = 65535;
-    
+
     /// Default initial capacity (typical Ethernet MTU)
     const DEFAULT_CAPACITY: usize = 1500;
 
@@ -256,13 +256,13 @@ impl OutPacketBuilder {
     /// ```
     pub fn new_option(&mut self, option_code: u16) -> Result<usize, PacketBuildError> {
         let start_pos = self.position;
-        
+
         // Write option code (16-bit, network byte order)
         self.put_u16(option_code)?;
-        
+
         // Reserve space for length field (16-bit), filled by end_option()
         self.put_u16(0)?;
-        
+
         Ok(start_pos)
     }
 
@@ -298,23 +298,23 @@ impl OutPacketBuilder {
         if container + 4 > self.position {
             return Err(PacketBuildError::InvalidOptionNesting);
         }
-        
+
         if container + 4 > self.buffer.len() {
             return Err(PacketBuildError::OptionNotStarted);
         }
-        
+
         // Calculate data length (excludes 4-byte header)
         let data_len = self.position - container - 4;
-        
+
         if data_len > u16::MAX as usize {
             return Err(PacketBuildError::BufferOverflow);
         }
-        
+
         // Update length field at container + 2 (after option code)
         let len_pos = container + 2;
         self.buffer[len_pos] = (data_len >> 8) as u8;
         self.buffer[len_pos + 1] = (data_len & 0xff) as u8;
-        
+
         Ok(())
     }
 
@@ -407,7 +407,8 @@ impl OutPacketBuilder {
     pub fn put_u16(&mut self, value: u16) -> Result<(), PacketBuildError> {
         self.ensure_capacity(2)?;
         // Using write_u16 method from WriteBytesExt trait for network byte order
-        self.buffer.write_u16::<BigEndian>(value)
+        self.buffer
+            .write_u16::<BigEndian>(value)
             .map_err(|_| PacketBuildError::BufferOverflow)?;
         self.position += 2;
         Ok(())
@@ -440,7 +441,8 @@ impl OutPacketBuilder {
     pub fn put_u32(&mut self, value: u32) -> Result<(), PacketBuildError> {
         self.ensure_capacity(4)?;
         // Using write_u32 method from WriteBytesExt trait for network byte order
-        self.buffer.write_u32::<BigEndian>(value)
+        self.buffer
+            .write_u32::<BigEndian>(value)
             .map_err(|_| PacketBuildError::BufferOverflow)?;
         self.position += 4;
         Ok(())
@@ -550,7 +552,7 @@ impl OutPacketBuilder {
         if pos > self.buffer.len() {
             return Err(PacketBuildError::InvalidOptionNesting);
         }
-        
+
         self.position = pos;
         self.buffer.truncate(pos);
         Ok(())
@@ -597,11 +599,11 @@ impl OutPacketBuilder {
     /// - `Err(BufferOverflow)` - Would exceed max_size limit
     fn ensure_capacity(&mut self, additional: usize) -> Result<(), PacketBuildError> {
         let required = self.buffer.len() + additional;
-        
+
         if required > self.max_size {
             return Err(PacketBuildError::BufferOverflow);
         }
-        
+
         self.buffer.reserve(additional);
         Ok(())
     }
@@ -681,30 +683,32 @@ mod tests {
     #[test]
     fn test_nested_options() {
         let mut builder = OutPacketBuilder::new();
-        
+
         // Outer IA_NA option (OPTION6_IA_NA = 3)
         let ia_na_pos = builder.new_option(3).unwrap();
         builder.put_u32(0x11111111).unwrap(); // IAID
         builder.put_u32(3600).unwrap(); // T1
         builder.put_u32(7200).unwrap(); // T2
-        
+
         // Inner IAADDR option (OPTION6_IAADDR = 5)
         let iaaddr_pos = builder.new_option(5).unwrap();
-        builder.put_data(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]).unwrap(); // IPv6
+        builder
+            .put_data(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
+            .unwrap(); // IPv6
         builder.put_u32(7200).unwrap(); // Preferred lifetime
         builder.put_u32(14400).unwrap(); // Valid lifetime
         builder.end_option(iaaddr_pos).unwrap();
-        
+
         builder.end_option(ia_na_pos).unwrap();
 
         let data = builder.as_slice();
-        
+
         // Verify outer option header
         assert_eq!(&data[0..2], &[0x00, 0x03]); // IA_NA option code
-        
+
         // IA_NA length = 12 (IAID+T1+T2) + 4 (IAADDR header) + 24 (IAADDR data) = 40
         assert_eq!(&data[2..4], &[0x00, 40]);
-        
+
         // Verify IAADDR header inside
         assert_eq!(&data[16..18], &[0x00, 0x05]); // IAADDR option code
         assert_eq!(&data[18..20], &[0x00, 24]); // IAADDR length = 16 (IPv6) + 8 (lifetimes)
@@ -715,7 +719,7 @@ mod tests {
         let mut builder = OutPacketBuilder::new();
         builder.put_u32(0x12345678).unwrap();
         assert_eq!(builder.len(), 4);
-        
+
         builder.clear();
         assert_eq!(builder.len(), 0);
         assert!(builder.is_empty());
@@ -725,13 +729,13 @@ mod tests {
     fn test_position_save_restore() {
         let mut builder = OutPacketBuilder::new();
         builder.put_u16(0x1234).unwrap();
-        
+
         let pos = builder.save_position();
         assert_eq!(pos, 2);
-        
+
         builder.put_u16(0x5678).unwrap();
         assert_eq!(builder.len(), 4);
-        
+
         builder.restore_position(pos).unwrap();
         assert_eq!(builder.len(), 2);
         assert_eq!(builder.as_slice(), &[0x12, 0x34]);
@@ -741,7 +745,7 @@ mod tests {
     fn test_error_invalid_option_nesting() {
         let mut builder = OutPacketBuilder::new();
         builder.put_u16(0x1234).unwrap();
-        
+
         // Try to end option that was never started (invalid position)
         let result = builder.end_option(10);
         assert!(result.is_err());
@@ -752,7 +756,7 @@ mod tests {
     fn test_error_restore_invalid_position() {
         let mut builder = OutPacketBuilder::new();
         builder.put_u16(0x1234).unwrap();
-        
+
         // Try to restore position beyond buffer
         let result = builder.restore_position(100);
         assert!(result.is_err());
@@ -763,7 +767,7 @@ mod tests {
     fn test_build_consumes_builder() {
         let mut builder = OutPacketBuilder::new();
         builder.put_u32(0x12345678).unwrap();
-        
+
         let packet = builder.build();
         assert_eq!(packet, vec![0x12, 0x34, 0x56, 0x78]);
         // builder is now consumed and cannot be used
@@ -772,13 +776,13 @@ mod tests {
     #[test]
     fn test_status_code_option_with_message() {
         let mut builder = OutPacketBuilder::new();
-        
+
         // Build STATUS_CODE option (OPTION6_STATUS_CODE = 13)
         let status_pos = builder.new_option(13).unwrap();
         builder.put_u16(0).unwrap(); // DHCP6SUCCESS = 0
         builder.put_string("Success").unwrap();
         builder.end_option(status_pos).unwrap();
-        
+
         let data = builder.as_slice();
         assert_eq!(&data[0..2], &[0x00, 0x0d]); // Option code 13
         assert_eq!(&data[2..4], &[0x00, 0x09]); // Length = 2 (status) + 7 ("Success")
@@ -789,11 +793,11 @@ mod tests {
     #[test]
     fn test_empty_option() {
         let mut builder = OutPacketBuilder::new();
-        
+
         // Option with no data
         let pos = builder.new_option(100).unwrap();
         builder.end_option(pos).unwrap();
-        
+
         let data = builder.as_slice();
         assert_eq!(&data[0..2], &[0x00, 0x64]); // Option code 100
         assert_eq!(&data[2..4], &[0x00, 0x00]); // Length = 0

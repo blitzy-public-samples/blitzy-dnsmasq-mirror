@@ -38,10 +38,10 @@ pub enum Dhcpv6MessageType {
 pub struct Dhcpv6Message {
     /// Message type
     pub msg_type: u8,
-    
+
     /// Transaction ID (24 bits)
     pub transaction_id: [u8; 3],
-    
+
     /// DHCPv6 options (TLV encoded)
     pub options: Vec<u8>,
 }

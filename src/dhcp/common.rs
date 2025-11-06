@@ -41,8 +41,8 @@
 //! - No buffer overflow vulnerabilities (compile-time prevention)
 //! - Safe string handling with UTF-8 validation
 
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::collections::HashSet;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Network ID tag for conditional DHCP configuration
 /// Corresponds to C's `struct dhcp_netid` (dnsmasq.h:831-834)
@@ -141,7 +141,8 @@ pub fn find_config<'a>(
     if let Some(cid) = client_id {
         for config in configs {
             if let Some(ref config_cid) = config.client_id {
-                if config_cid.as_slice() == cid && match_netid_check(&config.netid, context_netids) {
+                if config_cid.as_slice() == cid && match_netid_check(&config.netid, context_netids)
+                {
                     return Some(config);
                 }
             }
@@ -164,8 +165,9 @@ pub fn find_config<'a>(
         let normalized_host = strip_hostname(host);
         for config in configs {
             if let Some(ref config_host) = config.hostname {
-                if hostname_isequal(config_host, &normalized_host) 
-                    && match_netid_check(&config.netid, context_netids) {
+                if hostname_isequal(config_host, &normalized_host)
+                    && match_netid_check(&config.netid, context_netids)
+                {
                     return Some(config);
                 }
             }
@@ -178,7 +180,10 @@ pub fn find_config<'a>(
 /// Check if configuration's network IDs match the context's network IDs
 ///
 /// Implements C's `match_netid()` logic (dhcp-common.c:453-509)
-fn match_netid_check(config_netids: &HashSet<DhcpNetId>, context_netids: &HashSet<DhcpNetId>) -> bool {
+fn match_netid_check(
+    config_netids: &HashSet<DhcpNetId>,
+    context_netids: &HashSet<DhcpNetId>,
+) -> bool {
     // If config has no netid requirements, it matches any context
     if config_netids.is_empty() {
         return true;
@@ -260,11 +265,7 @@ pub fn match_bytes(pattern: &[u8], data: &[u8]) -> bool {
 /// ```
 pub fn strip_hostname(hostname: &str) -> String {
     // Find first dot and take everything before it
-    hostname
-        .split('.')
-        .next()
-        .unwrap_or(hostname)
-        .to_string()
+    hostname.split('.').next().unwrap_or(hostname).to_string()
 }
 
 /// Case-insensitive hostname comparison
@@ -400,8 +401,14 @@ mod tests {
             flags: ConfigFlags::default(),
         };
 
-        assert!(config_has_mac(&config, &[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]));
-        assert!(!config_has_mac(&config, &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]));
+        assert!(config_has_mac(
+            &config,
+            &[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]
+        ));
+        assert!(!config_has_mac(
+            &config,
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        ));
     }
 
     #[test]
@@ -420,7 +427,7 @@ mod tests {
 
         let context_netids = HashSet::new();
         let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-        
+
         let result = find_config(&configs, &context_netids, Some(&hwaddr), None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().addr, Some(Ipv4Addr::new(192, 168, 1, 100)));
@@ -438,12 +445,16 @@ mod tests {
     #[test]
     fn test_option_filter_matching_tags() {
         let mut client_tags = HashSet::new();
-        client_tags.insert(DhcpNetId { tag: "red".to_string() });
+        client_tags.insert(DhcpNetId {
+            tag: "red".to_string(),
+        });
 
         let context_tags = HashSet::new();
-        
+
         let mut option_tags = HashSet::new();
-        option_tags.insert(DhcpNetId { tag: "red".to_string() });
+        option_tags.insert(DhcpNetId {
+            tag: "red".to_string(),
+        });
 
         assert!(option_filter(&client_tags, &context_tags, &option_tags));
     }
@@ -452,9 +463,11 @@ mod tests {
     fn test_option_filter_missing_tags() {
         let client_tags = HashSet::new();
         let context_tags = HashSet::new();
-        
+
         let mut option_tags = HashSet::new();
-        option_tags.insert(DhcpNetId { tag: "blue".to_string() });
+        option_tags.insert(DhcpNetId {
+            tag: "blue".to_string(),
+        });
 
         assert!(!option_filter(&client_tags, &context_tags, &option_tags));
     }

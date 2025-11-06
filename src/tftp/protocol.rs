@@ -153,13 +153,15 @@ impl FromStr for TransferMode {
             "netascii" => Ok(TransferMode::Netascii),
             "octet" => Ok(TransferMode::Octet),
             "mail" => Ok(TransferMode::Mail),
-            _ => Err(ProtocolError::InvalidOptions(format!("Invalid transfer mode: {}", s))),
+            _ => Err(ProtocolError::InvalidOptions(format!(
+                "Invalid transfer mode: {}",
+                s
+            ))),
         }
     }
 }
 
 impl TransferMode {
-
     /// Convert transfer mode to string
     pub fn to_str(&self) -> &'static str {
         match self {
@@ -327,9 +329,12 @@ impl RequestPacket {
                 ));
             }
 
-            let opt_value = extract_null_terminated_string(&rest[opt_start..]).ok_or_else(|| {
-                ProtocolError::MalformedPacket("Missing option value null terminator".to_string())
-            })?;
+            let opt_value =
+                extract_null_terminated_string(&rest[opt_start..]).ok_or_else(|| {
+                    ProtocolError::MalformedPacket(
+                        "Missing option value null terminator".to_string(),
+                    )
+                })?;
 
             opt_start += opt_value.len() + 1;
             options.insert(opt_name.to_lowercase(), opt_value);
@@ -351,9 +356,7 @@ impl RequestPacket {
         let mut buffer = Vec::new();
 
         // Write opcode
-        buffer
-            .write_u16::<BigEndian>(self.opcode.to_u16())
-            .unwrap();
+        buffer.write_u16::<BigEndian>(self.opcode.to_u16()).unwrap();
 
         // Write filename with null terminator
         buffer.extend_from_slice(self.filename.as_bytes());
@@ -459,7 +462,9 @@ impl DataPacket {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(4 + self.data.len());
 
-        buffer.write_u16::<BigEndian>(TftpOpcode::DATA.to_u16()).unwrap();
+        buffer
+            .write_u16::<BigEndian>(TftpOpcode::DATA.to_u16())
+            .unwrap();
         buffer.write_u16::<BigEndian>(self.block).unwrap();
         buffer.extend_from_slice(&self.data);
 
@@ -538,7 +543,9 @@ impl AckPacket {
     /// Serialized packet bytes (always 4 bytes)
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(4);
-        buffer.write_u16::<BigEndian>(TftpOpcode::ACK.to_u16()).unwrap();
+        buffer
+            .write_u16::<BigEndian>(TftpOpcode::ACK.to_u16())
+            .unwrap();
         buffer.write_u16::<BigEndian>(self.block).unwrap();
         buffer
     }
@@ -634,7 +641,9 @@ impl OackPacket {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
 
-        buffer.write_u16::<BigEndian>(TftpOpcode::OACK.to_u16()).unwrap();
+        buffer
+            .write_u16::<BigEndian>(TftpOpcode::OACK.to_u16())
+            .unwrap();
 
         for (key, value) in &self.options {
             buffer.extend_from_slice(key.as_bytes());
@@ -738,8 +747,12 @@ impl ErrorPacket {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
 
-        buffer.write_u16::<BigEndian>(TftpOpcode::ERROR.to_u16()).unwrap();
-        buffer.write_u16::<BigEndian>(self.error_code.to_u16()).unwrap();
+        buffer
+            .write_u16::<BigEndian>(TftpOpcode::ERROR.to_u16())
+            .unwrap();
+        buffer
+            .write_u16::<BigEndian>(self.error_code.to_u16())
+            .unwrap();
         buffer.extend_from_slice(self.message.as_bytes());
         buffer.push(0);
 
@@ -892,15 +905,24 @@ mod tests {
 
     #[test]
     fn test_error_code_conversion() {
-        assert_eq!(TftpErrorCode::from_u16(1), Some(TftpErrorCode::FileNotFound));
-        assert_eq!(TftpErrorCode::from_u16(5), Some(TftpErrorCode::UnknownTransferId));
+        assert_eq!(
+            TftpErrorCode::from_u16(1),
+            Some(TftpErrorCode::FileNotFound)
+        );
+        assert_eq!(
+            TftpErrorCode::from_u16(5),
+            Some(TftpErrorCode::UnknownTransferId)
+        );
         assert_eq!(TftpErrorCode::from_u16(99), None);
     }
 
     #[test]
     fn test_transfer_mode_parsing() {
         assert_eq!(TransferMode::from_str("octet"), Ok(TransferMode::Octet));
-        assert_eq!(TransferMode::from_str("NETASCII"), Ok(TransferMode::Netascii));
+        assert_eq!(
+            TransferMode::from_str("NETASCII"),
+            Ok(TransferMode::Netascii)
+        );
         assert!(TransferMode::from_str("invalid").is_err());
         assert_eq!(TransferMode::Octet.to_str(), "octet");
     }
@@ -938,11 +960,7 @@ mod tests {
 
     #[test]
     fn test_request_packet_simple() {
-        let req = RequestPacket::new(
-            TftpOpcode::RRQ,
-            "test.txt".to_string(),
-            TransferMode::Octet,
-        );
+        let req = RequestPacket::new(TftpOpcode::RRQ, "test.txt".to_string(), TransferMode::Octet);
         let bytes = req.serialize();
 
         let parsed = RequestPacket::parse(&bytes).unwrap();
@@ -1031,7 +1049,10 @@ mod tests {
             extract_null_terminated_string(b"hello\0world"),
             Some("hello".to_string())
         );
-        assert_eq!(extract_null_terminated_string(b"test\0"), Some("test".to_string()));
+        assert_eq!(
+            extract_null_terminated_string(b"test\0"),
+            Some("test".to_string())
+        );
         assert_eq!(extract_null_terminated_string(b"\0"), Some(String::new()));
         assert_eq!(extract_null_terminated_string(b"no null"), None);
     }

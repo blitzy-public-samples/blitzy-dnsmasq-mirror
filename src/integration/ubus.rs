@@ -76,25 +76,25 @@ pub enum UbusError {
 pub struct UbusMetrics {
     /// Total DNS queries received
     pub dns_queries: u64,
-    
+
     /// DNS cache hits
     pub cache_hits: u64,
-    
+
     /// DNS cache misses
     pub cache_misses: u64,
-    
+
     /// Current number of DHCP leases
     pub dhcp_leases: u32,
-    
+
     /// DHCPv4 discover messages
     pub dhcp_discovers: u64,
-    
+
     /// DHCPv4 offer messages
     pub dhcp_offers: u64,
-    
+
     /// DHCPv4 request messages
     pub dhcp_requests: u64,
-    
+
     /// DHCPv4 ack messages
     pub dhcp_acks: u64,
 }
@@ -104,13 +104,13 @@ pub struct UbusMetrics {
 pub struct UbusLease {
     /// MAC address
     pub mac_address: String,
-    
+
     /// IP address
     pub ip_address: IpAddr,
-    
+
     /// Hostname (if known)
     pub hostname: Option<String>,
-    
+
     /// Lease expiry time (Unix timestamp)
     pub expires: u64,
 }
@@ -129,10 +129,10 @@ pub struct UbusLease {
 pub struct UbusContext {
     /// Metrics data
     metrics: Arc<RwLock<UbusMetrics>>,
-    
+
     /// Lease data
     leases: Arc<RwLock<Vec<UbusLease>>>,
-    
+
     /// Connection status
     connected: Arc<RwLock<bool>>,
 }
@@ -156,7 +156,7 @@ impl UbusContext {
 
         // In production, this would call ubus_connect() via FFI
         // For now, create a mock context that provides the API
-        
+
         // Check if ubus socket exists (only on OpenWrt)
         let ubus_socket_path = "/var/run/ubus/ubus.sock";
         if !std::path::Path::new(ubus_socket_path).exists() {
@@ -207,7 +207,11 @@ impl UbusContext {
     ///
     /// * `event_type` - Event type ("lease_added", "lease_deleted", "lease_updated")
     /// * `lease` - Lease information to broadcast
-    pub fn broadcast_lease_event(&self, event_type: &str, lease: &UbusLease) -> Result<(), UbusError> {
+    pub fn broadcast_lease_event(
+        &self,
+        event_type: &str,
+        lease: &UbusLease,
+    ) -> Result<(), UbusError> {
         debug!(
             "Broadcasting ubus event: {} for {} -> {}",
             event_type, lease.mac_address, lease.ip_address
@@ -249,12 +253,12 @@ impl UbusContext {
     /// Unregisters objects and closes the ubus connection.
     pub async fn disconnect(&self) {
         info!("Disconnecting from ubus");
-        
+
         // In production: ubus_remove_object() and ubus_free()
-        
+
         let mut connected = self.connected.write().await;
         *connected = false;
-        
+
         info!("ubus disconnected");
     }
 }
@@ -329,7 +333,7 @@ mod tests {
     async fn test_metrics_update() {
         // This test would fail on non-OpenWrt systems
         // In production, it would mock the ubus connection
-        
+
         let metrics = UbusMetrics {
             dns_queries: 1000,
             cache_hits: 800,

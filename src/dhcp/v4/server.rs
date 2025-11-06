@@ -10,35 +10,35 @@
 //!
 //! Main DHCPv4 server implementation, replacing `src/dhcp.c`.
 
-use std::net::Ipv4Addr;
 use super::protocol::{Dhcpv4Message, Dhcpv4MessageType};
 use super::state_machine::Dhcpv4StateMachine;
-use crate::dhcp::lease::{Lease, LeaseV4, LeaseFlags};
+use crate::dhcp::lease::{Lease, LeaseFlags, LeaseV4};
+use std::net::Ipv4Addr;
 
 /// DHCPv4 server configuration
 #[derive(Debug, Clone)]
 pub struct Dhcpv4ServerConfig {
     /// Server IP address (DHCP server identifier)
     pub server_addr: Ipv4Addr,
-    
+
     /// Network range start
     pub range_start: Ipv4Addr,
-    
+
     /// Network range end
     pub range_end: Ipv4Addr,
-    
+
     /// Subnet mask
     pub netmask: Ipv4Addr,
-    
+
     /// Default gateway (router)
     pub gateway: Option<Ipv4Addr>,
-    
+
     /// DNS servers
     pub dns_servers: Vec<Ipv4Addr>,
-    
+
     /// Default lease time (seconds)
     pub default_lease_time: u32,
-    
+
     /// Maximum lease time (seconds)
     pub max_lease_time: u32,
 }
@@ -47,10 +47,10 @@ pub struct Dhcpv4ServerConfig {
 pub struct Dhcpv4Server {
     /// Server configuration
     config: Dhcpv4ServerConfig,
-    
+
     /// State machine
     state_machine: Dhcpv4StateMachine,
-    
+
     /// Active leases
     leases: Vec<Lease>,
 }
@@ -119,7 +119,7 @@ impl Dhcpv4Server {
                 true
             }
         });
-        
+
         None // No response to RELEASE
     }
 

@@ -10,35 +10,35 @@
 //!
 //! Main DHCPv6 server implementation, replacing `src/dhcp6.c`.
 
-use std::net::Ipv6Addr;
 use super::protocol::{Dhcpv6Message, Dhcpv6MessageType};
 use super::state_machine::Dhcpv6StateMachine;
-use crate::dhcp::lease::{Lease, LeaseV6, LeaseType, LeaseFlags};
+use crate::dhcp::lease::{Lease, LeaseFlags, LeaseType, LeaseV6};
+use std::net::Ipv6Addr;
 
 /// DHCPv6 server configuration
 #[derive(Debug, Clone)]
 pub struct Dhcpv6ServerConfig {
     /// Server DUID (DHCP Unique Identifier)
     pub server_duid: Vec<u8>,
-    
+
     /// Network prefix for address assignment
     pub prefix: Ipv6Addr,
-    
+
     /// Prefix length (typically 64)
     pub prefix_len: u8,
-    
+
     /// DNS servers
     pub dns_servers: Vec<Ipv6Addr>,
-    
+
     /// Domain search list
     pub domain_list: Vec<String>,
-    
+
     /// Preferred lifetime (seconds)
     pub preferred_lifetime: u32,
-    
+
     /// Valid lifetime (seconds)
     pub valid_lifetime: u32,
-    
+
     /// Support rapid commit
     pub rapid_commit: bool,
 }
@@ -47,10 +47,10 @@ pub struct Dhcpv6ServerConfig {
 pub struct Dhcpv6Server {
     /// Server configuration
     config: Dhcpv6ServerConfig,
-    
+
     /// State machine
     state_machine: Dhcpv6StateMachine,
-    
+
     /// Active leases
     leases: Vec<Lease>,
 }

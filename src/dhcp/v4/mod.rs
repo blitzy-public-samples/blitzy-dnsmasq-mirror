@@ -28,13 +28,13 @@
 //! - **state_machine.rs** - Type-safe state transitions
 //! - **options.rs** - DHCPv4 option parsing
 
-pub mod server;
-pub mod protocol;
-pub mod state_machine;
 pub mod options;
+pub mod protocol;
+pub mod server;
+pub mod state_machine;
 
 // Re-export key types for external use
-pub use server::Dhcpv4Server;
-pub use protocol::{Dhcpv4Message, Dhcpv4MessageType};
-pub use state_machine::{Dhcpv4State, Dhcpv4StateMachine};
 pub use options::Dhcpv4Option;
+pub use protocol::{Dhcpv4Message, Dhcpv4MessageType};
+pub use server::Dhcpv4Server;
+pub use state_machine::{Dhcpv4State, Dhcpv4StateMachine};

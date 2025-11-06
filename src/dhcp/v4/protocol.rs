@@ -32,46 +32,46 @@ pub enum Dhcpv4MessageType {
 pub struct Dhcpv4Message {
     /// Message op code / message type (1 = BOOTREQUEST, 2 = BOOTREPLY)
     pub op: u8,
-    
+
     /// Hardware address type (1 = Ethernet)
     pub htype: u8,
-    
+
     /// Hardware address length (6 for Ethernet)
     pub hlen: u8,
-    
+
     /// Client sets to zero, optionally used by relay agents
     pub hops: u8,
-    
+
     /// Transaction ID
     pub xid: u32,
-    
+
     /// Seconds elapsed since client began address acquisition
     pub secs: u16,
-    
+
     /// Flags (broadcast bit)
     pub flags: u16,
-    
+
     /// Client IP address (filled in by client if known)
     pub ciaddr: Ipv4Addr,
-    
+
     /// 'your' (client) IP address
     pub yiaddr: Ipv4Addr,
-    
+
     /// IP address of next server to use in bootstrap
     pub siaddr: Ipv4Addr,
-    
+
     /// Relay agent IP address
     pub giaddr: Ipv4Addr,
-    
+
     /// Client hardware address (16 bytes, but only hlen are significant)
     pub chaddr: [u8; 16],
-    
+
     /// Server host name (64 bytes)
     pub sname: [u8; 64],
-    
+
     /// Boot file name (128 bytes)
     pub file: [u8; 128],
-    
+
     /// DHCPv4 options
     pub options: Vec<u8>,
 }

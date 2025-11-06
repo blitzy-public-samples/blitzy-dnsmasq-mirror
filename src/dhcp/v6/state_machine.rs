@@ -17,22 +17,22 @@ use super::protocol::Dhcpv6MessageType;
 pub enum Dhcpv6State {
     /// Initial state
     Init,
-    
+
     /// Client has sent SOLICIT, waiting for ADVERTISE
     Soliciting,
-    
+
     /// Client has received ADVERTISE, sent REQUEST, waiting for REPLY
     Requesting,
-    
+
     /// Client has valid configuration (received REPLY)
     Bound,
-    
+
     /// Client is renewing (sent RENEW, waiting for REPLY)
     Renewing,
-    
+
     /// Client is rebinding (sent REBIND, waiting for REPLY)
     Rebinding,
-    
+
     /// Configuration released
     Released,
 }
@@ -125,14 +125,10 @@ impl Dhcpv6StateMachine {
             }
 
             // INFORMATION-REQUEST (stateless)
-            (_, InformationRequest) => {
-                Some(Reply)
-            }
+            (_, InformationRequest) => Some(Reply),
 
             // CONFIRM (client checking address validity)
-            (_, Confirm) => {
-                Some(Reply)
-            }
+            (_, Confirm) => Some(Reply),
 
             // Invalid transitions
             _ => None,
@@ -169,21 +165,21 @@ mod tests {
     #[test]
     fn test_solicit_advertise_sequence() {
         let mut sm = Dhcpv6StateMachine::new();
-        
+
         // Client sends SOLICIT
         let response = sm.process_message(Dhcpv6MessageType::Solicit);
         assert_eq!(response, Some(Dhcpv6MessageType::Advertise));
         assert_eq!(sm.state(), Dhcpv6State::Soliciting);
-        
+
         // Server sends ADVERTISE
         let response = sm.process_message(Dhcpv6MessageType::Advertise);
         assert_eq!(response, Some(Dhcpv6MessageType::Request));
-        
+
         // Client sends REQUEST
         let response = sm.process_message(Dhcpv6MessageType::Request);
         assert_eq!(response, Some(Dhcpv6MessageType::Reply));
         assert_eq!(sm.state(), Dhcpv6State::Requesting);
-        
+
         // Server sends REPLY
         let response = sm.process_message(Dhcpv6MessageType::Reply);
         assert_eq!(response, None);
@@ -194,13 +190,13 @@ mod tests {
     #[test]
     fn test_release() {
         let mut sm = Dhcpv6StateMachine::new();
-        
+
         // Get to BOUND state
         sm.process_message(Dhcpv6MessageType::Solicit);
         sm.process_message(Dhcpv6MessageType::Request);
         sm.process_message(Dhcpv6MessageType::Reply);
         assert_eq!(sm.state(), Dhcpv6State::Bound);
-        
+
         // Release configuration
         sm.process_message(Dhcpv6MessageType::Release);
         assert_eq!(sm.state(), Dhcpv6State::Released);
@@ -209,7 +205,7 @@ mod tests {
     #[test]
     fn test_information_request() {
         let mut sm = Dhcpv6StateMachine::new();
-        
+
         // Information request can happen from any state
         let response = sm.process_message(Dhcpv6MessageType::InformationRequest);
         assert_eq!(response, Some(Dhcpv6MessageType::Reply));

@@ -43,11 +43,11 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::mpsc;
 use tokio::sync::RwLock;
-use thiserror::Error;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 /// Maximum script execution time in seconds
@@ -95,10 +95,10 @@ pub enum ScriptError {
 pub enum LeaseAction {
     /// New lease added (DHCP DISCOVER→OFFER→REQUEST→ACK)
     Add,
-    
+
     /// Existing lease deleted (lease expired or DHCP RELEASE)
     Del,
-    
+
     /// Lease renewed (DHCP REQUEST from existing client)
     Old,
 }
@@ -195,7 +195,10 @@ impl ScriptEvent {
                 remote_id,
                 tags,
             } => {
-                env.insert("DNSMASQ_ACTION".to_string(), action.as_env_str().to_string());
+                env.insert(
+                    "DNSMASQ_ACTION".to_string(),
+                    action.as_env_str().to_string(),
+                );
                 env.insert("DNSMASQ_MAC".to_string(), mac_address.clone());
                 env.insert("DNSMASQ_IP".to_string(), ip_address.to_string());
 
@@ -204,10 +207,7 @@ impl ScriptEvent {
                 }
 
                 if let Some(ref cid) = client_id {
-                    env.insert(
-                        "DNSMASQ_CLIENT_ID".to_string(),
-                        hex::encode(cid),
-                    );
+                    env.insert("DNSMASQ_CLIENT_ID".to_string(), hex::encode(cid));
                 }
 
                 if let Some(expiry) = expiry_time {
@@ -244,7 +244,10 @@ impl ScriptEvent {
                 expiry_time,
                 tags,
             } => {
-                env.insert("DNSMASQ_ACTION".to_string(), action.as_env_str().to_string());
+                env.insert(
+                    "DNSMASQ_ACTION".to_string(),
+                    action.as_env_str().to_string(),
+                );
                 env.insert("DNSMASQ_DUID".to_string(), hex::encode(duid));
                 env.insert("DNSMASQ_IAID".to_string(), iaid.to_string());
                 env.insert("DNSMASQ_IP".to_string(), ip_address.to_string());
@@ -273,7 +276,10 @@ impl ScriptEvent {
                     file_path.display().to_string(),
                 );
                 env.insert("DNSMASQ_TFTP_SIZE".to_string(), file_size.to_string());
-                env.insert("DNSMASQ_CLIENT_ADDRESS".to_string(), client_address.to_string());
+                env.insert(
+                    "DNSMASQ_CLIENT_ADDRESS".to_string(),
+                    client_address.to_string(),
+                );
             }
 
             ScriptEvent::TftpError {
@@ -286,7 +292,10 @@ impl ScriptEvent {
                     "DNSMASQ_TFTP_FILE".to_string(),
                     file_path.display().to_string(),
                 );
-                env.insert("DNSMASQ_CLIENT_ADDRESS".to_string(), client_address.to_string());
+                env.insert(
+                    "DNSMASQ_CLIENT_ADDRESS".to_string(),
+                    client_address.to_string(),
+                );
                 env.insert("DNSMASQ_TFTP_ERROR".to_string(), error_message.clone());
             }
 
@@ -315,10 +324,14 @@ impl ScriptEvent {
     /// Get event description for logging
     pub fn description(&self) -> String {
         match self {
-            ScriptEvent::DhcpLease { action, ip_address, .. } => {
+            ScriptEvent::DhcpLease {
+                action, ip_address, ..
+            } => {
                 format!("DHCP {:?} for {}", action, ip_address)
             }
-            ScriptEvent::Dhcp6Lease { action, ip_address, .. } => {
+            ScriptEvent::Dhcp6Lease {
+                action, ip_address, ..
+            } => {
                 format!("DHCPv6 {:?} for {}", action, ip_address)
             }
             ScriptEvent::TftpTransfer { file_path, .. } => {
@@ -342,13 +355,13 @@ impl ScriptEvent {
 pub struct ScriptResult {
     /// Exit status code
     pub exit_code: i32,
-    
+
     /// Standard output captured from script
     pub stdout: String,
-    
+
     /// Standard error captured from script
     pub stderr: String,
-    
+
     /// Execution duration in milliseconds
     pub duration_ms: u64,
 }
@@ -360,10 +373,10 @@ pub struct ScriptResult {
 pub struct ScriptExecutor {
     /// Path to the script executable (immutable after construction for security)
     script_path: PathBuf,
-    
+
     /// Event queue sender
     event_tx: mpsc::UnboundedSender<ScriptEvent>,
-    
+
     /// Shared state for tracking execution
     state: Arc<RwLock<ExecutorState>>,
 }
@@ -373,13 +386,13 @@ pub struct ScriptExecutor {
 struct ExecutorState {
     /// Number of events queued
     queued_count: u64,
-    
+
     /// Number of events executed
     executed_count: u64,
-    
+
     /// Number of events that failed
     failed_count: u64,
-    
+
     /// Whether the executor is running
     running: bool,
 }
@@ -430,11 +443,7 @@ impl ScriptExecutor {
         };
 
         // Spawn background task to process events
-        tokio::spawn(Self::event_processor(
-            script_path,
-            event_rx,
-            state,
-        ));
+        tokio::spawn(Self::event_processor(script_path, event_rx, state));
 
         Ok(executor)
     }
@@ -657,7 +666,10 @@ mod tests {
         let env = event.build_env_vars();
 
         assert_eq!(env.get("DNSMASQ_ACTION"), Some(&"add".to_string()));
-        assert_eq!(env.get("DNSMASQ_MAC"), Some(&"00:11:22:33:44:55".to_string()));
+        assert_eq!(
+            env.get("DNSMASQ_MAC"),
+            Some(&"00:11:22:33:44:55".to_string())
+        );
         assert_eq!(env.get("DNSMASQ_IP"), Some(&"192.168.1.100".to_string()));
         assert_eq!(env.get("DNSMASQ_HOSTNAME"), Some(&"test-host".to_string()));
         assert_eq!(env.get("DNSMASQ_CLIENT_ID"), Some(&"010203".to_string()));

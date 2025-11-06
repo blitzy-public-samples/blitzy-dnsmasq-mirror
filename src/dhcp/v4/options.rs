@@ -43,58 +43,58 @@ pub enum Dhcpv4OptionCode {
 pub enum Dhcpv4Option {
     /// Option 0: Pad (no data)
     Pad,
-    
+
     /// Option 1: Subnet mask
     SubnetMask(Ipv4Addr),
-    
+
     /// Option 3: Router (default gateway)
     Router(Vec<Ipv4Addr>),
-    
+
     /// Option 6: DNS servers
     DnsServer(Vec<Ipv4Addr>),
-    
+
     /// Option 12: Host name
     HostName(String),
-    
+
     /// Option 15: Domain name
     DomainName(String),
-    
+
     /// Option 28: Broadcast address
     BroadcastAddress(Ipv4Addr),
-    
+
     /// Option 50: Requested IP address
     RequestedIpAddress(Ipv4Addr),
-    
+
     /// Option 51: IP address lease time (seconds)
     IpAddressLeaseTime(u32),
-    
+
     /// Option 53: DHCP message type
     MessageType(u8),
-    
+
     /// Option 54: Server identifier
     ServerIdentifier(Ipv4Addr),
-    
+
     /// Option 55: Parameter request list
     ParameterRequestList(Vec<u8>),
-    
+
     /// Option 56: Message
     Message(String),
-    
+
     /// Option 57: Maximum DHCP message size
     MaxDhcpMessageSize(u16),
-    
+
     /// Option 58: Renewal (T1) time
     RenewalTime(u32),
-    
+
     /// Option 59: Rebinding (T2) time
     RebindingTime(u32),
-    
+
     /// Option 61: Client identifier
     ClientIdentifier(Vec<u8>),
-    
+
     /// Option 255: End marker
     End,
-    
+
     /// Unknown option
     Unknown { code: u8, data: Vec<u8> },
 }
@@ -120,14 +120,14 @@ impl Dhcpv4Option {
 
         while i < data.len() {
             let code = data[i];
-            
+
             // Handle pad and end options (no length field)
             if code == 0 {
                 options.push(Self::Pad);
                 i += 1;
                 continue;
             }
-            
+
             if code == 255 {
                 options.push(Self::End);
                 break;
@@ -256,7 +256,7 @@ mod tests {
     fn test_parse_message_type() {
         let data = &[53, 1, 1]; // Message Type = DISCOVER
         let options = Dhcpv4Option::parse_all(data);
-        
+
         assert_eq!(options.len(), 1);
         match &options[0] {
             Dhcpv4Option::MessageType(1) => {}
@@ -275,11 +275,11 @@ mod tests {
     fn test_parse_with_magic_cookie() {
         let data = &[
             99, 130, 83, 99, // Magic cookie
-            53, 1, 1,        // Message Type = DISCOVER
-            255,             // End
+            53, 1, 1,   // Message Type = DISCOVER
+            255, // End
         ];
         let options = Dhcpv4Option::parse_all(data);
-        
+
         assert!(!options.is_empty());
         match &options[0] {
             Dhcpv4Option::MessageType(1) => {}

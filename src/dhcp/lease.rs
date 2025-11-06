@@ -41,9 +41,9 @@
 //! - Safe time handling with std::time
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr, IpAddr};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// DHCPv4 lease entry
 /// Corresponds to C's `struct dhcp_lease` for IPv4 (dnsmasq.h:799-829)
@@ -143,7 +143,7 @@ impl Lease {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_secs();
-        
+
         self.expires() < now
     }
 
@@ -376,7 +376,7 @@ impl LeaseDatabase {
     /// Cloned lease if found, None otherwise
     pub fn find_v4_by_hwaddr(&self, hwaddr: &[u8]) -> Option<Lease> {
         let leases = self.v4_leases.read().unwrap();
-        
+
         for lease in leases.values() {
             if lease.hwaddr == hwaddr {
                 return Some(Lease::V4(lease.clone()));
@@ -398,7 +398,7 @@ impl LeaseDatabase {
     /// Cloned lease if found, None otherwise
     pub fn find_v6_by_duid(&self, duid: &[u8], iaid: u32) -> Option<Lease> {
         let leases = self.v6_leases.read().unwrap();
-        
+
         for lease in leases.values() {
             if lease.duid == duid && lease.iaid == iaid {
                 return Some(Lease::V6(lease.clone()));

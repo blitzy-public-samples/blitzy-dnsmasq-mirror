@@ -177,7 +177,7 @@ pub use v6::server::Dhcpv6Server;
 
 // IPv6 Router Advertisement re-exports (conditional on ipv6 feature)
 #[cfg(feature = "ipv6")]
-pub use ipv6::radv::{RouterAdvertiser, RouterAdvertisement, PrefixInfo};
+pub use ipv6::radv::{PrefixInfo, RouterAdvertisement, RouterAdvertiser};
 
 // =============================================================================
 // Module Tests
@@ -191,7 +191,7 @@ mod tests {
     fn test_module_organization() {
         // Verify that the module structure is properly organized
         // This is a compile-time verification that all modules exist
-        
+
         // Common module should always be available
         use crate::dhcp::common::DhcpConfig;
         let type_name = std::any::type_name::<DhcpConfig>();

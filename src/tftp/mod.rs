@@ -25,6 +25,6 @@ pub mod protocol;
 
 // Re-export commonly used types for convenience
 pub use protocol::{
-    sanitise_string, AckPacket, DataPacket, ErrorPacket, OackPacket, ProtocolError,
-    RequestPacket, TftpErrorCode, TftpOpcode, TftpPacket, TransferMode,
+    AckPacket, DataPacket, ErrorPacket, OackPacket, ProtocolError, RequestPacket, TftpErrorCode,
+    TftpOpcode, TftpPacket, TransferMode, sanitise_string,
 };

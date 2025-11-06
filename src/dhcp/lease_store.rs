@@ -43,11 +43,11 @@
 //! 1609459200 00:01:00:01:12:34:56:78 2001:db8::1 client2 00:01:00:01:12:34:56:78
 //! ```
 
+use crate::dhcp::lease::{Lease, LeaseFlags, LeaseType, LeaseV4, LeaseV6};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use crate::dhcp::lease::{Lease, LeaseV4, LeaseV6, LeaseType, LeaseFlags};
+use std::path::{Path, PathBuf};
 
 /// Persistent lease storage manager
 pub struct LeaseStore {
@@ -109,7 +109,7 @@ impl LeaseStore {
 
         for line in reader.lines() {
             let line = line?;
-            
+
             // Skip empty lines and comments
             if line.trim().is_empty() || line.starts_with('#') {
                 continue;
@@ -260,7 +260,8 @@ impl LeaseStore {
             Lease::V4(lease) => {
                 let hwaddr = format_hex_string(&lease.hwaddr);
                 let hostname = lease.hostname.as_deref().unwrap_or("*");
-                let client_id = lease.client_id
+                let client_id = lease
+                    .client_id
                     .as_ref()
                     .map(|cid| format_hex_string(cid))
                     .unwrap_or_else(|| "*".to_string());
@@ -274,10 +275,7 @@ impl LeaseStore {
                 let duid = format_hex_string(&lease.duid);
                 let hostname = lease.hostname.as_deref().unwrap_or("*");
 
-                format!(
-                    "{} {} {} {}",
-                    lease.expires, duid, lease.addr, hostname
-                )
+                format!("{} {} {} {}", lease.expires, duid, lease.addr, hostname)
             }
         }
     }

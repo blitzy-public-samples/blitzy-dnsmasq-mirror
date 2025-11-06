@@ -89,13 +89,13 @@ pub enum DbusError {
 pub struct LeaseInfo {
     /// MAC address
     pub mac_address: String,
-    
+
     /// IP address
     pub ip_address: IpAddr,
-    
+
     /// Hostname (if known)
     pub hostname: Option<String>,
-    
+
     /// Lease expiry time (Unix timestamp)
     pub expiry_time: Option<u64>,
 }
@@ -105,10 +105,10 @@ pub struct LeaseInfo {
 pub struct ServerSpec {
     /// Server address
     pub address: IpAddr,
-    
+
     /// Server port
     pub port: u16,
-    
+
     /// Domain (if server-specific)
     pub domain: Option<String>,
 }
@@ -122,10 +122,10 @@ pub struct ServerSpec {
 struct DnsmasqDbusInterface {
     /// DHCP lease count
     lease_count: Arc<RwLock<u32>>,
-    
+
     /// DNS cache size
     cache_size: Arc<RwLock<u32>>,
-    
+
     /// Upstream DNS servers
     servers: Arc<RwLock<Vec<ServerSpec>>>,
 }
@@ -140,7 +140,7 @@ impl DnsmasqDbusInterface {
     /// Clear DNS cache
     async fn clear_cache(&self) {
         info!("D-Bus method called: ClearCache");
-        
+
         // In full implementation, this would call into dns::cache module
         // For now, just reset the cache size counter
         let mut cache_size = self.cache_size.write().await;
@@ -177,7 +177,7 @@ impl DnsmasqDbusInterface {
     /// Set upstream DNS servers
     async fn set_servers(&self, servers: Vec<String>) {
         info!("D-Bus method called: SetServers({} servers)", servers.len());
-        
+
         // Parse server specifications
         let mut parsed_servers = Vec::new();
         for server_str in servers {
@@ -204,7 +204,7 @@ impl DnsmasqDbusInterface {
                 }
             }
         }
-        
+
         let mut servers_lock = self.servers.write().await;
         *servers_lock = parsed_servers;
     }
@@ -243,7 +243,7 @@ impl DnsmasqDbusInterface {
 pub struct DbusInterface {
     /// D-Bus connection
     connection: Connection,
-    
+
     /// Internal interface implementation (shared state)
     interface_impl: Arc<DnsmasqDbusInterface>,
 }

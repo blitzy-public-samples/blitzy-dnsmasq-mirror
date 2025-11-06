@@ -206,10 +206,10 @@ pub use scripts::{LeaseAction, ScriptError, ScriptEvent, ScriptExecutor, ScriptR
 pub struct IntegrationStatus {
     /// D-Bus integration available
     pub dbus_available: bool,
-    
+
     /// ubus integration available
     pub ubus_available: bool,
-    
+
     /// Script execution available
     pub scripts_available: bool,
 }
@@ -223,7 +223,7 @@ impl IntegrationStatus {
             scripts_available: cfg!(feature = "scripts"),
         }
     }
-    
+
     /// Check if any integrations are available
     pub fn has_any(&self) -> bool {
         self.dbus_available || self.ubus_available || self.scripts_available
@@ -237,15 +237,15 @@ mod tests {
     #[test]
     fn test_integration_status_detect() {
         let status = IntegrationStatus::detect();
-        
+
         // At least scripts should be available if the feature is enabled
         #[cfg(feature = "scripts")]
         assert!(status.scripts_available);
-        
+
         #[cfg(not(feature = "scripts"))]
         assert!(!status.scripts_available);
     }
-    
+
     #[test]
     fn test_integration_status_has_any() {
         let status = IntegrationStatus {
@@ -254,7 +254,7 @@ mod tests {
             scripts_available: true,
         };
         assert!(status.has_any());
-        
+
         let status_none = IntegrationStatus {
             dbus_available: false,
             ubus_available: false,
