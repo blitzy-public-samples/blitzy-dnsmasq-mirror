@@ -4,8 +4,12 @@
 
 pub mod types;
 
-/// Prometheus metrics collector for dnsmasq
-/// 
-/// Collects and exports metrics about DNS queries, DHCP leases, cache statistics,
-/// and other operational data in Prometheus format.
-pub struct MetricsCollector {}
+#[cfg(feature = "prometheus-metrics")]
+pub mod metrics;
+
+#[cfg(feature = "prometheus-metrics")]
+pub use metrics::MetricsCollector;
+
+#[cfg(not(feature = "prometheus-metrics"))]
+/// Stub implementation when prometheus-metrics feature is disabled
+pub struct MetricsCollector;
