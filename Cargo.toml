@@ -117,7 +117,7 @@ socket2 = "0.5"
 
 # Unix system calls - replaces direct libc calls
 libc = "0.2"
-nix = { version = "0.29", features = ["user", "signal", "socket", "net"] }
+nix = { version = "0.29", features = ["user", "signal", "socket", "net", "fs", "process"] }
 
 # Feature-gated dependencies (optional)
 # DNSSEC cryptography - replaces nettle + hogweed + gmp

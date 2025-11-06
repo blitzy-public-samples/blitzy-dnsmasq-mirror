@@ -21,14 +21,16 @@
 //!
 //! # Example Usage
 //!
-//! ```no_run
+//! ```ignore
 //! use dnsmasq::runtime;
 //! use dnsmasq::config::Config;
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Load configuration from file and CLI args
-//!     let config = Config::load()?;
+//!     // Load configuration
+//!     let config = Config::new();
 //!     
 //!     // Daemonize if requested (fork to background)
 //!     runtime::daemonize(&config.daemon_config)?;
@@ -37,16 +39,20 @@
 //!     runtime::drop_privileges(&config.privilege_config)?;
 //!     
 //!     // Create PID file for init script integration
-//!     runtime::create_pid_file(&config.daemon_config.pid_file)?;
+//!     runtime::create_pid_file(&config.daemon_config.pid_file, None)?;
 //!     
-//!     // Set up signal handlers for SIGHUP, SIGUSR1, SIGTERM
+//!     // Set up signal handlers
 //!     let signal_handler = runtime::setup_signal_handlers()?;
 //!     
 //!     // Spawn helper process for script execution
-//!     let helper_handle = runtime::spawn_helper_process(&config)?;
+//!     let helper_handle = runtime::spawn_helper_process(&config, None, Default::default())?;
+//!     
+//!     // Create daemon state
+//!     let state = Arc::new(RwLock::new(crate::types::DaemonState::new()));
 //!     
 //!     // Run main event loop until shutdown signal
-//!     runtime::run_event_loop(config, signal_handler, helper_handle).await
+//!     runtime::run_event_loop(config, state, signal_handler).await?;
+//!     Ok(())
 //! }
 //! ```
 //!

@@ -7,3 +7,12 @@
 
 // Core constants module - fully implemented
 pub mod constants;
+
+// Common types and error handling
+pub mod types;
+
+// Configuration management
+pub mod config;
+
+// Runtime module - daemon lifecycle and event loop
+pub mod runtime;
