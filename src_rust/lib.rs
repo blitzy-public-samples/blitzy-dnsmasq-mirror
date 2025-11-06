@@ -90,17 +90,22 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use dnsmasq::{Daemon, Config, Result};
+//! use dnsmasq::daemon::Daemon;
+//! use dnsmasq::types::Config;
 //!
-//! fn main() -> Result<()> {
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Initialize the library
+//!     dnsmasq::init()?;
+//!     
 //!     // Parse configuration from file and CLI arguments
-//!     let config = Config::from_args()?;
+//!     let config = Config::default();
 //!     
 //!     // Initialize daemon with validated configuration
-//!     let mut daemon = Daemon::new(config)?;
+//!     let daemon = Daemon::new(config);
 //!     
 //!     // Run event loop (blocks until SIGTERM/SIGINT)
-//!     daemon.run()?;
+//!     daemon.run().await?;
 //!     
 //!     Ok(())
 //! }
@@ -452,15 +457,14 @@ pub type Result<T> = result::Result<T, Error>;
 pub use crate::core::{daemon, event_loop, signals};
 
 // Re-export DNS subsystem components
-pub use crate::dns::{cache, forwarder, parser, protocol, serializer};
+pub use crate::dns::{cache, forwarder, protocol};
+// Note: parser from dns is renamed to avoid conflict with config::parser
+pub use crate::dns::parser as dns_parser;
 
 #[cfg(feature = "dnssec")]
 pub use crate::dns::dnssec;
 
 // Re-export DHCP subsystem components
-#[cfg(feature = "dhcp")]
-pub use crate::dhcp::{common, lease};
-
 #[cfg(feature = "dhcp")]
 pub use crate::dhcp::v4;
 
@@ -468,42 +472,33 @@ pub use crate::dhcp::v4;
 pub use crate::dhcp::v6;
 
 // Re-export IPv6 services
-pub use crate::ipv6::{addr, radv, slaac};
+pub use crate::ipv6::{radv, slaac};
 
 // Re-export network layer
-pub use crate::network::{arp, interfaces, loop_detect, platform, sockets};
+pub use crate::network::{platform, sockets};
 
-// Re-export TFTP service
+// Re-export TFTP service (struct from services module)
 #[cfg(feature = "tftp")]
-pub use crate::services::tftp;
+pub use crate::services::TftpServer;
 
 // Re-export integration components
 #[cfg(feature = "dbus")]
 pub use crate::integration::dbus;
 
-#[cfg(feature = "ubus")]
-pub use crate::integration::ubus;
-
-pub use crate::integration::{conntrack, inotify, ipset, nftset, pf_tables};
-
 // Re-export configuration types
-pub use crate::config::{cli, defaults, parser, types, validator};
+pub use crate::config::{parser as config_parser, types};
 
 // Re-export process management
-pub use crate::process::{helper, pidfile, privileges};
+pub use crate::process::ProcessManager;
 
-// Re-export logging
-pub use crate::logging::{logger, structured};
-
-// Re-export monitoring (if enabled)
-#[cfg(feature = "prometheus-metrics")]
-pub use crate::monitoring::{metrics, types as metric_types};
+// Note: logging and monitoring modules are directly accessible via crate::{logging, monitoring}
+// and do not need re-export to avoid name conflicts
 
 // Re-export utilities
-pub use crate::utils::{dump, general, pattern_match, rand, string};
+pub use crate::utils::general;
 
 // Re-export FFI wrappers
-pub use crate::ffi::{libc_wrappers, platform as ffi_platform};
+pub use crate::ffi::libc_wrappers;
 
 //
 // ============================================================================
@@ -549,7 +544,7 @@ pub const USER_AGENT: &str = concat!("dnsmasq/", env!("CARGO_PKG_VERSION"), " (R
 /// ```
 pub fn init() -> Result<()> {
     // Initialize logging with default configuration
-    logging::logger::init_default()
+    logging::init()
         .map_err(|e| Error::Config {
             message: format!("Failed to initialize logging: {}", e),
         })?;
