@@ -111,7 +111,7 @@ mod tests {
     
     #[test]
     fn test_parse_empty_file() {
-        let mut temp_file = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path().to_str().unwrap();
         
         let result = parse_config_file(path);

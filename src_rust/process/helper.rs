@@ -32,11 +32,17 @@ use tokio::sync::mpsc;
 /// Errors that can occur during helper process operations
 #[derive(Debug)]
 pub enum HelperError {
+    /// Failed to fork the helper process
     ForkFailed(std::io::Error),
+    /// Failed to create IPC socket for communication
     SocketCreationFailed(std::io::Error),
+    /// Failed to send event to helper process
     SendFailed(std::io::Error),
+    /// Helper process terminated unexpectedly
     HelperDied,
+    /// Failed to serialize event data
     SerializationFailed(String),
+    /// Invalid script path provided
     InvalidScriptPath(String),
 }
 
@@ -105,40 +111,63 @@ impl HelperHandle {
 pub enum ScriptData {
     /// DHCPv4 lease event
     DhcpLease {
-        action: String,         // "add", "del", "old"
+        /// Action type: "add", "del", "old"
+        action: String,
+        /// Client MAC address
         mac_addr: [u8; 6],
+        /// Assigned IP address
         ip_addr: Ipv4Addr,
+        /// Client hostname (if provided)
         hostname: Option<String>,
+        /// Client identifier (DHCP option 61)
         client_id: Option<Vec<u8>>,
-        expiry_time: u32,       // seconds
+        /// Lease expiry time in seconds
+        expiry_time: u32,
+        /// Vendor class identifier
         vendor_class: Option<String>,
+        /// Network interface name
         interface: String,
     },
 
     /// DHCPv6 lease event
     Dhcp6Lease {
-        action: String,         // "add", "del", "old"
+        /// Action type: "add", "del", "old"
+        action: String,
+        /// Client DUID (DHCP Unique Identifier)
         duid: Vec<u8>,
+        /// Assigned IPv6 address
         ip_addr: Ipv6Addr,
+        /// Client hostname (if provided)
         hostname: Option<String>,
+        /// Identity Association Identifier (IAID)
         iaid: u32,
+        /// Lease duration in seconds
         lease_time: u32,
+        /// Network interface name
         interface: String,
     },
 
     /// TFTP transfer event
     TftpTransfer {
-        action: String,         // "start", "end"
+        /// Action type: "start", "end"
+        action: String,
+        /// Path to transferred file
         file_path: PathBuf,
+        /// Client IP address
         client_addr: Ipv4Addr,
+        /// Size of transferred file in bytes
         file_size: u64,
+        /// Network interface name
         interface: String,
     },
 
     /// ARP detection event
     ArpEvent {
+        /// MAC address detected via ARP
         mac_addr: [u8; 6],
+        /// IP address associated with MAC
         ip_addr: Ipv4Addr,
+        /// Network interface name
         interface: String,
     },
 }

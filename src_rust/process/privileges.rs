@@ -33,13 +33,21 @@ use nix::unistd::{setgid, setuid, Gid, Uid};
 /// Errors that can occur during privilege dropping
 #[derive(Debug)]
 pub enum PrivilegeError {
+    /// Failed to lookup user in system database
     UserLookupFailed(String, String),
+    /// Failed to lookup group in system database
     GroupLookupFailed(String, String),
+    /// Failed to set group ID
     SetGidFailed(u32, String),
+    /// Failed to set user ID
     SetUidFailed(u32, String),
+    /// Failed to set or drop capabilities
     CapabilityFailed(String),
+    /// Invalid user or group name provided
     InvalidName,
+    /// Operation requires root privileges
     NotRoot,
+    /// Platform does not support this privilege operation
     UnsupportedPlatform,
 }
 

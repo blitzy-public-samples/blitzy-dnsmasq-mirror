@@ -447,9 +447,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
-    use tracing::{debug, error, info, span, warn, Level};
-    use tracing_subscriber::fmt;
 
     #[test]
     fn test_log_format_from_env() {

@@ -351,10 +351,17 @@ pub fn legal_hostname(name: &str) -> bool {
 /// - [`legal_hostname`] for hostname-specific rules
 #[derive(Debug)]
 pub enum CanonicaliseError {
+    /// Name contains invalid characters or format
     InvalidName,
+    /// Memory allocation failed during conversion
     MemoryAllocation,
 }
 
+/// Convert a domain name to canonical form (lowercase, IDN-encoded if needed)
+///
+/// # Errors
+///
+/// Returns `CanonicaliseError::InvalidName` if the input contains invalid characters.
 pub fn canonicalise(input: &str) -> Result<String, CanonicaliseError> {
     let mut name = String::from(input);
     
@@ -421,10 +428,17 @@ pub fn canonicalise(input: &str) -> Result<String, CanonicaliseError> {
 /// - DNS packet building in `dns::serializer` module
 #[derive(Debug)]
 pub enum Rfc1035Error {
+    /// Output buffer has insufficient space for DNS name encoding
     BufferLimitExceeded,
+    /// Domain name label exceeds 63 bytes or contains invalid characters
     InvalidLabel,
 }
 
+/// Convert a domain name to RFC 1035 wire format with length-prefixed labels
+///
+/// # Errors
+///
+/// Returns `Rfc1035Error` if the buffer is too small or labels are invalid.
 pub fn do_rfc1035_name(
     sval: &str,
     buffer: &mut [u8],

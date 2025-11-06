@@ -33,8 +33,8 @@ use tokio::sync::mpsc::{channel, Receiver};
 /// Provides network interface operations using Linux's Netlink RTNETLINK protocol.
 #[derive(Debug)]
 pub struct LinuxPlatform {
-    /// Netlink socket file descriptor (created during initialization)
-    netlink_fd: Option<OwnedFd>,
+    /// Netlink socket file descriptor (created during initialization, kept for RAII cleanup)
+    _netlink_fd: Option<OwnedFd>,
 }
 
 impl LinuxPlatform {
@@ -65,7 +65,7 @@ impl LinuxPlatform {
         })?;
 
         Ok(Self {
-            netlink_fd: Some(fd),
+            _netlink_fd: Some(fd),
         })
     }
 }

@@ -403,6 +403,7 @@ pub trait Platform: Send + Sync {
 // These use #[cfg] attributes to select the appropriate implementation at compile time,
 // providing zero-cost abstraction over platform differences.
 
+/// Platform-specific implementation type (Linux)
 #[cfg(target_os = "linux")]
 pub type PlatformImpl = linux::LinuxPlatform;
 
