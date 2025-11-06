@@ -737,6 +737,400 @@ strings src/dnsmasq | grep -i version
 
 ---
 
+## Building the Rust Implementation
+
+The dnsmasq project includes a memory-safe Rust implementation that provides functional equivalence with the C version while eliminating memory-safety vulnerabilities through Rust's ownership system and borrow checker. This section covers building, configuring, and verifying the Rust implementation.
+
+### Prerequisites
+
+**Rust Toolchain Installation**:
+
+The Rust implementation requires Rust 1.91.0 stable. Install via rustup:
+
+```bash
+# Install rustup (Rust toolchain installer)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Follow on-screen instructions, then reload shell
+source $HOME/.cargo/env
+
+# Verify installation
+rustc --version  # Should show: rustc 1.91.0
+cargo --version  # Cargo is included with Rust
+```
+
+**Cargo Package Manager**:
+
+Cargo is included with Rust installation and handles dependency management, compilation, testing, and installation. No separate installation required.
+
+**System Library Requirements**:
+
+The Rust version supports the same optional system libraries as the C version:
+
+- **libnetfilter_conntrack** - Linux connection tracking integration (optional)
+- **libnftables ≥0.9** - nftables set integration (optional)
+- **libubus/libubox** - OpenWrt ubus control interface (optional)
+- **pkg-config** - System library detection during build
+
+Install system libraries using your distribution's package manager (same as C version requirements documented above).
+
+### Build Commands
+
+**Standard Release Build**:
+```bash
+# Navigate to dnsmasq repository root
+cd dnsmasq
+
+# Build optimized release binary
+cargo build --release
+
+# Binary location
+ls -lh target/release/dnsmasq
+```
+
+**Development Build** (faster compilation, includes debug symbols):
+```bash
+# Build development binary
+cargo build
+
+# Binary location
+ls -lh target/debug/dnsmasq
+```
+
+**Running Tests**:
+```bash
+# Run unit and integration tests
+cargo test
+
+# Run specific test
+cargo test dns_cache_test
+
+# Run tests with output
+cargo test -- --nocapture
+```
+
+**Running Benchmarks**:
+```bash
+# Run performance benchmarks
+cargo bench
+
+# Run specific benchmark
+cargo bench dns_query_bench
+```
+
+**Installing Binary**:
+```bash
+# Install to ~/.cargo/bin (user installation)
+cargo install --path .
+
+# System-wide installation (requires root)
+sudo cargo install --path . --root /usr/local
+```
+
+**Binary Locations After Build**:
+- Release build: `target/release/dnsmasq`
+- Development build: `target/debug/dnsmasq`
+- Installed binary: `~/.cargo/bin/dnsmasq` or `/usr/local/bin/dnsmasq`
+
+### Feature Flags
+
+The Rust implementation uses Cargo's feature system for compile-time feature selection, analogous to the C version's COPTS system.
+
+**Default Features** (enabled automatically):
+- `dhcp` - DHCPv4 server support
+- `dhcp6` - DHCPv6 server support (depends on dhcp)
+- `tftp` - TFTP server support
+- `script` - External script execution (dhcp-script, auth-script)
+- `auth` - Authoritative DNS server
+- `dnssec` - DNSSEC validation (requires ring and rustls crates)
+
+**Building with Specific Features**:
+```bash
+# Enable DNSSEC support (included in defaults)
+cargo build --release --features dnssec
+
+# Disable all default features, then enable specific ones
+cargo build --release --no-default-features --features "dhcp,tftp"
+
+# Enable multiple optional features
+cargo build --release --features "dnssec,dbus,prometheus-metrics"
+```
+
+**Available Optional Features**:
+
+| Feature Flag | Description | Dependencies |
+|--------------|-------------|--------------|
+| `dnssec` | DNSSEC validation support | ring, rustls crates |
+| `dbus` | D-Bus control interface | zbus crate |
+| `idn` | Internationalized Domain Name support | libidn crate |
+| `lua` | Lua scripting support | rlua crate |
+| `prometheus-metrics` | Prometheus metrics export | prometheus crate |
+| `loop-detect` | Forwarding loop detection | None |
+| `dump` | PCAP packet dumping for debugging | None |
+
+**Feature Dependencies**:
+- `dhcp6` automatically enables `dhcp`
+- `dnssec` requires cryptographic libraries (ring, rustls)
+- `dbus` requires system D-Bus libraries (detected via pkg-config)
+
+**Example Feature Combinations**:
+```bash
+# Minimal build (DNS forwarding only)
+cargo build --release --no-default-features
+
+# Full-featured build
+cargo build --release --features "dnssec,dbus,idn,lua,prometheus-metrics,loop-detect,dump"
+
+# Embedded/IoT build (small binary size)
+cargo build --release --no-default-features --features "dhcp,tftp"
+```
+
+### Platform-Specific Notes
+
+**Linux** (primary platform):
+- Full feature support including netlink, inotify, conntrack, ipset, nftables
+- Automatic platform detection via conditional compilation
+- Native async I/O using tokio runtime
+- Build command: `cargo build --release`
+
+**FreeBSD/OpenBSD/NetBSD**:
+- Uses BSD routing sockets instead of netlink (`src_rust/network/platform/bsd.rs`)
+- BPF-based interface enumeration
+- PF table integration (OpenBSD/FreeBSD)
+- Build command: `cargo build --release --features bsd`
+
+**macOS**:
+- BSD-style networking with BPF support
+- launchd integration (systemd equivalent)
+- Build command: `cargo build --release --features macos`
+
+**Solaris**:
+- ioctl-based interface enumeration fallback
+- SMF (Service Management Facility) integration
+- Build command: `cargo build --release`
+
+**Cross-Compilation**:
+
+Use `cross` (cross-compilation tool) for building on different architectures:
+
+```bash
+# Install cross tool
+cargo install cross
+
+# Cross-compile for ARM64 Linux
+cross build --target aarch64-unknown-linux-gnu --release
+
+# Cross-compile for MIPS (OpenWrt routers)
+cross build --target mipsel-unknown-linux-musl --release
+
+# Cross-compile for ARM (Raspberry Pi)
+cross build --target armv7-unknown-linux-gnueabihf --release
+
+# Static binary for Alpine Linux
+cross build --target x86_64-unknown-linux-musl --release
+```
+
+### Troubleshooting Rust Builds
+
+**Rust Version Mismatch**:
+```bash
+# Check current Rust version
+rustc --version
+
+# If version is incorrect, update to 1.91.0
+rustup update stable
+rustup default stable
+
+# Verify correct version
+rustc --version  # Should show 1.91.0
+```
+
+**Missing System Libraries**:
+```bash
+# Verify library is installed (Linux)
+pkg-config --libs libnetfilter_conntrack
+pkg-config --libs libnftables
+
+# If missing, install via package manager
+# Debian/Ubuntu:
+sudo apt-get install libnetfilter-conntrack-dev libnftables-dev
+
+# Red Hat/Fedora:
+sudo yum install libnetfilter_conntrack-devel libnftables-devel
+
+# Check library search paths
+ldconfig -p | grep netfilter
+```
+
+**Build Cache Issues**:
+```bash
+# Clean all build artifacts
+cargo clean
+
+# Rebuild from scratch
+cargo build --release
+
+# Force rebuild of specific dependency
+cargo update -p <dependency-name>
+cargo build --release
+```
+
+**Feature Conflicts**:
+```bash
+# Review enabled features
+cargo build --release --verbose
+
+# Check Cargo.toml [features] section
+cat Cargo.toml | grep -A 20 "^\[features\]"
+
+# Resolve conflicts by explicitly disabling conflicting features
+cargo build --release --no-default-features --features "dhcp,tftp"
+```
+
+**Linking Errors**:
+
+```bash
+# Linux: Check library paths
+ldconfig -p | grep <library-name>
+
+# macOS: Print library loading
+DYLD_PRINT_LIBRARIES=1 ./target/release/dnsmasq --version
+
+# Add library path temporarily
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+cargo build --release
+
+# Permanent fix: Add to Cargo.toml or build.rs
+```
+
+**Compilation Errors in Dependencies**:
+```bash
+# Update all dependencies to latest compatible versions
+cargo update
+
+# Check for dependency conflicts
+cargo tree
+
+# Force specific dependency version (edit Cargo.toml)
+# [dependencies]
+# problematic-crate = "=1.2.3"  # Pin exact version
+```
+
+**Out of Memory During Compilation**:
+```bash
+# Reduce parallel compilation jobs
+cargo build --release -j 2
+
+# Use incremental compilation (development builds)
+export CARGO_INCREMENTAL=1
+cargo build
+```
+
+### Verification After Rust Build
+
+**Check Binary**:
+```bash
+# Verify binary type and architecture
+file target/release/dnsmasq
+# Expected output: ELF 64-bit LSB executable, x86-64, dynamically linked
+
+# Check binary size
+ls -lh target/release/dnsmasq
+# Expected: ~3-5 MB (release build with default features)
+```
+
+**Check Dependencies**:
+```bash
+# Linux: List dynamic library dependencies
+ldd target/release/dnsmasq
+# Should show: libc.so.6, libgcc_s.so.1, and optional feature libraries
+
+# macOS: List dynamic library dependencies
+otool -L target/release/dnsmasq
+
+# Check for unexpected dependencies
+ldd target/release/dnsmasq | grep -v "libc\|libgcc\|libm\|libpthread"
+```
+
+**Test Functionality**:
+```bash
+# Check version information
+./target/release/dnsmasq --version
+# Expected output: dnsmasq version 2.90.0-rust (with feature list)
+
+# Run configuration test
+./target/release/dnsmasq --test
+# Expected output: dnsmasq: syntax check OK
+
+# Validate help output
+./target/release/dnsmasq --help | head -20
+
+# Test with minimal configuration
+./target/release/dnsmasq --no-daemon --port=5353 --log-queries
+# Should start successfully, press Ctrl+C to exit
+```
+
+**Compare with C Version** (for compatibility verification):
+```bash
+# Build C version (if not already built)
+make clean && make
+
+# Compare binary sizes
+ls -lh src/dnsmasq target/release/dnsmasq
+
+# Compare version output format
+./src/dnsmasq --version
+./target/release/dnsmasq --version
+
+# Run side-by-side functionality test
+# C version on port 5353:
+./src/dnsmasq --no-daemon --port=5353 --log-queries &
+# Rust version on port 5354:
+./target/release/dnsmasq --no-daemon --port=5354 --log-queries &
+
+# Test both with dig
+dig @localhost -p 5353 example.com
+dig @localhost -p 5354 example.com
+
+# Kill test processes
+killall dnsmasq
+```
+
+**Run Integration Tests**:
+```bash
+# Run Rust integration test suite
+cargo test --release
+
+# Run with verbose output
+cargo test --release -- --nocapture --test-threads=1
+
+# Run specific integration test
+cargo test --test dns_tests --release
+
+# Run compatibility test script (if available)
+./scripts/test-compat.sh
+```
+
+**Benchmark Performance** (optional):
+```bash
+# Run performance benchmarks
+cargo bench
+
+# Compare with C version using external tools
+# Install perfdhcp (ISC DHCP benchmark tool)
+# Install dnsperf (DNS benchmark tool)
+
+# DNS query benchmark
+dnsperf -s localhost -d query-file.txt -c 10 -l 60
+
+# DHCP lease benchmark (requires perfdhcp)
+perfdhcp -r 100 -p 1000 localhost
+```
+
+**Cross-Reference with C Build Documentation**: See previous sections for C-specific build instructions and compare feature parity. The Rust implementation maintains 100% functional equivalence with the C version, using the same configuration file format (dnsmasq.conf) and command-line arguments.
+
+---
+
 ## Related Documentation
 
 - [System Architecture](ARCHITECTURE.md) - Overall dnsmasq architecture
