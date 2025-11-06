@@ -567,7 +567,7 @@ pub fn is_interface_allowed(
 /// # Examples
 ///
 /// ```rust,no_run
-/// use dnsmasq::network::interface::watch_interfaces;
+/// use dnsmasq::network::interface::{watch_interfaces, InterfaceEvent};
 /// use tokio_stream::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
