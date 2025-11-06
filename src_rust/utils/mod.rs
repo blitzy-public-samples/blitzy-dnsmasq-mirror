@@ -2,3 +2,4 @@
 pub mod general;
 pub mod dump;
 pub mod pattern_match;
+pub mod rand;
