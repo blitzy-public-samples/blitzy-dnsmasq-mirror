@@ -73,7 +73,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
 use crate::constants::TFTP_BLOCK_SIZE;
-use crate::tftp::protocol::ErrorPacket;
+use crate::tftp::protocol::{ErrorPacket, TransferMode};
 
 /// Maximum block size for TFTP transfers (65464 bytes per RFC 2348)
 /// Limited by UDP payload size to avoid fragmentation
@@ -90,21 +90,9 @@ const MAX_BACKOFF: u8 = 7;
 /// C reference: timeout calculation in check_tftp_listeners()
 const INITIAL_TIMEOUT_SECS: u64 = 1;
 
-/// Transfer mode for TFTP file transfers
-/// C reference: transfer->netascii field and mode string parsing
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransferMode {
-    /// Binary octet mode (no translation)
-    Octet,
-    /// Network ASCII mode with CR-LF translation
-    Netascii,
-    /// Mail mode (obsolete, included for RFC compliance)
-    Mail,
-}
-
 /// TFTP transfer options negotiated with client
 /// C reference: transfer->opt_blocksize, opt_transize fields
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TransferOptions {
     /// Whether blocksize option was requested by client
     pub blocksize_requested: bool,
@@ -122,11 +110,6 @@ impl TransferOptions {
             tsize_requested: false,
             timeout_requested: false,
         }
-    }
-
-    /// Create default transfer options (all disabled)
-    pub fn default() -> Self {
-        Self::new()
     }
 
     /// Create options with blocksize negotiation enabled
@@ -239,11 +222,19 @@ pub enum TransferAction {
 ///
 /// # Example
 ///
-/// ```rust
-/// let file = TftpFile::open("/tftpboot/pxelinux.0", false).await?;
-/// // file.refcount = 1
+/// ```rust,no_run
+/// use dnsmasq::tftp::transfer::TftpFile;
+/// use std::sync::Arc;
+/// use std::path::PathBuf;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let path = PathBuf::from("/tftpboot/pxelinux.0");
+/// let file = TftpFile::open(&path, false).await?;
+/// // file is now wrapped in Arc internally
 /// let file_arc = Arc::new(file);
 /// // Multiple transfers share file_arc via Arc::clone()
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct TftpFile {
@@ -345,7 +336,7 @@ impl TftpFile {
                 let file_uid = std_metadata.uid();
                 if file_uid != uid {
                     return Err(TransferError::PermissionDenied(
-                        format!("File not owned by dnsmasq user (secure mode)")
+                        "File not owned by dnsmasq user (secure mode)".to_string()
                     ));
                 }
             }
@@ -547,7 +538,7 @@ impl Transfer {
         options: TransferOptions,
     ) -> Result<Self, TransferError> {
         // Validate block size
-        if blocksize < MIN_BLOCK_SIZE || blocksize > MAX_BLOCK_SIZE {
+        if !(MIN_BLOCK_SIZE..=MAX_BLOCK_SIZE).contains(&blocksize) {
             return Err(TransferError::InvalidBlockSize(blocksize));
         }
 
