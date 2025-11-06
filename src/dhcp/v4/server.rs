@@ -96,7 +96,7 @@ impl Dhcpv4Server {
         // TODO: Implement full DISCOVER logic
         // For now, return a basic OFFER
         let mut response = Dhcpv4Message::new();
-        response.op = 2; // BOOTREPLY
+        response.set_op(2); // BOOTREPLY
         Some(response)
     }
 
@@ -104,14 +104,14 @@ impl Dhcpv4Server {
     fn handle_request(&mut self, _message: Dhcpv4Message) -> Option<Dhcpv4Message> {
         // TODO: Implement full REQUEST logic
         let mut response = Dhcpv4Message::new();
-        response.op = 2; // BOOTREPLY
+        response.set_op(2); // BOOTREPLY
         Some(response)
     }
 
     /// Handle RELEASE message
     fn handle_release(&mut self, message: Dhcpv4Message) -> Option<Dhcpv4Message> {
         // Find and remove lease
-        let client_addr = message.ciaddr;
+        let client_addr = message.get_ciaddr();
         self.leases.retain(|lease| {
             if let Lease::V4(l) = lease {
                 l.addr != client_addr
@@ -127,7 +127,7 @@ impl Dhcpv4Server {
     fn handle_inform(&mut self, _message: Dhcpv4Message) -> Option<Dhcpv4Message> {
         // TODO: Implement INFORM response
         let mut response = Dhcpv4Message::new();
-        response.op = 2; // BOOTREPLY
+        response.set_op(2); // BOOTREPLY
         Some(response)
     }
 

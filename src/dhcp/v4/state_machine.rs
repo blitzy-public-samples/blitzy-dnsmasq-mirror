@@ -12,7 +12,7 @@
 //!
 //! Replaces state management in C implementation (`src/dhcp.c`).
 
-use super::protocol::Dhcpv4MessageType;
+use super::protocol::{Dhcpv4MessageType, MessageType};
 
 /// DHCPv4 client states (RFC 2131 Section 4.4)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,7 +68,7 @@ impl Dhcpv4StateMachine {
     ///
     /// Expected response message type, or None if no response needed
     pub fn process_message(&mut self, msg_type: Dhcpv4MessageType) -> Option<Dhcpv4MessageType> {
-        use Dhcpv4MessageType::*;
+        use MessageType::*;
         use Dhcpv4State::*;
 
         match (self.state, msg_type) {

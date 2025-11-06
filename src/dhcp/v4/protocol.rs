@@ -82,9 +82,9 @@
 //! let response_bytes = response.serialize()?;
 //! ```
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use bytes::BytesMut;
-use std::io::{Cursor, Write};
+use byteorder::{BigEndian, ReadBytesExt};
+use bytes::{BufMut, BytesMut};
+use std::io::Cursor;
 use std::net::Ipv4Addr;
 use thiserror::Error;
 use tracing::error;
@@ -775,15 +775,15 @@ impl DhcpPacket {
         buffer.put_u8(self.hops);
 
         // Write multi-byte fields in network byte order (big-endian)
-        buffer.write_u32::<BigEndian>(self.xid)?;
-        buffer.write_u16::<BigEndian>(self.secs)?;
-        buffer.write_u16::<BigEndian>(self.flags)?;
+        buffer.put_slice(&self.xid.to_be_bytes());
+        buffer.put_slice(&self.secs.to_be_bytes());
+        buffer.put_slice(&self.flags.to_be_bytes());
 
         // Write IPv4 addresses (4 bytes each, big-endian)
-        buffer.write_u32::<BigEndian>(u32::from(self.ciaddr))?;
-        buffer.write_u32::<BigEndian>(u32::from(self.yiaddr))?;
-        buffer.write_u32::<BigEndian>(u32::from(self.siaddr))?;
-        buffer.write_u32::<BigEndian>(u32::from(self.giaddr))?;
+        buffer.put_slice(&u32::from(self.ciaddr).to_be_bytes());
+        buffer.put_slice(&u32::from(self.yiaddr).to_be_bytes());
+        buffer.put_slice(&u32::from(self.siaddr).to_be_bytes());
+        buffer.put_slice(&u32::from(self.giaddr).to_be_bytes());
 
         // Write client hardware address (16 bytes)
         buffer.extend_from_slice(&self.chaddr);
@@ -1147,6 +1147,65 @@ impl DhcpPacket {
         None
     }
 
+    /// Find a specific DHCP option and return full option bytes (code + length + data)
+    ///
+    /// Similar to find_option but returns the complete option including the code
+    /// and length bytes, which is needed for DhcpOption::parse().
+    ///
+    /// # Arguments
+    ///
+    /// * `option_code` - Option code to search for (e.g., 53 for message type)
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&[u8])` - Full option bytes [code, length, data...]
+    /// * `None` - Option not found
+    fn find_option_full(&self, option_code: u8) -> Option<&[u8]> {
+        // Options start after DHCP magic cookie (first 4 bytes)
+        if self.options.len() < 4 {
+            return None;
+        }
+
+        let mut pos = 4; // Skip magic cookie
+
+        while pos < self.options.len() {
+            let code = self.options[pos];
+
+            // Option 255 (END) marks end of options
+            if code == OPTION_END {
+                break;
+            }
+
+            // Option 0 (PAD) has no length or data
+            if code == OPTION_PAD {
+                pos += 1;
+                continue;
+            }
+
+            // Check if we have room for length byte
+            if pos + 1 >= self.options.len() {
+                break;
+            }
+
+            let len = self.options[pos + 1] as usize;
+
+            // Check if option data fits in remaining space
+            if pos + 2 + len > self.options.len() {
+                break;
+            }
+
+            // Found the option we're looking for - return full option including code and length
+            if code == option_code {
+                return Some(&self.options[pos..pos + 2 + len]);
+            }
+
+            // Move to next option
+            pos += 2 + len;
+        }
+
+        None
+    }
+
     /// Get a specific DHCP option by parsing it into typed enum
     ///
     /// This is a convenience wrapper around `find_option()` that additionally
@@ -1169,8 +1228,8 @@ impl DhcpPacket {
     /// }
     /// ```
     pub fn get_option(&self, option_code: u8) -> Option<DhcpOption> {
-        self.find_option(option_code)
-            .and_then(|data| DhcpOption::parse(option_code, data).ok())
+        self.find_option_full(option_code)
+            .and_then(|data| DhcpOption::parse(data).ok())
     }
 
     /// Get all DHCP options from the packet
@@ -1225,8 +1284,9 @@ impl DhcpPacket {
                 break;
             }
 
-            let data = &self.options[pos + 2..pos + 2 + len];
-            if let Ok(option) = DhcpOption::parse(code, data) {
+            // Pass full option bytes (code + length + data) to parse
+            let full_option = &self.options[pos..pos + 2 + len];
+            if let Ok(option) = DhcpOption::parse(full_option) {
                 options.push(option);
             }
 
@@ -1276,6 +1336,22 @@ impl Default for DhcpPacket {
         Self::new()
     }
 }
+
+// ============================================================================
+// Type Aliases for External API Consistency
+// ============================================================================
+
+/// Type alias for DHCPv4 message/packet structure
+///
+/// This provides a consistent naming convention across the codebase.
+/// External modules can import either `DhcpPacket` or `Dhcpv4Message`.
+pub type Dhcpv4Message = DhcpPacket;
+
+/// Type alias for DHCPv4 message type enum
+///
+/// This provides a consistent naming convention across the codebase.
+/// External modules can import either `MessageType` or `Dhcpv4MessageType`.
+pub type Dhcpv4MessageType = MessageType;
 
 // ============================================================================
 // Unit Tests
