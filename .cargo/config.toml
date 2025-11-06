@@ -1,23 +1,202 @@
+# .cargo/config.toml
+# Cargo build configuration for dnsmasq Rust implementation
+#
+# This file provides platform-specific build settings, linker configurations,
+# compiler flags, and custom profiles to ensure consistent builds across
+# Linux, BSD, macOS, and Solaris platforms.
+#
+# Based on C Makefile CFLAGS: -Wall -W -O2 (line 27)
+# and platform-specific settings from Makefile (lines 54-74)
+
+# ============================================================================
+# Build Configuration
+# ============================================================================
+
 [build]
-# Use all available CPU cores for compilation
-# jobs setting removed - cargo auto-detects optimal value
+# Standard target directory for build artifacts
+target-dir = "target"
 
-[target.x86_64-unknown-linux-gnu]
-# Link against system libraries
-rustflags = ["-C", "link-arg=-Wl,--as-needed"]
-
-[profile.dev]
-# Faster compile times in development
+# Enable incremental compilation for faster rebuilds during development
 incremental = true
-codegen-units = 256
 
+# Enable build pipelining for better parallelization
+# (requires Rust 1.70+, harmless on older versions)
+pipelining = true
+
+# Rust compiler flags matching C compiler warnings and optimization
+# -Wall -W in C → treat warnings seriously in Rust
+rustflags = [
+    "-D", "warnings",           # Treat all warnings as errors (matches -Wall -W)
+    "-W", "unused",             # Warn on unused code
+    "-W", "missing-docs",       # Encourage documentation (not enforced as error)
+]
+
+# ============================================================================
+# Platform-Specific Linker Configurations
+# ============================================================================
+
+# Linux: Security hardening with RELRO and --as-needed
+[target.'cfg(target_os = "linux")']
+linker = "gcc"
+rustflags = [
+    "-C", "link-arg=-Wl,--as-needed",   # Only link libraries that are actually used
+    "-C", "link-arg=-Wl,-z,relro",      # Read-only relocations for security
+    "-C", "link-arg=-Wl,-z,now",        # Full RELRO - resolve all symbols at startup
+]
+
+# FreeBSD: Standard system linker
+[target.'cfg(target_os = "freebsd")']
+linker = "cc"
+
+# OpenBSD: Standard system linker
+[target.'cfg(target_os = "openbsd")']
+linker = "cc"
+
+# NetBSD: Standard system linker
+[target.'cfg(target_os = "netbsd")']
+linker = "cc"
+
+# Solaris/illumos: GCC with special system libraries
+# Based on Makefile line 72: sunos_libs = -lsocket -lnsl -lposix4
+[target.'cfg(target_os = "solaris")']
+linker = "gcc"
+rustflags = [
+    "-C", "link-arg=-lsocket",          # Solaris socket library
+    "-C", "link-arg=-lnsl",             # Solaris name service library
+    "-C", "link-arg=-lposix4",          # Solaris POSIX.4 extensions (timers, etc.)
+]
+
+# macOS: Use clang as the system linker
+[target.'cfg(target_os = "macos")']
+linker = "clang"
+
+# ============================================================================
+# Build Profiles
+# ============================================================================
+
+# Development Profile
+# Optimized for fast compile times and comprehensive debugging
+[profile.dev]
+opt-level = 0                   # No optimization for fastest compile times
+debug = true                    # Full debug symbols for gdb/lldb
+debug-assertions = true         # Enable runtime assertion checks
+overflow-checks = true          # Runtime integer overflow detection
+lto = false                     # No LTO to speed up linking
+incremental = true              # Incremental compilation for faster rebuilds
+codegen-units = 256             # Maximum parallelism for faster compilation
+
+# Release Profile
+# Matches C build optimization (-O2) with Rust enhancements
+# This profile balances optimization with reasonable compile times
 [profile.release]
-# Optimize for size and performance in release
-lto = "fat"
-codegen-units = 1
-opt-level = 3
-strip = "symbols"
+opt-level = 3                   # Maximum optimization (Rust -O3 ≈ C -O2 + more)
+lto = "thin"                    # Thin LTO for good optimization without excessive compile time
+codegen-units = 16              # Moderate parallelism for balanced compile time
+strip = false                   # Keep symbols for debugging production issues
+debug = false                   # No debug info in release builds
+debug-assertions = false        # Disable assertions for performance
+overflow-checks = false         # Disable overflow checks for performance
+panic = "unwind"                # Allow panic unwinding (for cleanup handlers)
+incremental = false             # No incremental compilation in release
+
+# Release with Full LTO Profile
+# Maximum optimization for production deployment
+# Use with: cargo build --profile release-lto
+[profile.release-lto]
+inherits = "release"
+lto = "fat"                     # Full LTO across all crates for maximum optimization
+codegen-units = 1               # Single codegen unit for best optimization
+strip = "symbols"               # Strip symbols to reduce binary size
+opt-level = 3                   # Maximum optimization
+
+# Test Profile
+# Optimized for test execution speed while maintaining debuggability
+[profile.test]
+opt-level = 1                   # Light optimization for faster test execution
+debug = true                    # Debug symbols for test debugging
+debug-assertions = true         # Enable assertions in tests
+overflow-checks = true          # Catch overflow bugs in tests
+incremental = true              # Incremental compilation for test iteration
+
+# Benchmark Profile
+# Optimized for accurate performance measurements
+[profile.bench]
+inherits = "release"
+lto = "thin"                    # Thin LTO for realistic performance
+debug = false                   # No debug info
+strip = false                   # Keep symbols for profiling tools
+
+# ============================================================================
+# Cargo Registry Configuration
+# ============================================================================
 
 [net]
-# Use sparse registry for faster dependency resolution
+# Use Git CLI for fetching (set to true if behind corporate proxy)
 git-fetch-with-cli = false
+
+# Retry failed downloads
+retry = 2
+
+# ============================================================================
+# Terminal Output Configuration
+# ============================================================================
+
+[term]
+# Control verbose output (override with --verbose or --quiet)
+verbose = false
+
+# Colored output: auto, always, never
+color = "auto"
+
+# Terminal width (auto-detect if omitted)
+# width = 120
+
+# ============================================================================
+# Cargo Feature Configuration
+# ============================================================================
+
+# Uncomment to enable specific resolver behavior
+# [resolver]
+# Version 2 resolver (default for Rust 2021 edition)
+# version = "2"
+
+# ============================================================================
+# Platform-Specific Notes
+# ============================================================================
+
+# Linux:
+#   - netlink, inotify, conntrack, ipset, nftables support require system libraries
+#   - D-Bus integration requires libdbus-1-dev
+#   - DNSSEC requires nettle/hogweed libraries
+#
+# BSD (FreeBSD, OpenBSD, NetBSD):
+#   - Uses BPF and routing sockets for network interface enumeration
+#   - PF table integration on OpenBSD/FreeBSD
+#   - Different socket options than Linux
+#
+# macOS:
+#   - Uses BPF for packet capture
+#   - launchd integration for system service
+#   - Different privilege separation model
+#
+# Solaris/illumos:
+#   - Requires special system libraries (-lsocket -lnsl -lposix4)
+#   - Uses ioctl for interface enumeration (fallback from netlink/BPF)
+#   - SMF integration for system service
+
+# ============================================================================
+# Cross-Compilation Support
+# ============================================================================
+
+# To cross-compile for a different target:
+# 1. Install target: rustup target add <target-triple>
+# 2. Install cross-linker for target platform
+# 3. Build: cargo build --target <target-triple>
+#
+# Example targets:
+#   - x86_64-unknown-linux-gnu (Linux x86-64)
+#   - x86_64-unknown-linux-musl (Linux x86-64, static musl libc)
+#   - aarch64-unknown-linux-gnu (Linux ARM64)
+#   - x86_64-unknown-freebsd (FreeBSD x86-64)
+#   - x86_64-apple-darwin (macOS x86-64)
+#   - aarch64-apple-darwin (macOS ARM64 - Apple Silicon)
