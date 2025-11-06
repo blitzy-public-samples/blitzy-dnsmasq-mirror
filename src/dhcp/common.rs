@@ -84,9 +84,9 @@ pub struct ConfigFlags {
     pub decline: bool,
 }
 
-impl ConfigFlags {
+impl Default for ConfigFlags {
     /// Create default configuration flags
-    pub fn default() -> Self {
+    fn default() -> Self {
         Self {
             disable: false,
             has_hostname: false,
