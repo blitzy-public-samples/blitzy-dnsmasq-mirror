@@ -1349,7 +1349,7 @@ pub fn serialize_resource_record(rr: &ResourceRecord, compression: &mut std::col
     let _ = compression;
     
     // Serialize without compression for now
-    if let Err(_) = serialize_rr(rr, &mut buf) {
+    if serialize_rr(rr, &mut buf).is_err() {
         return Vec::new();
     }
     
@@ -1394,7 +1394,7 @@ pub fn build_response_packet(message: &DnsMessage) -> Vec<u8> {
                 truncated_msg.header.flags.tc = true;
                 
                 // Try to fit by removing records from additional, then authority sections
-                while truncated_msg.additional.len() > 0 {
+                while !truncated_msg.additional.is_empty() {
                     truncated_msg.additional.pop();
                     if let Ok(p) = truncated_msg.serialize() {
                         if p.len() <= max_size {
@@ -1403,7 +1403,7 @@ pub fn build_response_packet(message: &DnsMessage) -> Vec<u8> {
                     }
                 }
                 
-                while truncated_msg.authority.len() > 0 {
+                while !truncated_msg.authority.is_empty() {
                     truncated_msg.authority.pop();
                     if let Ok(p) = truncated_msg.serialize() {
                         if p.len() <= max_size {
