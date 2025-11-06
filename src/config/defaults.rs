@@ -568,11 +568,11 @@ pub const DEFAULT_PID_FILE: &str = "/var/run/dnsmasq.pid";
 /// - Android: /data/misc/dhcp/dnsmasq.leases
 ///
 /// **Source**: config.h lines 1489-1510
-#[cfg(all(target_os = "linux", not(target_env = "android")))]
-pub const DEFAULT_LEASE_FILE: &str = "/var/lib/misc/dnsmasq.leases";
-
-#[cfg(target_env = "android")]
+#[cfg(target_os = "android")]
 pub const DEFAULT_LEASE_FILE: &str = "/data/misc/dhcp/dnsmasq.leases";
+
+#[cfg(all(target_os = "linux", not(target_os = "android")))]
+pub const DEFAULT_LEASE_FILE: &str = "/var/lib/misc/dnsmasq.leases";
 
 #[cfg(any(
     target_os = "freebsd",
