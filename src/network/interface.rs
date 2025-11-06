@@ -991,7 +991,7 @@ mod solaris {
 use once_cell::sync::Lazy;
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     
     #[tokio::test]
