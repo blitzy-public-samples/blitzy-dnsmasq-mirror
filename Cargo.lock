@@ -606,6 +606,7 @@ dependencies = [
  "pkg-config",
  "prometheus",
  "proptest",
+ "rand 0.8.5",
  "ring",
  "rlua",
  "rustls",
