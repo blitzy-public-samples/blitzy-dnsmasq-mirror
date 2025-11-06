@@ -163,9 +163,17 @@ impl SlaacManager {
     ///
     /// New SLAAC manager
     pub fn new() -> Self {
+        // Generate pseudo-random ping ID from system time
+        // This is sufficient for DAD purposes (doesn't need cryptographic randomness)
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .subsec_nanos();
+        let ping_id = (nanos & 0xFFFF) as u16;
+        
         Self {
             addresses: Vec::new(),
-            ping_id: rand::random(), // Random 16-bit identifier
+            ping_id,
         }
     }
 
@@ -186,7 +194,7 @@ impl SlaacManager {
     /// # Example
     ///
     /// ```rust
-    /// # use dnsmasq_rs::dhcp::ipv6::slaac::SlaacManager;
+    /// # use dnsmasq::dhcp::ipv6::slaac::SlaacManager;
     /// # use std::net::Ipv6Addr;
     /// let mut manager = SlaacManager::new();
     /// let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
@@ -336,7 +344,7 @@ impl Default for SlaacManager {
 /// # Example
 ///
 /// ```rust
-/// # use dnsmasq_rs::dhcp::ipv6::slaac::mac_to_eui64;
+/// # use dnsmasq::dhcp::ipv6::slaac::mac_to_eui64;
 /// let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
 /// let eui64 = mac_to_eui64(&mac).unwrap();
 /// assert_eq!(eui64, vec![0x02, 0x11, 0x22, 0xFF, 0xFE, 0x33, 0x44, 0x55]);

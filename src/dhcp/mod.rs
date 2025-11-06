@@ -177,7 +177,7 @@ pub use v6::server::Dhcpv6Server;
 
 // IPv6 Router Advertisement re-exports (conditional on ipv6 feature)
 #[cfg(feature = "ipv6")]
-pub use ipv6::radv::send_ra;
+pub use ipv6::radv::{RouterAdvertiser, RouterAdvertisement, PrefixInfo};
 
 // =============================================================================
 // Module Tests
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn test_ipv6_feature_enabled() {
         // Verify IPv6 functionality is available when feature is enabled
-        // send_ra is a function, so we verify it exists by referencing it
-        let _fn_ptr = send_ra;
+        let type_name = std::any::type_name::<RouterAdvertiser>();
+        assert!(type_name.contains("RouterAdvertiser"));
     }
 }
