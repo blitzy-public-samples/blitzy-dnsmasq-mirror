@@ -19,3 +19,7 @@ pub mod runtime;
 
 // Integration module - external system services (D-Bus, ubus, scripts)
 pub mod integration;
+
+// TFTP subsystem - Trivial File Transfer Protocol server
+#[cfg(feature = "tftp")]
+pub mod tftp;

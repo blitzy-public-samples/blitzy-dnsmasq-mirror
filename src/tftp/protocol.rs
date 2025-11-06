@@ -34,7 +34,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use dnsmasq::tftp::protocol::{TftpPacket, RequestPacket, TftpOpcode, TransferMode};
+//! use dnsmasq::tftp::protocol::{TftpPacket, RequestPacket, AckPacket, TftpOpcode, TransferMode};
 //!
 //! // Parse a read request
 //! let packet_data = vec![0, 1, /* RRQ opcode */
@@ -50,6 +50,7 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Write};
+use std::str::FromStr;
 use thiserror::Error;
 
 /// Maximum error message length to ensure packets stay under 512 bytes
@@ -143,16 +144,21 @@ pub enum TransferMode {
     Mail,
 }
 
-impl TransferMode {
+impl FromStr for TransferMode {
+    type Err = ProtocolError;
+
     /// Parse transfer mode from string (case-insensitive)
-    pub fn from_str(s: &str) -> Option<Self> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "netascii" => Some(TransferMode::Netascii),
-            "octet" => Some(TransferMode::Octet),
-            "mail" => Some(TransferMode::Mail),
-            _ => None,
+            "netascii" => Ok(TransferMode::Netascii),
+            "octet" => Ok(TransferMode::Octet),
+            "mail" => Ok(TransferMode::Mail),
+            _ => Err(ProtocolError::InvalidOptions(format!("Invalid transfer mode: {}", s))),
         }
     }
+}
+
+impl TransferMode {
 
     /// Convert transfer mode to string
     pub fn to_str(&self) -> &'static str {
@@ -165,7 +171,7 @@ impl TransferMode {
 }
 
 /// Protocol-level errors during packet parsing or validation
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum ProtocolError {
     /// Invalid or unknown opcode encountered
     #[error("Invalid TFTP opcode: {0}")]
@@ -297,7 +303,7 @@ impl RequestPacket {
             ProtocolError::MalformedPacket("Missing mode null terminator".to_string())
         })?;
 
-        let mode = TransferMode::from_str(&mode_str).ok_or_else(|| {
+        let mode = TransferMode::from_str(&mode_str).map_err(|_| {
             ProtocolError::InvalidOptions(format!("Invalid transfer mode: {}", mode_str))
         })?;
 
@@ -893,9 +899,9 @@ mod tests {
 
     #[test]
     fn test_transfer_mode_parsing() {
-        assert_eq!(TransferMode::from_str("octet"), Some(TransferMode::Octet));
-        assert_eq!(TransferMode::from_str("NETASCII"), Some(TransferMode::Netascii));
-        assert_eq!(TransferMode::from_str("invalid"), None);
+        assert_eq!(TransferMode::from_str("octet"), Ok(TransferMode::Octet));
+        assert_eq!(TransferMode::from_str("NETASCII"), Ok(TransferMode::Netascii));
+        assert!(TransferMode::from_str("invalid").is_err());
         assert_eq!(TransferMode::Octet.to_str(), "octet");
     }
 
