@@ -16,3 +16,6 @@ pub mod config;
 
 // Runtime module - daemon lifecycle and event loop
 pub mod runtime;
+
+// Integration module - external system services (D-Bus, ubus, scripts)
+pub mod integration;
