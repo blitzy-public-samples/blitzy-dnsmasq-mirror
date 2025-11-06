@@ -1,492 +1,889 @@
 // Copyright (c) 2024 dnsmasq-rs Contributors
-// This file is part of the dnsmasq Rust rewrite project.
+// SPDX-License-Identifier: GPL-2.0-or-later
 //
-// This program is free software; you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation; version 2 dated June, 1991, or
-// (at your option) version 3 dated 29 June, 2007.
+// String manipulation utilities providing safe hostname validation, domain name
+// canonicalization, IDN conversion, wildcard pattern matching, hexadecimal parsing,
+// address formatting, and RFC 1035 DNS name encoding.
 //
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU General Public License for more details.
+// Translated from src/util.c string-related functions to memory-safe Rust.
 
-//! String Manipulation and DNS Name Operations
+//! String manipulation utilities for DNS operations
 //!
-//! This module provides string utilities and DNS name operations translated from
-//! the C implementation in `src/util.c`. It includes hostname validation, DNS name
-//! encoding/decoding, wildcard matching, and socket address formatting.
+//! This module provides foundational string operations used throughout dnsmasq subsystems:
+//! - RFC 1035/1123 hostname validation
+//! - Case-insensitive DNS name comparison and subdomain checking
+//! - DNS wire format encoding (length-prefixed labels)
+//! - Internationalized Domain Name (IDN) to ASCII conversion
+//! - Wildcard pattern matching for domain filters
+//! - Hexadecimal parsing with wildcard support (for MAC addresses)
+//! - Socket address formatting for logging
+//! - Safe string operations eliminating buffer overflow vulnerabilities
 //!
-//! # Key Functionality
+//! # Source Mapping from C
 //!
-//! - **Hostname Validation**: RFC-compliant validation of DNS hostnames
-//! - **DNS Name Encoding**: Convert dotted names to DNS wire format
-//! - **String Comparison**: Case-insensitive DNS name comparison
-//! - **Wildcard Matching**: Glob-style pattern matching for domain names
-//! - **Socket Formatting**: Human-readable socket address formatting
-//!
-//! # Source Mapping
-//!
-//! Translated from: `src/util.c` (string-related functions including:
 //! - `legal_hostname()` → `is_legal_hostname()`
 //! - `hostname_isequal()` → `hostname_equal()`
+//! - `hostname_order()` → `hostname_cmp()`
 //! - `hostname_issubdomain()` → `is_subdomain()`
 //! - `wildcard_match()` → `wildcard_match()`
-//! - `to_wire()` → `encode_dns_name()`
+//! - `wildcard_matchn()` → `wildcard_match_prefix()`
+//! - `parse_hex()` → `parse_hex_string()`
+//! - `memcmp_masked()` → `compare_with_mask()`
 //! - `prettyprint_addr()` → `format_socket_addr()`
-//!
-//! # Examples
-//!
-//! ```rust
-//! use dnsmasq::util::string::{is_legal_hostname, hostname_equal, is_subdomain};
-//!
-//! // Validate hostname
-//! assert!(is_legal_hostname("example.com"));
-//! assert!(!is_legal_hostname("-invalid.com"));
-//!
-//! // Case-insensitive comparison
-//! assert!(hostname_equal("Example.COM", "example.com"));
-//!
-//! // Subdomain checking
-//! assert!(is_subdomain("sub.example.com", "example.com"));
-//! ```
+//! - `do_rfc1035_name()` → `encode_dns_name()`
+//! - `canonicalise()` → `canonicalize_hostname()`
+//! - `expand_buf()` → `expand_buffer()`
 
-use std::fmt;
-use std::net::{IpAddr, SocketAddr};
+use std::cmp::Ordering;
+use std::net::SocketAddr;
+use thiserror::Error;
 
-/// Maximum length of a DNS label (63 bytes per RFC 1035)
-const MAX_LABEL_LEN: usize = 63;
+/// Maximum total DNS domain name length per RFC 1035 (253 characters + 2 length bytes)
+pub const MAX_DOMAIN_NAME_LENGTH: usize = 253;
 
-/// Maximum length of a fully qualified domain name (255 bytes per RFC 1035)
-const MAX_DOMAIN_LEN: usize = 255;
+/// Maximum DNS label length per RFC 1035 (63 characters)
+pub const MAX_LABEL_LENGTH: usize = 63;
 
-/// Error types for string operations
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Recommended buffer size for DNS name encoding (256 bytes)
+pub const DNS_NAME_BUFFER_SIZE: usize = 256;
+
+/// Errors related to string validation and manipulation
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum StringError {
-    /// DNS name exceeds maximum length
-    NameTooLong,
-    /// DNS label exceeds maximum length
-    LabelTooLong,
-    /// Invalid character in DNS name
-    InvalidCharacter(char),
-    /// Empty label in DNS name
-    EmptyLabel,
-    /// Invalid name format
+    /// String length is invalid (too short or too long)
+    #[error("Invalid string length: {0}")]
+    InvalidLength(String),
+    
+    /// Empty string where content is required
+    #[error("Empty string not allowed")]
+    EmptyString,
+    
+    /// String exceeds maximum allowed length
+    #[error("String too long: {current} bytes (max {max})")]
+    StringTooLong { current: usize, max: usize },
+}
+
+/// Errors related to hexadecimal parsing
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum ParseError {
+    /// Invalid hexadecimal digit encountered
+    #[error("Invalid hex digit at position {position}: '{character}'")]
+    InvalidHexDigit { position: usize, character: char },
+    
+    /// Invalid format for hex string
+    #[error("Invalid format: {0}")]
     InvalidFormat(String),
+    
+    /// Wildcard mixed with hex digits in same byte
+    #[error("Wildcard '*' cannot be mixed with hex digits in the same byte")]
+    WildcardMixedWithHex,
 }
 
-impl fmt::Display for StringError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StringError::NameTooLong => write!(f, "DNS name exceeds 255 bytes"),
-            StringError::LabelTooLong => write!(f, "DNS label exceeds 63 bytes"),
-            StringError::InvalidCharacter(c) => write!(f, "Invalid character in DNS name: '{}'", c),
-            StringError::EmptyLabel => write!(f, "Empty label in DNS name"),
-            StringError::InvalidFormat(msg) => write!(f, "Invalid name format: {}", msg),
-        }
-    }
+/// Errors related to DNS name encoding
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum DnsNameError {
+    /// Label exceeds 63 bytes (RFC 1035 limit)
+    #[error("Label too long: {length} bytes (max 63)")]
+    LabelTooLong { length: usize },
+    
+    /// Total name exceeds 253 bytes (RFC 1035 limit)
+    #[error("Name too long: {length} bytes (max 253)")]
+    NameTooLong { length: usize },
+    
+    /// Invalid character in domain name
+    #[error("Invalid character in domain name: '{0}'")]
+    InvalidCharacter(char),
+    
+    /// Empty label (consecutive dots or leading/trailing dot)
+    #[error("Empty label in domain name")]
+    EmptyLabel,
 }
 
-impl std::error::Error for StringError {}
+/// Errors related to IDN (Internationalized Domain Names) conversion
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum IdnError {
+    /// IDN to ASCII conversion failed
+    #[error("IDN conversion failed: {0}")]
+    ConversionFailed(String),
+    
+    /// Invalid domain name for IDN processing
+    #[error("Invalid name for IDN conversion")]
+    InvalidName,
+}
 
-/// Validate that a string is a legal DNS hostname.
+/// Validate hostname against RFC 952/1123 hostname rules
 ///
-/// Checks that the hostname contains only valid DNS characters (alphanumeric,
-/// hyphen, underscore, and dot), doesn't start or end with a hyphen or underscore,
-/// and has valid label structure.
+/// Validates that hostname conforms to strict hostname syntax: first label must contain
+/// only alphanumeric characters, hyphens, and underscores (hyphens/underscores not at start).
+/// This is stricter than general domain names and is used for DHCP hostnames.
 ///
 /// # Arguments
 ///
-/// * `name` - The hostname to validate
+/// * `name` - Hostname or FQDN string to validate
 ///
 /// # Returns
 ///
-/// `true` if the hostname is valid, `false` otherwise
+/// `true` if valid hostname per RFC 952/1123 rules, `false` otherwise
 ///
 /// # Examples
 ///
-/// ```rust
-/// use dnsmasq::util::string::is_legal_hostname;
+/// ```
+/// use dnsmasq_rs::util::string::is_legal_hostname;
 ///
-/// assert!(is_legal_hostname("example.com"));
-/// assert!(is_legal_hostname("sub-domain.example.com"));
-/// assert!(!is_legal_hostname("-invalid.com"));
-/// assert!(!is_legal_hostname(""));
+/// assert!(is_legal_hostname("my-server"));
+/// assert!(is_legal_hostname("web1.example.com"));
+/// assert!(!is_legal_hostname("-invalid"));
+/// assert!(!is_legal_hostname("_underscore"));
 /// ```
 ///
-/// # Source
+/// # RFC Compliance
 ///
-/// Translated from: `legal_hostname()` in `src/util.c`
+/// RFC 952 (hostname syntax), RFC 1123 (allows leading digit)
 pub fn is_legal_hostname(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
-
-    // Split into labels and validate each
-    let labels: Vec<&str> = name.split('.').collect();
     
-    for label in labels {
-        // Empty labels are invalid (e.g., "example..com")
-        if label.is_empty() {
-            return false;
-        }
-        
-        // Get first and last characters
-        let first_char = label.chars().next().unwrap(); // Safe because we checked is_empty
-        let last_char = label.chars().last().unwrap();
-        
-        // Labels cannot start or end with hyphen or underscore
-        if first_char == '-' || first_char == '_' {
-            return false;
-        }
-        if last_char == '-' || last_char == '_' {
-            return false;
-        }
-        
-        // All characters must be alphanumeric, hyphen, or underscore
-        for c in label.chars() {
-            if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
+    let mut is_first = true;
+    
+    for c in name.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' => {
+                is_first = false;
+            }
+            '-' | '_' if !is_first => {
+                // Hyphens and underscores allowed after first character
+            }
+            '.' => {
+                // Dot ends first label - if we reached here, first label is valid
+                return true;
+            }
+            _ => {
                 return false;
             }
         }
     }
-
+    
     true
 }
 
-/// Compare two hostnames for equality (case-insensitive).
+/// Safe string copy ensuring destination is always null-terminated
 ///
-/// Performs case-insensitive comparison of DNS hostnames, matching the
-/// behavior of the C implementation's `hostname_isequal()`.
+/// This is a Rust-safe alternative to C's `strncpy()` that guarantees null-termination.
+/// Copies up to `max_len` characters from `src` to `dest` buffer.
 ///
 /// # Arguments
 ///
-/// * `a` - First hostname
-/// * `b` - Second hostname
+/// * `dest` - Mutable destination string buffer
+/// * `src` - Source string to copy
+/// * `max_len` - Maximum number of bytes to copy
 ///
 /// # Returns
 ///
-/// `true` if hostnames are equal (case-insensitive), `false` otherwise
+/// `Ok(())` on success, `Err(StringError)` if string is too long
 ///
 /// # Examples
 ///
-/// ```rust
-/// use dnsmasq::util::string::hostname_equal;
+/// ```no_run
+/// use dnsmasq_rs::util::string::safe_copy;
+///
+/// let mut buffer = String::with_capacity(64);
+/// safe_copy(&mut buffer, "hostname", 64).unwrap();
+/// ```
+///
+/// # Note
+///
+/// In Rust, this function is primarily for compatibility. Native Rust string operations
+/// provide better safety guarantees.
+pub fn safe_copy(dest: &mut String, src: &str, max_len: usize) -> Result<(), StringError> {
+    if src.len() >= max_len {
+        return Err(StringError::StringTooLong {
+            current: src.len(),
+            max: max_len,
+        });
+    }
+    
+    dest.clear();
+    dest.push_str(src);
+    Ok(())
+}
+
+/// Compare two hostnames for equality (case-insensitive)
+///
+/// Simple wrapper around `hostname_cmp()` returning `true` if hostnames are equal.
+/// DNS names are case-insensitive per RFC 1035.
+///
+/// # Arguments
+///
+/// * `a` - First hostname string
+/// * `b` - Second hostname string
+///
+/// # Returns
+///
+/// `true` if hostnames are equal (ignoring case), `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::hostname_equal;
 ///
 /// assert!(hostname_equal("Example.COM", "example.com"));
 /// assert!(hostname_equal("test", "TEST"));
-/// assert!(!hostname_equal("example.com", "example.org"));
+/// assert!(!hostname_equal("different", "names"));
 /// ```
 ///
-/// # Source
+/// # RFC Compliance
 ///
-/// Translated from: `hostname_isequal()` in `src/util.c`
+/// RFC 1035 Section 3.1 (DNS names are case-insensitive)
 pub fn hostname_equal(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
+    hostname_cmp(a, b) == Ordering::Equal
 }
 
-/// Check if one hostname is a subdomain of another.
+/// Compare two hostnames lexicographically (case-insensitive)
 ///
-/// Determines if `subdomain` is a subdomain of `domain`. For example,
-/// "sub.example.com" is a subdomain of "example.com".
+/// Performs case-insensitive lexicographic comparison of DNS hostnames, converting
+/// uppercase ASCII characters to lowercase before comparison. Returns `Ordering` for
+/// sorting and comparison operations.
 ///
 /// # Arguments
 ///
-/// * `subdomain` - The potential subdomain
-/// * `domain` - The parent domain
+/// * `a` - First hostname string
+/// * `b` - Second hostname string
 ///
 /// # Returns
 ///
-/// `true` if `subdomain` is a subdomain of `domain`, `false` otherwise
+/// `Ordering::Less` if a < b, `Ordering::Equal` if a == b, `Ordering::Greater` if a > b
 ///
 /// # Examples
 ///
-/// ```rust
-/// use dnsmasq::util::string::is_subdomain;
+/// ```
+/// use std::cmp::Ordering;
+/// use dnsmasq_rs::util::string::hostname_cmp;
 ///
-/// assert!(is_subdomain("sub.example.com", "example.com"));
-/// assert!(is_subdomain("deep.sub.example.com", "example.com"));
-/// assert!(!is_subdomain("example.com", "example.com")); // Not a subdomain of itself
-/// assert!(!is_subdomain("other.org", "example.com"));
+/// assert_eq!(hostname_cmp("aaa.com", "bbb.com"), Ordering::Less);
+/// assert_eq!(hostname_cmp("Example.COM", "example.com"), Ordering::Equal);
+/// assert_eq!(hostname_cmp("zzz.com", "aaa.com"), Ordering::Greater);
 /// ```
 ///
-/// # Source
+/// # RFC Compliance
 ///
-/// Translated from: `hostname_issubdomain()` in `src/util.c`
-pub fn is_subdomain(subdomain: &str, domain: &str) -> bool {
-    let subdomain_lower = subdomain.to_ascii_lowercase();
-    let domain_lower = domain.to_ascii_lowercase();
+/// RFC 1035 Section 3.1 (DNS names are case-insensitive)
+pub fn hostname_cmp(a: &str, b: &str) -> Ordering {
+    let mut chars_a = a.chars();
+    let mut chars_b = b.chars();
+    
+    loop {
+        match (chars_a.next(), chars_b.next()) {
+            (Some(c1), Some(c2)) => {
+                let c1_lower = c1.to_ascii_lowercase();
+                let c2_lower = c2.to_ascii_lowercase();
+                
+                match c1_lower.cmp(&c2_lower) {
+                    Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+        }
+    }
+}
 
-    // Subdomain must be longer than domain
-    if subdomain_lower.len() <= domain_lower.len() {
+/// Test if child is a subdomain of parent (case-insensitive)
+///
+/// Checks DNS hierarchy relationship by comparing hostnames from right to left.
+/// Returns `true` if `child` is equal to or a subdomain of `parent`.
+/// For example, "www.example.com" is a subdomain of "example.com".
+///
+/// # Arguments
+///
+/// * `child` - Domain name to test (potential subdomain)
+/// * `parent` - Parent domain name
+///
+/// # Returns
+///
+/// `true` if child equals or is subdomain of parent, `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::is_subdomain;
+///
+/// assert!(is_subdomain("www.example.com", "example.com"));
+/// assert!(is_subdomain("example.com", "example.com")); // Equal counts as subdomain
+/// assert!(!is_subdomain("example.org", "example.com"));
+/// assert!(!is_subdomain("badexample.com", "example.com")); // Must be at label boundary
+/// ```
+///
+/// # RFC Compliance
+///
+/// RFC 1035 Section 3.1 (DNS hierarchical namespace)
+pub fn is_subdomain(child: &str, parent: &str) -> bool {
+    // Convert to lowercase for case-insensitive comparison
+    let child_lower = child.to_lowercase();
+    let parent_lower = parent.to_lowercase();
+    
+    // If child is shorter than parent, cannot be subdomain
+    if child_lower.len() < parent_lower.len() {
         return false;
     }
-
-    // Check if subdomain ends with ".domain"
-    if subdomain_lower.ends_with(&format!(".{}", domain_lower)) {
+    
+    // If parent is empty, nothing can be subdomain
+    if parent_lower.is_empty() {
+        return false;
+    }
+    
+    // If equal, it's a match
+    if child_lower == parent_lower {
         return true;
     }
-
+    
+    // Check if child ends with parent and is preceded by a dot
+    if child_lower.ends_with(&parent_lower) {
+        let prefix_len = child_lower.len() - parent_lower.len();
+        if prefix_len > 0 {
+            // Must be preceded by a dot for valid subdomain
+            return child_lower.as_bytes()[prefix_len - 1] == b'.';
+        }
+    }
+    
     false
 }
 
-/// Match a string against a wildcard pattern.
+/// Match string against simple wildcard pattern
 ///
-/// Supports glob-style wildcard matching with '*' matching any sequence of characters.
+/// Compares string against pattern containing optional asterisk (*) wildcard.
+/// Asterisk matches any remaining characters. Returns `true` if match successful.
+/// This is simple wildcard matching, not full regex or glob patterns.
 ///
 /// # Arguments
 ///
-/// * `pattern` - The pattern to match against (may contain '*' wildcards)
-/// * `text` - The text to match
+/// * `pattern` - Pattern string containing optional '*' wildcard
+/// * `text` - String to test against pattern
 ///
 /// # Returns
 ///
-/// `true` if the text matches the pattern, `false` otherwise
+/// `true` if text matches pattern, `false` otherwise
 ///
 /// # Examples
 ///
-/// ```rust
-/// use dnsmasq::util::string::wildcard_match;
-///
-/// assert!(wildcard_match("*.example.com", "sub.example.com"));
-/// assert!(wildcard_match("test*", "test123"));
-/// assert!(wildcard_match("*", "anything"));
-/// assert!(!wildcard_match("*.com", "example.org"));
 /// ```
+/// use dnsmasq_rs::util::string::wildcard_match;
 ///
-/// # Source
-///
-/// Translated from: `wildcard_match()` in `src/util.c`
+/// assert!(wildcard_match("*.example.com", "www.example.com"));
+/// assert!(wildcard_match("test*", "test123"));
+/// assert!(wildcard_match("exact", "exact"));
+/// assert!(!wildcard_match("abc", "def"));
+/// ```
 pub fn wildcard_match(pattern: &str, text: &str) -> bool {
-    wildcard_match_impl(pattern.as_bytes(), text.as_bytes())
+    let mut pattern_chars = pattern.chars();
+    let mut text_chars = text.chars();
+    
+    loop {
+        match (pattern_chars.next(), text_chars.next()) {
+            (Some('*'), _) => return true, // Wildcard matches rest
+            (Some(p), Some(t)) if p == t => continue,
+            (Some(_), Some(_)) => return false, // Mismatch
+            (None, None) => return true, // Both exhausted
+            _ => return false,
+        }
+    }
 }
 
-/// Internal implementation of wildcard matching using byte slices.
-fn wildcard_match_impl(pattern: &[u8], text: &[u8]) -> bool {
-    let mut p_idx = 0;
-    let mut t_idx = 0;
-    let mut star_idx = None;
-    let mut match_idx = 0;
+/// Match string against wildcard pattern with length limit
+///
+/// Like `wildcard_match()` but compares at most `max_labels` characters, similar to
+/// `strncmp()`. Returns `true` if the first `max_labels` characters match the pattern.
+/// If characters are exhausted before mismatch or wildcard, returns `true`.
+///
+/// # Arguments
+///
+/// * `pattern` - Pattern string containing optional '*' wildcard
+/// * `text` - String to test against pattern
+/// * `max_labels` - Maximum number of characters to compare
+///
+/// # Returns
+///
+/// `true` if match successful within `max_labels` characters, `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::wildcard_match_prefix;
+///
+/// assert!(wildcard_match_prefix("prefix*", "prefix-suffix", 6));
+/// assert!(wildcard_match_prefix("test", "test123", 4));
+/// ```
+pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bool {
+    let mut pattern_chars = pattern.chars();
+    let mut text_chars = text.chars();
+    let mut count = 0;
+    
+    while count < max_labels {
+        match (pattern_chars.next(), text_chars.next()) {
+            (Some('*'), _) => return true,
+            (Some(p), Some(t)) if p == t => {
+                count += 1;
+                continue;
+            }
+            (Some(_), Some(_)) => return false,
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+    
+    true // Exhausted max_labels without mismatch
+}
 
-    while t_idx < text.len() {
-        if p_idx < pattern.len() && (pattern[p_idx] == text[t_idx] || pattern[p_idx] == b'?') {
-            // Characters match or pattern has '?'
-            p_idx += 1;
-            t_idx += 1;
-        } else if p_idx < pattern.len() && pattern[p_idx] == b'*' {
-            // Wildcard '*' - remember position
-            star_idx = Some(p_idx);
-            match_idx = t_idx;
-            p_idx += 1;
-        } else if let Some(star) = star_idx {
-            // Backtrack to last '*' and try matching one more character
-            p_idx = star + 1;
-            match_idx += 1;
-            t_idx = match_idx;
+/// Parse hexadecimal string with optional wildcard support
+///
+/// Converts hex string (e.g., "01:23:45:67:89:ab") to byte array. Supports colon,
+/// hyphen, or no separator. Handles '*' wildcard characters, returning separate
+/// wildcard mask indicating which bytes are wildcards.
+///
+/// # Arguments
+///
+/// * `input` - Hex string to parse (with optional separators)
+/// * `separator` - Expected separator character (or None for no separator)
+///
+/// # Returns
+///
+/// `Ok((bytes, wildcard_mask))` where `wildcard_mask` is `Some(mask)` if wildcards present,
+/// `Err(ParseError)` on parse failure
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::parse_hex_string;
+///
+/// let (bytes, mask) = parse_hex_string("01:02:*:04", Some(':')).unwrap();
+/// assert_eq!(bytes, vec![0x01, 0x02, 0x00, 0x04]);
+/// assert_eq!(mask, Some(vec![false, false, true, false]));
+///
+/// let (bytes2, mask2) = parse_hex_string("0a0b0c", None).unwrap();
+/// assert_eq!(bytes2, vec![0x0a, 0x0b, 0x0c]);
+/// assert_eq!(mask2, None);
+/// ```
+pub fn parse_hex_string(
+    input: &str,
+    separator: Option<char>,
+) -> Result<(Vec<u8>, Option<Vec<bool>>), ParseError> {
+    let mut bytes = Vec::new();
+    let mut wildcard_mask = Vec::new();
+    let mut has_wildcards = false;
+    
+    let parts: Vec<&str> = if let Some(sep) = separator {
+        input.split(sep).collect()
+    } else {
+        // No separator - split into 2-character chunks
+        if input.len() % 2 != 0 {
+            return Err(ParseError::InvalidFormat(
+                "Hex string without separator must have even length".to_string(),
+            ));
+        }
+        input
+            .as_bytes()
+            .chunks(2)
+            .map(|chunk| std::str::from_utf8(chunk).unwrap())
+            .collect()
+    };
+    
+    for (pos, part) in parts.iter().enumerate() {
+        if part.trim().is_empty() {
+            continue;
+        }
+        
+        if *part == "*" {
+            bytes.push(0); // Placeholder for wildcard
+            wildcard_mask.push(true);
+            has_wildcards = true;
         } else {
-            // No match
+            // Check for wildcards mixed with hex
+            if part.contains('*') {
+                return Err(ParseError::WildcardMixedWithHex);
+            }
+            
+            // Parse hex digits
+            let byte = u8::from_str_radix(part, 16).map_err(|_| ParseError::InvalidHexDigit {
+                position: pos,
+                character: part.chars().next().unwrap_or('?'),
+            })?;
+            
+            bytes.push(byte);
+            wildcard_mask.push(false);
+        }
+    }
+    
+    Ok((bytes, if has_wildcards { Some(wildcard_mask) } else { None }))
+}
+
+/// Compare byte arrays with wildcard mask support
+///
+/// Compares arrays `a` and `b` byte-by-byte, skipping comparison where mask indicates
+/// wildcard. Returns `true` if all non-wildcard bytes match.
+///
+/// # Arguments
+///
+/// * `a` - First byte array
+/// * `b` - Second byte array
+/// * `mask` - Boolean mask array (true = wildcard/skip comparison)
+///
+/// # Returns
+///
+/// `true` if all non-wildcard bytes match, `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::compare_with_mask;
+///
+/// let mac1 = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+/// let mac2 = vec![0x01, 0xFF, 0x03, 0x04, 0x05, 0x06];
+/// let mask = vec![false, true, false, false, false, false]; // Wildcard 2nd byte
+///
+/// assert!(compare_with_mask(&mac1, &mac2, &mask));
+/// ```
+pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
+    if a.len() != b.len() || a.len() != mask.len() {
+        return false;
+    }
+    
+    for i in 0..a.len() {
+        if !mask[i] && a[i] != b[i] {
             return false;
         }
     }
-
-    // Consume remaining '*' in pattern
-    while p_idx < pattern.len() && pattern[p_idx] == b'*' {
-        p_idx += 1;
-    }
-
-    // Match if we've consumed entire pattern
-    p_idx == pattern.len()
-}
-
-/// Encode a domain name into DNS wire format.
-///
-/// Converts a dotted domain name (e.g., "example.com") into DNS wire format
-/// with length-prefixed labels (e.g., \x07example\x03com\x00).
-///
-/// # Arguments
-///
-/// * `name` - The domain name to encode
-///
-/// # Returns
-///
-/// A `Result` containing the encoded name as a `Vec<u8>`, or a `StringError`
-///
-/// # Errors
-///
-/// - `StringError::NameTooLong` if the name exceeds 255 bytes
-/// - `StringError::LabelTooLong` if any label exceeds 63 bytes
-/// - `StringError::EmptyLabel` if the name contains empty labels
-///
-/// # Examples
-///
-/// ```rust
-/// use dnsmasq::util::string::encode_dns_name;
-///
-/// let encoded = encode_dns_name("example.com").unwrap();
-/// // encoded = [7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0]
-/// ```
-///
-/// # Source
-///
-/// Translated from: `to_wire()` in `src/util.c`
-pub fn encode_dns_name(name: &str) -> Result<Vec<u8>, StringError> {
-    let mut result = Vec::with_capacity(name.len() + 2);
     
-    if name.is_empty() {
-        result.push(0); // Root domain
-        return Ok(result);
-    }
-
-    for label in name.split('.') {
-        if label.is_empty() {
-            return Err(StringError::EmptyLabel);
-        }
-
-        if label.len() > MAX_LABEL_LEN {
-            return Err(StringError::LabelTooLong);
-        }
-
-        // Add label length
-        result.push(label.len() as u8);
-        
-        // Add label bytes
-        result.extend_from_slice(label.as_bytes());
-    }
-
-    // Add terminating zero byte
-    result.push(0);
-
-    if result.len() > MAX_DOMAIN_LEN {
-        return Err(StringError::NameTooLong);
-    }
-
-    Ok(result)
+    true
 }
 
-/// Format a socket address as a human-readable string.
+/// Format socket address as human-readable string
 ///
-/// Converts a `SocketAddr` into a human-readable string with IP address and port.
+/// Converts `SocketAddr` (IPv4 or IPv6) to string representation. For IPv6 addresses,
+/// uses standard bracket notation with port.
 ///
 /// # Arguments
 ///
-/// * `addr` - The socket address to format
+/// * `addr` - Socket address to format
 ///
 /// # Returns
 ///
-/// A string representation of the socket address
+/// Formatted address string (e.g., "192.168.1.1:53" or "[2001:db8::1]:53")
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-/// use dnsmasq::util::string::format_socket_addr;
+/// use dnsmasq_rs::util::string::format_socket_addr;
 ///
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 /// assert_eq!(format_socket_addr(&addr), "192.168.1.1:53");
 /// ```
-///
-/// # Source
-///
-/// Translated from: `prettyprint_addr()` in `src/util.c`
 pub fn format_socket_addr(addr: &SocketAddr) -> String {
-    match addr {
-        SocketAddr::V4(v4) => format!("{}:{}", v4.ip(), v4.port()),
-        SocketAddr::V6(v6) => format!("[{}]:{}", v6.ip(), v6.port()),
+    // Rust's SocketAddr Display trait already handles this correctly
+    addr.to_string()
+}
+
+/// Encode domain name in RFC 1035 wire format
+///
+/// Converts dot-separated domain name string to DNS wire format where each label
+/// is prefixed by its length byte. For example, "example.com" becomes:
+/// `[0x07, 'e','x','a','m','p','l','e', 0x03, 'c','o','m', 0x00]`
+///
+/// # Arguments
+///
+/// * `domain` - Dot-separated domain name string
+///
+/// # Returns
+///
+/// `Ok(Vec<u8>)` containing wire-format encoded name with terminating zero byte,
+/// `Err(DnsNameError)` if validation fails
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::encode_dns_name;
+///
+/// let encoded = encode_dns_name("example.com").unwrap();
+/// assert_eq!(encoded[0], 7); // Length of "example"
+/// assert_eq!(&encoded[1..8], b"example");
+/// assert_eq!(encoded[8], 3); // Length of "com"
+/// assert_eq!(&encoded[9..12], b"com");
+/// assert_eq!(encoded[12], 0); // Terminating zero
+/// ```
+///
+/// # RFC Compliance
+///
+/// RFC 1035 Section 3.1 (Name space definitions and DNS message format)
+pub fn encode_dns_name(domain: &str) -> Result<Vec<u8>, DnsNameError> {
+    let mut result = Vec::with_capacity(domain.len() + 2);
+    let mut total_length = 0;
+    
+    // Split by dots and encode each label
+    for label in domain.split('.') {
+        if label.is_empty() {
+            return Err(DnsNameError::EmptyLabel);
+        }
+        
+        let label_bytes = label.as_bytes();
+        if label_bytes.len() > MAX_LABEL_LENGTH {
+            return Err(DnsNameError::LabelTooLong {
+                length: label_bytes.len(),
+            });
+        }
+        
+        // Check for invalid characters
+        for &byte in label_bytes {
+            if !byte.is_ascii_alphanumeric() && byte != b'-' && byte != b'_' {
+                return Err(DnsNameError::InvalidCharacter(byte as char));
+            }
+        }
+        
+        // Write length byte
+        result.push(label_bytes.len() as u8);
+        // Write label bytes
+        result.extend_from_slice(label_bytes);
+        
+        total_length += 1 + label_bytes.len();
+    }
+    
+    if total_length > MAX_DOMAIN_NAME_LENGTH {
+        return Err(DnsNameError::NameTooLong {
+            length: total_length,
+        });
+    }
+    
+    // Add terminating zero byte
+    result.push(0);
+    
+    Ok(result)
+}
+
+/// Canonicalize hostname with optional IDN (Internationalized Domain Names) conversion
+///
+/// Converts domain name to canonical form suitable for DNS queries. For ASCII names,
+/// returns the input string. For names with non-ASCII characters (when IDN support enabled),
+/// converts to ASCII-compatible encoding (Punycode) per IDNA2008.
+///
+/// This function is feature-gated on the "idn" feature flag.
+///
+/// # Arguments
+///
+/// * `name` - Input domain name string (may contain non-ASCII if IDN support enabled)
+///
+/// # Returns
+///
+/// `Ok(String)` containing canonical ASCII domain name,
+/// `Err(IdnError)` on invalid names or conversion failure
+///
+/// # Examples
+///
+/// ```no_run
+/// use dnsmasq_rs::util::string::canonicalize_hostname;
+///
+/// let canon = canonicalize_hostname("münchen.de").unwrap();
+/// // With IDN support: "xn--mnchen-3ya.de"
+/// // Without IDN support: "münchen.de" (unchanged)
+/// ```
+///
+/// # RFC Compliance
+///
+/// RFC 5890 (IDNA2008)
+#[cfg(feature = "idn")]
+pub fn canonicalize_hostname(name: &str) -> Result<String, IdnError> {
+    // Check if name contains non-ASCII characters
+    if name.is_ascii() {
+        return Ok(name.to_string());
+    }
+    
+    // Use idna crate for conversion
+    idna::domain_to_ascii(name).map_err(|e| IdnError::ConversionFailed(e.to_string()))
+}
+
+/// Canonicalize hostname (IDN support disabled)
+///
+/// When the "idn" feature is not enabled, this function simply returns the input string
+/// unchanged. Non-ASCII names will not be converted to Punycode.
+#[cfg(not(feature = "idn"))]
+pub fn canonicalize_hostname(name: &str) -> Result<String, IdnError> {
+    Ok(name.to_string())
+}
+
+/// Expand buffer to at least specified size
+///
+/// Ensures vector has capacity for at least `required_size` bytes. If current capacity
+/// is insufficient, reserves additional space. This function never shrinks the buffer.
+///
+/// # Arguments
+///
+/// * `buf` - Mutable reference to vector to expand
+/// * `required_size` - Required minimum capacity in bytes
+///
+/// # Examples
+///
+/// ```
+/// use dnsmasq_rs::util::string::expand_buffer;
+///
+/// let mut buffer = Vec::with_capacity(64);
+/// expand_buffer(&mut buffer, 1024);
+/// assert!(buffer.capacity() >= 1024);
+/// ```
+///
+/// # Note
+///
+/// In Rust, `Vec::reserve()` provides similar functionality with automatic growth.
+/// This function is provided for API compatibility with the C version.
+pub fn expand_buffer(buf: &mut Vec<u8>, required_size: usize) {
+    if buf.capacity() < required_size {
+        buf.reserve(required_size - buf.len());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
+    
     #[test]
     fn test_is_legal_hostname() {
         // Valid hostnames
+        assert!(is_legal_hostname("example"));
         assert!(is_legal_hostname("example.com"));
-        assert!(is_legal_hostname("sub.example.com"));
-        assert!(is_legal_hostname("my-server.example.com"));
-        assert!(is_legal_hostname("my_server.example.com"));
-        assert!(is_legal_hostname("server123.example.com"));
-
+        assert!(is_legal_hostname("my-server"));
+        assert!(is_legal_hostname("web1"));
+        assert!(is_legal_hostname("test.example.com"));
+        
         // Invalid hostnames
-        assert!(!is_legal_hostname("")); // Empty
-        assert!(!is_legal_hostname("-invalid.com")); // Starts with hyphen
-        assert!(!is_legal_hostname("_invalid.com")); // Starts with underscore
-        assert!(!is_legal_hostname("invalid-.com")); // Ends with hyphen
-        assert!(!is_legal_hostname("in valid.com")); // Contains space
-        assert!(!is_legal_hostname("invalid@.com")); // Invalid character
+        assert!(!is_legal_hostname(""));
+        assert!(!is_legal_hostname("-invalid"));
+        assert!(!is_legal_hostname("_underscore"));
+        assert!(!is_legal_hostname("invalid..com"));
     }
-
+    
     #[test]
     fn test_hostname_equal() {
         assert!(hostname_equal("example.com", "example.com"));
         assert!(hostname_equal("Example.COM", "example.com"));
-        assert!(hostname_equal("EXAMPLE.COM", "example.com"));
-        assert!(!hostname_equal("example.com", "example.org"));
-        assert!(!hostname_equal("sub.example.com", "example.com"));
+        assert!(hostname_equal("TEST", "test"));
+        assert!(!hostname_equal("different", "names"));
     }
-
+    
+    #[test]
+    fn test_hostname_cmp() {
+        assert_eq!(hostname_cmp("aaa", "bbb"), Ordering::Less);
+        assert_eq!(hostname_cmp("bbb", "aaa"), Ordering::Greater);
+        assert_eq!(hostname_cmp("test", "test"), Ordering::Equal);
+        assert_eq!(hostname_cmp("Test", "test"), Ordering::Equal);
+    }
+    
     #[test]
     fn test_is_subdomain() {
-        assert!(is_subdomain("sub.example.com", "example.com"));
-        assert!(is_subdomain("deep.sub.example.com", "example.com"));
-        assert!(is_subdomain("a.b.c.d.example.com", "example.com"));
-        
-        assert!(!is_subdomain("example.com", "example.com")); // Same domain
-        assert!(!is_subdomain("other.org", "example.com")); // Different domain
-        assert!(!is_subdomain("example.com", "sub.example.com")); // Parent not subdomain
+        assert!(is_subdomain("www.example.com", "example.com"));
+        assert!(is_subdomain("example.com", "example.com"));
+        assert!(is_subdomain("sub.sub.example.com", "example.com"));
+        assert!(!is_subdomain("example.org", "example.com"));
+        assert!(!is_subdomain("badexample.com", "example.com"));
+        assert!(!is_subdomain("short", "longer.name"));
     }
-
+    
     #[test]
     fn test_wildcard_match() {
-        assert!(wildcard_match("*.example.com", "sub.example.com"));
-        assert!(wildcard_match("*.example.com", "deep.sub.example.com"));
-        assert!(wildcard_match("test*", "test"));
+        assert!(wildcard_match("*.example.com", "www.example.com"));
         assert!(wildcard_match("test*", "test123"));
-        assert!(wildcard_match("*test", "mytest"));
+        assert!(wildcard_match("exact", "exact"));
         assert!(wildcard_match("*", "anything"));
-        assert!(wildcard_match("a*c", "abc"));
-        assert!(wildcard_match("a*c", "abxyzc"));
-
-        assert!(!wildcard_match("*.com", "example.org"));
-        assert!(!wildcard_match("test", "test123"));
-        assert!(!wildcard_match("test*", "tes"));
+        assert!(!wildcard_match("abc", "def"));
+        assert!(!wildcard_match("test", "testing"));
     }
-
+    
+    #[test]
+    fn test_wildcard_match_prefix() {
+        assert!(wildcard_match_prefix("prefix*", "prefix-suffix", 6));
+        assert!(wildcard_match_prefix("test", "test123", 4));
+        assert!(wildcard_match_prefix("abc", "abc", 3));
+        assert!(!wildcard_match_prefix("abc", "def", 3));
+    }
+    
+    #[test]
+    fn test_parse_hex_string() {
+        // With colon separator
+        let (bytes, mask) = parse_hex_string("01:02:03", Some(':')).unwrap();
+        assert_eq!(bytes, vec![0x01, 0x02, 0x03]);
+        assert_eq!(mask, None);
+        
+        // With wildcard
+        let (bytes, mask) = parse_hex_string("01:*:03", Some(':')).unwrap();
+        assert_eq!(bytes, vec![0x01, 0x00, 0x03]);
+        assert_eq!(mask, Some(vec![false, true, false]));
+        
+        // Without separator
+        let (bytes, mask) = parse_hex_string("0a0b0c", None).unwrap();
+        assert_eq!(bytes, vec![0x0a, 0x0b, 0x0c]);
+        assert_eq!(mask, None);
+        
+        // Invalid hex
+        assert!(parse_hex_string("0g", None).is_err());
+    }
+    
+    #[test]
+    fn test_compare_with_mask() {
+        let a = vec![0x01, 0x02, 0x03, 0x04];
+        let b = vec![0x01, 0xFF, 0x03, 0x04];
+        let mask = vec![false, true, false, false];
+        
+        assert!(compare_with_mask(&a, &b, &mask));
+        
+        let mask_no_wild = vec![false, false, false, false];
+        assert!(!compare_with_mask(&a, &b, &mask_no_wild));
+    }
+    
     #[test]
     fn test_encode_dns_name() {
-        // Simple domain
         let encoded = encode_dns_name("example.com").unwrap();
         assert_eq!(encoded[0], 7); // Length of "example"
         assert_eq!(&encoded[1..8], b"example");
         assert_eq!(encoded[8], 3); // Length of "com"
         assert_eq!(&encoded[9..12], b"com");
-        assert_eq!(encoded[12], 0); // Terminator
-
-        // Root domain
-        let encoded = encode_dns_name("").unwrap();
-        assert_eq!(encoded, vec![0]);
-
+        assert_eq!(encoded[12], 0); // Terminating zero
+        
+        // Empty label
+        assert!(encode_dns_name("example..com").is_err());
+        
         // Label too long
         let long_label = "a".repeat(64);
         assert!(matches!(
             encode_dns_name(&long_label),
-            Err(StringError::LabelTooLong)
+            Err(DnsNameError::LabelTooLong { .. })
         ));
     }
-
+    
     #[test]
     fn test_format_socket_addr() {
-        // IPv4
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
-        assert_eq!(format_socket_addr(&addr), "192.168.1.1:53");
-
-        // IPv6
-        let addr = SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
-            53,
-        );
-        assert_eq!(format_socket_addr(&addr), "[2001:db8::1]:53");
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        
+        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
+        assert_eq!(format_socket_addr(&addr4), "192.168.1.1:53");
+        
+        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)), 53);
+        assert_eq!(format_socket_addr(&addr6), "[2001:db8::1]:53");
+    }
+    
+    #[test]
+    fn test_expand_buffer() {
+        let mut buf = Vec::with_capacity(10);
+        assert!(buf.capacity() >= 10);
+        
+        expand_buffer(&mut buf, 100);
+        assert!(buf.capacity() >= 100);
+        
+        // Should not shrink
+        expand_buffer(&mut buf, 50);
+        assert!(buf.capacity() >= 100);
+    }
+    
+    #[test]
+    fn test_canonicalize_hostname_ascii() {
+        let result = canonicalize_hostname("example.com").unwrap();
+        assert_eq!(result, "example.com");
     }
 }
