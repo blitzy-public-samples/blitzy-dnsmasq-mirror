@@ -119,7 +119,7 @@
 //!
 //! // 1. Initialize logging first (for error reporting)
 //! let log_config = LogConfig::default();
-//! init_logging(log_config)?;
+//! init_logging(&log_config)?;
 //!
 //! // 2. Initialize cryptographic RNG (for DNS security)
 //! init_rng()?;
