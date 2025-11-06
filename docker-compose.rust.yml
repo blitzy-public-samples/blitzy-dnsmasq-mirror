@@ -1,0 +1,270 @@
+# Docker Compose configuration for dnsmasq Rust implementation
+# Version: 3.8 (requires Docker Compose 1.28.0+)
+#
+# This configuration provides a containerized deployment of dnsmasq-rs with:
+# - DNS forwarding and caching (ports 53/tcp, 53/udp)
+# - DHCPv4 server (port 67/udp)
+# - TFTP server for network boot (port 69/udp)
+# - Persistent lease storage
+# - Configuration via mounted config file or environment variables
+# - Health monitoring
+#
+# Usage:
+#   docker-compose -f docker-compose.rust.yml up -d
+#   docker-compose -f docker-compose.rust.yml logs -f
+#   docker-compose -f docker-compose.rust.yml down
+
+version: '3.8'
+
+services:
+  dnsmasq-rs:
+    # Build configuration
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+      args:
+        # Alpine Linux version per Section 0.5.5
+        # Supports: 3.19.9, 3.20.8, 3.21.5, 3.22.2
+        ALPINE_VERSION: "3.22.2"
+        # Rust version per Agent Action Plan
+        RUST_VERSION: "1.91.0"
+    
+    # Container name for easy reference
+    container_name: dnsmasq-rs
+    
+    # Image name and tag
+    image: dnsmasq-rs:latest
+    
+    # Network mode: Use host network for direct interface access
+    # Alternative: bridge mode with port mappings (see ports section)
+    # network_mode: host
+    
+    # Port mappings (used when not in host network mode)
+    ports:
+      # DNS service
+      - "53:53/tcp"     # DNS over TCP
+      - "53:53/udp"     # DNS over UDP (primary)
+      
+      # DHCP service
+      - "67:67/udp"     # DHCPv4 server
+      - "547:547/udp"   # DHCPv6 server (if enabled)
+      
+      # TFTP service
+      - "69:69/udp"     # TFTP for PXE boot
+    
+    # Volume mounts for configuration and persistence
+    volumes:
+      # Configuration file (read-only)
+      # Mount your dnsmasq.conf here for custom configuration
+      - type: bind
+        source: ./config/dnsmasq.conf
+        target: /etc/dnsmasq.conf
+        read_only: true
+      
+      # Additional configuration directory (optional)
+      - type: bind
+        source: ./config/dnsmasq.d
+        target: /etc/dnsmasq.d
+        read_only: true
+      
+      # DHCP lease database (persistent storage)
+      - type: bind
+        source: ./data/dnsmasq.leases
+        target: /var/lib/misc/dnsmasq.leases
+        read_only: false
+      
+      # Local DNS records (/etc/hosts format)
+      - type: bind
+        source: ./config/hosts
+        target: /etc/hosts.dnsmasq
+        read_only: true
+      
+      # TFTP root directory for network boot files
+      - type: bind
+        source: ./data/tftp
+        target: /var/lib/tftpboot
+        read_only: true
+      
+      # Log directory (if file logging is enabled)
+      - type: bind
+        source: ./logs
+        target: /var/log/dnsmasq
+        read_only: false
+    
+    # Environment variables for runtime configuration
+    # These override settings in dnsmasq.conf
+    environment:
+      # Logging configuration
+      - RUST_LOG=info                    # Log level: trace, debug, info, warn, error
+      - DNSMASQ_LOG_QUERIES=false        # Log all DNS queries
+      - DNSMASQ_LOG_DHCP=true            # Log DHCP transactions
+      
+      # DNS configuration
+      - DNSMASQ_PORT=53                  # DNS port (0 to disable DNS)
+      - DNSMASQ_DOMAIN_NEEDED=true       # Don't forward plain names
+      - DNSMASQ_BOGUS_PRIV=true          # Don't forward private IP reverse lookups
+      - DNSMASQ_NO_RESOLV=false          # Don't read /etc/resolv.conf
+      - DNSMASQ_SERVER=8.8.8.8           # Upstream DNS server
+      - DNSMASQ_CACHE_SIZE=1000          # DNS cache size (entries)
+      
+      # DHCP configuration
+      - DNSMASQ_DHCP_RANGE=192.168.1.50,192.168.1.150,12h  # DHCP range and lease time
+      - DNSMASQ_DHCP_OPTION=option:router,192.168.1.1      # Default gateway
+      - DNSMASQ_DHCP_OPTION_DNS=option:dns-server,192.168.1.1  # DNS server for clients
+      
+      # TFTP configuration
+      - DNSMASQ_ENABLE_TFTP=false        # Enable TFTP server
+      - DNSMASQ_TFTP_ROOT=/var/lib/tftpboot  # TFTP root directory
+      
+      # Interface binding
+      - DNSMASQ_INTERFACE=eth0           # Listen on specific interface
+      - DNSMASQ_BIND_INTERFACES=true     # Bind to interfaces instead of wildcard
+      
+      # Security settings
+      - DNSMASQ_USER=dnsmasq             # Run as unprivileged user
+      - DNSMASQ_GROUP=dnsmasq            # Run as unprivileged group
+      
+      # Feature flags (enable/disable features at runtime)
+      - DNSMASQ_NO_DAEMON=true           # Don't daemonize (required for Docker)
+      - DNSMASQ_KEEP_IN_FOREGROUND=true  # Stay in foreground (required for Docker)
+    
+    # Linux capabilities required for network operations
+    # Per Section 0.7.9: NET_ADMIN and NET_RAW for DHCP/raw sockets
+    cap_add:
+      - NET_ADMIN      # Required for DHCP operations and interface binding
+      - NET_RAW        # Required for raw socket operations
+      - NET_BIND_SERVICE  # Required to bind to privileged ports (<1024)
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true  # Prevent privilege escalation
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    # Restart policy per Section 0.6.1
+    restart: unless-stopped
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "dnsmasq-rs"
+        labels: "service=dnsmasq,environment=production"
+    
+    # Health check to validate DNS service
+    # Uses dig or nslookup to query localhost
+    healthcheck:
+      test: ["CMD-SHELL", "dig @127.0.0.1 -p 53 localhost +short || nslookup localhost 127.0.0.1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Dependencies (if running with other services)
+    # depends_on:
+    #   - other-service
+    
+    # DNS configuration for the container itself
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    
+    # Extra hosts entries
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    
+    # Labels for organization and metadata
+    labels:
+      - "com.dnsmasq.description=dnsmasq Rust implementation"
+      - "com.dnsmasq.version=2.90-rust"
+      - "com.dnsmasq.vendor=dnsmasq-rs"
+      - "com.dnsmasq.maintainer=dnsmasq-rs-team"
+
+# Networks configuration (optional)
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: br-dnsmasq
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+
+# Volumes configuration for named volumes (alternative to bind mounts)
+volumes:
+  # Named volume for lease persistence
+  dnsmasq_leases:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/dnsmasq.leases
+  
+  # Named volume for TFTP files
+  dnsmasq_tftp:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/tftp
+  
+  # Named volume for logs
+  dnsmasq_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./logs
+
+# Configuration for multi-container setup (optional)
+# Uncomment to deploy with monitoring and management tools
+#
+# services:
+#   dnsmasq-rs:
+#     # ... (configuration above)
+#   
+#   # Prometheus exporter for metrics
+#   dnsmasq-exporter:
+#     image: ghcr.io/google/dnsmasq_exporter:latest
+#     container_name: dnsmasq-exporter
+#     command:
+#       - '--dnsmasq.address=dnsmasq-rs:53'
+#     ports:
+#       - "9153:9153"
+#     depends_on:
+#       - dnsmasq-rs
+#   
+#   # Grafana for visualization
+#   grafana:
+#     image: grafana/grafana:latest
+#     container_name: dnsmasq-grafana
+#     ports:
+#       - "3000:3000"
+#     environment:
+#       - GF_SECURITY_ADMIN_PASSWORD=admin
+#     volumes:
+#       - grafana_data:/var/lib/grafana
+#   
+#   # Prometheus for metrics collection
+#   prometheus:
+#     image: prom/prometheus:latest
+#     container_name: dnsmasq-prometheus
+#     ports:
+#       - "9090:9090"
+#     volumes:
+#       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+#       - prometheus_data:/prometheus
+#     command:
+#       - '--config.file=/etc/prometheus/prometheus.yml'
+#       - '--storage.tsdb.path=/prometheus'
