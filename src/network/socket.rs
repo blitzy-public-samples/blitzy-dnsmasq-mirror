@@ -1085,7 +1085,7 @@ pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     
     #[tokio::test]
