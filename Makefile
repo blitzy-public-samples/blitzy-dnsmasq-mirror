@@ -40,6 +40,10 @@ MSGMERGE   = msgmerge
 MSGFMT     = msgfmt
 XGETTEXT   = xgettext
 
+# Rust toolchain commands (for Rust implementation build)
+CARGO      = cargo
+RUSTC      = rustc
+
 SRC = src
 PO  = po
 MAN = man
@@ -176,4 +180,57 @@ dnsmasq.pot : $(objs:.o=.c) $(hdrs)
 %.mo : $(top)/$(PO)/%.po dnsmasq.pot
 	$(MSGMERGE) -o - $(top)/$(PO)/$*.po dnsmasq.pot | $(MSGFMT) -o $*.mo -
 
-.PHONY : all clean mostly_clean install install-common all-i18n install-i18n merge baseline bloatcheck
+#################################################################
+#
+# Rust Implementation Build Targets
+#
+# This Makefile supports building both the original C implementation
+# (targets above) and the new Rust implementation (targets below).
+# Both implementations provide identical functionality with the Rust
+# version offering memory-safety guarantees.
+#
+# C build:    make all && make install
+# Rust build: make all-rust && make rust-install
+#
+# The Rust implementation uses Cargo as its build system and respects
+# the PREFIX and DESTDIR variables for installation compatibility.
+#
+#################################################################
+
+# Build the Rust implementation in release mode
+# This compiles the Rust sources in src_rust/ using Cargo
+rust-build:
+	@echo "Building Rust implementation..."
+	$(CARGO) build --release
+
+# Run all Rust tests including unit and integration tests
+rust-test:
+	@echo "Running Rust tests..."
+	$(CARGO) test --all
+
+# Run Rust code quality checks (linting and formatting)
+rust-check:
+	@echo "Running Rust quality checks..."
+	$(CARGO) clippy --all-targets --all-features -- -D warnings
+	$(CARGO) fmt -- --check
+
+# Install the Rust-built binary to DESTDIR/PREFIX
+# Respects the same DESTDIR and PREFIX variables as C installation
+rust-install: rust-build
+	@echo "Installing Rust implementation to $(DESTDIR)$(BINDIR)..."
+	$(INSTALL) -d $(DESTDIR)$(BINDIR)
+	$(INSTALL) -d $(DESTDIR)$(MANDIR)/man8
+	$(INSTALL) -m 644 $(MAN)/dnsmasq.8 $(DESTDIR)$(MANDIR)/man8
+	$(INSTALL) -m 755 target/release/dnsmasq $(DESTDIR)$(BINDIR)/dnsmasq
+
+# Clean Rust build artifacts
+rust-clean:
+	@echo "Cleaning Rust build artifacts..."
+	$(CARGO) clean
+
+# Convenience target: Build the Rust implementation with all checks
+all-rust: rust-check rust-build rust-test
+	@echo "Rust implementation built and tested successfully"
+
+.PHONY : all clean mostly_clean install install-common all-i18n install-i18n merge baseline bloatcheck \
+         rust-build rust-test rust-check rust-install rust-clean all-rust
