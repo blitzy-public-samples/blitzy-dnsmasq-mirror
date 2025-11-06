@@ -26,8 +26,7 @@
 use clap::Parser;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, BufRead};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 /// Command-line arguments
@@ -129,7 +128,6 @@ struct ConfigOption {
 struct Config {
     options: Vec<ConfigOption>,
     includes: Vec<PathBuf>,
-    dhcp_ranges: Vec<DhcpRange>,
 }
 
 /// DHCP address range for overlap detection
@@ -174,12 +172,12 @@ impl ValidationResult {
 
 /// Configuration parser
 struct ConfigParser {
-    verbose: bool,
+    _verbose: bool,
 }
 
 impl ConfigParser {
     fn new(verbose: bool) -> Self {
-        Self { verbose }
+        Self { _verbose: verbose }
     }
 
     /// Parse a configuration file and all its includes
@@ -319,13 +317,13 @@ impl ConfigParser {
 
 /// Configuration validator
 struct ConfigValidator {
-    verbose: bool,
+    _verbose: bool,
     format: bool,
 }
 
 impl ConfigValidator {
     fn new(verbose: bool, format: bool) -> Self {
-        Self { verbose, format }
+        Self { _verbose: verbose, format }
     }
 
     /// Validate entire configuration
@@ -845,7 +843,7 @@ fn main() {
     if !result.errors.is_empty() {
         println!("ERRORS:");
         for error in &result.errors {
-            print_colored(&IssueSeverity::Error, &format!(
+            print_colored(&error.severity, &format!(
                 "  [ERROR] {}:{} - {}",
                 error.file.display(),
                 error.line_number,
@@ -862,7 +860,7 @@ fn main() {
     if !result.warnings.is_empty() {
         println!("WARNINGS:");
         for warning in &result.warnings {
-            print_colored(&IssueSeverity::Warning, &format!(
+            print_colored(&warning.severity, &format!(
                 "  [WARN] {}:{} - {}",
                 warning.file.display(),
                 warning.line_number,
@@ -879,7 +877,7 @@ fn main() {
     if (args.verbose || args.format) && !result.infos.is_empty() {
         println!("INFORMATION:");
         for info in &result.infos {
-            print_colored(&IssueSeverity::Info, &format!(
+            print_colored(&info.severity, &format!(
                 "  [INFO] {}:{} - {}",
                 info.file.display(),
                 info.line_number,
