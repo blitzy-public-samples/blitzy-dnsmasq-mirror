@@ -46,13 +46,12 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
-use ipnetwork::IpNetwork;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::io::{BufRead, BufReader, Write};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use walkdir::WalkDir;
@@ -213,6 +212,7 @@ struct DhcpRange {
     line: usize,
     start: IpAddr,
     end: IpAddr,
+    #[allow(dead_code)]
     netmask: Option<IpAddr>,
 }
 
@@ -222,6 +222,7 @@ struct DhcpHost {
     file: String,
     line: usize,
     mac: Option<String>,
+    #[allow(dead_code)]
     ip: Option<IpAddr>,
     hostname: Option<String>,
 }
@@ -266,26 +267,7 @@ impl Validators {
             .with_context(|| format!("Invalid IP address: {}", value))
     }
 
-    /// Validate IPv4 address specifically
-    fn validate_ipv4_address(value: &str) -> Result<Ipv4Addr> {
-        value
-            .parse::<Ipv4Addr>()
-            .with_context(|| format!("Invalid IPv4 address: {}", value))
-    }
 
-    /// Validate IPv6 address specifically
-    fn validate_ipv6_address(value: &str) -> Result<Ipv6Addr> {
-        value
-            .parse::<Ipv6Addr>()
-            .with_context(|| format!("Invalid IPv6 address: {}", value))
-    }
-
-    /// Validate CIDR notation (IP address with prefix length)
-    fn validate_cidr(value: &str) -> Result<IpNetwork> {
-        value
-            .parse::<IpNetwork>()
-            .with_context(|| format!("Invalid CIDR notation: {}", value))
-    }
 
     /// Validate port number (1-65535)
     fn validate_port(value: &str) -> Result<u16> {
@@ -430,12 +412,11 @@ impl Validators {
 /// Configuration file parser
 struct ConfigParser<'a> {
     context: &'a mut ConfigContext,
-    test_only: bool,
 }
 
 impl<'a> ConfigParser<'a> {
-    fn new(context: &'a mut ConfigContext, test_only: bool) -> Self {
-        Self { context, test_only }
+    fn new(context: &'a mut ConfigContext) -> Self {
+        Self { context }
     }
 
     /// Parse a configuration file
@@ -1459,18 +1440,24 @@ impl SemanticValidator {
             "pid-file", "user", "group", "log-facility",
         ];
         
+        // Collect issues first to avoid borrow checker issues
+        let mut issues = Vec::new();
+        
         for option in &singleton_options {
             if let Some(occurrences) = context.options.get(*option) {
                 if occurrences.len() > 1 {
+                    let first_file = occurrences[0].0.clone();
+                    let first_line = occurrences[0].1;
+                    
                     for (file, line) in occurrences.iter().skip(1) {
-                        context.add_issue(ValidationIssue {
+                        issues.push(ValidationIssue {
                             severity: Severity::Warning,
                             file: file.clone(),
                             line: *line,
                             column: None,
                             message: format!(
                                 "Option '{}' defined multiple times (first at {}:{})",
-                                option, occurrences[0].0, occurrences[0].1
+                                option, first_file, first_line
                             ),
                             value: None,
                             suggestion: Some("Remove duplicate options or keep only one".to_string()),
@@ -1479,18 +1466,24 @@ impl SemanticValidator {
                 }
             }
         }
+        
+        // Now add all collected issues
+        for issue in issues {
+            context.add_issue(issue);
+        }
     }
 
     /// Check for conflicting DHCP host definitions
     fn check_dhcp_host_conflicts(context: &mut ConfigContext) {
         let mut mac_to_host: HashMap<String, (String, usize)> = HashMap::new();
         let mut hostname_to_host: HashMap<String, (String, usize)> = HashMap::new();
+        let mut issues = Vec::new();
         
         for host in &context.dhcp_hosts {
             // Check for duplicate MAC addresses
             if let Some(ref mac) = host.mac {
                 if let Some((prev_file, prev_line)) = mac_to_host.get(mac) {
-                    context.add_issue(ValidationIssue {
+                    issues.push(ValidationIssue {
                         severity: Severity::Warning,
                         file: host.file.clone(),
                         line: host.line,
@@ -1510,7 +1503,7 @@ impl SemanticValidator {
             // Check for duplicate hostnames
             if let Some(ref hostname) = host.hostname {
                 if let Some((prev_file, prev_line)) = hostname_to_host.get(hostname) {
-                    context.add_issue(ValidationIssue {
+                    issues.push(ValidationIssue {
                         severity: Severity::Info,
                         file: host.file.clone(),
                         line: host.line,
@@ -1526,6 +1519,11 @@ impl SemanticValidator {
                     hostname_to_host.insert(hostname.clone(), (host.file.clone(), host.line));
                 }
             }
+        }
+        
+        // Now add all collected issues
+        for issue in issues {
+            context.add_issue(issue);
         }
     }
 }
@@ -1753,7 +1751,7 @@ fn main() -> Result<()> {
     let mut context = ConfigContext::new(features);
     
     // Parse all configuration files
-    let mut parser = ConfigParser::new(&mut context, cli.test_only);
+    let mut parser = ConfigParser::new(&mut context);
     
     for config_file in &cli.config_files {
         if !config_file.exists() {
