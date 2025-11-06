@@ -1,3 +1,11 @@
+# dnsmasq-rs - Memory-safe Rust implementation of dnsmasq network services daemon
+# Copyright (c) 2000-2022 Simon Kelley
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 dated June, 1991, or
+# (at your option) version 3 dated 29 June, 2007.
+
 [package]
 name = "dnsmasq-rs"
 version = "0.1.0"
@@ -5,93 +13,131 @@ edition = "2021"
 rust-version = "1.91.0"
 authors = ["Simon Kelley <simon@thekelleys.org.uk>", "Rust implementation contributors"]
 license = "GPL-2.0-or-later"
-description = "Memory-safe Rust implementation of dnsmasq network services daemon"
+description = "Memory-safe Rust implementation of dnsmasq network services daemon providing DNS, DHCP, TFTP, and router advertisement services"
 homepage = "http://www.thekelleys.org.uk/dnsmasq/"
 repository = "https://github.com/yourusername/dnsmasq"
 keywords = ["dns", "dhcp", "tftp", "networking", "server"]
 categories = ["network-programming", "command-line-utilities"]
+readme = "README.md"
 
 [features]
+# Default features mirror the C version's standard build configuration
+# Corresponds to C's default HAVE_DHCP, HAVE_DHCP6, and HAVE_TFTP
 default = ["dhcp", "dns", "tftp"]
 
-# Major subsystem features (map C's HAVE_* macros)
+# Major subsystem features (mapping C's HAVE_* macros from src/config.h)
+# HAVE_DHCP - DHCPv4 server functionality (dhcp.c, rfc2131.c, lease.c)
 dhcp = ["dhcp-v4", "dhcp-v6"]
 dhcp-v4 = []
+# HAVE_DHCP6 - DHCPv6 server functionality (dhcp6.c, rfc3315.c)
 dhcp-v6 = []
+
+# DNS subsystem features
 dns = ["dns-cache", "dns-forward"]
 dns-cache = []
 dns-forward = []
+
+# HAVE_TFTP - Built-in TFTP server (tftp.c)
 tftp = []
+
+# HAVE_DNSSEC - DNSSEC validation with cryptographic verification (dnssec.c, dnssec-crypto.c)
 dnssec = ["dep:ring", "dns"]
+
+# HAVE_AUTH - Authoritative DNS server mode (auth.c)
 auth-dns = ["dns"]
 
 # IPv6 features
 ipv6 = ["dhcp-v6", "radv", "slaac"]
+# Router Advertisement support (radv.c)
 radv = ["ipv6"]
+# Stateless Address Autoconfiguration (slaac.c)
 slaac = ["ipv6"]
 
 # Platform integration features
+# HAVE_DBUS - D-Bus interface for NetworkManager integration (dbus.c)
 dbus = ["dep:zbus"]
+# HAVE_UBUS - OpenWrt ubus integration (ubus.c)
 ubus = []
+# HAVE_INOTIFY - Linux inotify for efficient config file monitoring (inotify.c)
 inotify = []
+# HAVE_LINUX_NETWORK - Linux netlink socket interface (netlink.c)
 netlink = []
+# HAVE_BSD_NETWORK - BSD Packet Filter interface (bpf.c)
 bpf = []
-conntrack = []  # Note: nfnetlink crate not available - requires custom FFI
+# HAVE_CONNTRACK - Linux connection tracking integration (conntrack.c)
+conntrack = ["dep:nfnetlink"]
+# HAVE_IPSET - Linux ipset integration (ipset.c)
 ipset = []
-nftables = []  # Note: nftables crate version needs verification
+# HAVE_NFTSET - nftables set manipulation (nftset.c)
+nftables = ["dep:nftables"]
 
 # Build and runtime options
+# HAVE_SCRIPT - DHCP script execution on lease changes (helper.c)
 scripts = []
-lua = ["dep:mlua"]
+# HAVE_LUASCRIPT - Lua scripting support (implies HAVE_SCRIPT)
+lua = ["dep:mlua", "scripts"]
+# HAVE_IDN/HAVE_LIBIDN2 - Internationalized Domain Names support
 idn = ["dep:idna"]
+# HAVE_LOOP - DNS forwarding loop detection (loop.c)
 loop-detect = []
+# HAVE_BROKEN_RTC - Embedded systems mode without stable RTC
 broken-rtc = []
+# HAVE_CRYPTOHASH - Hash functions only, no full DNSSEC
+cryptohash = []
 
-# Testing and development
+# Testing and development features
+proptest-impl = ["dep:proptest"]
 test-utils = []
 
 [dependencies]
-# Core async runtime
+# Core async runtime - replaces C's poll.c event loop
 tokio = { version = "1.40", features = ["full"] }
 
-# CLI and configuration
+# CLI and configuration parsing - replaces option.c
 clap = { version = "4.5", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 
-# Logging and error handling
+# Logging and error handling - replaces log.c
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1.0"
 anyhow = "1.0"
 
-# Network and protocol parsing
+# Network and protocol parsing - replaces manual buffer management
 bytes = "1.7"
 byteorder = "1.5"
 nom = "7.1"
 socket2 = "0.5"
 
-# Unix system calls
+# Unix system calls - replaces direct libc calls
 libc = "0.2"
 nix = { version = "0.29", features = ["user", "signal", "socket", "net"] }
 
-# Feature-gated dependencies
+# Feature-gated dependencies (optional)
+# DNSSEC cryptography - replaces nettle + hogweed + gmp
 ring = { version = "0.17", optional = true }
+# D-Bus integration - replaces libdbus-1
 zbus = { version = "4.4", optional = true }
-# Note: nfnetlink crate not available on crates.io - will need custom FFI or alternative
-# nfnetlink = { version = "0.5", optional = true }
-# Note: nftables crate version 0.4 may not exist - will need version verification
-# nftables = { version = "0.4", optional = true }
+# Linux netfilter connection tracking - replaces libnetfilter_conntrack
+nfnetlink = { version = "0.5", optional = true }
+# nftables integration - replaces libnftables
+nftables = { version = "0.4", optional = true }
+# Lua scripting - replaces lua5.2
 mlua = { version = "0.10", optional = true, features = ["lua54"] }
+# Internationalized domain names - replaces libidn2
 idna = { version = "1.0", optional = true }
+# Property-based testing
+proptest = { version = "1.5", optional = true }
 
-# Platform-specific dependencies
+# Platform-specific dependencies (Linux)
 [target.'cfg(target_os = "linux")'.dependencies]
 netlink-sys = "0.8"
 netlink-packet-core = "0.7"
 inotify = "0.10"
 
+# Platform-specific dependencies (BSD family)
 [target.'cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
 kqueue = "1.0"
 
@@ -102,34 +148,47 @@ criterion = "0.5"
 tempfile = "3.12"
 test-case = "3.3"
 
+# Release profile optimized for production deployment
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
+opt-level = 3              # Maximum optimization for performance
+lto = true                 # Link-time optimization for binary size and speed
+codegen-units = 1          # Single codegen unit for better optimization
+strip = true               # Strip symbols to reduce binary size
+panic = "abort"            # Abort on panic (no unwinding) for smaller binary
 
+# Development profile for fast compilation
 [profile.dev]
-opt-level = 0
-debug = true
+opt-level = 0              # No optimization for fast compilation
+debug = true               # Full debug symbols
+split-debuginfo = "unpacked"  # Faster debug builds on macOS/Windows
 
-# Binary and library targets will be auto-discovered once src/ directory exists
-# [[bin]]
-# name = "dnsmasq-rs"
-# path = "src/main.rs"
+# Binary configuration - main dnsmasq-rs executable
+[[bin]]
+name = "dnsmasq-rs"
+path = "src/main.rs"
 
-# [lib]
-# name = "dnsmasq"
-# path = "src/lib.rs"
+# Library configuration for testing and potential reuse
+[lib]
+name = "dnsmasq"
+path = "src/lib.rs"
 
-# Benchmark configuration (will be enabled once benches/ directory exists)
-# [[bench]]
-# name = "dns_cache"
-# harness = false
+# Benchmark configurations using criterion
+[[bench]]
+name = "dns_cache"
+harness = false
+path = "benches/dns_cache.rs"
 
-# [[bench]]
-# name = "dhcp_allocation"
-# harness = false
+[[bench]]
+name = "dhcp_allocation"
+harness = false
+path = "benches/dhcp_allocation.rs"
 
-# [[bench]]
-# name = "packet_parsing"
-# harness = false
+[[bench]]
+name = "packet_parsing"
+harness = false
+path = "benches/packet_parsing.rs"
+
+# Cargo metadata for crates.io publication
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
