@@ -442,14 +442,13 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
         let facility = config.syslog_facility.unwrap_or(DEFAULT_LOG_FACILITY);
         
         // Build syslog writer using syslog-tracing
-        let identity = std::ffi::CStr::from_bytes_with_nul(b"dnsmasq\0")
-            .expect("Identity string must be null-terminated");
+        let identity = c"dnsmasq";
         let options = syslog_tracing::Options::LOG_PID;
         let syslog_facility = facility_code_to_syslog_facility(facility);
         
         let syslog = Syslog::new(identity, options, syslog_facility)
             .ok_or_else(|| LogError::SyslogInitFailed(
-                io::Error::new(io::ErrorKind::Other, "Failed to initialize syslog")
+                io::Error::other("Failed to initialize syslog")
             ))?;
         
         // Wrap syslog writer in a fmt layer
@@ -484,7 +483,7 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
             .filename_prefix(filename)
             .build(directory)
             .map_err(|e| LogError::FileOpenFailed(
-                io::Error::new(io::ErrorKind::Other, e.to_string())
+                io::Error::other(e.to_string())
             ))?;
         
         // Build fmt layer for file output

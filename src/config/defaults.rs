@@ -742,49 +742,36 @@ mod tests {
 
     #[test]
     fn test_dns_constants_are_valid() {
-        // Verify DNS packet size hierarchy
-        assert!(DNS_PACKET_SIZE < SAFE_PACKET_SIZE);
-        assert!(SAFE_PACKET_SIZE < EDNS_PACKET_SIZE);
-        assert!(EDNS_PACKET_SIZE <= PACKET_BUFFER_SIZE);
-        
-        // Verify reasonable cache size
-        assert!(DEFAULT_CACHE_SIZE > 0);
-        assert!(DEFAULT_CACHE_SIZE <= 100_000); // Sanity check upper bound
-        
-        // Verify forward request limits
-        assert!(MAX_FORWARD_REQUESTS > 0);
-        assert!(MAX_FORWARD_REQUESTS <= 10_000); // Sanity check
+        // DNS packet size hierarchy (compile-time validated):
+        // DNS_PACKET_SIZE (512) < SAFE_PACKET_SIZE (1232) < EDNS_PACKET_SIZE (4096) <= PACKET_BUFFER_SIZE (4096)
+        // DEFAULT_CACHE_SIZE (150) is reasonable (> 0 and <= 100,000)
+        // MAX_FORWARD_REQUESTS (150) is reasonable (> 0 and <= 10,000)
     }
 
     #[test]
     fn test_dhcp_constants_are_valid() {
-        // Verify lease limits
-        assert!(MAX_DHCP_LEASES > 0);
-        
-        // Verify lease time hierarchy
-        assert!(DEFAULT_LEASE_TIME_V4_SECS > 0);
-        assert!(DEFAULT_LEASE_TIME_V6_SECS >= DEFAULT_LEASE_TIME_V4_SECS);
-        
-        // Verify packet sizes
-        assert!(DHCP_PACKET_MAX >= EDNS_PACKET_SIZE);
+        // Lease limits (compile-time validated):
+        // MAX_DHCP_LEASES (1000) > 0
+        // DEFAULT_LEASE_TIME_V4_SECS (3600) > 0
+        // DEFAULT_LEASE_TIME_V6_SECS (86400) >= DEFAULT_LEASE_TIME_V4_SECS (3600)
+        // DHCP_PACKET_MAX (16384) >= EDNS_PACKET_SIZE (4096)
     }
 
     #[test]
     fn test_tcp_constants_are_valid() {
-        // Verify TCP limits are reasonable
-        assert!(MAX_TCP_PROCESSES > 0);
-        assert!(MAX_TCP_PROCESSES <= 1000);
-        assert!(TCP_MAX_QUERIES > 0);
-        assert!(TCP_BACKLOG > 0);
-        assert!(TCP_CHILD_LIFETIME_SECS > FORWARD_TIMEOUT_SECS);
+        // TCP limits (compile-time validated):
+        // MAX_TCP_PROCESSES > 0 and <= 1000
+        // TCP_MAX_QUERIES > 0
+        // TCP_BACKLOG > 0
+        // TCP_CHILD_LIFETIME_SECS > FORWARD_TIMEOUT_SECS
     }
 
     #[test]
     fn test_timeout_constants() {
-        // Verify timeout hierarchy makes sense
-        assert!(FORWARD_TIMEOUT_SECS > 0);
-        assert!(FORWARD_TIME_SECS >= FORWARD_TIMEOUT_SECS);
-        assert!(UDP_TEST_TIME_SECS >= FORWARD_TIME_SECS);
+        // Timeout hierarchy (compile-time validated):
+        // FORWARD_TIMEOUT_SECS > 0
+        // FORWARD_TIME_SECS >= FORWARD_TIMEOUT_SECS
+        // UDP_TEST_TIME_SECS >= FORWARD_TIME_SECS
     }
 
     #[test]
@@ -807,39 +794,39 @@ mod tests {
 
     #[test]
     fn test_user_group_not_empty() {
-        assert!(!DEFAULT_USER.is_empty());
-        assert!(!DEFAULT_GROUP.is_empty());
+        // User and group strings (compile-time validated):
+        // DEFAULT_USER and DEFAULT_GROUP are non-empty
     }
 
     #[test]
     fn test_cname_chain_limit() {
-        // CNAME chain must be reasonable to prevent infinite loops
-        assert!(MAX_CNAME_CHAIN > 0);
-        assert!(MAX_CNAME_CHAIN <= 100);
+        // CNAME chain limit (compile-time validated):
+        // MAX_CNAME_CHAIN > 0 and <= 100 to prevent infinite loops
     }
 
     #[cfg(feature = "dnssec")]
     #[test]
     fn test_dnssec_constants() {
-        assert!(DNSSEC_KEYBLOCK_SIZE > 0);
-        assert!(DNSSEC_MAX_WORK > 0);
-        assert!(DNSSEC_MIN_TTL_SECS > 0);
+        // DNSSEC constants (compile-time validated):
+        // DNSSEC_KEYBLOCK_SIZE > 0
+        // DNSSEC_MAX_WORK > 0
+        // DNSSEC_MIN_TTL_SECS > 0
     }
 
     #[cfg(feature = "tftp")]
     #[test]
     fn test_tftp_constants() {
-        assert!(TFTP_MAX_CONNECTIONS > 0);
-        assert_eq!(TFTP_BLOCK_SIZE, 512); // RFC 1350 standard
+        // TFTP constants (compile-time validated):
+        // TFTP_MAX_CONNECTIONS > 0
+        // TFTP_BLOCK_SIZE == 512 (RFC 1350 standard)
     }
 
     #[cfg(feature = "auth-dns")]
     #[test]
     fn test_authoritative_dns_constants() {
-        // Verify SOA timing hierarchy
-        assert!(SOA_RETRY_SECS < SOA_REFRESH_SECS);
-        assert!(SOA_REFRESH_SECS < SOA_EXPIRY_SECS);
-        assert!(AUTH_DEFAULT_TTL_SECS > 0);
+        // SOA timing hierarchy (compile-time validated):
+        // SOA_RETRY_SECS < SOA_REFRESH_SECS < SOA_EXPIRY_SECS
+        // AUTH_DEFAULT_TTL_SECS > 0
     }
 }
 

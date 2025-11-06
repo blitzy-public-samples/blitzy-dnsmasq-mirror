@@ -129,7 +129,7 @@ pub enum IdnError {
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::is_legal_hostname;
+/// use dnsmasq::util::string::is_legal_hostname;
 ///
 /// assert!(is_legal_hostname("my-server"));
 /// assert!(is_legal_hostname("web1.example.com"));
@@ -199,7 +199,7 @@ pub fn is_legal_hostname(name: &str) -> bool {
 /// # Examples
 ///
 /// ```no_run
-/// use dnsmasq_rs::util::string::safe_copy;
+/// use dnsmasq::util::string::safe_copy;
 ///
 /// let mut buffer = String::with_capacity(64);
 /// safe_copy(&mut buffer, "hostname", 64).unwrap();
@@ -239,7 +239,7 @@ pub fn safe_copy(dest: &mut String, src: &str, max_len: usize) -> Result<(), Str
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::hostname_equal;
+/// use dnsmasq::util::string::hostname_equal;
 ///
 /// assert!(hostname_equal("Example.COM", "example.com"));
 /// assert!(hostname_equal("test", "TEST"));
@@ -272,7 +272,7 @@ pub fn hostname_equal(a: &str, b: &str) -> bool {
 ///
 /// ```
 /// use std::cmp::Ordering;
-/// use dnsmasq_rs::util::string::hostname_cmp;
+/// use dnsmasq::util::string::hostname_cmp;
 ///
 /// assert_eq!(hostname_cmp("aaa.com", "bbb.com"), Ordering::Less);
 /// assert_eq!(hostname_cmp("Example.COM", "example.com"), Ordering::Equal);
@@ -322,7 +322,7 @@ pub fn hostname_cmp(a: &str, b: &str) -> Ordering {
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::is_subdomain;
+/// use dnsmasq::util::string::is_subdomain;
 ///
 /// assert!(is_subdomain("www.example.com", "example.com"));
 /// assert!(is_subdomain("example.com", "example.com")); // Equal counts as subdomain
@@ -383,7 +383,7 @@ pub fn is_subdomain(child: &str, parent: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::wildcard_match;
+/// use dnsmasq::util::string::wildcard_match;
 ///
 /// assert!(wildcard_match("*.example.com", "www.example.com"));
 /// assert!(wildcard_match("test*", "test123"));
@@ -424,7 +424,7 @@ pub fn wildcard_match(pattern: &str, text: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::wildcard_match_prefix;
+/// use dnsmasq::util::string::wildcard_match_prefix;
 ///
 /// assert!(wildcard_match_prefix("prefix*", "prefix-suffix", 6));
 /// assert!(wildcard_match_prefix("test", "test123", 4));
@@ -469,7 +469,7 @@ pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bo
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::parse_hex_string;
+/// use dnsmasq::util::string::parse_hex_string;
 ///
 /// let (bytes, mask) = parse_hex_string("01:02:*:04", Some(':')).unwrap();
 /// assert_eq!(bytes, vec![0x01, 0x02, 0x00, 0x04]);
@@ -550,7 +550,7 @@ pub fn parse_hex_string(
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::compare_with_mask;
+/// use dnsmasq::util::string::compare_with_mask;
 ///
 /// let mac1 = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
 /// let mac2 = vec![0x01, 0xFF, 0x03, 0x04, 0x05, 0x06];
@@ -589,7 +589,7 @@ pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
 ///
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-/// use dnsmasq_rs::util::string::format_socket_addr;
+/// use dnsmasq::util::string::format_socket_addr;
 ///
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 /// assert_eq!(format_socket_addr(&addr), "192.168.1.1:53");
@@ -617,7 +617,7 @@ pub fn format_socket_addr(addr: &SocketAddr) -> String {
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::encode_dns_name;
+/// use dnsmasq::util::string::encode_dns_name;
 ///
 /// let encoded = encode_dns_name("example.com").unwrap();
 /// assert_eq!(encoded[0], 7); // Length of "example"
@@ -694,7 +694,7 @@ pub fn encode_dns_name(domain: &str) -> Result<Vec<u8>, DnsNameError> {
 /// # Examples
 ///
 /// ```no_run
-/// use dnsmasq_rs::util::string::canonicalize_hostname;
+/// use dnsmasq::util::string::canonicalize_hostname;
 ///
 /// let canon = canonicalize_hostname("münchen.de").unwrap();
 /// // With IDN support: "xn--mnchen-3ya.de"
@@ -737,7 +737,7 @@ pub fn canonicalize_hostname(name: &str) -> Result<String, IdnError> {
 /// # Examples
 ///
 /// ```
-/// use dnsmasq_rs::util::string::expand_buffer;
+/// use dnsmasq::util::string::expand_buffer;
 ///
 /// let mut buffer = Vec::with_capacity(64);
 /// expand_buffer(&mut buffer, 1024);

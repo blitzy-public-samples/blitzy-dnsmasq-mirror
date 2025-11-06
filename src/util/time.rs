@@ -137,13 +137,11 @@ static START_TIME_SYSTEM: OnceLock<SystemTime> = OnceLock::new();
 /// ```rust
 /// use dnsmasq::util::time::init_time_source;
 ///
-/// fn main() {
-///     // Initialize time tracking at program startup
-///     init_time_source();
-///     
-///     // Now safe to call monotonic_time() from anywhere
-///     // ...
-/// }
+/// // Initialize time tracking at program startup
+/// init_time_source();
+/// 
+/// // Now safe to call monotonic_time() from anywhere
+/// // ...
 /// ```
 pub fn init_time_source() {
     // Initialize the primary time source (Instant)

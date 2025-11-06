@@ -292,8 +292,7 @@ pub async fn index_to_name(index: u32) -> Result<String, InterfaceError> {
     
     // Cache miss or stale - perform platform-specific lookup
     task::spawn_blocking(move || index_to_name_blocking(index)).await
-        .map_err(|e| InterfaceError::EnumerationFailed(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        .map_err(|e| InterfaceError::EnumerationFailed(std::io::Error::other(
             format!("Task join error: {}", e)
         )))?
 }
@@ -375,8 +374,7 @@ pub async fn name_to_index(name: &str) -> Result<u32, InterfaceError> {
     
     // Cache miss - perform platform-specific lookup
     task::spawn_blocking(move || name_to_index_blocking(&name)).await
-        .map_err(|e| InterfaceError::EnumerationFailed(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        .map_err(|e| InterfaceError::EnumerationFailed(std::io::Error::other(
             format!("Task join error: {}", e)
         )))?
 }
@@ -444,8 +442,7 @@ fn name_to_index_blocking(name: &str) -> Result<u32, InterfaceError> {
 /// ```
 pub async fn enumerate_interfaces() -> Result<Vec<InterfaceRecord>, InterfaceError> {
     let interfaces = task::spawn_blocking(enumerate_interfaces_blocking).await
-        .map_err(|e| InterfaceError::EnumerationFailed(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        .map_err(|e| InterfaceError::EnumerationFailed(std::io::Error::other(
             format!("Task join error: {}", e)
         )))??;
     
@@ -790,15 +787,13 @@ mod linux {
     
     /// Convert SockaddrStorage to SocketAddr
     fn sockaddr_to_socketaddr(addr: &nix::sys::socket::SockaddrStorage) -> Option<SocketAddr> {
-        use std::net::{Ipv4Addr, Ipv6Addr};
-        
         if let Some(sin) = addr.as_sockaddr_in() {
-            let ip = Ipv4Addr::from(sin.ip());
+            let ip = sin.ip();
             return Some(SocketAddr::new(IpAddr::V4(ip), sin.port()));
         }
         
         if let Some(sin6) = addr.as_sockaddr_in6() {
-            let ip = Ipv6Addr::from(sin6.ip());
+            let ip = sin6.ip();
             return Some(SocketAddr::new(IpAddr::V6(ip), sin6.port()));
         }
         
@@ -918,12 +913,12 @@ mod bsd {
         use std::net::{Ipv4Addr, Ipv6Addr};
         
         if let Some(sin) = addr.as_sockaddr_in() {
-            let ip = Ipv4Addr::from(sin.ip());
+            let ip = sin.ip();
             return Some(SocketAddr::new(IpAddr::V4(ip), sin.port()));
         }
         
         if let Some(sin6) = addr.as_sockaddr_in6() {
-            let ip = Ipv6Addr::from(sin6.ip());
+            let ip = sin6.ip();
             return Some(SocketAddr::new(IpAddr::V6(ip), sin6.port()));
         }
         

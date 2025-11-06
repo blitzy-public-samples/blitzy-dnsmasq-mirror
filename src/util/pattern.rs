@@ -408,7 +408,7 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
                     });
                 }
 
-                if num_bytes < 1 || num_bytes > MAX_DNS_NAME_LENGTH {
+                if !(1..=MAX_DNS_NAME_LENGTH).contains(&num_bytes) {
                     debug!("DNS name has invalid length ({})", num_bytes);
                     return Err(ValidationError::InvalidLength {
                         actual: num_bytes,
@@ -606,7 +606,7 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
                     });
                 }
 
-                if num_bytes < 1 || num_bytes > MAX_DNS_NAME_LENGTH {
+                if !(1..=MAX_DNS_NAME_LENGTH).contains(&num_bytes) {
                     debug!("DNS pattern has invalid length after removing wildcards ({})", num_bytes);
                     return Err(ValidationError::InvalidLength {
                         actual: num_bytes,
