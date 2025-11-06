@@ -131,8 +131,11 @@ pub const BRDBAND_FORUM_IANA: u32 = 3561;
 ///
 /// Values carried in OPTION_MESSAGE_TYPE (53) to identify DHCP message purpose.
 /// Each message type defines specific required and optional options.
+///
+/// Note: Variant names intentionally match RFC 2131 and C implementation naming.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum MessageType {
     /// DHCP Discover (1): Broadcast by client to locate available servers.
     DHCPDISCOVER = 1,
@@ -182,8 +185,11 @@ impl MessageType {
 ///
 /// Type-safe representation of DHCP option codes with exhaustive matching.
 /// Prevents use of invalid option numbers and enables compile-time verification.
+///
+/// Note: Variant names intentionally match RFC 2132 and C implementation naming.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum OptionCode {
     /// Padding option (0): Used to pad options field or align options.
     OPTION_PAD = 0,
@@ -311,8 +317,11 @@ impl OptionCode {
 ///
 /// Sub-options appear within OPTION_AGENT_ID data field, added by DHCP
 /// relay agents to provide client location information.
+///
+/// Note: Variant names intentionally match RFC 3027 and C implementation naming.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum SuboptionCode {
     /// Circuit ID (1): Identifies relay agent's circuit (port, VLAN).
     SUBOPT_CIRCUIT_ID = 1,
@@ -352,8 +361,11 @@ impl SuboptionCode {
 /// PXE boot suboption codes (option 43) per PXE specification v2.1.
 ///
 /// Sub-options appear within OPTION_VENDOR_CLASS_OPT data field for PXE boot.
+///
+/// Note: Variant names intentionally match PXE specification and C implementation naming.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum PxeSuboption {
     /// PXE discovery control (6): Flags controlling discovery behavior.
     SUBOPT_PXE_DISCOVERY = 6,
