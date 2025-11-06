@@ -1007,8 +1007,9 @@ pub const fn has_dbus() -> bool {
 /// - `MAX_FORWARD_REQUESTS` (FTABSIZ in C)
 /// - `MAX_TCP_PROCESSES` (MAX_PROCS in C)
 /// - `MAX_DOMAIN_NAME` (MAXDNAME in C)
-
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
+#[allow(clippy::const_is_empty)]
 mod tests {
     use super::*;
 
