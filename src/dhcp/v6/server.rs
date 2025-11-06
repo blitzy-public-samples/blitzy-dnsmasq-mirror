@@ -64,7 +64,7 @@ impl Dhcpv6Server {
     pub fn new(config: Dhcpv6ServerConfig) -> Self {
         Self {
             config,
-            state_machine: Dhcpv6StateMachine::new(),
+            state_machine: Dhcpv6StateMachine::new(0), // Initial transaction ID (unused in server-wide state machine)
             leases: Vec::new(),
         }
     }
