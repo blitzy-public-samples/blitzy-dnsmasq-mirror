@@ -1,0 +1,15 @@
+[Unit]
+Description=dnsmasq-rs - A lightweight DHCP and caching DNS server (Rust implementation)
+After=network.target
+Before=network-online.target nss-lookup.target
+Wants=nss-lookup.target
+
+[Service]
+Type=dbus
+BusName=uk.org.thekelleys.dnsmasq
+ExecStartPre=/usr/sbin/dnsmasq-rs --test
+ExecStart=/usr/sbin/dnsmasq-rs -k
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target
