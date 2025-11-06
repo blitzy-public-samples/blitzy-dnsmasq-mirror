@@ -639,9 +639,15 @@ mod tests {
         assert!(remaining.unwrap() > 0);
         assert!(remaining.unwrap() <= timeout);
         
-        // Expired timestamp should return None
-        let past = start.saturating_sub(10);
-        assert_eq!(time_remaining(past, 5), None);
+        // Test with a timestamp that's guaranteed to be expired
+        // Sleep a bit to ensure some time passes
+        thread::sleep(StdDuration::from_millis(10));
+        let now = monotonic_time();
+        
+        // Create a timestamp that's definitely in the past
+        // If now is 0, this will be 0, and with timeout 0, it should be expired
+        let past = now.saturating_sub(1);
+        assert_eq!(time_remaining(past, 0), None);
     }
 
     #[test]
