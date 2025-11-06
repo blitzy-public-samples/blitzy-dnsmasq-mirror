@@ -160,11 +160,13 @@ pub mod netlink {
     /// # Example
     ///
     /// ```no_run
-    /// use libc::{NETLINK_ROUTE, RTMGRP_IPV4_IFADDR, RTMGRP_IPV6_IFADDR};
+    /// # use dnsmasq::ffi::platform::create_netlink_socket;
+    /// # use libc::{NETLINK_ROUTE, RTMGRP_IPV4_IFADDR, RTMGRP_IPV6_IFADDR};
     /// let socket = create_netlink_socket(
     ///     NETLINK_ROUTE,
-    ///     RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR
+    ///     (RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR) as u32
     /// )?;
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn create_netlink_socket(protocol: i32, groups: u32) -> IoResult<NetlinkSocket> {
         // SAFETY: socket(2) syscall with validated parameters
@@ -356,9 +358,13 @@ pub mod netlink {
     /// # Example
     ///
     /// ```no_run
+    /// # use dnsmasq::ffi::platform::{create_netlink_socket, recv_netlink_message};
+    /// # use libc::NETLINK_ROUTE;
+    /// let socket = create_netlink_socket(NETLINK_ROUTE, 0)?;
     /// let mut buf = vec![0u8; 8192];
     /// let (len, addr) = recv_netlink_message(&socket, &mut buf, 0)?;
     /// // Process message in buf[..len]
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn recv_netlink_message(
         socket: &NetlinkSocket,

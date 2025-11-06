@@ -59,45 +59,83 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-use std::ffi::{CStr, CString};
 use std::fmt;
 use std::io;
-use std::mem::{self, MaybeUninit};
-use std::net::{SocketAddr, IpAddr};
-use std::os::unix::io::RawFd;
+use std::mem;
+use std::net::SocketAddr;
+use std::os::fd::{OwnedFd, AsFd, AsRawFd};
 use std::ptr;
 use std::result::Result as StdResult;
 
-use nix::errno::Errno;
 use nix::sys::signal::{SigAction, SigHandler, SigSet, Signal, SaFlags};
 use nix::sys::socket::{
-    socket, bind, setsockopt, listen, AddressFamily, SockType, SockFlag, SockProtocol,
-    sockopt, IpV6Only, ReuseAddr, ReusePort,
+    socket, bind, setsockopt, AddressFamily, SockType, SockFlag, SockProtocol,
+    sockopt::{Ipv6V6Only as IpV6Only, ReuseAddr, ReusePort},
 };
 use nix::unistd::{setuid, setgid, setgroups, Uid, Gid, User, Group};
 
 // Raw libc types and constants needed for operations not wrapped by nix
 use libc::{
-    c_int, c_uint, c_void, socklen_t, sa_family_t,
-    SIGUSR1, SIGUSR2, SIGHUP, SIGTERM, SIGINT, SIGPIPE, SIGCHLD, SIGALRM,
-    SIG_DFL, SIG_IGN,
-    SOL_SOCKET, SO_REUSEADDR, SO_RCVBUF, SO_SNDBUF,
-    IPPROTO_IP, IPPROTO_IPV6, IPV6_V6ONLY,
+    c_int, c_uint, c_void, socklen_t,
+    SOL_SOCKET, SO_RCVBUF, SO_SNDBUF,
     IPPROTO_TCP, TCP_FASTOPEN,
-    SOCK_DGRAM, SOCK_STREAM,
-    AF_INET, AF_INET6,
 };
 
 // Linux-specific capabilities support
 #[cfg(target_os = "linux")]
 use libc::{
-    __user_cap_header_struct, __user_cap_data_struct,
-    capget, capset, prctl,
-    CAP_NET_ADMIN, CAP_NET_RAW, CAP_NET_BIND_SERVICE,
-    CAP_SETUID, CAP_SETGID, CAP_DAC_OVERRIDE, CAP_SYS_CHROOT,
-    LINUX_CAPABILITY_VERSION_1, LINUX_CAPABILITY_VERSION_2, LINUX_CAPABILITY_VERSION_3,
-    PR_SET_KEEPCAPS, PR_CAPBSET_DROP,
+    prctl,
+    PR_SET_KEEPCAPS,
 };
+
+// Linux capabilities API types and constants
+// These are defined manually as libc crate doesn't export them consistently across versions
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct __user_cap_header_struct {
+    version: u32,
+    pid: c_int,
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct __user_cap_data_struct {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn capget(hdrp: *const __user_cap_header_struct, datap: *mut __user_cap_data_struct) -> c_int;
+    fn capset(hdrp: *const __user_cap_header_struct, datap: *const __user_cap_data_struct) -> c_int;
+}
+
+// Linux capability constants
+#[cfg(target_os = "linux")]
+const CAP_NET_ADMIN: c_uint = 12;
+#[cfg(target_os = "linux")]
+const CAP_NET_RAW: c_uint = 13;
+#[cfg(target_os = "linux")]
+const CAP_NET_BIND_SERVICE: c_uint = 10;
+#[cfg(target_os = "linux")]
+const CAP_SETUID: c_uint = 7;
+#[cfg(target_os = "linux")]
+const CAP_SETGID: c_uint = 6;
+#[cfg(target_os = "linux")]
+const CAP_DAC_OVERRIDE: c_uint = 1;
+#[cfg(target_os = "linux")]
+const CAP_SYS_CHROOT: c_uint = 18;
+
+// Linux capability version constants
+#[cfg(target_os = "linux")]
+const LINUX_CAPABILITY_VERSION_1: u32 = 0x19980330;
+#[cfg(target_os = "linux")]
+const LINUX_CAPABILITY_VERSION_2: u32 = 0x20071026;
+#[cfg(target_os = "linux")]
+const LINUX_CAPABILITY_VERSION_3: u32 = 0x20080522;
 
 /// Result type alias for FFI operations
 pub type Result<T> = StdResult<T, FfiError>;
@@ -107,38 +145,50 @@ pub type Result<T> = StdResult<T, FfiError>;
 pub enum FfiError {
     /// System call failed with specific error
     SystemCall {
+        /// Name of the system call that failed
         call: &'static str,
+        /// Underlying I/O error from the system
         source: io::Error,
     },
     /// Permission denied for operation
     PermissionDenied {
+        /// Description of the operation that was denied
         operation: &'static str,
     },
     /// Invalid argument provided
     InvalidArgument {
+        /// Name of the invalid parameter
         parameter: &'static str,
+        /// Reason why the argument is invalid
         reason: String,
     },
     /// Resource not found
     NotFound {
+        /// Type of resource that was not found
         resource: &'static str,
+        /// Name of the specific resource
         name: String,
     },
     /// User not found in system database
     UserNotFound {
+        /// Username that was not found
         username: String,
     },
     /// Group not found in system database
     GroupNotFound {
+        /// Group name that was not found
         groupname: String,
     },
     /// Capability operation not supported on this platform
     CapabilityNotSupported {
+        /// Name of the capability that is not supported
         capability: String,
     },
     /// Socket operation failed
     SocketError {
+        /// Name of the socket operation that failed
         operation: &'static str,
+        /// Underlying I/O error from the socket operation
         source: io::Error,
     },
 }
@@ -851,7 +901,7 @@ pub fn create_socket(
     sock_type: SockType,
     flags: SockFlag,
     protocol: Option<SockProtocol>,
-) -> Result<RawFd> {
+) -> Result<OwnedFd> {
     socket(family, sock_type, flags, protocol)
         .map_err(|e| FfiError::SocketError {
             operation: "socket",
@@ -885,28 +935,33 @@ pub fn create_socket(
 ///
 /// ```rust,no_run
 /// # use dnsmasq::ffi::libc_wrappers::{create_socket, bind_socket};
-/// # use nix::sys::socket::{AddressFamily, SockType, SockFlag, SockAddr};
+/// # use nix::sys::socket::{AddressFamily, SockType, SockFlag};
 /// # use std::net::SocketAddr;
 /// let fd = create_socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None)?;
 /// let addr: SocketAddr = "127.0.0.1:53".parse()?;
-/// bind_socket(fd, &addr)?;
+/// bind_socket(&fd, &addr)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn bind_socket(fd: RawFd, addr: &SocketAddr) -> Result<()> {
-    let sock_addr = match addr {
-        SocketAddr::V4(v4) => nix::sys::socket::SockAddr::Inet(
-            nix::sys::socket::InetAddr::from_std(v4)
-        ),
-        SocketAddr::V6(v6) => nix::sys::socket::SockAddr::Inet(
-            nix::sys::socket::InetAddr::from_std(v6)
-        ),
-    };
-
-    bind(fd, &sock_addr)
-        .map_err(|e| FfiError::SocketError {
-            operation: "bind",
-            source: io::Error::from_raw_os_error(e as i32),
-        })
+pub fn bind_socket<F: AsFd>(fd: F, addr: &SocketAddr) -> Result<()> {
+    let raw_fd = fd.as_fd().as_raw_fd();
+    match addr {
+        SocketAddr::V4(v4) => {
+            let sock_addr = nix::sys::socket::SockaddrIn::from(*v4);
+            bind(raw_fd, &sock_addr)
+                .map_err(|e| FfiError::SocketError {
+                    operation: "bind",
+                    source: io::Error::from_raw_os_error(e as i32),
+                })
+        }
+        SocketAddr::V6(v6) => {
+            let sock_addr = nix::sys::socket::SockaddrIn6::from(*v6);
+            bind(raw_fd, &sock_addr)
+                .map_err(|e| FfiError::SocketError {
+                    operation: "bind",
+                    source: io::Error::from_raw_os_error(e as i32),
+                })
+        }
+    }
 }
 
 /// Socket options that can be set
@@ -958,28 +1013,28 @@ pub enum SocketOption {
 /// # use dnsmasq::ffi::libc_wrappers::{create_socket, set_socket_option, SocketOption};
 /// # use nix::sys::socket::{AddressFamily, SockType, SockFlag};
 /// let fd = create_socket(AddressFamily::Inet, SockType::Stream, SockFlag::empty(), None)?;
-/// set_socket_option(fd, SocketOption::ReuseAddr(true))?;
-/// set_socket_option(fd, SocketOption::TcpFastOpen(5))?;
+/// set_socket_option(&fd, SocketOption::ReuseAddr(true))?;
+/// set_socket_option(&fd, SocketOption::TcpFastOpen(5))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn set_socket_option(fd: RawFd, option: SocketOption) -> Result<()> {
+pub fn set_socket_option<F: AsFd>(fd: F, option: SocketOption) -> Result<()> {
     match option {
         SocketOption::ReuseAddr(enable) => {
-            setsockopt(fd, ReuseAddr, &enable)
+            setsockopt(&fd, ReuseAddr, &enable)
                 .map_err(|e| FfiError::SocketError {
                     operation: "setsockopt_reuseaddr",
                     source: io::Error::from_raw_os_error(e as i32),
                 })
         }
         SocketOption::ReusePort(enable) => {
-            setsockopt(fd, ReusePort, &enable)
+            setsockopt(&fd, ReusePort, &enable)
                 .map_err(|e| FfiError::SocketError {
                     operation: "setsockopt_reuseport",
                     source: io::Error::from_raw_os_error(e as i32),
                 })
         }
         SocketOption::Ipv6Only(enable) => {
-            setsockopt(fd, IpV6Only, &enable)
+            setsockopt(&fd, IpV6Only, &enable)
                 .map_err(|e| FfiError::SocketError {
                     operation: "setsockopt_ipv6only",
                     source: io::Error::from_raw_os_error(e as i32),
@@ -987,10 +1042,11 @@ pub fn set_socket_option(fd: RawFd, option: SocketOption) -> Result<()> {
         }
         SocketOption::ReceiveBufferSize(size) => {
             // Use raw setsockopt for buffer sizes
+            let raw_fd = fd.as_fd().as_raw_fd();
             unsafe {
                 let size_val = size as c_int;
                 if libc::setsockopt(
-                    fd,
+                    raw_fd,
                     SOL_SOCKET,
                     SO_RCVBUF,
                     &size_val as *const c_int as *const c_void,
@@ -1006,10 +1062,11 @@ pub fn set_socket_option(fd: RawFd, option: SocketOption) -> Result<()> {
             Ok(())
         }
         SocketOption::SendBufferSize(size) => {
+            let raw_fd = fd.as_fd().as_raw_fd();
             unsafe {
                 let size_val = size as c_int;
                 if libc::setsockopt(
-                    fd,
+                    raw_fd,
                     SOL_SOCKET,
                     SO_SNDBUF,
                     &size_val as *const c_int as *const c_void,
@@ -1028,9 +1085,10 @@ pub fn set_socket_option(fd: RawFd, option: SocketOption) -> Result<()> {
             // TCP_FASTOPEN support varies by platform
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             {
+                let raw_fd = fd.as_fd().as_raw_fd();
                 unsafe {
                     if libc::setsockopt(
-                        fd,
+                        raw_fd,
                         IPPROTO_TCP,
                         TCP_FASTOPEN,
                         &qlen as *const c_int as *const c_void,
