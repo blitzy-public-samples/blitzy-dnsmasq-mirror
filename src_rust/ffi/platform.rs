@@ -35,12 +35,10 @@
 //! 5. Bounds checking for all buffer operations
 
 use nix::unistd::close;
-use std::ffi::{CStr, CString};
 use std::fmt::Debug;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::mem::size_of;
 use std::os::unix::io::RawFd;
-use std::ptr;
 
 // ============================================================================
 // Linux Netlink Module
