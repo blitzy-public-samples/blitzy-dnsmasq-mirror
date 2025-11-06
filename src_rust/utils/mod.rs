@@ -138,10 +138,11 @@ pub use general::{
 // Re-export commonly used items from string module
 pub use string::{
     safe_strncpy,
-    check_name,
     legal_hostname,
     canonicalise,
     do_rfc1035_name,
+    CanonicaliseError,
+    Rfc1035Error,
 };
 
 // Re-export random number generation functions
