@@ -40,8 +40,9 @@
 //! }
 //! ```
 
+use async_trait::async_trait;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use tokio::sync::mpsc::Receiver;
 
 // For address family constants (AF_INET, AF_INET6)
@@ -321,6 +322,7 @@ impl fmt::Display for PlatformErrorKind {
 /// - Interface enumeration may involve multiple system calls
 /// - Network monitoring streams events continuously
 /// - ARP cache access may require kernel queries
+#[async_trait]
 pub trait Platform: Send + Sync {
     /// Enumerate all network interfaces
     ///
@@ -488,6 +490,7 @@ pub(crate) fn io_error_to_platform_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     
     #[test]
     fn test_interface_info_flags() {
@@ -543,5 +546,193 @@ mod tests {
         let error_string = error.to_string();
         assert!(error_string.contains("Interface enumeration failed"));
         assert!(error_string.contains("Failed to enumerate interfaces"));
+    }
+    
+    // Additional comprehensive ad-hoc tests
+    
+    #[test]
+    fn test_interface_info_ipv6() {
+        let iface = InterfaceInfo {
+            addr: IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0x1234, 0x5678, 0x9abc, 0xdef0)),
+            name: "eth0".to_string(),
+            index: 2,
+            flags: 0x1, // IFF_UP
+            prefixlen: 64,
+            netmask: IpAddr::V6(Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0, 0, 0, 0)),
+        };
+        
+        assert!(iface.is_up(), "IPv6 interface should be up");
+        assert_eq!(iface.prefixlen, 64, "Standard IPv6 prefix length");
+        
+        match iface.addr {
+            IpAddr::V6(addr) => {
+                assert!(addr.is_unicast_link_local(), "Should be link-local IPv6");
+            }
+            _ => panic!("Expected IPv6 address"),
+        }
+    }
+    
+    #[test]
+    fn test_interface_info_broadcast_detection() {
+        let eth = InterfaceInfo {
+            addr: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            name: "eth0".to_string(),
+            index: 2,
+            flags: 0x2 | 0x1, // IFF_BROADCAST | IFF_UP
+            prefixlen: 24,
+            netmask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)),
+        };
+        
+        assert!(eth.is_broadcast(), "Should detect broadcast flag");
+        assert!(eth.is_up(), "Should detect up flag");
+        assert!(!eth.is_loopback(), "Ethernet is not loopback");
+    }
+    
+    #[test]
+    fn test_interface_info_point_to_point() {
+        let ppp = InterfaceInfo {
+            addr: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            name: "ppp0".to_string(),
+            index: 3,
+            flags: 0x10 | 0x1, // IFF_POINTOPOINT | IFF_UP
+            prefixlen: 32,
+            netmask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255)),
+        };
+        
+        assert!(ppp.is_point_to_point(), "Should detect point-to-point flag");
+        assert!(!ppp.is_broadcast(), "PPP is not broadcast");
+    }
+    
+    #[test]
+    fn test_arp_entry_zero_hwaddr() {
+        let zero_entry = ArpEntry::new(
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)),
+            [0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            2,
+        );
+        
+        assert_eq!(zero_entry.hwaddr_string(), "00:00:00:00:00:00");
+        assert_eq!(zero_entry.if_index, 2);
+    }
+    
+    #[test]
+    fn test_network_change_address_added() {
+        let addr_added = NetworkChange::AddressAdded {
+            if_index: 2,
+            addr: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            prefixlen: 24,
+        };
+        
+        match addr_added {
+            NetworkChange::AddressAdded { if_index, addr, prefixlen } => {
+                assert_eq!(if_index, 2);
+                assert_eq!(prefixlen, 24);
+                match addr {
+                    IpAddr::V4(v4) => assert_eq!(v4, Ipv4Addr::new(192, 168, 1, 10)),
+                    _ => panic!("Expected IPv4"),
+                }
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+    
+    #[test]
+    fn test_network_change_route_changed() {
+        let route = NetworkChange::RouteChanged {
+            destination: Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
+            gateway: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
+        };
+        
+        match route {
+            NetworkChange::RouteChanged { destination, gateway } => {
+                assert!(destination.is_some());
+                assert!(gateway.is_some());
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+    
+    #[test]
+    fn test_platform_error_with_source() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Access denied");
+        let error_with_source = PlatformError::with_source(
+            PlatformErrorKind::MonitoringFailed,
+            "Cannot monitor network",
+            Box::new(io_error),
+        );
+        
+        let error_string = error_with_source.to_string();
+        assert!(error_string.contains("Network monitoring failed"));
+        assert!(error_string.contains("Cannot monitor network"));
+        assert!(error_string.contains("caused by"));
+        assert!(error_with_source.source.is_some());
+    }
+    
+    #[test]
+    fn test_all_platform_error_kinds() {
+        let test_cases = vec![
+            (PlatformErrorKind::EnumerationFailed, "Interface enumeration failed"),
+            (PlatformErrorKind::MonitoringFailed, "Network monitoring failed"),
+            (PlatformErrorKind::ArpAccessFailed, "ARP cache access failed"),
+            (PlatformErrorKind::UnsupportedPlatform, "Platform not supported"),
+            (PlatformErrorKind::InvalidConfiguration, "Invalid configuration"),
+            (PlatformErrorKind::PermissionDenied, "Permission denied"),
+        ];
+        
+        for (kind, expected_msg) in test_cases {
+            let error = PlatformError::new(kind, "test message");
+            let error_string = error.to_string();
+            assert!(
+                error_string.contains(expected_msg),
+                "Error kind {:?} should contain '{}', got '{}'",
+                kind,
+                expected_msg,
+                error_string
+            );
+        }
+    }
+    
+    #[test]
+    fn test_network_change_interface_removed() {
+        let removed = NetworkChange::InterfaceRemoved {
+            name: "eth1".to_string(),
+            index: 3,
+        };
+        
+        match removed {
+            NetworkChange::InterfaceRemoved { name, index } => {
+                assert_eq!(name, "eth1");
+                assert_eq!(index, 3);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+    
+    #[test]
+    fn test_network_change_address_removed() {
+        let addr_removed = NetworkChange::AddressRemoved {
+            if_index: 2,
+            addr: IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+        };
+        
+        match addr_removed {
+            NetworkChange::AddressRemoved { if_index, addr } => {
+                assert_eq!(if_index, 2);
+                match addr {
+                    IpAddr::V6(_) => {},
+                    _ => panic!("Expected IPv6"),
+                }
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_create_platform_returns_valid_boxed_trait() {
+        let result = create_platform();
+        assert!(result.is_ok(), "Platform creation should succeed");
+        
+        let _platform: Box<dyn Platform> = result.unwrap();
+        // Successfully created and type-checked as Box<dyn Platform>
     }
 }

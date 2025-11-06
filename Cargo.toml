@@ -114,6 +114,11 @@ tokio = { version = "1.43", features = ["full"] }
 # - Provides: Codec implementations for DNS/DHCP packet framing
 tokio-util = { version = "0.7", features = ["codec"] }
 
+# async-trait: Enables async methods in trait definitions for trait objects
+# - Required for Platform trait to support dyn dispatch with async methods
+# - Provides: #[async_trait] macro for trait and impl blocks
+async-trait = "0.1"
+
 # -----------------------------------------------------------------------------
 # Networking Layer (Section 0.11.1) - Replaces C network.c, netlink.c, bpf.c
 # -----------------------------------------------------------------------------
@@ -127,6 +132,11 @@ socket2 = { version = "0.5", features = ["all"] }
 # - Features: net (networking), socket (sockets), signal (signals), process (fork/exec)
 # - Platforms: Linux, BSD, macOS, Solaris
 nix = { version = "0.29", features = ["net", "socket", "signal", "process", "fs", "feature", "user"] }
+
+# libc: Raw FFI bindings to platform C libraries
+# - Provides: Direct access to C library functions for platform-specific operations
+# - Usage: File descriptor operations, low-level system calls not wrapped by nix
+libc = "0.2"
 
 # -----------------------------------------------------------------------------
 # DNS/DHCP Protocol Libraries (Section 0.11.2) - Replaces C rfc1035.c, rfc2131.c

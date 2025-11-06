@@ -593,12 +593,14 @@ dependencies = [
 name = "dnsmasq"
 version = "2.90.0"
 dependencies = [
+ "async-trait",
  "bitflags",
  "cc",
  "clap",
  "criterion",
  "hashbrown 0.15.5",
  "idna 1.1.0",
+ "libc",
  "lru",
  "mockall",
  "nix",
