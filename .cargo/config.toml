@@ -1,0 +1,397 @@
+# .cargo/config.toml
+# Cargo build configuration for dnsmasq Rust implementation
+#
+# This file configures Cargo's build system behavior, compiler flags, linker options,
+# and target-specific settings for the dnsmasq C-to-Rust refactor. It translates the
+# C Makefile's CFLAGS, LDFLAGS, and platform-specific compilation settings into Rust's
+# build system equivalents.
+#
+# MAPPING FROM C BUILD SYSTEM:
+#
+# C Makefile CFLAGS:
+#   -Wall -W -O2 → Rust clippy.toml (warnings) + Cargo.toml profile.release (opt-level=3)
+#
+# C pkg-config library detection:
+#   dbus-1, libidn2, libnetfilter_conntrack, lua5.2, nettle, hogweed, gmp, libnftables, ubus
+#   → Cargo.toml feature-gated dependencies (dbus, idn, conntrack, lua, dnssec, nftables, ubus)
+#
+# C platform detection (#ifdef HAVE_LINUX_NETWORK):
+#   → Cargo cfg(target_os = "linux") conditional compilation
+#
+# C COPTS feature flags (HAVE_DHCP, HAVE_DNSSEC, HAVE_TFTP):
+#   → Cargo.toml [features] section with identical semantics
+#
+# C linker flags for security:
+#   -Wl,-z,relro,-z,now → rustflags below for RELRO and BIND_NOW
+#
+# C static linking for embedded/container deployment:
+#   -static → rustflags for musl targets with crt-static
+#
+# SECURITY HARDENING:
+#
+# - RELRO (Relocation Read-Only): Makes the Global Offset Table (GOT) read-only after
+#   dynamic linking completes, preventing GOT overwrites in exploits
+#
+# - BIND_NOW: Resolves all dynamic symbols at program load time rather than on first use
+#   (lazy binding), eliminating a class of attacks that exploit lazy binding mechanisms
+#
+# - Static linking on musl: Produces fully static binaries with no shared library
+#   dependencies, reducing attack surface and ensuring portability across Linux distributions
+#
+# PLATFORM-SPECIFIC NOTES:
+#
+# Linux (glibc):
+#   - Default for most distributions (Debian, Ubuntu, Fedora, RHEL)
+#   - Requires linux-headers for netlink/BPF development (feature = "netlink")
+#   - Supports inotify for /etc/hosts monitoring (feature = "inotify")
+#
+# Linux (musl):
+#   - Used for Alpine Linux and static binary deployment
+#   - Enables full static linking (crt-static) for container portability
+#   - Produces binaries that work across all Linux distributions
+#   - Requires musl-gcc if cross-compiling from glibc system
+#
+# BSD (FreeBSD, OpenBSD, NetBSD, DragonFly):
+#   - Uses native BPF (Berkeley Packet Filter) interface for packet capture
+#   - kqueue for file monitoring (replaces Linux inotify)
+#   - Platform-specific routing socket for network interface enumeration
+#
+# macOS:
+#   - Uses kqueue for file monitoring
+#   - Supports launchd socket activation
+#   - Universal binaries supported (x86_64 and aarch64 "Apple Silicon")
+#
+# TARGET ARCHITECTURE SUPPORT:
+#
+# Tier 1 (Fully tested and supported):
+#   - x86_64-unknown-linux-gnu (Linux 64-bit, glibc)
+#   - x86_64-unknown-linux-musl (Linux 64-bit, musl - Alpine Linux)
+#   - x86_64-apple-darwin (macOS Intel)
+#   - aarch64-apple-darwin (macOS Apple Silicon)
+#
+# Tier 2 (Supported, may require additional testing):
+#   - aarch64-unknown-linux-gnu (ARM64 Linux, glibc - Raspberry Pi 4, cloud ARM instances)
+#   - aarch64-unknown-linux-musl (ARM64 Linux, musl - Alpine on ARM)
+#   - x86_64-unknown-freebsd (FreeBSD 64-bit)
+#   - x86_64-unknown-openbsd (OpenBSD 64-bit)
+#   - x86_64-unknown-netbsd (NetBSD 64-bit)
+#
+# BUILD PROFILES:
+#
+# Development (dev):
+#   - Fast compilation (opt-level=0)
+#   - Full debug symbols
+#   - No LTO (link-time optimization)
+#   - Incremental compilation enabled
+#   - Use: cargo build
+#
+# Release (release):
+#   - Maximum optimization (opt-level=3)
+#   - Minimal debug symbols
+#   - Full LTO for best performance
+#   - Single codegen unit for better optimization
+#   - Use: cargo build --release
+#
+# USAGE EXAMPLES:
+#
+# Standard development build:
+#   cargo build
+#
+# Optimized release build:
+#   cargo build --release
+#
+# Build for Alpine Linux (static binary):
+#   cargo build --release --target x86_64-unknown-linux-musl
+#
+# Build with specific features:
+#   cargo build --release --features "dnssec,dbus,nftables"
+#
+# Cross-compile for ARM64:
+#   cargo build --release --target aarch64-unknown-linux-gnu
+
+# ============================================================================
+# BUILD BEHAVIOR CONFIGURATION
+# ============================================================================
+
+[build]
+# Target directory for build artifacts
+# Standard Rust convention: target/ directory in workspace root
+target-dir = "target"
+
+# Enable incremental compilation for faster rebuilds during development
+# Caches compilation results between builds, significantly speeding up
+# iterative development. Automatically disabled for release builds with LTO.
+incremental = true
+
+# Enable build pipelining for improved parallelism
+# Allows rustc to begin compiling downstream crates while upstream crates
+# are still being optimized and linked, reducing total build time
+pipelining = true
+
+# ============================================================================
+# LINUX x86_64 (glibc) - Standard Linux distributions
+# ============================================================================
+
+[target.x86_64-unknown-linux-gnu]
+# Use system GCC as linker (standard on most Linux distributions)
+linker = "gcc"
+
+# Security hardening flags:
+# -Wl,-z,relro: Enable RELRO (Relocation Read-Only) to make GOT read-only
+# -Wl,-z,now: Enable BIND_NOW to resolve all symbols at load time
+rustflags = [
+    "-C", "link-arg=-Wl,-z,relro,-z,now"
+]
+
+# ============================================================================
+# LINUX x86_64 (musl) - Alpine Linux and static binaries
+# ============================================================================
+
+[target.x86_64-unknown-linux-musl]
+# Use musl-gcc as linker for musl libc targets
+# If musl-gcc is not available, cargo will fall back to default linker
+# Install on Debian/Ubuntu: apt-get install musl-tools
+# Install on Fedora/RHEL: dnf install musl-gcc
+linker = "musl-gcc"
+
+# Enable full static linking for portable binaries
+# target-feature=+crt-static: Link C runtime statically
+# link-arg=-static: Produce fully static binary with no dynamic dependencies
+# Result: Single binary that runs on any Linux distribution (kernel version permitting)
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=-static"
+]
+
+# ============================================================================
+# LINUX ARM64 (glibc) - ARM servers, Raspberry Pi 4, cloud ARM instances
+# ============================================================================
+
+[target.aarch64-unknown-linux-gnu]
+# Use system GCC as linker
+linker = "gcc"
+
+# Security hardening flags (same as x86_64)
+rustflags = [
+    "-C", "link-arg=-Wl,-z,relro,-z,now"
+]
+
+# ============================================================================
+# LINUX ARM64 (musl) - Alpine Linux on ARM
+# ============================================================================
+
+[target.aarch64-unknown-linux-musl]
+# Use musl-gcc as linker for ARM64 musl targets
+linker = "musl-gcc"
+
+# Enable full static linking for ARM64 (same as x86_64 musl)
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=-static"
+]
+
+# ============================================================================
+# FREEBSD x86_64 - FreeBSD operating system
+# ============================================================================
+
+[target.x86_64-unknown-freebsd]
+# Use system C compiler (typically clang on modern FreeBSD)
+linker = "cc"
+
+# Note: FreeBSD uses LLVM/clang by default, which supports similar security
+# hardening options but with different syntax. FreeBSD's base system compiler
+# typically enables RELRO by default.
+
+# ============================================================================
+# OPENBSD x86_64 - OpenBSD operating system
+# ============================================================================
+
+[target.x86_64-unknown-openbsd]
+# Use system C compiler (clang on OpenBSD)
+linker = "cc"
+
+# Note: OpenBSD has aggressive security defaults including W^X (write XOR execute),
+# ASLR (address space layout randomization), and stack protection enabled by default.
+# Additional linker flags generally not needed.
+
+# ============================================================================
+# NETBSD x86_64 - NetBSD operating system
+# ============================================================================
+
+[target.x86_64-unknown-netbsd]
+# Use system C compiler (GCC or clang depending on NetBSD version)
+linker = "cc"
+
+# ============================================================================
+# MACOS x86_64 - macOS on Intel processors
+# ============================================================================
+
+[target.x86_64-apple-darwin]
+# Use system C compiler (clang from Xcode Command Line Tools)
+linker = "cc"
+
+# Note: macOS linker (ld64) has different security options than GNU ld.
+# Modern macOS enables PIE (Position Independent Executable), stack protection,
+# and code signing requirements by default. Additional hardening typically
+# applied through Xcode build settings or codesign tool.
+
+# ============================================================================
+# MACOS ARM64 - macOS on Apple Silicon (M1/M2/M3)
+# ============================================================================
+
+[target.aarch64-apple-darwin]
+# Use system C compiler (clang for ARM64)
+linker = "cc"
+
+# Note: Apple Silicon Macs require code signing for execution. Rust's default
+# behavior is to ad-hoc sign binaries. For distribution, use codesign tool
+# with proper Apple Developer ID certificate.
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+
+[env]
+# Enable backtraces by default for better debugging
+# Set to '1' for basic backtrace, 'full' for verbose backtrace with all frames
+# Override at runtime: RUST_BACKTRACE=0 ./dnsmasq to disable
+RUST_BACKTRACE = "1"
+
+# ============================================================================
+# NETWORK CONFIGURATION
+# ============================================================================
+
+[net]
+# Use libgit2 for dependency fetching instead of git CLI
+# Provides better performance and more reliable dependency resolution
+# Set to 'true' to force git CLI if libgit2 has issues
+git-fetch-with-cli = false
+
+# ============================================================================
+# REGISTRY CONFIGURATION
+# ============================================================================
+
+[registry]
+# Use crates.io as default package registry
+# This is the standard Rust package repository
+default = "crates-io"
+
+# ============================================================================
+# TERMINAL OUTPUT CONFIGURATION
+# ============================================================================
+
+[term]
+# Reduce build output verbosity (show warnings and errors only)
+# Set to 'true' for detailed build output including all compilation commands
+verbose = false
+
+# Automatic color detection for terminal output
+# Options: 'auto' (detect), 'always' (force colors), 'never' (no colors)
+color = "auto"
+
+# ============================================================================
+# ADDITIONAL NOTES
+# ============================================================================
+#
+# PROFILE-SPECIFIC SETTINGS:
+#
+# Release profile settings are defined in workspace Cargo.toml:
+#   [profile.release]
+#   opt-level = 3              # Maximum optimization
+#   lto = true                 # Enable link-time optimization
+#   codegen-units = 1          # Single codegen unit for best optimization
+#   strip = true               # Strip debug symbols from binary
+#   panic = "abort"            # Smaller binary size, no unwinding
+#
+# Development profile settings (also in Cargo.toml):
+#   [profile.dev]
+#   opt-level = 0              # Fast compilation
+#   debug = true               # Full debug symbols
+#   split-debuginfo = "unpacked"  # Faster linking on supported platforms
+#
+# CROSS-COMPILATION:
+#
+# To cross-compile for a different target, install the appropriate target:
+#   rustup target add <target-triple>
+#
+# Examples:
+#   rustup target add x86_64-unknown-linux-musl
+#   rustup target add aarch64-unknown-linux-gnu
+#   rustup target add x86_64-unknown-freebsd
+#
+# Then build with --target flag:
+#   cargo build --release --target <target-triple>
+#
+# CONTAINER DEPLOYMENT:
+#
+# For Docker/Podman containers, use musl targets for minimal image size:
+#   1. Build static binary: cargo build --release --target x86_64-unknown-linux-musl
+#   2. Use scratch or distroless base image
+#   3. Copy single binary: COPY --from=builder /target/x86_64-unknown-linux-musl/release/dnsmasq /usr/local/bin/
+#   4. Result: ~10-15MB container image vs ~100MB+ with glibc
+#
+# Alpine Linux (specified base images: 3.19.9, 3.20.8, 3.21.5, 3.22.2):
+#   FROM alpine:3.22.2 AS builder
+#   RUN apk add --no-cache rust cargo musl-dev
+#   # Build produces musl binary automatically on Alpine
+#   cargo build --release
+#
+# PLATFORM-SPECIFIC DEPENDENCIES:
+#
+# Linux netlink support (feature = "netlink"):
+#   - Requires kernel headers: apt-get install linux-headers-$(uname -r)
+#   - Uses nix crate for netlink socket FFI
+#
+# Linux inotify support (feature = "inotify"):
+#   - Built into Linux kernel, no additional dependencies
+#   - Uses inotify crate for safe Rust wrapper
+#
+# BSD BPF support (feature = "bpf"):
+#   - Native BSD kernel interface, no additional dependencies
+#   - Uses nix crate for BPF device FFI
+#
+# D-Bus support (feature = "dbus"):
+#   - Requires libdbus development files: apt-get install libdbus-1-dev
+#   - Uses zbus crate (pure Rust implementation, no C dependencies)
+#
+# DNSSEC support (feature = "dnssec"):
+#   - Uses ring crate (pure Rust cryptography)
+#   - No external library dependencies (replaces nettle + hogweed + gmp)
+#
+# OPTIMIZATION NOTES:
+#
+# LTO (Link-Time Optimization):
+#   - Enabled in release profile (Cargo.toml)
+#   - Performs whole-program optimization across crate boundaries
+#   - Increases build time significantly but produces faster binary
+#   - Reduces binary size by eliminating dead code
+#
+# Codegen Units:
+#   - Set to 1 in release profile for maximum optimization
+#   - Allows LLVM to see entire crate for better optimization
+#   - Trade-off: Slower compilation, faster execution
+#
+# Strip Symbols:
+#   - Enabled in release profile to reduce binary size
+#   - Removes debug symbols and other metadata
+#   - Use separate debug symbols if needed: objcopy --only-keep-debug
+#
+# TROUBLESHOOTING:
+#
+# If musl-gcc is not found:
+#   - Debian/Ubuntu: apt-get install musl-tools
+#   - Fedora/RHEL: dnf install musl-gcc
+#   - Arch Linux: pacman -S musl
+#   - Or use Docker/Podman with Alpine Linux base image
+#
+# If cross-compilation fails:
+#   - Ensure target is installed: rustup target list --installed
+#   - Install cross-compilation toolchain for target architecture
+#   - Consider using cross tool: cargo install cross && cross build --target <triple>
+#
+# If linker errors occur:
+#   - Verify system linker is installed (gcc or clang)
+#   - Check for missing system libraries: ldd <binary>
+#   - Ensure feature-gated dependencies are available (e.g., libdbus-1-dev)
+#
+# END OF CONFIGURATION
