@@ -1,0 +1,151 @@
+# systemd service unit file for dnsmasq (Rust implementation)
+#
+# This service unit defines the lifecycle management for the Rust-based
+# dnsmasq implementation, maintaining full backward compatibility with the
+# C version while leveraging Rust's memory safety guarantees.
+#
+# Key Features:
+# - D-Bus integration for control interface (uk.org.thekelleys.dnsmasq)
+# - Signal-based configuration reload (SIGHUP)
+# - Configuration validation on startup
+# - Socket activation support (use with dnsmasq-rust.socket)
+# - Systemd journal integration for structured logging
+# - Network service ordering for proper startup sequence
+#
+# Installation:
+#   sudo cp dnsmasq-rust.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable dnsmasq-rust.service
+#   sudo systemctl start dnsmasq-rust.service
+#
+# For socket activation (recommended):
+#   sudo systemctl enable dnsmasq-rust.socket
+#   sudo systemctl start dnsmasq-rust.socket
+
+[Unit]
+Description=dnsmasq - A lightweight DHCP and caching DNS server (Rust)
+Documentation=man:dnsmasq(8)
+Documentation=https://thekelleys.org.uk/dnsmasq/doc.html
+
+# Network dependencies: Start after basic networking is available,
+# but before network-online and nss-lookup targets to ensure DNS
+# resolution is available early in the boot process
+After=network.target
+Before=network-online.target nss-lookup.target
+Wants=nss-lookup.target
+
+# Support for socket activation: If dnsmasq-rust.socket is enabled,
+# systemd will pass the pre-bound sockets to the service
+After=dnsmasq-rust.socket
+Requires=dnsmasq-rust.socket
+
+[Service]
+# Service type: dbus indicates this service registers on the D-Bus system bus
+# This ensures proper lifecycle management and allows systemd to track the
+# service through its D-Bus name registration
+Type=dbus
+
+# D-Bus bus name: Preserve the same bus name as the C implementation for
+# backward compatibility. External tools and scripts can continue using
+# the uk.org.thekelleys.dnsmasq D-Bus interface without modification
+BusName=uk.org.thekelleys.dnsmasq
+
+# Pre-start validation: Test configuration file syntax before attempting
+# to start the service. This prevents startup failures due to configuration
+# errors and provides clear error messages via --test flag
+ExecStartPre=/usr/sbin/dnsmasq --test
+
+# Main service execution: Start dnsmasq in foreground mode (-k flag)
+# When socket activation is used, systemd passes the pre-bound sockets
+# via file descriptor passing, allowing dnsmasq to bind to privileged
+# ports (53, 67, 68) without requiring CAP_NET_BIND_SERVICE after startup
+ExecStart=/usr/sbin/dnsmasq -k --conf-file=/etc/dnsmasq.conf
+
+# Configuration reload: Send SIGHUP to the main process to trigger
+# configuration file re-reading without service interruption. This
+# preserves active connections and cached DNS entries while applying
+# configuration changes
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy: Automatically restart on failure (crash, non-zero exit)
+# but not on clean shutdown. This ensures service availability while
+# respecting intentional stops
+Restart=on-failure
+RestartSec=5s
+
+# Process management: Use the service's main process as the PID to track
+PIDFile=/run/dnsmasq/dnsmasq.pid
+
+# Logging: Direct stderr to systemd journal for centralized log management
+# This integrates Rust's tracing logs with systemd's journal, enabling
+# structured logging queries with journalctl
+StandardOutput=journal
+StandardError=journal
+
+# Syslog compatibility: Tag journal entries with "dnsmasq" identifier
+# for backward compatibility with syslog-based monitoring tools
+SyslogIdentifier=dnsmasq
+
+# Runtime directory: Ensure /run/dnsmasq exists with correct permissions
+# for PID file, DHCP lease file, and other runtime state
+RuntimeDirectory=dnsmasq
+RuntimeDirectoryMode=0755
+
+# State directory: Persistent storage for DHCP leases across reboots
+StateDirectory=dnsmasq
+StateDirectoryMode=0755
+
+# Security hardening: Apply systemd security features to minimize
+# attack surface. These restrictions are compatible with dnsmasq's
+# operational requirements
+
+# Capability restrictions: Limit capabilities to only those required
+# for network operations and privilege dropping
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW CAP_SETGID CAP_SETUID CAP_CHOWN CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+
+# Filesystem restrictions: Limit filesystem access to necessary paths
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/dnsmasq /run/dnsmasq
+
+# Kernel restrictions: Prevent kernel module loading and restrict kernel logs
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+
+# Process restrictions: Prevent privilege escalation and restrict access
+# to process information
+NoNewPrivileges=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# System call restrictions: Lock down personality and restrict realtime
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+
+# Namespace restrictions: Private /tmp and /dev, but allow network access
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Memory restrictions: Deny write+execute memory regions
+MemoryDenyWriteExecute=yes
+
+# Address family restrictions: Limit to IPv4 and IPv6 (no other protocols)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+
+# System call filter: Allow only necessary system calls for network services
+# This provides defense-in-depth against exploitation attempts
+SystemCallFilter=@system-service @network-io @signal @file-system @process
+SystemCallFilter=~@privileged @resources @obsolete @debug @mount @swap @reboot @module @raw-io @cpu-emulation
+SystemCallErrorNumber=EPERM
+
+[Install]
+# Target: Enable as part of multi-user.target (standard system startup)
+# This ensures dnsmasq starts automatically on system boot
+WantedBy=multi-user.target
+
+# Socket activation alternative: This service can also be started by
+# dnsmasq-rust.socket for on-demand activation
+Also=dnsmasq-rust.socket
