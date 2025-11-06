@@ -354,116 +354,19 @@ pub fn mac_to_eui64(mac: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
 
-    let mut eui64 = Vec::with_capacity(8);
-
-    // First 3 bytes with flipped U/L bit
-    eui64.push(mac[0] ^ 0x02); // Flip bit 7
-    eui64.push(mac[1]);
-    eui64.push(mac[2]);
-
-    // Insert FF:FE
-    eui64.push(0xFF);
-    eui64.push(0xFE);
-
-    // Last 3 bytes
-    eui64.push(mac[3]);
-    eui64.push(mac[4]);
-    eui64.push(mac[5]);
+    // Convert MAC-48 to EUI-64 by inserting FF:FE and flipping U/L bit
+    let eui64 = vec![
+        mac[0] ^ 0x02,  // Flip bit 7 (Universal/Local bit)
+        mac[1],
+        mac[2],
+        0xFF,           // Insert FF:FE
+        0xFE,
+        mac[3],
+        mac[4],
+        mac[5],
+    ];
 
     Some(eui64)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mac_to_eui64() {
-        let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-        let eui64 = mac_to_eui64(&mac).unwrap();
-
-        assert_eq!(eui64.len(), 8);
-        assert_eq!(eui64[0], 0x02); // U/L bit flipped
-        assert_eq!(eui64[1], 0x11);
-        assert_eq!(eui64[2], 0x22);
-        assert_eq!(eui64[3], 0xFF);
-        assert_eq!(eui64[4], 0xFE);
-        assert_eq!(eui64[5], 0x33);
-        assert_eq!(eui64[6], 0x44);
-        assert_eq!(eui64[7], 0x55);
-    }
-
-    #[test]
-    fn test_mac_to_eui64_invalid() {
-        let mac = vec![0x00, 0x11, 0x22]; // Too short
-        assert!(mac_to_eui64(&mac).is_none());
-    }
-
-    #[test]
-    fn test_generate_slaac_address() {
-        let mut manager = SlaacManager::new();
-        let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
-        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-
-        let addr = manager.generate_address(prefix, 64, &hwaddr);
-        assert!(addr.is_some());
-
-        let addr = addr.unwrap();
-        assert_eq!(addr.state, SlaacState::Tentative);
-
-        // Verify prefix is preserved
-        let octets = addr.address.octets();
-        assert_eq!(octets[0..8], [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0]);
-
-        // Verify EUI-64 IID
-        assert_eq!(octets[8], 0x02); // Flipped U/L bit
-        assert_eq!(octets[11], 0xFF);
-        assert_eq!(octets[12], 0xFE);
-    }
-
-    #[test]
-    fn test_slaac_address_ping_due() {
-        let addr = SlaacAddress::new(
-            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
-            vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
-        );
-
-        assert!(addr.is_ping_due()); // No ping sent yet
-    }
-
-    #[test]
-    fn test_slaac_address_state_transitions() {
-        let mut addr = SlaacAddress::new(
-            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
-            vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
-        );
-
-        assert_eq!(addr.state, SlaacState::Tentative);
-
-        addr.mark_ping_sent();
-        assert_eq!(addr.state, SlaacState::Validating);
-
-        addr.confirm();
-        assert_eq!(addr.state, SlaacState::Confirmed);
-    }
-
-    #[test]
-    fn test_handle_ping_reply_duplicate() {
-        let mut manager = SlaacManager::new();
-        let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
-        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-
-        let addr = manager.generate_address(prefix, 64, &hwaddr).unwrap();
-        let address = addr.address;
-
-        // Transition to validating state
-        manager.addresses[0].mark_ping_sent();
-
-        // Simulate receiving echo reply (duplicate detected)
-        let is_our_probe = manager.handle_ping_reply(address, manager.ping_id);
-        assert!(is_our_probe);
-        assert_eq!(manager.addresses[0].state, SlaacState::Duplicate);
-    }
 }
 
 // ==============================================================================
@@ -563,4 +466,97 @@ pub fn periodic_slaac() {
 
     let _awaiting_dad = manager.periodic_dad();
     // TODO: Log or handle the number of addresses awaiting DAD
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mac_to_eui64() {
+        let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+        let eui64 = mac_to_eui64(&mac).unwrap();
+
+        assert_eq!(eui64.len(), 8);
+        assert_eq!(eui64[0], 0x02); // U/L bit flipped
+        assert_eq!(eui64[1], 0x11);
+        assert_eq!(eui64[2], 0x22);
+        assert_eq!(eui64[3], 0xFF);
+        assert_eq!(eui64[4], 0xFE);
+        assert_eq!(eui64[5], 0x33);
+        assert_eq!(eui64[6], 0x44);
+        assert_eq!(eui64[7], 0x55);
+    }
+
+    #[test]
+    fn test_mac_to_eui64_invalid() {
+        let mac = vec![0x00, 0x11, 0x22]; // Too short
+        assert!(mac_to_eui64(&mac).is_none());
+    }
+
+    #[test]
+    fn test_generate_slaac_address() {
+        let mut manager = SlaacManager::new();
+        let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
+        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+
+        let addr = manager.generate_address(prefix, 64, &hwaddr);
+        assert!(addr.is_some());
+
+        let addr = addr.unwrap();
+        assert_eq!(addr.state, SlaacState::Tentative);
+
+        // Verify prefix is preserved
+        let octets = addr.address.octets();
+        assert_eq!(octets[0..8], [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0]);
+
+        // Verify EUI-64 IID
+        assert_eq!(octets[8], 0x02); // Flipped U/L bit
+        assert_eq!(octets[11], 0xFF);
+        assert_eq!(octets[12], 0xFE);
+    }
+
+    #[test]
+    fn test_slaac_address_ping_due() {
+        let addr = SlaacAddress::new(
+            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
+            vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+        );
+
+        assert!(addr.is_ping_due()); // No ping sent yet
+    }
+
+    #[test]
+    fn test_slaac_address_state_transitions() {
+        let mut addr = SlaacAddress::new(
+            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
+            vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+        );
+
+        assert_eq!(addr.state, SlaacState::Tentative);
+
+        addr.mark_ping_sent();
+        assert_eq!(addr.state, SlaacState::Validating);
+
+        addr.confirm();
+        assert_eq!(addr.state, SlaacState::Confirmed);
+    }
+
+    #[test]
+    fn test_handle_ping_reply_duplicate() {
+        let mut manager = SlaacManager::new();
+        let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
+        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+
+        let addr = manager.generate_address(prefix, 64, &hwaddr).unwrap();
+        let address = addr.address;
+
+        // Transition to validating state
+        manager.addresses[0].mark_ping_sent();
+
+        // Simulate receiving echo reply (duplicate detected)
+        let is_our_probe = manager.handle_ping_reply(address, manager.ping_id);
+        assert!(is_our_probe);
+        assert_eq!(manager.addresses[0].state, SlaacState::Duplicate);
+    }
 }
