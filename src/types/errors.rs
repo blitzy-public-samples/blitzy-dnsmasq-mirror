@@ -944,6 +944,7 @@ pub enum AuthError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
 
     #[test]
     fn test_error_display() {
