@@ -472,11 +472,12 @@ impl ListenerManager {
     /// # }
     /// ```
     pub async fn refresh_listeners(&self) -> Result<(), SocketError> {
+        // Recreate all listeners (without holding the lock)
+        let new_listeners = create_bound_listeners(false).await?;
+        
+        // Now acquire the lock and update
         let mut listeners = self.listeners.write().unwrap();
         listeners.clear();
-        
-        // Recreate all listeners
-        let new_listeners = create_bound_listeners(false).await?;
         listeners.extend(new_listeners);
         
         Ok(())
@@ -655,7 +656,7 @@ pub async fn bind_to_interface(
     };
     
     let socket = Socket::new(domain, Type::DGRAM, Some(SocketProtocol::UDP))
-        .map_err(|e| SocketError::CreationFailed(e))?;
+        .map_err(SocketError::CreationFailed)?;
     
     // Set SO_REUSEADDR for address reuse
     socket
@@ -709,9 +710,9 @@ pub async fn bind_to_interface(
     })?;
     
     // Convert to Tokio UdpSocket
-    socket.set_nonblocking(true).map_err(|e| SocketError::CreationFailed(e))?;
+    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
     let std_socket: std::net::UdpSocket = socket.into();
-    UdpSocket::from_std(std_socket).map_err(|e| SocketError::CreationFailed(e))
+    UdpSocket::from_std(std_socket).map_err(SocketError::CreationFailed)
 }
 
 /// Bind UDP socket to wildcard address (0.0.0.0 or ::)
@@ -749,7 +750,7 @@ pub async fn bind_wildcard(port: u16, ipv6: bool) -> Result<UdpSocket, SocketErr
     
     let domain = if ipv6 { Domain::IPV6 } else { Domain::IPV4 };
     let socket = Socket::new(domain, Type::DGRAM, Some(SocketProtocol::UDP))
-        .map_err(|e| SocketError::CreationFailed(e))?;
+        .map_err(SocketError::CreationFailed)?;
     
     socket
         .set_reuse_address(true)
@@ -763,9 +764,9 @@ pub async fn bind_wildcard(port: u16, ipv6: bool) -> Result<UdpSocket, SocketErr
         source: e,
     })?;
     
-    socket.set_nonblocking(true).map_err(|e| SocketError::CreationFailed(e))?;
+    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
     let std_socket: std::net::UdpSocket = socket.into();
-    UdpSocket::from_std(std_socket).map_err(|e| SocketError::CreationFailed(e))
+    UdpSocket::from_std(std_socket).map_err(SocketError::CreationFailed)
 }
 
 /// Create UDP socket with random ephemeral source port
@@ -846,7 +847,7 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
     };
     
     let socket = Socket::new(domain, Type::STREAM, Some(SocketProtocol::TCP))
-        .map_err(|e| SocketError::CreationFailed(e))?;
+        .map_err(SocketError::CreationFailed)?;
     
     socket
         .set_reuse_address(true)
@@ -860,12 +861,12 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
         source: e,
     })?;
     
-    socket.listen(128).map_err(|e| SocketError::CreationFailed(e))?;
+    socket.listen(128).map_err(SocketError::CreationFailed)?;
     
-    socket.set_nonblocking(true).map_err(|e| SocketError::CreationFailed(e))?;
+    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
     let std_listener: std::net::TcpListener = socket.into();
     let listener = TcpListener::from_std(std_listener)
-        .map_err(|e| SocketError::CreationFailed(e))?;
+        .map_err(SocketError::CreationFailed)?;
     
     Ok(TcpSocketListener {
         listener,
@@ -904,7 +905,7 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
 #[cfg(feature = "dhcp")]
 pub async fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SocketProtocol::UDP))
-        .map_err(|e| SocketError::CreationFailed(e))?;
+        .map_err(SocketError::CreationFailed)?;
     
     socket
         .set_broadcast(true)
@@ -926,9 +927,9 @@ pub async fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
         source: e,
     })?;
     
-    socket.set_nonblocking(true).map_err(|e| SocketError::CreationFailed(e))?;
+    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
     let std_socket: std::net::UdpSocket = socket.into();
-    UdpSocket::from_std(std_socket).map_err(|e| SocketError::CreationFailed(e))
+    UdpSocket::from_std(std_socket).map_err(SocketError::CreationFailed)
 }
 
 /// Bind socket to local interface or address

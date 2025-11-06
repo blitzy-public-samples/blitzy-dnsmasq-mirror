@@ -515,8 +515,8 @@ impl LeaseStore {
         let (hardware_address, iaid, is_temporary_address) = if address.is_ipv6() {
             // DHCPv6 format: second field is [T]<iaid>
             let iaid_str = parts[1];
-            let (is_ta, iaid_num_str) = if iaid_str.starts_with('T') {
-                (true, &iaid_str[1..])
+            let (is_ta, iaid_num_str) = if let Some(stripped) = iaid_str.strip_prefix('T') {
+                (true, stripped)
             } else {
                 (false, iaid_str)
             };

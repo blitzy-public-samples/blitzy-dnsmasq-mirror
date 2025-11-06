@@ -298,19 +298,17 @@ pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Opti
         let prefix_end = name_lower.len() - domain_with_dot.len();
         let hostname_part = &name_lower[..prefix_end];
         
-        // Check if prefix matches (if configured)
-        if !config.prefix.is_empty() {
+        // Extract the numeric/IP portion after the prefix
+        let data_part = if !config.prefix.is_empty() {
             let prefix_lower = config.prefix.to_lowercase();
-            if !hostname_part.starts_with(&prefix_lower) {
+            // Check if prefix matches and strip it
+            if let Some(stripped) = hostname_part.strip_prefix(&prefix_lower as &str) {
+                stripped
+            } else {
                 continue;
             }
-        }
-        
-        // Extract the numeric/IP portion after the prefix
-        let data_part = if config.prefix.is_empty() {
-            hostname_part
         } else {
-            &hostname_part[config.prefix.len()..]
+            hostname_part
         };
         
         match config.format {
@@ -407,12 +405,12 @@ pub fn generate_synthetic_domain(ip: IpAddr, synth_domains: &[SynthDomain]) -> O
         }
         
         // Append domain suffix
-        if !result.is_empty() {
-            if result.len() + config.domain.len() + 1 <= MAX_DOMAIN_NAME {
-                result.push('.');
-                result.push_str(&config.domain);
-                return Some(result);
-            }
+        if !result.is_empty()
+            && result.len() + config.domain.len() < MAX_DOMAIN_NAME
+        {
+            result.push('.');
+            result.push_str(&config.domain);
+            return Some(result);
         }
     }
     
@@ -552,9 +550,8 @@ pub fn wildcard_match(pattern: &str, domain: &str) -> bool {
     let pattern_lower = pattern.to_lowercase();
     let domain_lower = domain.to_lowercase();
     
-    if pattern_lower.starts_with("*.") {
+    if let Some(suffix) = pattern_lower.strip_prefix("*.") {
         // Leading wildcard: *.example.com
-        let suffix = &pattern_lower[2..]; // Remove "*."
         
         // Domain must end with the suffix
         if !domain_lower.ends_with(suffix) {

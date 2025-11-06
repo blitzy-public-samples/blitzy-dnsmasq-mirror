@@ -328,8 +328,9 @@ impl RecordType {
 }
 
 /// DNS record class (QCLASS/CLASS field)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RecordClass {
+    #[default]
     IN = 1,   // Internet
     CS = 2,   // CSNET
     CH = 3,   // CHAOS
@@ -355,12 +356,6 @@ impl RecordClass {
     /// Convert record class to u16
     pub fn to_u16(self) -> u16 {
         self as u16
-    }
-}
-
-impl Default for RecordClass {
-    fn default() -> Self {
-        RecordClass::IN
     }
 }
 

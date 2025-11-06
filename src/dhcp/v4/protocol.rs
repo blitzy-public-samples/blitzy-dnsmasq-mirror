@@ -111,7 +111,7 @@ const MIN_PACKET_SIZE: usize = 300;
 /// - 16 bytes: chaddr (client hardware address)
 /// - 64 bytes: sname (server hostname)
 /// - 128 bytes: file (boot filename)
-/// Total: 236 bytes
+///   Total: 236 bytes
 const DHCP_FIXED_HEADER_SIZE: usize = 236;
 
 /// Size of the options field in the basic DHCPv4 packet structure (312 bytes)
@@ -266,7 +266,7 @@ pub enum MessageType {
     /// - Client requests inappropriate address for its network
     /// - Client's lease has expired
     /// - Client moved to different subnet
-    /// Client must restart discovery process.
+    ///   Client must restart discovery process.
     Nak = 6,
 
     /// DHCPRELEASE (7) - Client voluntarily releasing IP address
