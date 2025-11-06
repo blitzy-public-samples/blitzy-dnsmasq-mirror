@@ -664,7 +664,10 @@ mod linux {
         }
         
         let mut ifr: ifreq = unsafe { mem::zeroed() };
-        ifr.ifr_ifru.ifru_ivalue = index as i32;
+        // Set interface index in the union - use ifru_ifindex which is the correct field
+        unsafe {
+            ifr.ifr_ifru.ifru_ifindex = index as i32;
+        }
         
         let result = unsafe { ioctl(fd, SIOCGIFNAME, &mut ifr) };
         unsafe { nix::libc::close(fd) };
@@ -707,7 +710,7 @@ mod linux {
             return Err(InterfaceError::NotFound(name.to_string()));
         }
         
-        let index = unsafe { ifr.ifr_ifru.ifru_ivalue as u32 };
+        let index = unsafe { ifr.ifr_ifru.ifru_ifindex as u32 };
         Ok(index)
     }
     
@@ -766,19 +769,19 @@ mod linux {
     }
     
     /// Convert nix interface flags to our InterfaceFlags
-    fn convert_flags(flags: nix::ifaddrs::InterfaceFlags) -> InterfaceFlags {
+    fn convert_flags(flags: nix::net::if_::InterfaceFlags) -> InterfaceFlags {
         let mut result = InterfaceFlags::empty();
         
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_UP) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_UP) {
             result |= InterfaceFlags::UP;
         }
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_LOOPBACK) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_LOOPBACK) {
             result |= InterfaceFlags::LOOPBACK;
         }
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_POINTOPOINT) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_POINTOPOINT) {
             result |= InterfaceFlags::POINTOPOINT;
         }
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_MULTICAST) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_MULTICAST) {
             result |= InterfaceFlags::MULTICAST;
         }
         
@@ -891,19 +894,19 @@ mod bsd {
     }
     
     /// Convert nix interface flags to our InterfaceFlags
-    fn convert_flags(flags: nix::ifaddrs::InterfaceFlags) -> InterfaceFlags {
+    fn convert_flags(flags: nix::net::if_::InterfaceFlags) -> InterfaceFlags {
         let mut result = InterfaceFlags::empty();
         
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_UP) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_UP) {
             result |= InterfaceFlags::UP;
         }
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_LOOPBACK) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_LOOPBACK) {
             result |= InterfaceFlags::LOOPBACK;
         }
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_POINTOPOINT) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_POINTOPOINT) {
             result |= InterfaceFlags::POINTOPOINT;
         }
-        if flags.contains(nix::ifaddrs::InterfaceFlags::IFF_MULTICAST) {
+        if flags.contains(nix::net::if_::InterfaceFlags::IFF_MULTICAST) {
             result |= InterfaceFlags::MULTICAST;
         }
         
