@@ -1,0 +1,534 @@
+# GitHub Actions Release Automation for dnsmasq-rs
+#
+# This workflow automates the build and publication of production-ready binary artifacts
+# for the Rust implementation of dnsmasq across multiple target platforms.
+#
+# Triggered automatically on version tags (v*.*.*) to create platform-specific binaries,
+# generate checksums, and publish to GitHub Releases with complete deployment packages.
+#
+# Supports: Linux (x86_64, aarch64), macOS (x86_64, aarch64), with static musl linking
+# for Linux to ensure compatibility with Alpine Linux 3.19.9, 3.20.8, 3.21.5, and 3.22.2
+# as specified in Agent Action Plan Section 0.5.5.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  RUST_VERSION: '1.91.0'
+  CARGO_TERM_COLOR: always
+  # Build optimizations
+  RUSTFLAGS: '-C target-cpu=native -C opt-level=3'
+
+jobs:
+  # Validate version tag and extract version information
+  validate-version:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      is_prerelease: ${{ steps.extract.outputs.is_prerelease }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: extract
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          
+          echo "Processing tag: $TAG"
+          
+          # Validate semver format (v1.2.3, v1.2.3-alpha.1, etc.)
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "Error: Tag '$TAG' does not follow semantic versioning (vX.Y.Z)"
+            exit 1
+          fi
+          
+          # Extract version without 'v' prefix
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Check if prerelease
+          if echo "$VERSION" | grep -qE '-'; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "Detected prerelease version: $VERSION"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "Detected stable version: $VERSION"
+          fi
+
+      - name: Validate version matches Cargo.toml
+        run: |
+          CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${{ steps.extract.outputs.version }}"
+          
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Cargo.toml version ($CARGO_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          
+          echo "✓ Version validation passed: $TAG_VERSION"
+
+  # Build release binaries for all target platforms
+  build-release:
+    name: Build ${{ matrix.target }}
+    needs: validate-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 (musl for static linking)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            use_cross: true
+            
+          # Linux aarch64 (musl for static linking)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            platform: linux
+            arch: aarch64
+            use_cross: true
+            
+          # macOS x86_64 (Intel)
+          - target: x86_64-apple-darwin
+            os: macos-13
+            platform: macos
+            arch: x86_64
+            use_cross: false
+            
+          # macOS aarch64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-14
+            platform: macos
+            arch: aarch64
+            use_cross: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cross-compilation tools
+        if: matrix.use_cross
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Install musl tools (Linux)
+        if: matrix.platform == 'linux' && !matrix.use_cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.use_cross }}" == "true" ]; then
+            cross build --release --target ${{ matrix.target }} --locked
+          else
+            cargo build --release --target ${{ matrix.target }} --locked
+          fi
+
+      - name: Strip binary
+        run: |
+          BINARY_PATH="target/${{ matrix.target }}/release/dnsmasq-rs"
+          
+          if [ -f "$BINARY_PATH" ]; then
+            if [ "${{ matrix.platform }}" == "linux" ]; then
+              strip "$BINARY_PATH" || true
+            elif [ "${{ matrix.platform }}" == "macos" ]; then
+              strip "$BINARY_PATH" || true
+            fi
+            
+            ls -lh "$BINARY_PATH"
+          else
+            echo "Error: Binary not found at $BINARY_PATH"
+            exit 1
+          fi
+
+      - name: Create release package
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          ARCHIVE_NAME="dnsmasq-rs-v${VERSION}-${{ matrix.target }}"
+          PACKAGE_DIR="package/$ARCHIVE_NAME"
+          
+          mkdir -p "$PACKAGE_DIR"
+          
+          # Copy binary
+          cp "target/${{ matrix.target }}/release/dnsmasq-rs" "$PACKAGE_DIR/"
+          
+          # Copy documentation
+          cp README.md "$PACKAGE_DIR/"
+          cp LICENSE "$PACKAGE_DIR/"
+          cp CHANGELOG.md "$PACKAGE_DIR/" || true
+          
+          # Copy systemd service file for Linux platforms
+          if [ "${{ matrix.platform }}" == "linux" ]; then
+            mkdir -p "$PACKAGE_DIR/systemd"
+            cp tools/systemd/dnsmasq-rs.service "$PACKAGE_DIR/systemd/" || echo "Warning: systemd service file not found"
+          fi
+          
+          # Create installation instructions
+          cat > "$PACKAGE_DIR/INSTALL.txt" << 'EOF'
+dnsmasq-rs Installation Instructions
+====================================
+
+Binary Installation:
+1. Extract this archive to a directory of your choice
+2. Copy the 'dnsmasq-rs' binary to /usr/local/bin/ or another directory in your PATH
+3. Make it executable: chmod +x /usr/local/bin/dnsmasq-rs
+
+Linux Systemd Installation:
+1. Copy systemd/dnsmasq-rs.service to /etc/systemd/system/
+2. Reload systemd: systemctl daemon-reload
+3. Enable service: systemctl enable dnsmasq-rs
+4. Start service: systemctl start dnsmasq-rs
+
+Configuration:
+- Compatible with existing dnsmasq.conf files
+- Default config location: /etc/dnsmasq.conf
+- Run 'dnsmasq-rs --help' for command-line options
+
+For full documentation, see README.md
+EOF
+
+          # Create archive
+          cd package
+          if [ "${{ matrix.platform }}" == "linux" ]; then
+            tar -czf "$ARCHIVE_NAME.tar.gz" "$ARCHIVE_NAME"
+            echo "ARCHIVE_PATH=package/$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
+            echo "ARCHIVE_NAME=$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
+          else
+            # macOS - create both tar.gz and zip
+            tar -czf "$ARCHIVE_NAME.tar.gz" "$ARCHIVE_NAME"
+            zip -r "$ARCHIVE_NAME.zip" "$ARCHIVE_NAME"
+            echo "ARCHIVE_PATH=package/$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
+            echo "ARCHIVE_PATH_ZIP=package/$ARCHIVE_NAME.zip" >> $GITHUB_ENV
+            echo "ARCHIVE_NAME=$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
+            echo "ARCHIVE_NAME_ZIP=$ARCHIVE_NAME.zip" >> $GITHUB_ENV
+          fi
+
+      - name: Generate checksums
+        run: |
+          cd package
+          sha256sum *.tar.gz > checksums-${{ matrix.target }}.txt
+          if [ -f *.zip ]; then
+            sha256sum *.zip >> checksums-${{ matrix.target }}.txt
+          fi
+          cat checksums-${{ matrix.target }}.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            package/*.tar.gz
+            package/*.zip
+            package/checksums-${{ matrix.target }}.txt
+          retention-days: 7
+
+  # Build Docker images for Alpine Linux (multi-platform)
+  build-docker:
+    name: Build Docker Images
+    needs: [validate-version, build-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Linux x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-x86_64-unknown-linux-musl
+          path: docker-build/
+
+      - name: Download Linux aarch64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-aarch64-unknown-linux-musl
+          path: docker-build/
+
+      - name: Prepare Docker build context
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          
+          # Extract binaries for Docker
+          cd docker-build
+          tar -xzf dnsmasq-rs-v${VERSION}-x86_64-unknown-linux-musl.tar.gz --strip-components=1 dnsmasq-rs-v${VERSION}-x86_64-unknown-linux-musl/dnsmasq-rs
+          mv dnsmasq-rs dnsmasq-rs-amd64
+          
+          tar -xzf dnsmasq-rs-v${VERSION}-aarch64-unknown-linux-musl.tar.gz --strip-components=1 dnsmasq-rs-v${VERSION}-aarch64-unknown-linux-musl/dnsmasq-rs
+          mv dnsmasq-rs dnsmasq-rs-arm64
+          
+          # Create multi-stage Dockerfile
+          cat > Dockerfile << 'DOCKERFILE'
+# Multi-stage Docker build for dnsmasq-rs
+# Supports Alpine Linux 3.19.9, 3.20.8, 3.21.5, and 3.22.2 as specified in Section 0.5.5
+ARG ALPINE_VERSION=3.22.2
+
+FROM alpine:${ALPINE_VERSION}
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Create user for running dnsmasq
+RUN addgroup -g 1000 dnsmasq && \
+    adduser -D -u 1000 -G dnsmasq dnsmasq
+
+# Copy binary based on architecture
+ARG TARGETARCH
+COPY dnsmasq-rs-${TARGETARCH} /usr/local/bin/dnsmasq-rs
+RUN chmod +x /usr/local/bin/dnsmasq-rs
+
+# Create necessary directories
+RUN mkdir -p /etc/dnsmasq.d /var/lib/dnsmasq && \
+    chown -R dnsmasq:dnsmasq /var/lib/dnsmasq
+
+# Expose ports
+EXPOSE 53/tcp 53/udp 67/udp 69/udp
+
+# Switch to non-root user
+USER dnsmasq
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD /usr/local/bin/dnsmasq-rs --test || exit 1
+
+ENTRYPOINT ["/usr/local/bin/dnsmasq-rs"]
+CMD ["--no-daemon", "--keep-in-foreground"]
+DOCKERFILE
+
+      - name: Build and push Docker images
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          REPO_NAME="${{ github.repository }}"
+          IMAGE_NAME="ghcr.io/${REPO_NAME,,}/dnsmasq-rs"
+          
+          cd docker-build
+          
+          # Build for each supported Alpine version
+          for ALPINE_VERSION in 3.19.9 3.20.8 3.21.5 3.22.2; do
+            ALPINE_TAG=$(echo $ALPINE_VERSION | cut -d. -f1-2)
+            
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --build-arg ALPINE_VERSION=$ALPINE_VERSION \
+              --tag "${IMAGE_NAME}:${VERSION}-alpine${ALPINE_TAG}" \
+              --push \
+              .
+          done
+          
+          # Tag latest with the newest Alpine version
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg ALPINE_VERSION=3.22.2 \
+            --tag "${IMAGE_NAME}:${VERSION}" \
+            --tag "${IMAGE_NAME}:latest" \
+            --push \
+            .
+
+  # Create GitHub Release with all artifacts
+  create-release:
+    name: Create GitHub Release
+    needs: [validate-version, build-release, build-docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Organize release files
+        run: |
+          mkdir -p final-release
+          
+          # Move all archives and checksums to final directory
+          find release-artifacts -name "*.tar.gz" -exec mv {} final-release/ \;
+          find release-artifacts -name "*.zip" -exec mv {} final-release/ \;
+          find release-artifacts -name "checksums-*.txt" -exec mv {} final-release/ \;
+          
+          # Create combined checksums file
+          cd final-release
+          cat checksums-*.txt > SHA256SUMS.txt
+          rm checksums-*.txt
+          
+          echo "Release artifacts:"
+          ls -lh
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          
+          # Try to extract changelog for this version
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(sed -n "/## \[${VERSION}\]/,/## \[/p" CHANGELOG.md | sed '1d;$d')
+          fi
+          
+          # Fallback to git log if no changelog entry
+          if [ -z "$NOTES" ]; then
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              NOTES=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+            else
+              NOTES=$(git log --pretty=format:"- %s (%h)" --no-merges -10)
+            fi
+          fi
+          
+          # Create release notes
+          cat > release-notes.md << EOF
+# dnsmasq-rs ${VERSION}
+
+Rust implementation of dnsmasq with memory safety guarantees and 100% feature parity.
+
+## What's New
+
+${NOTES}
+
+## Installation
+
+Download the appropriate archive for your platform:
+
+- **Linux x86_64**: \`dnsmasq-rs-v${VERSION}-x86_64-unknown-linux-musl.tar.gz\`
+- **Linux aarch64**: \`dnsmasq-rs-v${VERSION}-aarch64-unknown-linux-musl.tar.gz\`
+- **macOS x86_64** (Intel): \`dnsmasq-rs-v${VERSION}-x86_64-apple-darwin.tar.gz\`
+- **macOS aarch64** (Apple Silicon): \`dnsmasq-rs-v${VERSION}-aarch64-apple-darwin.tar.gz\`
+
+All archives include:
+- Static binary (\`dnsmasq-rs\`)
+- Documentation (README, LICENSE, CHANGELOG)
+- Installation instructions (INSTALL.txt)
+- Systemd service file (Linux only)
+
+### Docker Images
+
+Multi-platform Docker images are available for Alpine Linux:
+
+\`\`\`bash
+docker pull ghcr.io/${{ github.repository }}/dnsmasq-rs:${VERSION}
+\`\`\`
+
+Supported Alpine versions: 3.19, 3.20, 3.21, 3.22
+
+### Verification
+
+Verify download integrity using SHA256 checksums:
+
+\`\`\`bash
+sha256sum -c SHA256SUMS.txt
+\`\`\`
+
+## Configuration Compatibility
+
+This release is 100% backward compatible with dnsmasq configuration files and command-line arguments. Existing \`dnsmasq.conf\` files work without modification.
+
+## Drop-in Replacement
+
+The Rust implementation can replace the C version with identical behavior:
+- Same configuration syntax
+- Same command-line arguments
+- Same signal handling (SIGHUP, SIGUSR1, SIGTERM)
+- Same lease file format
+- Identical network protocol behavior
+
+## Documentation
+
+- [README](https://github.com/${{ github.repository }}/blob/v${VERSION}/README.md)
+- [Building from source](https://github.com/${{ github.repository }}/blob/v${VERSION}/docs/rust/BUILDING.md)
+- [Migration guide](https://github.com/${{ github.repository }}/blob/v${VERSION}/docs/rust/MIGRATION.md)
+
+---
+
+**Full Changelog**: https://github.com/${{ github.repository }}/compare/PREV_TAG...v${VERSION}
+EOF
+
+          echo "release_notes_file=release-notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: dnsmasq-rs v${{ needs.validate-version.outputs.version }}
+          body_path: ${{ steps.release_notes.outputs.release_notes_file }}
+          files: final-release/*
+          prerelease: ${{ needs.validate-version.outputs.is_prerelease }}
+          draft: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
+        run: |
+          echo "# Release v${{ needs.validate-version.outputs.version }} Published! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cd final-release
+          for file in *.tar.gz *.zip; do
+            if [ -f "$file" ]; then
+              SIZE=$(ls -lh "$file" | awk '{print $5}')
+              echo "- \`$file\` ($SIZE)" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}/dnsmasq-rs:${{ needs.validate-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}/dnsmasq-rs:latest\`" >> $GITHUB_STEP_SUMMARY
