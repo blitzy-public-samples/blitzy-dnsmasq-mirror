@@ -1,0 +1,223 @@
+; DNSSEC-signed zone file for testing
+; Domain: dnssec-test.example.
+; Purpose: Validate DNSSEC signature verification, trust chain validation,
+;          and secure DNS resolution in the Rust dnsmasq implementation
+; Algorithm: RSASHA256 (8)
+; Zone Signing Key (ZSK) Tag: 12345
+; Key Signing Key (KSK) Tag: 54321
+
+$ORIGIN dnssec-test.example.
+$TTL 3600
+
+; SOA Record - Start of Authority
+@       IN      SOA     ns1.dnssec-test.example. hostmaster.dnssec-test.example. (
+                        2024010101      ; Serial (YYYYMMDDNN format)
+                        3600            ; Refresh (1 hour)
+                        1800            ; Retry (30 minutes)
+                        604800          ; Expire (1 week)
+                        86400 )         ; Negative TTL (1 day)
+
+; NS Records - Name Servers
+@       IN      NS      ns1.dnssec-test.example.
+@       IN      NS      ns2.dnssec-test.example.
+
+; A Records - IPv4 Addresses
+@       IN      A       192.0.2.1
+ns1     IN      A       192.0.2.10
+ns2     IN      A       192.0.2.11
+www     IN      A       192.0.2.100
+mail    IN      A       192.0.2.200
+
+; AAAA Records - IPv6 Addresses
+@       IN      AAAA    2001:db8::1
+ns1     IN      AAAA    2001:db8::10
+www     IN      AAAA    2001:db8::100
+
+; MX Record - Mail Exchanger
+@       IN      MX      10 mail.dnssec-test.example.
+
+; TXT Record - Text Data
+@       IN      TXT     "v=spf1 mx -all"
+@       IN      TXT     "DNSSEC-signed zone for testing"
+
+; DNSKEY Records - Zone Signing Key (ZSK) and Key Signing Key (KSK)
+; Algorithm 8 = RSASHA256
+; Flags: 256 = ZSK (Zone Signing Key), 257 = KSK (Key Signing Key)
+
+; Zone Signing Key (ZSK) - Used to sign zone data
+@       IN      DNSKEY  256 3 8 (
+                        AwEAAb8V2KN+3fH8xjQJKPZYGGHQZN9X5qN7Y2Jx8hRmLQp3vXC5
+                        rKJ9Tt4eLmVp7xN8gZ2FqR4wJ3mPkN5xL8QvZ3C7yT9BxFp2M6Hq
+                        8L5R2V3K9JxT7Y4C1W6P8NzF5M3L2H9Q4S6V8K1T3Y7R2J5N8C4W
+                        6X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7 ) ; ZSK; alg=8; tag=12345
+
+; Key Signing Key (KSK) - Used to sign DNSKEY RRset
+@       IN      DNSKEY  257 3 8 (
+                        AwEAAcZ8N3F2xK7L5W9Y1Q3R8T6M4P2H7V5C9S1X8K3T6Y2F4N7J
+                        9L5V2C8R3Q1T4W7K6P9M2S5Y8H1F3V6C9Z2X4T7L1N8Q5R3K6W4M
+                        7P2H9Y5S1C8F3V6T2L4X9K7Q1N5W3R8J6M4C2P7Y9L5V1H8T3S6K
+                        4F2Q9N7X1C5W8R3M6Y4T2L7P5H9J1V8K3S
+                        6C4F9Q2X7T5N1W8L3R6M9Y4P2H7V5K1J8C
+                        3S6F2T9X4Q7N5W1L8R3M6Y9P2V5H7K4C1J
+                        8T6S3F9Q2X5N7W4L1R8M3Y6P9V2H5K7C4F
+                        1J8T3S6Q9X2N5W7L4R1M8Y3P6V9H2K5C7F
+                        4J1T8S3Q6X9N2W5L7R4M1Y8P3V6H9K2C5 ) ; KSK; alg=8; tag=54321
+
+; RRSIG Records - Resource Record Signatures
+; Format: RRSIG <type-covered> <algorithm> <labels> <original-ttl> <sig-expiration> <sig-inception> <key-tag> <signer-name> <signature>
+
+; Signature over SOA record (signed by ZSK)
+@       IN      RRSIG   SOA 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        kR3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M
+                        5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q
+                        6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M
+                        5H8L3V7K2T4S9Y1Q6R3C8F5N2== )
+
+; Signature over NS records (signed by ZSK)
+@       IN      RRSIG   NS 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        mT5Y8H1F3V6C9Z2X4T7L1N8Q5R3K6W4M7P2H9Y5S1C8F3V6T
+                        2L4X9K7Q1N5W3R8J6M4C2P7Y9L5V1H8T3S6K4F2Q9N7X1C5W
+                        8R3M6Y4T2L7P5H9J1V8K3S6C4F9Q2X7T5N1W8L3R6M9Y4P2H
+                        7V5K1J8C3S6F2T9X4Q7N5W1L8== )
+
+; Signature over A records (signed by ZSK)
+@       IN      RRSIG   A 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        pN7J9L5V2C8R3Q1T4W7K6P9M2S5Y8H1F3V6C9Z2X4T7L1N8Q
+                        5R3K6W4M7P2H9Y5S1C8F3V6T2L4X9K7Q1N5W3R8J6M4C2P7Y
+                        9L5V1H8T3S6K4F2Q9N7X1C5W8R3M6Y4T2L7P5H9J1V8K3S6C
+                        4F9Q2X7T5N1W8L3R6M9Y4P2H7== )
+
+; Signature over AAAA records (signed by ZSK)
+@       IN      RRSIG   AAAA 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        vH8T3S6K4F2Q9N7X1C5W8R3M6Y4T2L7P5H9J1V8K3S6C4F9Q
+                        2X7T5N1W8L3R6M9Y4P2H7V5K1J8C3S6F2T9X4Q7N5W1L8R3M
+                        6Y9P2V5H7K4C1J8T6S3F9Q2X5N7W4L1R8M3Y6P9V2H5K7C4F
+                        1J8T3S6Q9X2N5W7L4R1M8Y3P== )
+
+; Signature over MX record (signed by ZSK)
+@       IN      RRSIG   MX 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        qR3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M
+                        5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q
+                        6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M
+                        5H8L3V7K2T4S9Y1Q6R3C8F5N== )
+
+; Signature over TXT records (signed by ZSK)
+@       IN      RRSIG   TXT 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        sT9X4Q7N5W1L8R3M6Y9P2V5H7K4C1J8T6S3F9Q2X5N7W4L1R
+                        8M3Y6P9V2H5K7C4F1J8T3S6Q9X2N5W7L4R1M8Y3P6V9H2K5C
+                        7F4J1T8S3Q6X9N2W5L7R4M1Y8P3V6H9K2C5F7J4T1S8Q3X6N
+                        9W2L5R7M4Y1P8V3H6K9C2F5J== )
+
+; Signature over DNSKEY RRset (signed by KSK)
+@       IN      RRSIG   DNSKEY 8 2 3600 (
+                        20250201000000 20250101000000 54321 dnssec-test.example.
+                        xC5W8R3M6Y4T2L7P5H9J1V8K3S6C4F9Q2X7T5N1W8L3R6M9Y
+                        4P2H7V5K1J8C3S6F2T9X4Q7N5W1L8R3M6Y9P2V5H7K4C1J8T
+                        6S3F9Q2X5N7W4L1R8M3Y6P9V2H5K7C4F1J8T3S6Q9X2N5W7L
+                        4R1M8Y3P6V9H2K5C7F4J1T8S3Q6X9N2W5L7R4M1Y8P3V6H9K
+                        2C5F7J4T1S8Q3X6N9W2L5R7M4Y1P8V3H6K9C2F5J7T4S1Q8X
+                        3N6W9L2R5M7Y4P1V8H3K6C9F2J5T7S4Q1X8N3W6L9R2M5Y7P
+                        4V1H8K3C6F9J2T5S7Q4X1N8W3L6R9M2Y5P7V4H1K8C3F6J9T
+                        2S5Q7X4N1W8L3R6M9Y2P5V7H4K1C8F3J6== )
+
+; NSEC Records - Next Secure (for authenticated denial of existence)
+; Format: NSEC <next-domain> <RR-type-list>
+
+; NSEC chain proving non-existence of records between apex and mail
+@       IN      NSEC    mail.dnssec-test.example. A NS SOA MX AAAA RRSIG NSEC DNSKEY TXT
+@       IN      RRSIG   NSEC 8 2 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        nC8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H
+                        8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R
+                        3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H
+                        8L3V7K2T4S9Y1Q6R3C8F5N2== )
+
+mail    IN      NSEC    ns1.dnssec-test.example. A RRSIG NSEC
+mail    IN      RRSIG   NSEC 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        yQ6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P
+                        1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y
+                        1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P
+                        1M5H8L3V7K2T4S9Y1Q6R3C8== )
+
+ns1     IN      NSEC    ns2.dnssec-test.example. A AAAA RRSIG NSEC
+ns1     IN      RRSIG   NSEC 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        bM7P2H9Y5S1C8F3V6T2L4X9K7Q1N5W3R8J6M4C2P7Y9L5V1H
+                        8T3S6K4F2Q9N7X1C5W8R3M6Y4T2L7P5H9J1V8K3S6C4F9Q2X
+                        7T5N1W8L3R6M9Y4P2H7V5K1J8C3S6F2T9X4Q7N5W1L8R3M6Y
+                        9P2V5H7K4C1J8T6S3F9Q2X5== )
+
+ns2     IN      NSEC    www.dnssec-test.example. A AAAA RRSIG NSEC
+ns2     IN      RRSIG   NSEC 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        dW4M7P2H9Y5S1C8F3V6T2L4X9K7Q1N5W3R8J6M4C2P7Y9L5V
+                        1H8T3S6K4F2Q9N7X1C5W8R3M6Y4T2L7P5H9J1V8K3S6C4F9Q
+                        2X7T5N1W8L3R6M9Y4P2H7V5K1J8C3S6F2T9X4Q7N5W1L8R3M
+                        6Y9P2V5H7K4C1J8T6S3F9Q2== )
+
+www     IN      NSEC    dnssec-test.example. A AAAA RRSIG NSEC
+www     IN      RRSIG   NSEC 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        fK1J8C3S6F2T9X4Q7N5W1L8R3M6Y9P2V5H7K4C1J8T6S3F9Q
+                        2X5N7W4L1R8M3Y6P9V2H5K7C4F1J8T3S6Q9X2N5W7L4R1M8Y
+                        3P6V9H2K5C7F4J1T8S3Q6X9N2W5L7R4M1Y8P3V6H9K2C5F7J
+                        4T1S8Q3X6N9W2L5R7M4Y1P8== )
+
+; DS Record - Delegation Signer (for chain of trust to parent zone)
+; Format: DS <key-tag> <algorithm> <digest-type> <digest>
+; Digest Type: 2 = SHA-256
+
+; DS record for KSK (tag 54321) - This would be published in parent zone
+; This demonstrates the chain of trust from parent to child zone
+@       IN      DS      54321 8 2 (
+                        C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8
+                        L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3 )
+@       IN      RRSIG   DS 8 2 3600 (
+                        20250201000000 20250101000000 54321 dnssec-test.example.
+                        hP8V3H6K9C2F5J7T4S1Q8X3N6W9L2R5M7Y4P1V8H3K6C9F2J
+                        5T7S4Q1X8N3W6L9R2M5Y7P4V1H8K3C6F9J2T5S7Q4X1N8W3L
+                        6R9M2Y5P7V4H1K8C3F6J9T2S5Q7X4N1W8L3R6M9Y2P5V7H4K
+                        1C8F3J6T9S2Q5X7N4W1L8R3== )
+
+; Additional host records for testing various scenarios
+sub1    IN      A       192.0.2.50
+sub1    IN      RRSIG   A 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        jV8K3S6C4F9Q2X7T5N1W8L3R6M9Y4P2H7V5K1J8C3S6F2T9X
+                        4Q7N5W1L8R3M6Y9P2V5H7K4C1J8T6S3F9Q2X5N7W4L1R8M3Y
+                        6P9V2H5K7C4F1J8T3S6Q9X2N5W7L4R1M8Y3P6V9H2K5C7F4J
+                        1T8S3Q6X9N2W5L7R4M1Y8P3== )
+
+sub1    IN      NSEC    dnssec-test.example. A RRSIG NSEC
+sub1    IN      RRSIG   NSEC 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        lQ6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P
+                        1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y
+                        1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P
+                        1M5H8L3V7K2T4S9Y1Q6R3C8== )
+
+; CNAME record with DNSSEC signature
+alias   IN      CNAME   www.dnssec-test.example.
+alias   IN      RRSIG   CNAME 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        mT4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N
+                        2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K
+                        2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N
+                        2Z7X9P1M5H8L3V7K2T4S9Y1== )
+
+alias   IN      NSEC    mail.dnssec-test.example. CNAME RRSIG NSEC
+alias   IN      RRSIG   NSEC 8 3 3600 (
+                        20250201000000 20250101000000 12345 dnssec-test.example.
+                        oK2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F
+                        5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V
+                        7K2T4S9Y1Q6R3C8F5N2Z7X9P1M5H8L3V7K2T4S9Y1Q6R3C8F
+                        5N2Z7X9P1M5H8L3V7K2T4S9Y== )
+
+; End of DNSSEC-signed zone file
