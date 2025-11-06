@@ -471,7 +471,7 @@ impl InotifyWatcher {
     /// ```
     pub async fn next_event(&mut self) -> Option<FileEvent> {
         // Read events from inotify (non-blocking)
-        let events = match self.inotify.read_events() {
+        let events = match self.inotify.read_events(&mut self.event_buffer) {
             Ok(events) => events,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 // No events available
@@ -598,7 +598,8 @@ impl InotifyWatcher {
 
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            let filename = match entry.file_name().to_str() {
+            let file_name = entry.file_name();
+            let filename = match file_name.to_str() {
                 Some(name) => name,
                 None => continue,
             };
@@ -663,15 +664,19 @@ mod tests {
 
     #[test]
     fn test_should_ignore_file() {
-        // Should ignore backup files
+        // Should ignore backup files (ending with ~)
         assert!(InotifyWatcher::should_ignore_file("config~"));
         assert!(InotifyWatcher::should_ignore_file("resolv.conf~"));
 
-        // Should ignore lock files
+        // Should ignore lock files (starting AND ending with #)
         assert!(InotifyWatcher::should_ignore_file("#config#"));
-        assert!(InotifyWatcher::should_ignore_file("#.#file"));
+        assert!(InotifyWatcher::should_ignore_file("##"));
+        
+        // Should NOT ignore files that start with # but don't end with #
+        assert!(!InotifyWatcher::should_ignore_file("#.#file"));
+        assert!(!InotifyWatcher::should_ignore_file("#config"));
 
-        // Should ignore dotfiles
+        // Should ignore dotfiles (starting with .)
         assert!(InotifyWatcher::should_ignore_file(".hidden"));
         assert!(InotifyWatcher::should_ignore_file(".config"));
 
@@ -679,6 +684,9 @@ mod tests {
         assert!(!InotifyWatcher::should_ignore_file("config"));
         assert!(!InotifyWatcher::should_ignore_file("resolv.conf"));
         assert!(!InotifyWatcher::should_ignore_file("hosts"));
+        
+        // Should ignore empty filename
+        assert!(InotifyWatcher::should_ignore_file(""));
     }
 
     #[test]
