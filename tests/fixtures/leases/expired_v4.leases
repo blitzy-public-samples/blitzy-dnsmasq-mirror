@@ -1,0 +1,77 @@
+# Expired DHCPv4 lease database test fixture
+# Format: <timestamp> <hw_addr> <ip_addr> <hostname> <client_id>
+# All timestamps are in the past to test lease expiry detection and pruning logic
+# Tests lease_prune() function from src/lease.c
+
+# Long-expired leases (2020-2022) - should be first candidates for pruning
+1577836800 00:11:22:33:44:55 192.168.1.100 laptop-2020 01:00:11:22:33:44:55
+1588291200 aa:bb:cc:dd:ee:01 192.168.1.101 desktop-old 01:aa:bb:cc:dd:ee:01
+1598918400 02:de:ad:be:ef:01 10.0.0.50 server-legacy 01:02:de:ad:be:ef:01
+1609459200 ff:ee:dd:cc:bb:aa 172.16.0.100 workstation-2021 01:ff:ee:dd:cc:bb:aa
+1619827200 12:34:56:78:9a:bc 192.168.10.25 iot-device-old *
+
+# Moderately expired leases (2022-2023) - various expiry ages
+1640995200 de:ad:be:ef:00:01 192.168.1.105 printer-office 01:de:ad:be:ef:00:01
+1651449600 ca:fe:ba:be:00:02 192.168.1.106 scanner-lab *
+1661990400 00:50:56:ab:cd:ef 10.10.10.100 vm-guest-01 01:00:50:56:ab:cd:ef
+1672531200 08:00:27:12:34:56 172.20.1.50 virtualbox-client 01:08:00:27:12:34:56
+1682899200 b8:27:eb:a1:b2:c3 192.168.50.200 raspberry-pi-old 01:b8:27:eb:a1:b2:c3
+
+# Recently expired leases from 2023 (less than a year ago)
+1688169600 00:0c:29:5f:a8:d9 192.168.1.110 vmware-guest 01:00:0c:29:5f:a8:d9
+1698796800 52:54:00:12:34:56 10.20.30.40 kvm-instance 01:52:54:00:12:34:56
+1704067200 ac:de:48:00:11:22 192.168.100.15 test-machine *
+
+# Early 2024 expired leases
+1707436800 00:16:3e:01:02:03 172.31.0.100 lxc-container 01:00:16:3e:01:02:03
+1715212800 02:42:ac:11:00:02 192.168.200.50 docker-host 01:02:42:ac:11:00:02
+
+# Mid-2024 expired leases
+1722470400 e4:5f:01:ab:cd:ef 192.168.1.120 laptop-2024 01:e4:5f:01:ab:cd:ef
+1725148800 70:85:c2:12:34:56 10.50.0.75 smartphone-old 01:70:85:c2:12:34:56
+
+# Recently expired 2025 leases (within last few months)
+1727827200 d8:3a:dd:fe:dc:ba 192.168.1.125 tablet-guest *
+1730419200 00:1b:44:11:3a:b7 172.16.100.200 server-temp 01:00:1b:44:11:3a:b7
+
+# Expired leases with various special characteristics
+# Lease with non-standard hardware type (01- prefix for hardware type 1)
+1656633600 01-a1:b2:c3:d4:e5:f6 192.168.5.50 special-device 01:a1:b2:c3:d4:e5:f6
+
+# Lease with no hostname (asterisk)
+1669852800 88:99:aa:bb:cc:dd 10.100.50.25 * 01:88:99:aa:bb:cc:dd
+
+# Lease with no client ID (asterisk)
+1676592000 11:22:33:44:55:66 192.168.77.88 no-client-id *
+
+# Lease with neither hostname nor client ID
+1683388800 aa:bb:cc:dd:ee:ff 172.18.0.99 * *
+
+# Lease with long hostname
+1690329600 fe:dc:ba:98:76:54 192.168.1.150 very-long-hostname-for-testing-parser-limits 01:fe:dc:ba:98:76:54
+
+# Lease with complex client ID (longer format)
+1695513600 12:34:56:78:90:ab 10.0.100.100 complex-client 01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f:10
+
+# Multiple expired leases on same subnet to test batch pruning
+1700697600 00:aa:00:bb:00:cc 192.168.2.10 subnet2-host1 01:00:aa:00:bb:00:cc
+1700784000 00:aa:00:bb:00:dd 192.168.2.11 subnet2-host2 01:00:aa:00:bb:00:dd
+1700870400 00:aa:00:bb:00:ee 192.168.2.12 subnet2-host3 01:00:aa:00:bb:00:ee
+1700956800 00:aa:00:bb:00:ff 192.168.2.13 subnet2-host4 01:00:aa:00:bb:00:ff
+
+# Expired leases with various IP address ranges
+1710374400 c0:ff:ee:c0:ff:ee 10.0.0.1 gateway-device 01:c0:ff:ee:c0:ff:ee
+1712966400 ba:db:ee:f0:00:d0 172.30.255.254 edge-router *
+1715644800 de:ca:fb:ad:00:00 192.168.255.255 broadcast-test 01:de:ca:fb:ad:00:00
+
+# Edge case: Very old expired lease (year 2020 start)
+1577836801 01:23:45:67:89:ab 192.168.0.1 ancient-lease 01:01:23:45:67:89:ab
+
+# Edge case: Lease that expired exactly at midnight on various dates
+1609459200 11:11:11:11:11:11 10.1.1.1 midnight-2021 *
+1640995200 22:22:22:22:22:22 10.2.2.2 midnight-2022 *
+1672531200 33:33:33:33:33:33 10.3.3.3 midnight-2023 *
+1704067200 44:44:44:44:44:44 10.4.4.4 midnight-2024 *
+
+# Lease that just expired (a few days ago from Nov 6, 2025 perspective)
+1730764800 99:88:77:66:55:44 192.168.99.99 just-expired 01:99:88:77:66:55:44
