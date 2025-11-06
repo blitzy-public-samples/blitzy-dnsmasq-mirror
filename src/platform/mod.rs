@@ -229,10 +229,7 @@ impl From<PlatformError> for DnsmasqError {
                 DnsmasqError::System(crate::types::errors::SystemError::FileSystemError {
                     operation: "platform operation".to_string(),
                     path: err.to_string(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        err.to_string(),
-                    ),
+                    source: std::io::Error::other(err.to_string()),
                 })
             }
         }
