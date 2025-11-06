@@ -7,15 +7,15 @@ src/.copts_*
 contrib/lease-tools/dhcp_lease_time
 contrib/lease-tools/dhcp_release
 contrib/lease-tools/dhcp_release6
+
+# Rust build artifacts
+/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
 debian/files
 debian/substvars
 debian/utils-substvars
 debian/trees/
 debian/build/
-
-# Rust build artifacts
-/target/
-# Note: Cargo.lock is committed for binary crates (ensures reproducible builds)
-# For library crates, Cargo.lock would be ignored, but dnsmasq is a binary
-**/*.rs.bk
-*.pdb
