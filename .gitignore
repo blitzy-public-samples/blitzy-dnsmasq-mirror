@@ -12,3 +12,9 @@ debian/substvars
 debian/utils-substvars
 debian/trees/
 debian/build/
+
+# Rust build artifacts
+/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
