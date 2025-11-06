@@ -12,6 +12,7 @@
 //!
 //! Replaces C implementation in `src/rfc3315.c`.
 
+use std::fmt;
 use std::net::Ipv6Addr;
 
 /// DHCPv6 message types (RFC 3315)
@@ -31,6 +32,75 @@ pub enum Dhcpv6MessageType {
     InformationRequest = 11,
     RelayForw = 12,
     RelayRepl = 13,
+}
+
+impl Dhcpv6MessageType {
+    /// Convert u8 to Dhcpv6MessageType
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Solicit),
+            2 => Some(Self::Advertise),
+            3 => Some(Self::Request),
+            4 => Some(Self::Confirm),
+            5 => Some(Self::Renew),
+            6 => Some(Self::Rebind),
+            7 => Some(Self::Reply),
+            8 => Some(Self::Release),
+            9 => Some(Self::Decline),
+            10 => Some(Self::Reconfigure),
+            11 => Some(Self::InformationRequest),
+            12 => Some(Self::RelayForw),
+            13 => Some(Self::RelayRepl),
+            _ => None,
+        }
+    }
+
+    /// Convert Dhcpv6MessageType to u8
+    pub fn to_u8(&self) -> u8 {
+        *self as u8
+    }
+
+    /// Check if this message type requires a response from the server
+    pub fn requires_response(&self) -> bool {
+        matches!(
+            self,
+            Self::Solicit
+                | Self::Request
+                | Self::Confirm
+                | Self::Renew
+                | Self::Rebind
+                | Self::Release
+                | Self::Decline
+                | Self::InformationRequest
+                | Self::RelayForw
+        )
+    }
+
+    /// Check if this is a relay message type
+    pub fn is_relay_message(&self) -> bool {
+        matches!(self, Self::RelayForw | Self::RelayRepl)
+    }
+}
+
+impl fmt::Display for Dhcpv6MessageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Solicit => "SOLICIT",
+            Self::Advertise => "ADVERTISE",
+            Self::Request => "REQUEST",
+            Self::Confirm => "CONFIRM",
+            Self::Renew => "RENEW",
+            Self::Rebind => "REBIND",
+            Self::Reply => "REPLY",
+            Self::Release => "RELEASE",
+            Self::Decline => "DECLINE",
+            Self::Reconfigure => "RECONFIGURE",
+            Self::InformationRequest => "INFORMATION-REQUEST",
+            Self::RelayForw => "RELAY-FORW",
+            Self::RelayRepl => "RELAY-REPL",
+        };
+        write!(f, "{}", name)
+    }
 }
 
 /// DHCPv6 message structure (RFC 3315 Section 6)
