@@ -1,5 +1,7 @@
 //! DHCPv6 server implementation
 
+pub mod protocol;
+
 /// DHCPv6 server
 pub struct DhcpV6Server {}
 
