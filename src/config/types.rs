@@ -1317,8 +1317,10 @@ mod tests {
     #[test]
     fn test_config_validation_cache_size() {
         let mut builder = ConfigBuilder::new();
-        let mut dns = DnsConfig::default();
-        dns.cache_size = 200_000; // Too large
+        let dns = DnsConfig {
+            cache_size: 200_000, // Too large
+            ..Default::default()
+        };
         builder.dns(dns);
         
         assert!(builder.validate().is_err());
