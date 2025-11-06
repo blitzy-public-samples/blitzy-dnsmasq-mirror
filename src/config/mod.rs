@@ -5,6 +5,9 @@
 
 use std::path::PathBuf;
 
+/// Default configuration constants translated from C's config.h
+pub mod defaults;
+
 /// Main configuration structure
 #[derive(Debug, Clone)]
 pub struct Config {
