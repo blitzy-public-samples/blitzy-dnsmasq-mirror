@@ -1181,20 +1181,27 @@ mod tests {
     fn test_memcmp_masked() {
         let data1 = vec![0xFF, 0xAA, 0x55, 0x00];
         let data2 = vec![0xFF, 0xBB, 0x55, 0x00];
-        // mask bit pattern: bit 1 means ignore that byte position (from right)
-        // Bit 1 (position 1 from right) corresponds to index 2
-        let mask = 0b0010; // Ignore byte at index 2 when counting from right
         
         // mask=0: compare all bytes
         // data1 and data2 differ at index 1, so should return 0
         assert_eq!(memcmp_masked(&data1, &data2, 4, 0), 0);
         
-        // With mask=0b0010, we skip index 2 (counting from right)
-        // But data1[1] != data2[1], so still returns 0
+        // Test with mask to ignore specific byte positions
+        // mask bit pattern: bit 1 means ignore that byte position (from right)
+        // Bit 1 (position 1 from right) corresponds to index 2 when counting from right
+        let mask = 0b0010; // Ignore byte at index 2 when counting from right
+        
+        // Even with mask, data1[1] != data2[1] (0xAA != 0xBB), so still returns 0
+        assert_eq!(memcmp_masked(&data1, &data2, 4, mask), 0);
+        
+        // Test identical data
         let data3 = vec![0xFF, 0xAA, 0x55, 0x00];
         let data4 = vec![0xFF, 0xAA, 0x55, 0x00];
         // Identical data should match
         assert!(memcmp_masked(&data3, &data4, 4, 0) > 0);
+        
+        // Test with mask on matching data
+        assert!(memcmp_masked(&data3, &data4, 4, mask) > 0);
     }
     
     #[test]
