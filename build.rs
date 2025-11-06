@@ -289,22 +289,38 @@ fn detect_ubus_libraries() {
 /// Checks if a library exists in the linker search path.
 ///
 /// This is a fallback for libraries that don't provide pkg-config files.
-/// Attempts to link against the library using the cc crate.
+/// Uses a simple heuristic: check common library paths for the library file.
 ///
 /// # Arguments
 /// * `lib_name` - Library name without 'lib' prefix (e.g., "ubus" for libubus.so)
 ///
 /// # Returns
-/// * `true` if the library can be found and linked
+/// * `true` if the library can be found
 /// * `false` otherwise
 fn library_exists(lib_name: &str) -> bool {
-    // Try to build a simple test program that links against the library
-    let test_code = "int main() { return 0; }";
+    // Common library search paths on Unix-like systems
+    let lib_paths = [
+        "/usr/lib",
+        "/usr/local/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib64",
+        "/lib",
+        "/lib64",
+    ];
     
-    cc::Build::new()
-        .cargo_metadata(false)  // Don't emit cargo metadata
-        .try_compile_with_output(&format!("test_{}", lib_name), test_code, &[format!("-l{}", lib_name)])
-        .is_ok()
+    // Check for .so, .a, or .dylib extensions
+    let lib_extensions = ["so", "a", "dylib"];
+    
+    for path in &lib_paths {
+        for ext in &lib_extensions {
+            let lib_file = format!("{}/lib{}.{}", path, lib_name, ext);
+            if Path::new(&lib_file).exists() {
+                return true;
+            }
+        }
+    }
+    
+    false
 }
 
 /// Stamps version information into the build.
@@ -330,7 +346,7 @@ fn stamp_version() {
 /// Determines the version string for this build.
 ///
 /// Tries multiple strategies in order:
-/// 1. Read VERSION file if it exists
+/// 1. Read VERSION file if it exists and contains a real version (not a git substitution marker)
 /// 2. Run `git describe --tags` if in a git repository
 /// 3. Use "unknown" as fallback
 ///
@@ -340,7 +356,8 @@ fn get_version() -> String {
     // Strategy 1: Read VERSION file
     if let Ok(version) = fs::read_to_string("VERSION") {
         let version = version.trim();
-        if !version.is_empty() {
+        // Check if it's a real version (not a git export substitution marker)
+        if !version.is_empty() && !version.starts_with("$Format:") {
             return version.to_string();
         }
     }
@@ -362,17 +379,4 @@ fn get_version() -> String {
     // Strategy 3: Fallback
     println!("cargo:warning=Could not determine version (no VERSION file or git repository)");
     "unknown".to_string()
-}
-
-// Trait extension for cc::Build to support try_compile_with_output
-trait BuildExt {
-    fn try_compile_with_output(&mut self, output_name: &str, code: &str, extra_flags: &[String]) -> Result<(), ()>;
-}
-
-impl BuildExt for cc::Build {
-    fn try_compile_with_output(&mut self, _output_name: &str, _code: &str, _extra_flags: &[String]) -> Result<(), ()> {
-        // Simplified implementation - in production would actually try to compile
-        // For now, return Err to indicate library not found via this method
-        Err(())
-    }
 }
