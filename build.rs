@@ -364,7 +364,7 @@ fn get_version() -> String {
     
     // Strategy 2: Use git describe
     if let Ok(output) = Command::new("git")
-        .args(&["describe", "--tags", "--always", "--dirty"])
+        .args(["describe", "--tags", "--always", "--dirty"])
         .output()
     {
         if output.status.success() {
