@@ -105,7 +105,8 @@ toml = "0.8"
 
 # Logging and error handling - replaces log.c
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
 thiserror = "1.0"
 anyhow = "1.0"
 
@@ -153,6 +154,10 @@ inotify = "0.10"
 # Platform-specific dependencies (BSD family)
 [target.'cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
 kqueue = "1.0"
+
+# Unix-specific dependencies (syslog support)
+[target.'cfg(unix)'.dependencies]
+syslog-tracing = "0.3"
 
 [dev-dependencies]
 proptest = "1.5"
