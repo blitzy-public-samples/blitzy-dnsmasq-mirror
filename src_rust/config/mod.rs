@@ -338,6 +338,7 @@ pub(crate) mod internal {
     /// );
     /// assert_eq!(canonical, PathBuf::from("/etc/other.conf"));
     /// ```
+    #[allow(dead_code)] // Reserved for future include file support
     pub fn canonicalize_path(path: &Path, config_dir: &Path) -> PathBuf {
         if path.is_absolute() {
             // Already absolute - attempt canonicalization but fall back to original
@@ -358,6 +359,7 @@ pub(crate) mod internal {
     /// # Returns
     ///
     /// `Ok(())` if the path exists and is readable, `Err` otherwise
+    #[allow(dead_code)] // Reserved for future include file support
     pub fn check_readable(path: &Path) -> io::Result<()> {
         use std::fs;
         
@@ -393,6 +395,7 @@ pub(crate) mod internal {
     /// # Returns
     ///
     /// Vector of matching paths in sorted order (for deterministic behavior)
+    #[allow(dead_code)] // Reserved for future include file support
     pub fn expand_glob(pattern: &str) -> io::Result<Vec<PathBuf>> {
         use std::fs;
         
@@ -425,10 +428,12 @@ pub(crate) mod internal {
     ///
     /// Maintains a stack of currently-being-parsed files to detect cycles.
     /// This prevents infinite recursion that could cause stack overflow.
+    #[allow(dead_code)] // Reserved for future include file support
     pub struct IncludeGuard {
         stack: Vec<PathBuf>,
     }
     
+    #[allow(dead_code)] // Reserved for future include file support
     impl IncludeGuard {
         /// Create a new include guard
         pub fn new() -> Self {
@@ -489,10 +494,7 @@ mod tests {
     #[test]
     fn test_config_builder_with_defaults() {
         // ConfigBuilder should produce valid configurations
-        let config = ConfigBuilder::new()
-            .with_defaults()
-            .build()
-            .expect("ConfigBuilder with defaults should succeed");
+        let config = ConfigBuilder::with_defaults().build();
         
         assert!(validate_config(&config).is_ok());
     }
@@ -551,8 +553,16 @@ mod tests {
         // Pushing same path again should fail (circular include)
         assert!(guard.push(path1.clone()).is_err());
         
-        // After pop, should be able to push again
+        // After pop, path1 is still in stack, so pushing it should still fail
         guard.pop();
+        assert!(guard.push(path1.clone()).is_err());
+        
+        // But pushing path2 again should succeed
+        assert!(guard.push(path2.clone()).is_ok());
+        
+        // After popping both, should be able to push path1 again
+        guard.pop(); // Remove path2
+        guard.pop(); // Remove path1
         assert!(guard.push(path1).is_ok());
     }
 }

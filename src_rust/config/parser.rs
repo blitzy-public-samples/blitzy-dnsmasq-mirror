@@ -7,6 +7,70 @@ use super::types::Config;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::fmt;
+
+/// Errors that can occur during configuration file parsing
+#[derive(Debug)]
+pub enum ParseError {
+    /// IO error reading configuration file
+    Io(std::io::Error),
+    /// Invalid syntax in configuration file
+    InvalidSyntax {
+        /// Line number where the syntax error occurred
+        line: usize,
+        /// Description of the syntax error
+        message: String,
+    },
+    /// Circular include detected
+    CircularInclude {
+        /// Path of the file that would create a circular include
+        path: String,
+    },
+    /// Invalid value for configuration option
+    InvalidValue {
+        /// Line number where the invalid value appears
+        line: usize,
+        /// Name of the configuration option
+        option: String,
+        /// The invalid value provided
+        value: String,
+        /// Description of why the value is invalid
+        reason: String,
+    },
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::Io(e) => write!(f, "IO error: {}", e),
+            ParseError::InvalidSyntax { line, message } => {
+                write!(f, "Invalid syntax at line {}: {}", line, message)
+            }
+            ParseError::CircularInclude { path } => {
+                write!(f, "Circular include detected: {}", path)
+            }
+            ParseError::InvalidValue { line, option, value, reason } => {
+                write!(f, "Invalid value '{}' for option '{}' at line {}: {}", 
+                       value, option, line, reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ParseError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ParseError {
+    fn from(e: std::io::Error) -> Self {
+        ParseError::Io(e)
+    }
+}
 
 /// Parse configuration from file
 ///
@@ -54,7 +118,7 @@ use std::path::Path;
 ///     }
 /// }
 /// ```
-pub fn parse_config_file(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
+pub fn parse_config_file(path: &str) -> Result<Config, ParseError> {
     let path_obj = Path::new(path);
     
     // If file doesn't exist, return default config
@@ -79,7 +143,12 @@ pub fn parse_config_file(path: &str) -> Result<Config, Box<dyn std::error::Error
         // Parse configuration directives
         if let Some(port_str) = line.strip_prefix("port=") {
             config.dns.port = port_str.parse()
-                .map_err(|e| format!("Invalid port number at line {}: {}", line_num + 1, e))?;
+                .map_err(|_| ParseError::InvalidValue {
+                    line: line_num + 1,
+                    option: "port".to_string(),
+                    value: port_str.to_string(),
+                    reason: "Invalid port number".to_string(),
+                })?;
         } else if line.starts_with("dhcp-range") {
             // dhcp-range directives are handled in full implementation
             // For now, this is a placeholder
