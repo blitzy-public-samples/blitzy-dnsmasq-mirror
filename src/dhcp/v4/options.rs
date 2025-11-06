@@ -114,7 +114,7 @@ impl Dhcpv4Option {
         let mut i = 0;
 
         // Skip magic cookie if present
-        if data.len() >= 4 && &data[0..4] == &[99, 130, 83, 99] {
+        if data.len() >= 4 && data[0..4] == [99, 130, 83, 99] {
             i = 4;
         }
 
