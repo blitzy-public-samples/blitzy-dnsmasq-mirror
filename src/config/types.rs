@@ -174,9 +174,10 @@ pub enum Protocol {
 ///
 /// Replaces LOG_DAEMON, LOG_LOCAL0-7, LOG_USER macros from <syslog.h>.
 /// See dnsmasq.h lines 980-1003 for facility flag definitions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyslogFacility {
     /// System daemons (default for most dnsmasq messages)
+    #[default]
     Daemon,
     /// Local use 0 (custom facility)
     Local0,
@@ -196,12 +197,6 @@ pub enum SyslogFacility {
     Local7,
     /// User-level messages
     User,
-}
-
-impl Default for SyslogFacility {
-    fn default() -> Self {
-        SyslogFacility::Daemon
-    }
 }
 
 // =============================================================================
@@ -521,7 +516,7 @@ impl DhcpRange {
             start: IpAddr::V4(start),
             end: IpAddr::V4(end),
             netmask: None,
-            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS as u64),
+            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
             tag: None,
         }
     }
@@ -532,7 +527,7 @@ impl DhcpRange {
             start: IpAddr::V6(start),
             end: IpAddr::V6(end),
             netmask: None,
-            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS as u64),
+            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
             tag: None,
         }
     }
@@ -675,7 +670,7 @@ impl Default for DhcpConfig {
             static_hosts: Vec::new(),
             options: Vec::new(),
             lease_file: None,
-            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS as u64),
+            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
             authoritative: false,
         }
     }
@@ -815,7 +810,7 @@ pub struct TrustAnchor {
 ///
 /// Per schema: enabled, check_unsigned, trust_anchors
 #[cfg(feature = "dnssec")]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DnssecConfig {
     /// Enable DNSSEC validation
     pub enabled: bool,
@@ -823,17 +818,6 @@ pub struct DnssecConfig {
     pub check_unsigned: bool,
     /// Trust anchors (DS records)
     pub trust_anchors: Vec<TrustAnchor>,
-}
-
-#[cfg(feature = "dnssec")]
-impl Default for DnssecConfig {
-    fn default() -> Self {
-        DnssecConfig {
-            enabled: false,
-            check_unsigned: false,
-            trust_anchors: Vec::new(),
-        }
-    }
 }
 
 // =============================================================================
@@ -1065,7 +1049,7 @@ impl Default for SecurityConfig {
 /// # Members Exposed
 ///
 /// Per schema: dns, dhcp, network, logging, security, tftp, dnssec, auth, files
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
     /// DNS subsystem configuration
     pub dns: DnsConfig,
@@ -1122,25 +1106,7 @@ impl Default for FileConfig {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            dns: DnsConfig::default(),
-            #[cfg(feature = "dhcp")]
-            dhcp: None,
-            network: NetworkConfig::default(),
-            logging: LoggingConfig::default(),
-            security: SecurityConfig::default(),
-            #[cfg(feature = "tftp")]
-            tftp: None,
-            #[cfg(feature = "dnssec")]
-            dnssec: None,
-            #[cfg(feature = "auth-dns")]
-            auth: None,
-            files: FileConfig::default(),
-        }
-    }
-}
+
 
 // =============================================================================
 // CONFIGURATION BUILDER
@@ -1218,14 +1184,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Validates the configuration for consistency
+    /// Internal validation helper
     ///
-    /// Checks cross-field constraints that can't be enforced by the type system:
-    /// - No overlapping DHCP ranges
-    /// - Valid port numbers
-    /// - Accessible file paths
-    /// - Valid network interface names
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    /// Performs validation checks and returns Result<(), ConfigError>
+    fn _validate(&self) -> Result<(), ConfigError> {
         // Validate DNS configuration
         if let Some(ref dns) = self.dns {
             if dns.cache_size > 100_000 {
@@ -1253,7 +1215,7 @@ impl ConfigBuilder {
 
         // Validate network configuration
         if let Some(ref network) = self.network {
-            if network.port == 0 || network.port > 65535 {
+            if network.port == 0 {
                 return Err(ConfigError::InvalidPort(network.port));
             }
         }
@@ -1261,12 +1223,26 @@ impl ConfigBuilder {
         Ok(())
     }
 
+    /// Validates the configuration for consistency
+    ///
+    /// Checks cross-field constraints that can't be enforced by the type system:
+    /// - No overlapping DHCP ranges
+    /// - Valid port numbers
+    /// - Accessible file paths
+    /// - Valid network interface names
+    ///
+    /// Returns a mutable reference to self for method chaining.
+    pub fn validate(&mut self) -> Result<&mut Self, ConfigError> {
+        self._validate()?;
+        Ok(self)
+    }
+
     /// Builds the final configuration after validation
     ///
     /// Consumes the builder and returns a validated `Config` instance.
     pub fn build(self) -> Result<Config, ConfigError> {
         // Perform final validation
-        self.validate()?;
+        self._validate()?;
 
         Ok(Config {
             dns: self.dns.unwrap_or_default(),
@@ -1324,13 +1300,15 @@ mod tests {
 
     #[test]
     fn test_config_builder() {
-        let config = ConfigBuilder::new()
-            .dns(DnsConfig::default())
-            .network(NetworkConfig::default())
-            .validate()
-            .unwrap()
-            .build()
-            .unwrap();
+        let mut builder = ConfigBuilder::new();
+        builder.dns(DnsConfig::default());
+        builder.network(NetworkConfig::default());
+        
+        // Validate returns &mut Self for chaining
+        builder.validate().unwrap();
+        
+        // Build consumes the builder
+        let config = builder.build().unwrap();
 
         assert_eq!(config.dns.cache_size, super::super::defaults::DEFAULT_CACHE_SIZE);
         assert_eq!(config.network.port, 53);

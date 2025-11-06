@@ -8,6 +8,9 @@ use std::path::PathBuf;
 /// Default configuration constants translated from C's config.h
 pub mod defaults;
 
+/// Configuration type definitions and validation
+pub mod types;
+
 /// Main configuration structure
 #[derive(Debug, Clone)]
 pub struct Config {
