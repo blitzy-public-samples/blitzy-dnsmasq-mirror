@@ -13,7 +13,7 @@
 //!
 //! The metrics system tracks operational counters for:
 //! - **DNS operations**: Cache insertions/evictions, query forwarding, authoritative/local answers
-//! - **DHCP messages**: All DHCPv4 message types (DISCOVER, OFFER, REQUEST, ACK, NAK, etc.)
+//! - **DHCP messages**: All `DHCPv4` message types (DISCOVER, OFFER, REQUEST, ACK, NAK, etc.)
 //! - **Legacy protocols**: BOOTP and PXE boot requests
 //! - **Lease management**: IPv4/IPv6 lease allocations and pruning
 //! - **Resolution failures**: Queries with no answer (NXDOMAIN/NODATA)
@@ -145,7 +145,7 @@ pub enum MetricsError {
 
     /// Failed to encode metrics in Prometheus text format
     ///
-    /// Occurs during export when the TextEncoder fails to serialize metrics.
+    /// Occurs during export when the `TextEncoder` fails to serialize metrics.
     /// This is rare but can happen if internal state is corrupted or I/O fails.
     ///
     /// **Recovery**: Return empty metrics or cached previous export; log error.
@@ -188,21 +188,19 @@ impl Display for MetricsError {
             } => {
                 write!(
                     f,
-                    "Failed to register metric '{}': {}",
-                    metric_name, source
+                    "Failed to register metric '{metric_name}': {source}"
                 )
             }
             MetricsError::EncodingFailed { source } => {
-                write!(f, "Failed to encode metrics to Prometheus format: {}", source)
+                write!(f, "Failed to encode metrics to Prometheus format: {source}")
             }
             MetricsError::InvalidMetricId { metric_id } => {
-                write!(f, "Invalid metric ID: {}", metric_id)
+                write!(f, "Invalid metric ID: {metric_id}")
             }
             MetricsError::LockPoisoned { lock_name } => {
                 write!(
                     f,
-                    "Mutex lock '{}' was poisoned by a panicking thread",
-                    lock_name
+                    "Mutex lock '{lock_name}' was poisoned by a panicking thread"
                 )
             }
         }
@@ -214,8 +212,7 @@ impl StdError for MetricsError {
         match self {
             MetricsError::RegistrationFailed { source, .. } => Some(source),
             MetricsError::EncodingFailed { source } => Some(source),
-            MetricsError::InvalidMetricId { .. } => None,
-            MetricsError::LockPoisoned { .. } => None,
+            MetricsError::InvalidMetricId { .. } | MetricsError::LockPoisoned { .. } => None,
         }
     }
 }
@@ -235,14 +232,14 @@ impl StdError for MetricsError {
 ///
 /// ## Storage Strategy
 ///
-/// **Option 1: HashMap (Chosen)**
+/// **Option 1: `HashMap` (Chosen)**
 /// - `HashMap<MetricId, IntCounter>` for O(1) lookup by metric ID
 /// - Wrapped in `RwLock` for concurrent read access to multiple counters
 /// - Allows dynamic metric registration (future extensibility)
 ///
 /// **Option 2: Individual Fields** (Alternative, not used)
 /// - Separate `IntCounter` field for each metric (e.g., `dns_cache_inserted: IntCounter`)
-/// - Slightly faster access (no HashMap lookup)
+/// - Slightly faster access (no `HashMap` lookup)
 /// - More verbose, less extensible
 ///
 /// # Thread Safety
@@ -293,7 +290,7 @@ pub struct MetricsCollector {
     ///
     /// Protected by `RwLock` to allow multiple concurrent readers (for `get_value()`)
     /// while ensuring exclusive write access during initialization. Counters themselves
-    /// are atomically updated, so the lock is primarily for the HashMap structure.
+    /// are atomically updated, so the lock is primarily for the `HashMap` structure.
     counters: RwLock<HashMap<MetricId, IntCounter>>,
 
     /// Prometheus registry for metric registration
@@ -499,7 +496,7 @@ impl MetricsCollector {
     /// # Errors
     ///
     /// - `MetricsError::InvalidMetricId` if metric doesn't exist (shouldn't happen with type-safe enum)
-    /// - `MetricsError::LockPoisoned` if the RwLock was poisoned by a panic
+    /// - `MetricsError::LockPoisoned` if the `RwLock` was poisoned by a panic
     ///
     /// # Examples
     ///
@@ -515,7 +512,7 @@ impl MetricsCollector {
     ///
     /// # Performance
     ///
-    /// - O(1) HashMap lookup
+    /// - O(1) `HashMap` lookup
     /// - Lock-free atomic increment (no contention)
     /// - Typical latency: <100ns on modern hardware
     pub fn increment(&self, metric: MetricId) -> MetricsResult<()> {
@@ -529,7 +526,7 @@ impl MetricsCollector {
         let counter = counters.get(&metric).ok_or_else(|| {
             warn!("Attempted to increment non-existent metric: {:?}", metric);
             MetricsError::InvalidMetricId {
-                metric_id: format!("{:?}", metric),
+                metric_id: format!("{metric:?}"),
             }
         })?;
 
@@ -555,7 +552,7 @@ impl MetricsCollector {
     /// # Errors
     ///
     /// - `MetricsError::InvalidMetricId` if metric doesn't exist
-    /// - `MetricsError::LockPoisoned` if the RwLock was poisoned
+    /// - `MetricsError::LockPoisoned` if the `RwLock` was poisoned
     ///
     /// # Examples
     ///
@@ -574,7 +571,7 @@ impl MetricsCollector {
         let counter = counters.get(&metric).ok_or_else(|| {
             warn!("Attempted to get value of non-existent metric: {:?}", metric);
             MetricsError::InvalidMetricId {
-                metric_id: format!("{:?}", metric),
+                metric_id: format!("{metric:?}"),
             }
         })?;
 
@@ -593,7 +590,7 @@ impl MetricsCollector {
     ///
     /// # Errors
     ///
-    /// Returns `MetricsError::EncodingFailed` if the TextEncoder fails to
+    /// Returns `MetricsError::EncodingFailed` if the `TextEncoder` fails to
     /// serialize metrics. This is rare but can occur if I/O fails or internal
     /// state is corrupted.
     ///
@@ -634,7 +631,7 @@ impl MetricsCollector {
         encoder.encode(&metric_families, &mut buffer).map_err(|e| {
             error!("Failed to encode metrics: {}", e);
             MetricsError::EncodingFailed {
-                source: std::io::Error::new(std::io::ErrorKind::Other, e)
+                source: std::io::Error::other(e)
             }
         })?;
 
@@ -675,7 +672,7 @@ impl MetricsCollector {
     ///
     /// # Errors
     ///
-    /// Returns `MetricsError::LockPoisoned` if the RwLock was poisoned.
+    /// Returns `MetricsError::LockPoisoned` if the `RwLock` was poisoned.
     pub fn reset(&self) -> MetricsResult<()> {
         warn!("Resetting all metrics to zero (breaks Prometheus monotonicity convention)");
         
@@ -768,7 +765,7 @@ pub fn get_metric_value(collector: &MetricsCollector, metric: MetricId) -> Metri
     collector.get_value(metric)
 }
 
-/// Returns the Prometheus metric name for a given MetricId
+/// Returns the Prometheus metric name for a given `MetricId`
 ///
 /// Convenience function providing the metric name string suitable for Prometheus
 /// export. This replaces the C implementation's `get_metric_name(int i)` function
@@ -780,7 +777,7 @@ pub fn get_metric_value(collector: &MetricsCollector, metric: MetricId) -> Metri
 ///
 /// # Returns
 ///
-/// Static string containing the Prometheus metric name (e.g., "dns_queries_forwarded_total")
+/// Static string containing the Prometheus metric name (e.g., `"dns_queries_forwarded_total"`)
 ///
 /// # Examples
 ///
@@ -803,6 +800,7 @@ pub fn get_metric_value(collector: &MetricsCollector, metric: MetricId) -> Metri
 ///
 /// Rust version provides compile-time safety via `MetricId` enum, preventing
 /// invalid indices that would cause array out-of-bounds access in C.
+#[must_use]
 pub fn get_metric_name(metric: MetricId) -> &'static str {
     metric.to_prometheus_name()
 }
