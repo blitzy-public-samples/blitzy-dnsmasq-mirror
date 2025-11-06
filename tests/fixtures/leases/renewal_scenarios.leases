@@ -1,0 +1,300 @@
+# DHCPv4 and DHCPv6 Lease Renewal Scenario Test Fixture
+#
+# This fixture file contains DHCP leases at various stages of their lifecycle
+# to test lease renewal timing logic and expiry update handling per RFC 2131
+# (DHCPv4) and RFC 3315 (DHCPv6).
+#
+# BASELINE TIMESTAMP: 1735689600 (January 1, 2025 00:00:00 UTC)
+# STANDARD LEASE TIME: 86400 seconds (24 hours)
+#
+# RFC 2131 Section 4.4.5 defines renewal timings:
+# - T1 (Renewal Time): 50% of lease duration (client begins unicast renewal)
+# - T2 (Rebinding Time): 87.5% of lease duration (client begins broadcast rebinding)
+# - Lease Expiry: 100% of lease duration (lease expires if not renewed)
+#
+# LIFECYCLE STAGES REPRESENTED:
+#
+# 1. NEWLY ALLOCATED LEASES (Stage 1: 0% - 50% lifecycle)
+#    Expiry = now + 86400 (24 hours remaining)
+#    Client has just received the lease, far from renewal
+#    No renewal action expected yet
+#
+# 2. APPROACHING T1 RENEWAL (Stage 2: ~50% lifecycle)
+#    Expiry = now + 43200 (12 hours remaining = 50% of 24h lease)
+#    Client should begin unicast RENEWAL to server soon
+#    T1 renewal window is imminent
+#
+# 3. IN RENEWAL WINDOW (Stage 3: 50% - 87.5% lifecycle)
+#    Expiry = now + 7200 (2 hours remaining = ~91.7% through lease)
+#    Client is actively attempting to renew via unicast REQUEST
+#    Between T1 and approaching T2 rebinding time
+#
+# 4. NEAR EXPIRY / REBINDING (Stage 4: >87.5% lifecycle)
+#    Expiry = now + 300 (5 minutes remaining = 99.4% through lease)
+#    Client has passed T2 and is broadcasting REBINDING requests
+#    Critical renewal state, lease about to expire
+#
+# 5. RECENTLY RENEWED (Stage 5: Lease extended)
+#    Expiry = now + 86400 (24 hours remaining after renewal ACK)
+#    Lease was successfully renewed, timestamps updated
+#    Client received ACK with new lease time
+#
+# FILE FORMAT (per src/lease.c lines 550-614):
+#
+# DHCPv4 format:
+# <expiry_timestamp> <mac_address> <ipv4_address> <hostname> <client_id>
+#
+# DHCPv6 format (requires "duid" line first):
+# duid <server_duid_hex>
+# <expiry_timestamp> <iaid> <ipv6_address> <hostname> <client_id>
+# <expiry_timestamp> T<iaid> <ipv6_address> <hostname> <client_id>  # TA (Temporary Address)
+#
+# Fields:
+# - expiry_timestamp: Unix timestamp (seconds since epoch)
+# - mac_address: Colon-separated hex (xx:xx:xx:xx:xx:xx) for Ethernet
+# - ipv4_address: Dotted decimal (e.g., 192.168.1.100)
+# - ipv6_address: Colon hex notation (e.g., 2001:db8::1)
+# - hostname: Client hostname or "*" if none
+# - client_id: Colon-separated hex bytes or "*" if none
+# - iaid: Identity Association ID (DHCPv6 only)
+# - T prefix: Indicates Temporary Address (DHCPv6 TA lease)
+
+# ============================================================================
+# DHCPv4 LEASES - RENEWAL LIFECYCLE STAGES
+# ============================================================================
+
+# Stage 1: NEWLY ALLOCATED - Desktop client just received lease
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# Status: Fresh lease, 24 hours remaining, no renewal activity expected
+1735776000 52:54:00:12:34:56 192.168.1.100 desktop-01 01:52:54:00:12:34:56
+
+# Stage 1: NEWLY ALLOCATED - Laptop client with FQDN
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# Status: Fresh lease with fully qualified hostname
+1735776000 52:54:00:ab:cd:ef 192.168.1.101 laptop-02.example.local 01:52:54:00:ab:cd:ef
+
+# Stage 1: NEWLY ALLOCATED - Client without explicit client-id (uses MAC)
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# Status: Fresh lease, client-id field is "*" (no separate client ID)
+1735776000 52:54:00:11:22:33 192.168.1.102 workstation-03 *
+
+# Stage 2: APPROACHING T1 RENEWAL - Server at 50% lease time
+# Expiry: 1735732800 (Jan 1, 2025 12:00:00 = now + 43200)
+# Status: 12 hours remaining, client should initiate unicast renewal soon
+# T1 = 50% of 24h = 12h, so client is at the T1 threshold
+1735732800 52:54:00:22:33:44 192.168.1.110 server-01 01:52:54:00:22:33:44
+
+# Stage 2: APPROACHING T1 RENEWAL - Printer device
+# Expiry: 1735732800 (Jan 1, 2025 12:00:00 = now + 43200)
+# Status: 12 hours remaining, entering renewal window
+1735732800 52:54:00:33:44:55 192.168.1.111 printer-hplj * 
+
+# Stage 3: IN RENEWAL WINDOW - IoT device actively renewing
+# Expiry: 1735696800 (Jan 1, 2025 02:00:00 = now + 7200)
+# Status: 2 hours remaining (91.7% through lease), between T1 and T2
+# Client has passed T1 (12h ago) and is sending unicast RENEWAL requests
+1735696800 52:54:00:44:55:66 192.168.1.120 iot-sensor-01 01:52:54:00:44:55:66
+
+# Stage 3: IN RENEWAL WINDOW - Camera with long hostname
+# Expiry: 1735696800 (Jan 1, 2025 02:00:00 = now + 7200)
+# Status: 2 hours remaining, actively renewing via unicast
+1735696800 52:54:00:55:66:77 192.168.1.121 security-camera-main-entrance 01:52:54:00:55:66:77
+
+# Stage 4: NEAR EXPIRY / REBINDING - Mobile device critically low
+# Expiry: 1735689900 (Jan 1, 2025 00:05:00 = now + 300)
+# Status: 5 minutes remaining (99.4% through lease), past T2 rebinding time
+# T2 = 87.5% of 24h = 21h, client is at 23h55m, broadcasting REBIND requests
+1735689900 52:54:00:66:77:88 192.168.1.130 mobile-phone-01 01:52:54:00:66:77:88
+
+# Stage 4: NEAR EXPIRY / REBINDING - Tablet about to expire
+# Expiry: 1735689900 (Jan 1, 2025 00:05:00 = now + 300)
+# Status: 5 minutes remaining, critical renewal state, broadcasting rebind
+1735689900 52:54:00:77:88:99 192.168.1.131 tablet-guest *
+
+# Stage 5: RECENTLY RENEWED - VM that just extended its lease
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# Status: Lease was previously near expiry but successfully renewed via ACK
+# Timestamps updated, client received new 24-hour lease
+1735776000 52:54:00:88:99:aa 192.168.1.140 vm-server-01 01:52:54:00:88:99:aa
+
+# Stage 5: RECENTLY RENEWED - Container with updated expiry
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# Status: Recent DHCPACK updated lease time, reset to full 24 hours
+1735776000 52:54:00:99:aa:bb 192.168.1.141 container-web-01 01:52:54:00:99:aa:bb
+
+# ============================================================================
+# DHCPv6 LEASES - RENEWAL LIFECYCLE STAGES
+# ============================================================================
+
+# DHCPv6 Server DUID (Device Unique Identifier)
+# Format: Link-layer address plus time (DUID-LLT, type 1)
+# This DUID identifies the DHCP server
+duid 00:01:00:01:2d:3e:4f:50:52:54:00:00:11:22
+
+# Stage 1: NEWLY ALLOCATED - IPv6 client just received NA (Non-Temporary Address)
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# IAID: 1001 (Identity Association for Non-temporary Address)
+# Status: Fresh IPv6 lease, 24 hours remaining
+1735776000 1001 2001:db8:1::100 desktop-ipv6-01 01:52:54:00:12:34:56
+
+# Stage 1: NEWLY ALLOCATED - TA (Temporary Address) for privacy
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# IAID: T2001 (Temporary Address, indicated by "T" prefix)
+# Status: Fresh temporary address per RFC 4941 privacy extensions
+1735776000 T2001 2001:db8:1:temp::1a2b laptop-ipv6-temp *
+
+# Stage 1: NEWLY ALLOCATED - Dual-stack host with both A and AAAA
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# IAID: 1003
+# Status: IPv6 portion of dual-stack configuration
+1735776000 1003 2001:db8:1::102 workstation-ipv6-03 01:52:54:00:11:22:33
+
+# Stage 2: APPROACHING T1 RENEWAL - IPv6 server at 50% lease time
+# Expiry: 1735732800 (Jan 1, 2025 12:00:00 = now + 43200)
+# IAID: 1010
+# Status: 12 hours remaining, approaching T1 renewal threshold
+# RFC 3315 Section 22.4: Client sends RENEW at T1 (default 0.5 * preferred lifetime)
+1735732800 1010 2001:db8:1::110 server-ipv6-01 01:52:54:00:22:33:44
+
+# Stage 2: APPROACHING T1 RENEWAL - IPv6 printer
+# Expiry: 1735732800 (Jan 1, 2025 12:00:00 = now + 43200)
+# IAID: 1011
+# Status: 12 hours remaining, T1 renewal imminent
+1735732800 1011 2001:db8:1::111 printer-ipv6 *
+
+# Stage 3: IN RENEWAL WINDOW - IPv6 IoT sensor actively renewing
+# Expiry: 1735696800 (Jan 1, 2025 02:00:00 = now + 7200)
+# IAID: 1020
+# Status: 2 hours remaining, between T1 and T2, sending unicast RENEW to server
+# RFC 3315: Client unicasts RENEW messages containing IA with desired lifetimes
+1735696800 1020 2001:db8:1::120 iot-sensor-ipv6-01 01:52:54:00:44:55:66
+
+# Stage 3: IN RENEWAL WINDOW - IPv6 camera in renewal phase
+# Expiry: 1735696800 (Jan 1, 2025 02:00:00 = now + 7200)
+# IAID: 1021
+# Status: 2 hours remaining, actively attempting lease renewal
+1735696800 1021 2001:db8:1::121 camera-ipv6-entrance 01:52:54:00:55:66:77
+
+# Stage 4: NEAR EXPIRY / REBINDING - IPv6 mobile critically low
+# Expiry: 1735689900 (Jan 1, 2025 00:05:00 = now + 300)
+# IAID: 1030
+# Status: 5 minutes remaining, past T2, multicasting REBIND messages
+# RFC 3315 Section 18.1.4: Client multicasts REBIND at T2 (default 0.8 * preferred lifetime)
+1735689900 1030 2001:db8:1::130 mobile-ipv6-01 01:52:54:00:66:77:88
+
+# Stage 4: NEAR EXPIRY / REBINDING - IPv6 tablet about to expire
+# Expiry: 1735689900 (Jan 1, 2025 00:05:00 = now + 300)
+# IAID: 1031
+# Status: 5 minutes remaining, critical rebinding state
+1735689900 1031 2001:db8:1::131 tablet-ipv6-guest *
+
+# Stage 4: NEAR EXPIRY - Temporary Address about to be discarded
+# Expiry: 1735689900 (Jan 1, 2025 00:05:00 = now + 300)
+# IAID: T2002 (Temporary Address)
+# Status: TA lease near expiry, client may have already generated new temp address
+1735689900 T2002 2001:db8:1:temp::9z8y temp-addr-expiring *
+
+# Stage 5: RECENTLY RENEWED - IPv6 VM successfully extended lease
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# IAID: 1040
+# Status: Received REPLY to RENEW, lease extended to full 24 hours
+# RFC 3315: Server responds with REPLY containing updated IA with new lifetimes
+1735776000 1040 2001:db8:1::140 vm-server-ipv6-01 01:52:54:00:88:99:aa
+
+# Stage 5: RECENTLY RENEWED - IPv6 container with updated timestamps
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+# IAID: 1041
+# Status: Recent REPLY message updated lease, reset to full duration
+1735776000 1041 2001:db8:1::141 container-ipv6-web 01:52:54:00:99:aa:bb
+
+# ============================================================================
+# MIXED SCENARIOS - TESTING EDGE CASES
+# ============================================================================
+
+# Edge Case: Client with extremely long hostname (63 chars - DNS label limit)
+# Stage 1: Newly allocated
+# Expiry: 1735776000 (Jan 2, 2025 00:00:00 = now + 86400)
+1735776000 52:54:00:aa:bb:cc 192.168.1.200 very-long-hostname-for-testing-maximum-dns-label-length-63ch 01:52:54:00:aa:bb:cc
+
+# Edge Case: Client with non-Ethernet hardware type (Token Ring = 0x06)
+# Stage 2: Approaching renewal
+# Expiry: 1735732800 (Jan 1, 2025 12:00:00 = now + 43200)
+# Format: Hardware type prefix (06-) followed by address
+06-10:00:5a:12:34:56 192.168.1.210 tokenring-client 01:10:00:5a:12:34:56
+
+# Edge Case: Client with complex client-id (longer than MAC)
+# Stage 3: In renewal window
+# Expiry: 1735696800 (Jan 1, 2025 02:00:00 = now + 7200)
+# Client ID: 16 bytes (typical for some vendor implementations)
+1735696800 52:54:00:cc:dd:ee 192.168.1.220 complex-clid-device 01:00:01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f
+
+# Edge Case: IPv6 with link-local IAID (low number)
+# Stage 4: Near expiry
+# Expiry: 1735689900 (Jan 1, 2025 00:05:00 = now + 300)
+# IAID: 1 (minimal IAID value)
+1735689900 1 2001:db8:1::250 minimal-iaid-host 01:52:54:00:ff:ee:dd
+
+# ============================================================================
+# TEST VALIDATION POINTS
+# ============================================================================
+#
+# Tests using this fixture should verify:
+#
+# 1. Lease Parsing:
+#    - Correct parsing of DHCPv4 and DHCPv6 formats
+#    - Proper handling of MAC addresses (standard and non-Ethernet)
+#    - Client ID parsing (hex format with colons, wildcard "*")
+#    - Hostname parsing (including long hostnames and wildcards)
+#    - DUID line parsing for DHCPv6
+#    - TA lease detection (T prefix on IAID)
+#
+# 2. Renewal Timing Calculations:
+#    - T1 time = expiry - (lease_duration * 0.5)
+#    - T2 time = expiry - (lease_duration * 0.125)  [87.5% through lease]
+#    - Correct identification of renewal windows
+#    - Time-to-expiry calculations relative to current time
+#
+# 3. Lifecycle State Detection:
+#    - Newly allocated: time_remaining >= lease_duration * 0.5
+#    - Approaching T1: time_remaining ≈ lease_duration * 0.5
+#    - In renewal window: lease_duration * 0.125 < time_remaining < lease_duration * 0.5
+#    - Near expiry/rebinding: time_remaining <= lease_duration * 0.125
+#    - Expired: time_remaining <= 0
+#
+# 4. Lease Update Handling (per src/lease.c lease_set_expires()):
+#    - Timestamp updates when lease renewed
+#    - lease->expires field modification
+#    - Triggering of OPT_LEASE_RENEW flag for script execution
+#    - Preservation of client identity (MAC, client-id, hostname)
+#
+# 5. Protocol Compliance:
+#    - RFC 2131 Section 4.4.5: T1 = 0.5 * lease_duration, T2 = 0.875 * lease_duration
+#    - RFC 3315 Section 22.4: DHCPv6 T1/T2 timing (may differ if configured)
+#    - Lease database format matching src/lease.c lines 550-614
+#
+# 6. Edge Cases:
+#    - Non-standard hardware types (Token Ring, etc.)
+#    - Maximum-length hostnames (63 characters)
+#    - Complex client identifiers (>6 bytes)
+#    - Temporary Address (TA) leases with T prefix
+#    - Clients without explicit client-id (wildcard "*")
+#
+# USAGE IN TESTS:
+#
+# Rust test code should:
+# 1. Load this fixture using lease parsing logic from src/dhcp/lease.rs
+# 2. Set test "now" timestamp to 1735689600 (baseline)
+# 3. For each lease, calculate:
+#    - time_remaining = lease.expires - now
+#    - time_elapsed = lease_duration - time_remaining (assuming 86400s duration)
+#    - percentage_through_lease = time_elapsed / lease_duration
+# 4. Verify renewal window detection matches expected lifecycle stage
+# 5. Simulate lease renewal by updating expires timestamp
+# 6. Verify lease_set_expires() behavior and flag handling
+#
+# Example test assertion:
+#   let lease = parse_lease_line("1735689900 52:54:00:66:77:88 192.168.1.130 ...");
+#   let now = 1735689600;
+#   let time_remaining = lease.expires - now;  // 300 seconds
+#   assert_eq!(time_remaining, 300);
+#   assert!(lease.is_in_rebinding_window(now, 86400));  // Past T2
