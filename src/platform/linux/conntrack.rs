@@ -60,6 +60,7 @@
 //!
 //! ```rust,no_run
 //! use std::net::{SocketAddr, IpAddr};
+//! use dnsmasq::platform::linux::conntrack::get_incoming_mark;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let peer = "192.0.2.10:54321".parse::<SocketAddr>()?;
@@ -87,11 +88,83 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::os::raw::{c_int, c_void};
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
-// External dependencies for conntrack integration
-use nfnetlink::nfct;
+// FFI bindings to libnetfilter_conntrack
+// These are direct bindings to the C library since no suitable Rust crate exists
+// that provides full conntrack GET query functionality
+#[allow(non_camel_case_types)]
+mod ffi {
+    use super::*;
+    use std::ffi::c_void;
+
+    pub type nfct_handle = c_void;
+    pub type nf_conntrack = c_void;
+    
+    // Attribute identifiers from libnetfilter_conntrack/libnetfilter_conntrack.h
+    pub const ATTR_L3PROTO: c_int = 1;
+    pub const ATTR_L4PROTO: c_int = 2;
+    pub const ATTR_IPV4_SRC: c_int = 3;
+    pub const ATTR_IPV4_DST: c_int = 4;
+    pub const ATTR_IPV6_SRC: c_int = 5;
+    pub const ATTR_IPV6_DST: c_int = 6;
+    pub const ATTR_PORT_SRC: c_int = 7;
+    pub const ATTR_PORT_DST: c_int = 8;
+    pub const ATTR_MARK: c_int = 15;
+    
+    // Subsystem identifiers
+    pub const CONNTRACK: u8 = 1;
+    
+    // Query types
+    pub const NFCT_Q_GET: c_int = 4;
+    
+    // Callback return values
+    pub const NFCT_CB_CONTINUE: c_int = 1;
+    
+    // Message types for callbacks
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub enum nf_conntrack_msg_type {
+        NFCT_T_UNKNOWN = 0,
+        NFCT_T_NEW = 1,
+        NFCT_T_UPDATE = 2,
+        NFCT_T_DESTROY = 3,
+        NFCT_T_ALL = 4,
+        NFCT_T_ERROR = 5,
+    }
+    
+    pub type nfct_callback = extern "C" fn(
+        msg_type: nf_conntrack_msg_type,
+        ct: *const nf_conntrack,
+        data: *mut c_void,
+    ) -> c_int;
+
+    extern "C" {
+        pub fn nfct_new() -> *mut nf_conntrack;
+        pub fn nfct_destroy(ct: *mut nf_conntrack);
+        
+        pub fn nfct_open(subsys_id: u8, subscription: c_int) -> *mut nfct_handle;
+        pub fn nfct_close(h: *mut nfct_handle) -> c_int;
+        
+        pub fn nfct_set_attr_u8(ct: *mut nf_conntrack, attr: c_int, value: u8);
+        pub fn nfct_set_attr_u16(ct: *mut nf_conntrack, attr: c_int, value: u16);
+        pub fn nfct_set_attr_u32(ct: *mut nf_conntrack, attr: c_int, value: u32);
+        pub fn nfct_set_attr(ct: *mut nf_conntrack, attr: c_int, value: *const c_void);
+        
+        pub fn nfct_get_attr_u32(ct: *const nf_conntrack, attr: c_int) -> u32;
+        
+        pub fn nfct_callback_register(
+            h: *mut nfct_handle,
+            msg_type: nf_conntrack_msg_type,
+            cb: nfct_callback,
+            data: *mut c_void,
+        ) -> c_int;
+        
+        pub fn nfct_query(h: *mut nfct_handle, qt: c_int, data: *const nf_conntrack) -> c_int;
+    }
+}
 
 /// Errors that can occur during conntrack operations
 ///
@@ -207,6 +280,7 @@ pub enum ConntrackError {
 ///
 /// ```rust,no_run
 /// use std::net::{SocketAddr, IpAddr};
+/// use dnsmasq::platform::linux::conntrack::get_incoming_mark;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client_addr = "203.0.113.42:57123".parse::<SocketAddr>()?;
@@ -232,6 +306,41 @@ pub enum ConntrackError {
 ///
 /// Linux-only. Function is not available on other platforms (gated by
 /// `#[cfg(target_os = "linux")]`).
+/// Data structure passed to callback
+struct CallbackData {
+    mark: Arc<Mutex<Option<u32>>>,
+}
+
+/// C callback function for conntrack query
+///
+/// # Safety
+///
+/// This function is called by the C library with pointers that must be valid.
+/// The data pointer is expected to point to a valid CallbackData structure.
+extern "C" fn conntrack_callback(
+    _msg_type: ffi::nf_conntrack_msg_type,
+    ct: *const ffi::nf_conntrack,
+    data: *mut c_void,
+) -> c_int {
+    // SAFETY: data pointer is guaranteed to be valid CallbackData we passed to nfct_callback_register
+    unsafe {
+        if data.is_null() || ct.is_null() {
+            return ffi::NFCT_CB_CONTINUE;
+        }
+        
+        let callback_data = &mut *(data as *mut CallbackData);
+        
+        // Extract the mark attribute from the conntrack entry
+        let mark = ffi::nfct_get_attr_u32(ct, ffi::ATTR_MARK);
+        
+        if let Ok(mut result) = callback_data.mark.lock() {
+            *result = Some(mark);
+        }
+    }
+    
+    ffi::NFCT_CB_CONTINUE
+}
+
 pub async fn get_incoming_mark(
     peer: SocketAddr,
     local: IpAddr,
@@ -276,180 +385,161 @@ pub async fn get_incoming_mark(
             }
         };
 
-        // Create conntrack handle for querying the connection tracking table
-        // This requires CAP_NET_ADMIN capability
-        let mut handle = nfnetlink::nfct::Handle::new()
-            .map_err(|e| {
-                let err_msg = format!("{}", e);
-                if err_msg.contains("Permission denied") || err_msg.contains("EPERM") {
-                    ConntrackError::PermissionDenied(format!(
+        // SAFETY: All FFI calls are to libnetfilter_conntrack, a well-established C library.
+        // We properly manage the lifetime of all allocated resources and validate pointers.
+        unsafe {
+            // Create conntrack handle for querying the connection tracking table
+            // This requires CAP_NET_ADMIN capability
+            let handle = ffi::nfct_open(ffi::CONNTRACK, 0);
+            if handle.is_null() {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EPERM) {
+                    return Err(ConntrackError::PermissionDenied(format!(
                         "Cannot access conntrack table: {}. Process requires CAP_NET_ADMIN capability.",
-                        e
-                    ))
+                        err
+                    )));
                 } else {
-                    ConntrackError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to create conntrack handle: {}", e),
-                    ))
+                    return Err(ConntrackError::IoError(err));
                 }
-            })?;
-
-        // Create conntrack query object and set attributes
-        let mut ct = nfnetlink::nfct::Conntrack::new()
-            .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create conntrack object: {}", e),
-            )))?;
-
-        // Set layer 4 protocol (TCP or UDP)
-        ct.set_attr_u8(nfnetlink::nfct::Attr::L4Proto, protocol)
-            .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to set L4 protocol: {}", e),
-            )))?;
-
-        // Set destination port (DNS port in network byte order)
-        ct.set_attr_u16(nfnetlink::nfct::Attr::PortDst, DNS_PORT.to_be())
-            .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to set destination port: {}", e),
-            )))?;
-
-        // Set source port from peer address (network byte order)
-        ct.set_attr_u16(nfnetlink::nfct::Attr::PortSrc, peer_port.to_be())
-            .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to set source port: {}", e),
-            )))?;
-
-        // Set layer 3 protocol and addresses based on IP version
-        if is_ipv6 {
-            // IPv6 connection (AF_INET6 = 10 per POSIX standard)
-            ct.set_attr_u8(nfnetlink::nfct::Attr::L3Proto, 10)
-                .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to set L3 protocol: {}", e),
-                )))?;
-            
-            if let Some(peer_v6) = ipv6_peer {
-                ct.set_attr(nfnetlink::nfct::Attr::Ipv6Src, &peer_v6.octets())
-                    .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to set IPv6 source address: {}", e),
-                    )))?;
             }
             
-            if let Some(local_v6) = ipv6_local {
-                ct.set_attr(nfnetlink::nfct::Attr::Ipv6Dst, &local_v6.octets())
-                    .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to set IPv6 destination address: {}", e),
-                    )))?;
-            }
-        } else {
-            // IPv4 connection (AF_INET = 2 per POSIX standard)
-            ct.set_attr_u8(nfnetlink::nfct::Attr::L3Proto, 2)
-                .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to set L3 protocol: {}", e),
-                )))?;
-            
-            if let Some(peer_v4) = ipv4_peer {
-                // IPv4 address as u32 in network byte order
-                let addr_u32 = u32::from_be_bytes(peer_v4.octets());
-                ct.set_attr_u32(nfnetlink::nfct::Attr::Ipv4Src, addr_u32)
-                    .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to set IPv4 source address: {}", e),
-                    )))?;
-            }
-            
-            if let Some(local_v4) = ipv4_local {
-                let addr_u32 = u32::from_be_bytes(local_v4.octets());
-                ct.set_attr_u32(nfnetlink::nfct::Attr::Ipv4Dst, addr_u32)
-                    .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to set IPv4 destination address: {}", e),
-                    )))?;
-            }
-        }
-
-        // Register callback to extract mark from conntrack entry
-        // The callback captures mark_result_clone and writes the mark value
-        let callback_result = mark_result_clone.clone();
-        let callback = Box::new(move |ct_entry: &nfnetlink::nfct::Conntrack| {
-            // Extract firewall mark attribute from conntrack entry
-            match ct_entry.get_attr_u32(nfnetlink::nfct::Attr::Mark) {
-                Ok(mark) => {
-                    // Successfully extracted mark, store it in shared result
-                    if let Ok(mut result) = callback_result.lock() {
-                        *result = Some(mark);
+            // Ensure handle is closed on drop using a guard
+            struct HandleGuard(*mut ffi::nfct_handle);
+            impl Drop for HandleGuard {
+                fn drop(&mut self) {
+                    unsafe {
+                        ffi::nfct_close(self.0);
                     }
                 }
-                Err(_) => {
-                    // Mark attribute not present in conntrack entry
-                    // This is not an error - connection may not have a mark set
+            }
+            let _handle_guard = HandleGuard(handle);
+
+            // Create conntrack query object and set attributes
+            let ct = ffi::nfct_new();
+            if ct.is_null() {
+                return Err(ConntrackError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::OutOfMemory,
+                    "Failed to create conntrack object",
+                )));
+            }
+            
+            // Ensure ct is destroyed on drop
+            struct CtGuard(*mut ffi::nf_conntrack);
+            impl Drop for CtGuard {
+                fn drop(&mut self) {
+                    unsafe {
+                        ffi::nfct_destroy(self.0);
+                    }
                 }
             }
-            nfnetlink::nfct::CallbackStatus::Continue
-        }) as Box<dyn FnMut(&nfnetlink::nfct::Conntrack) -> nfnetlink::nfct::CallbackStatus>;
+            let _ct_guard = CtGuard(ct);
 
-        handle.register_callback(callback)
-            .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to register callback: {}", e),
-            )))?;
+            // Set layer 4 protocol (TCP or UDP)
+            ffi::nfct_set_attr_u8(ct, ffi::ATTR_L4PROTO, protocol);
 
-        // Execute conntrack query to retrieve the matching entry
-        handle.query(nfnetlink::nfct::Query::Get, &ct)
-            .map_err(|e| {
-                let err_msg = format!("{}", e);
-                if err_msg.contains("Permission denied") || err_msg.contains("EPERM") {
-                    ConntrackError::PermissionDenied(format!(
+            // Set destination port (DNS port in network byte order)
+            ffi::nfct_set_attr_u16(ct, ffi::ATTR_PORT_DST, DNS_PORT.to_be());
+
+            // Set source port from peer address (network byte order)
+            ffi::nfct_set_attr_u16(ct, ffi::ATTR_PORT_SRC, peer_port.to_be());
+
+            // Set layer 3 protocol and addresses based on IP version
+            if is_ipv6 {
+                // IPv6 connection (AF_INET6 = 10 per POSIX standard)
+                ffi::nfct_set_attr_u8(ct, ffi::ATTR_L3PROTO, 10);
+                
+                if let Some(peer_v6) = ipv6_peer {
+                    ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_SRC, peer_v6.octets().as_ptr() as *const c_void);
+                }
+                
+                if let Some(local_v6) = ipv6_local {
+                    ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_DST, local_v6.octets().as_ptr() as *const c_void);
+                }
+            } else {
+                // IPv4 connection (AF_INET = 2 per POSIX standard)
+                ffi::nfct_set_attr_u8(ct, ffi::ATTR_L3PROTO, 2);
+                
+                if let Some(peer_v4) = ipv4_peer {
+                    // IPv4 address as u32 in network byte order
+                    let addr_u32 = u32::from_be_bytes(peer_v4.octets());
+                    ffi::nfct_set_attr_u32(ct, ffi::ATTR_IPV4_SRC, addr_u32);
+                }
+                
+                if let Some(local_v4) = ipv4_local {
+                    let addr_u32 = u32::from_be_bytes(local_v4.octets());
+                    ffi::nfct_set_attr_u32(ct, ffi::ATTR_IPV4_DST, addr_u32);
+                }
+            }
+
+            // Create callback data structure
+            let mut callback_data = CallbackData {
+                mark: mark_result_clone,
+            };
+
+            // Register callback to extract mark from conntrack entry
+            let ret = ffi::nfct_callback_register(
+                handle,
+                ffi::nf_conntrack_msg_type::NFCT_T_ALL,
+                conntrack_callback,
+                &mut callback_data as *mut _ as *mut c_void,
+            );
+            
+            if ret < 0 {
+                return Err(ConntrackError::IoError(std::io::Error::other(
+                    "Failed to register callback",
+                )));
+            }
+
+            // Execute conntrack query to retrieve the matching entry
+            let ret = ffi::nfct_query(handle, ffi::NFCT_Q_GET, ct);
+            
+            if ret < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EPERM) {
+                    return Err(ConntrackError::PermissionDenied(format!(
                         "Conntrack query denied: {}. Ensure CAP_NET_ADMIN capability is retained after privilege drop.",
-                        e
-                    ))
-                } else if err_msg.contains("No such file") || err_msg.contains("ENOENT") {
-                    ConntrackError::QueryFailed(format!(
+                        err
+                    )));
+                } else if err.raw_os_error() == Some(libc::ENOENT) {
+                    return Err(ConntrackError::QueryFailed(format!(
                         "No conntrack entry found for {}:{} -> {} (proto {})",
                         peer.ip(), peer_port, local, if is_tcp { "TCP" } else { "UDP" }
-                    ))
+                    )));
                 } else {
-                    ConntrackError::QueryFailed(format!(
+                    return Err(ConntrackError::QueryFailed(format!(
                         "Conntrack query failed: {}",
-                        e
-                    ))
+                        err
+                    )));
                 }
-            })?;
+            }
 
-        // Extract mark from callback result
-        let mark = mark_result
-            .lock()
-            .map_err(|e| ConntrackError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Mutex lock poisoned: {}", e),
-            )))?
-            .ok_or_else(|| {
-                ConntrackError::QueryFailed(
-                    "Conntrack entry found but no mark attribute present".to_string()
-                )
-            })?;
+            // Extract mark from callback result
+            let mark = mark_result
+                .lock()
+                .map_err(|e| ConntrackError::IoError(std::io::Error::other(
+                    format!("Mutex lock poisoned: {}", e),
+                )))?
+                .ok_or_else(|| {
+                    ConntrackError::QueryFailed(
+                        "Conntrack entry found but no mark attribute present".to_string()
+                    )
+                })?;
+            
+            // Log successful mark retrieval for operational visibility
+            debug!(
+                "Retrieved conntrack mark {} for {} -> {} ({})",
+                mark,
+                peer,
+                local,
+                if is_tcp { "TCP" } else { "UDP" }
+            );
 
-        // Log successful mark retrieval for operational visibility
-        debug!(
-            "Retrieved conntrack mark {} for {} -> {} ({})",
-            mark,
-            peer,
-            local,
-            if is_tcp { "TCP" } else { "UDP" }
-        );
-
-        Ok(mark)
+            Ok(mark)
+        }
     })
     .await
     .map_err(|e| {
-        ConntrackError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        ConntrackError::IoError(std::io::Error::other(
             format!("Tokio task join error: {}", e),
         ))
     })?

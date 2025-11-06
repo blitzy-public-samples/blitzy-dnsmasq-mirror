@@ -151,6 +151,10 @@ criterion = "0.5"
 tempfile = "3.12"
 test-case = "3.3"
 
+# Build dependencies
+[build-dependencies]
+pkg-config = "0.3"
+
 # Release profile optimized for production deployment
 [profile.release]
 opt-level = 3              # Maximum optimization for performance
