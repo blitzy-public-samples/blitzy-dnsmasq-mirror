@@ -56,7 +56,7 @@
 //! let packet = &[
 //!     // DNS header (12 bytes)
 //!     0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-//!     // Query: "example.com" (3 "example" 3 "com" 0)
+//!     // Query: "example.com" (7 "example" 3 "com" 0)
 //!     0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
 //!     0x03, b'c', b'o', b'm',
 //!     0x00,
@@ -65,9 +65,9 @@
 //! ];
 //!
 //! let mut offset = 12; // Start after DNS header
-//! let name = extract_name(packet, &mut offset, 4)?;
+//! let name = extract_name(packet, &mut offset, 4)?; // Validate 4 more bytes exist (QTYPE/QCLASS)
 //! assert_eq!(name.labels.join("."), "example.com");
-//! assert_eq!(offset, 12 + 13 + 4); // After name + QTYPE + QCLASS
+//! assert_eq!(offset, 25); // After name (12 + 13 bytes), positioned at QTYPE/QCLASS
 //! # Ok::<(), CompressionError>(())
 //! ```
 
@@ -313,10 +313,10 @@ impl CompressedName {
 /// ];
 ///
 /// let mut offset = 12; // Start after header
-/// let name = extract_name(packet, &mut offset, 4)?; // Expect 4 bytes (QTYPE+QCLASS) after name
+/// let name = extract_name(packet, &mut offset, 4)?; // Validate 4 bytes (QTYPE+QCLASS) exist after name
 /// assert_eq!(name.labels, vec!["example", "com"]);
 /// assert_eq!(name.compressed, false);
-/// assert_eq!(offset, 12 + 13 + 4); // Header + name + extrabytes
+/// assert_eq!(offset, 25); // After name (12 + 13 bytes), positioned at QTYPE/QCLASS
 /// # Ok::<(), CompressionError>(())
 /// ```
 pub fn extract_name(
@@ -835,17 +835,17 @@ mod tests {
             0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
             0x03, b'c', b'o', b'm',
             0x00,
-            // Second name: "www" + pointer to offset 12
+            // Second name at offset 25: "www" + pointer to offset 12
             0x03, b'w', b'w', b'w',
             0xC0, 0x0C, // Pointer to offset 12
         ];
 
-        let mut offset = 29;
+        let mut offset = 25; // Start at the "www" label
         let name = extract_name(&packet, &mut offset, 0).unwrap();
 
         assert_eq!(name.labels, vec!["www", "example", "com"]);
         assert_eq!(name.compressed, true);
-        assert_eq!(offset, 29 + 6); // After "www" + pointer
+        assert_eq!(offset, 31); // After "www" (4 bytes) + pointer (2 bytes) = offset 25 + 6 = 31
     }
 
     /// Test error on packet too short
@@ -942,8 +942,10 @@ mod tests {
         assert_eq!(packet, expected);
 
         // Verify compression map entries
+        // "example.com" starts at byte 0
+        // "com" starts at byte 8 (after 0x07 + 7 bytes of "example")
         assert_eq!(compression_map.get("example.com"), Some(&0));
-        assert_eq!(compression_map.get("com"), Some(&9));
+        assert_eq!(compression_map.get("com"), Some(&8));
     }
 
     /// Test compression with pointer generation

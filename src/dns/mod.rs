@@ -48,6 +48,9 @@
 //! // use dnsmasq::dns::{DnsServer, DnsCache, DnsForwarder};
 //! ```
 
+// DNS name compression pointer handling (fully implemented)
+pub mod compression;
+
 // DNSSEC validation and cryptography (fully implemented)
 #[cfg(feature = "dnssec")]
 pub mod dnssec;
@@ -55,6 +58,9 @@ pub mod dnssec;
 // Placeholder re-exports for DNSSEC functionality
 #[cfg(feature = "dnssec")]
 pub use dnssec::{Algorithm, CryptoError, verify_signature};
+
+// Re-export compression types for convenience
+pub use compression::{CompressedName, CompressionError, CompressionResult, compress_name, extract_name, skip_name};
 
 // Additional DNS modules will be added here as they are implemented:
 // pub mod protocol;  // DNS message parsing (planned)
