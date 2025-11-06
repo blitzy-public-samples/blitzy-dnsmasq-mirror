@@ -224,7 +224,7 @@ pub struct BlockDataPool {
     /// Free blocks available for allocation
     ///
     /// Replaces C's `keyblock_free` linked list with a Vec for simpler management.
-    free_blocks: Vec<Box<BlockData>>,
+    free_blocks: Vec<BlockData>,
 
     /// Current number of blocks in use
     count: usize,
@@ -349,10 +349,10 @@ impl BlockDataPool {
         
         for _ in 0..count {
             // Create empty block with no data
-            let block = Box::new(BlockData {
+            let block = BlockData {
                 data: Vec::new(),
                 next: None,
-            });
+            };
             new_blocks.push(block);
         }
 
@@ -439,17 +439,15 @@ impl BlockDataPool {
 
         while !remaining.is_empty() {
             // Ensure we have free blocks available
-            if self.free_blocks.is_empty() {
-                if let Err(_) = self.expand_pool(EXPANSION_SIZE) {
-                    // Allocation failed, return error
-                    // Partial chain will be automatically freed when head is dropped
-                    return Err(BlockDataError::PoolExhausted);
-                }
+            if self.free_blocks.is_empty() && self.expand_pool(EXPANSION_SIZE).is_err() {
+                // Allocation failed, return error
+                // Partial chain will be automatically freed when head is dropped
+                return Err(BlockDataError::PoolExhausted);
             }
 
             // Get block from free list
             let mut block = match self.free_blocks.pop() {
-                Some(b) => b,
+                Some(b) => Box::new(b),
                 None => {
                     return Err(BlockDataError::PoolExhausted);
                 }
@@ -744,30 +742,25 @@ impl BlockDataPool {
     ///     }
     /// }
     /// ```
-    fn free_chain(&mut self, mut chain: Box<BlockData>) {
-        // Count blocks in chain
-        let mut block_count = 0;
-        let mut current = Some(&*chain);
+    fn free_chain(&mut self, chain: Box<BlockData>) {
+        // Count blocks in chain and collect them
+        let mut blocks_to_free = Vec::new();
+        let mut current = Some(chain);
         
-        while let Some(block) = current {
-            block_count += 1;
-            current = block.next.as_deref();
+        while let Some(mut block) = current {
+            current = block.next.take();
+            // Clear data to save memory while in free list
+            block.data.clear();
+            blocks_to_free.push(*block);
         }
 
+        let block_count = blocks_to_free.len();
+        
         // Decrement usage count
         self.count = self.count.saturating_sub(block_count);
 
-        // Flatten chain into individual blocks and return to free list
-        while let Some(mut next) = chain.next.take() {
-            // Clear data to save memory while in free list
-            chain.data.clear();
-            self.free_blocks.push(chain);
-            chain = next;
-        }
-        
-        // Don't forget the last block
-        chain.data.clear();
-        self.free_blocks.push(chain);
+        // Return all blocks to free list
+        self.free_blocks.extend(blocks_to_free);
 
         debug!(
             "Returned {} blocks to pool (count now: {}, free: {})",
@@ -908,10 +901,10 @@ mod tests {
         let mut pool = BlockDataPool::new(0, false);
         
         // Allocate some data
-        let chain1 = pool.allocate(&vec![0u8; 40]).unwrap();
+        let chain1 = pool.allocate(&[0u8; 40]).unwrap();
         assert_eq!(pool.high_water_mark, 1);
         
-        let chain2 = pool.allocate(&vec![0u8; 80]).unwrap(); // 2 blocks
+        let chain2 = pool.allocate(&[0u8; 80]).unwrap(); // 2 blocks
         assert_eq!(pool.high_water_mark, 3);
         
         // Free first chain
@@ -928,12 +921,12 @@ mod tests {
     fn test_report_statistics() {
         let mut pool = BlockDataPool::new(50, true);
         
-        let _chain = pool.allocate(&vec![0u8; 100]).unwrap();
+        let _chain = pool.allocate(&[0u8; 100]).unwrap();
         
         let stats = pool.report_statistics();
         assert_eq!(stats.count, 3); // 100 bytes = 3 blocks
         assert_eq!(stats.high_water_mark, 3);
-        assert_eq!(stats.allocated, 50 + EXPANSION_SIZE); // Initial 50 + expansion of 50
+        assert_eq!(stats.allocated, 50); // Initial 50 blocks, no expansion needed
     }
 
     #[test]
