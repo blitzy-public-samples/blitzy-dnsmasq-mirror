@@ -280,7 +280,7 @@ mod tests {
         ];
         let options = Dhcpv4Option::parse_all(data);
         
-        assert!(options.len() >= 1);
+        assert!(!options.is_empty());
         match &options[0] {
             Dhcpv4Option::MessageType(1) => {}
             _ => panic!("Expected MessageType"),
