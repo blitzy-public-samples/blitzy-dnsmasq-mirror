@@ -31,27 +31,28 @@
 //! # Usage Example
 //!
 //! ```rust
-//! use tracing_subscriber::fmt;
-//! use crate::logging::structured::{JsonFormatter, PlainTextFormatter, LogFormat};
+//! use dnsmasq::logging::{JsonFormatter, PlainTextFormatter, LogFormat};
 //!
 //! // Select formatter based on environment or configuration
 //! let format = LogFormat::from_env();
 //! match format {
 //!     LogFormat::Json => {
-//!         fmt().event_format(JsonFormatter::new()).init();
+//!         let _formatter = JsonFormatter::new();
+//!         // Use with tracing_subscriber::fmt().event_format(formatter).init();
 //!     }
 //!     LogFormat::PlainText => {
-//!         fmt().event_format(PlainTextFormatter::new()).init();
+//!         let _formatter = PlainTextFormatter::new();
+//!         // Use with tracing_subscriber::fmt().event_format(formatter).init();
 //!     }
 //! }
 //!
-//! // Structured logging with custom fields
-//! tracing::info!(
-//!     client_ip = "192.168.1.1",
-//!     query_type = "A",
-//!     domain = "example.com",
-//!     "DNS query received"
-//! );
+//! // Structured logging with custom fields would be used like:
+//! // tracing::info!(
+//! //     client_ip = "192.168.1.1",
+//! //     query_type = "A",
+//! //     domain = "example.com",
+//! //     "DNS query received"
+//! // );
 //! ```
 //!
 //! # Integration with C Log Format
@@ -61,23 +62,17 @@
 //! like "Jan  1 12:34:56 ". This ensures log parsers and monitoring tools expecting
 //! the legacy format continue to work without modification.
 
-use chrono::{DateTime, Local, SecondsFormat, Utc};
-use serde::ser::{SerializeMap, SerializeStruct};
-use serde::{Serialize, Serializer};
-use serde_json::{json, to_writer, Map, Value};
+use chrono::{Local, SecondsFormat, Utc};
+use serde_json::{json, to_writer, Value};
 use std::collections::HashMap;
 use std::env;
-use std::fmt::{self, Debug, Display, Formatter, Result as FmtResult, Write as FmtWrite};
+use std::fmt::{self, Debug, Result as FmtResult};
 use std::io::{Result as IoResult, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::field::{Field, Value as FieldValue, Visit};
-use tracing::{Event, Level, Metadata, Subscriber};
-use tracing_subscriber::fmt::format::{Format, Writer};
-use tracing_subscriber::fmt::{FormatEvent, FormatFields, FormattedFields};
-use tracing_subscriber::layer::Context;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
-use tracing_subscriber::Registry;
 
 /// Log output format selection
 ///
@@ -402,8 +397,8 @@ where
 {
     fn format_event(
         &self,
-        _ctx: &Context<'_, S>,
-        writer: Writer<'_>,
+        _ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> FmtResult {
         // Convert Writer to a buffer we can work with
@@ -431,8 +426,8 @@ where
 {
     fn format_event(
         &self,
-        _ctx: &Context<'_, S>,
-        writer: Writer<'_>,
+        _ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> FmtResult {
         // Convert Writer to a buffer we can work with
@@ -496,7 +491,7 @@ mod tests {
 
     #[test]
     fn test_field_visitor_records_fields() {
-        let mut visitor = FieldVisitor::new();
+        let visitor = FieldVisitor::new();
 
         // Simulate field recording (would normally be done by tracing)
         // We can't easily test this without creating actual tracing events,
@@ -510,20 +505,6 @@ mod tests {
     #[test]
     fn test_json_formatter_format_basic() {
         let formatter = JsonFormatter::new();
-        let mut output = Vec::new();
-
-        // Create a simple event for testing
-        // Note: This is a simplified test. In real usage, events come from tracing macros
-        let metadata = tracing::Metadata::new(
-            "test",
-            "test_target",
-            Level::INFO,
-            Some("test.rs"),
-            Some(42),
-            Some("test_module"),
-            tracing::field::FieldSet::new(&["message"], tracing::callsite::Identifier(&())),
-            tracing::metadata::Kind::EVENT,
-        );
 
         // We can't easily construct a full Event in tests, so we verify the formatter
         // methods exist and have correct signatures
@@ -533,7 +514,6 @@ mod tests {
     #[test]
     fn test_plain_text_formatter_format_basic() {
         let formatter = PlainTextFormatter::new();
-        let mut output = Vec::new();
 
         // Verify formatter is created correctly
         assert_eq!(formatter.pid, std::process::id());
