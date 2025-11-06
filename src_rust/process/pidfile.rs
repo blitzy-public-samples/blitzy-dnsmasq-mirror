@@ -177,24 +177,38 @@ fn is_process_alive(path: &Path) -> Result<bool, io::Error> {
         Err(_) => return Ok(false), // Invalid PID - assume dead
     };
 
-    // Check if process exists by sending signal 0
-    // On Unix, kill(pid, 0) checks if process exists without sending a signal
-    #[cfg(unix)]
+    // Check if process exists by checking /proc/{pid} on Linux
+    // This is safer than sending signals as it doesn't affect the target process
+    #[cfg(target_os = "linux")]
     {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
+        let proc_path = format!("/proc/{}", pid);
+        Ok(std::path::Path::new(&proc_path).exists())
+    }
 
-        match kill(Pid::from_raw(pid as i32), Signal::SIGTERM) {
-            Ok(_) => Ok(true),  // Process exists
-            Err(nix::errno::Errno::ESRCH) => Ok(false), // Process doesn't exist
-            Err(nix::errno::Errno::EPERM) => Ok(true),  // Process exists but we can't signal it
-            Err(_) => Ok(false), // Other error - assume dead
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        // On non-Linux Unix, use kill with signal 0 (null signal) to check existence
+        // Signal 0 doesn't actually send a signal, it just checks if we can signal the process
+        use nix::unistd::Pid;
+        
+        // Use libc directly for signal 0 since nix Signal enum doesn't include it
+        let result = unsafe { libc::kill(pid as i32, 0) };
+        
+        if result == 0 {
+            Ok(true) // Process exists
+        } else {
+            let errno = std::io::Error::last_os_error();
+            match errno.raw_os_error() {
+                Some(libc::ESRCH) => Ok(false), // Process doesn't exist
+                Some(libc::EPERM) => Ok(true),  // Process exists but we can't signal it
+                _ => Ok(false), // Other error - assume dead
+            }
         }
     }
 
     #[cfg(not(unix))]
     {
-        // On non-Unix, we can't reliably check - assume alive to be safe
+        // On non-Unix (Windows), we can't reliably check - assume alive to be safe
         Ok(true)
     }
 }
