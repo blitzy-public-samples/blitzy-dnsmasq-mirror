@@ -535,14 +535,21 @@ fn parse_ecdsa_signature(sig_data: &[u8], component_len: usize) -> Result<EcdsaS
 ///
 /// # Arguments
 ///
-/// * `public_key` - Raw public key bytes from DNSKEY
+/// * `public_key` - Raw public key bytes from DNSKEY in RFC 3110 format
 /// * `signature` - Signature bytes from RRSIG
-/// * `message` - Message digest to verify
-/// * `algorithm` - RSA algorithm variant
+/// * `message` - Message digest to verify (already hashed)
+/// * `algorithm` - RSA algorithm variant (8 for SHA-256, 10 for SHA-512)
 ///
 /// # Returns
 ///
-/// Ok(true) if signature is valid, Ok(false) or Err if invalid
+/// Ok(true) if signature is valid, Ok(false) if invalid signature, Err for malformed data
+///
+/// # Format
+///
+/// RFC 3110 RSA public key format:
+/// - 1 byte exponent length (or 0x00 followed by 2-byte length if > 255)
+/// - exponent bytes (big-endian)
+/// - modulus bytes (big-endian)
 ///
 /// Source: C implementation dnsmasq_rsa_verify(), src/crypto.c lines 479-529
 fn verify_rsa_signature(
@@ -551,24 +558,42 @@ fn verify_rsa_signature(
     message: &[u8],
     algorithm: Algorithm,
 ) -> Result<bool, CryptoError> {
-    // Parse RSA public key
+    use ring::signature;
+    
+    // Parse RSA public key from RFC 3110 format
     let key = parse_rsa_public_key(public_key)?;
     
-    // For ring, we need to construct DER-encoded public key
-    // For now, we return an error since ring's RSA verification requires
-    // more complex key handling. This would be implemented with proper
-    // DER encoding of the RSA key components.
-    //
-    // Note: A complete implementation would use ring::signature::RsaPublicKeyComponents
-    // or a helper library to construct the proper format.
+    // Create RSA public key components
+    // ring expects modulus (n) and exponent (e) in big-endian format
+    let public_key_components = signature::RsaPublicKeyComponents {
+        n: &key.modulus,
+        e: &key.exponent,
+    };
     
-    // Placeholder for production implementation:
-    // In production, we would:
-    // 1. Convert exponent and modulus to DER format
-    // 2. Use ring::signature::UnparsedPublicKey with RSA_PKCS1_* verification algorithm
-    // 3. Call verify() on the UnparsedPublicKey
+    // Select verification parameters based on algorithm and verify
+    let result = match algorithm {
+        Algorithm::RsaSha256 => {
+            public_key_components.verify(
+                &signature::RSA_PKCS1_2048_8192_SHA256,
+                message,
+                signature
+            )
+        }
+        Algorithm::RsaSha512 => {
+            public_key_components.verify(
+                &signature::RSA_PKCS1_2048_8192_SHA512,
+                message,
+                signature
+            )
+        }
+        _ => return Err(CryptoError::UnsupportedAlgorithm(algorithm as u8)),
+    };
     
-    Err(CryptoError::UnsupportedAlgorithm(algorithm as u8))
+    // Convert result
+    match result {
+        Ok(()) => Ok(true),
+        Err(ring::error::Unspecified) => Ok(false),
+    }
 }
 
 /// Verify ECDSA signature
@@ -578,14 +603,24 @@ fn verify_rsa_signature(
 ///
 /// # Arguments
 ///
-/// * `public_key` - Raw public key bytes from DNSKEY
-/// * `signature` - Signature bytes from RRSIG
-/// * `message` - Message digest to verify
-/// * `algorithm` - ECDSA algorithm variant
+/// * `public_key` - Raw public key bytes from DNSKEY in RFC 6605 format (x || y)
+/// * `signature` - Signature bytes from RRSIG in raw format (r || s)
+/// * `message` - Message digest to verify (already hashed)
+/// * `algorithm` - ECDSA algorithm variant (13 for P-256, 14 for P-384)
 ///
 /// # Returns
 ///
-/// Ok(true) if signature is valid, Ok(false) or Err if invalid
+/// Ok(true) if signature is valid, Ok(false) if invalid signature, Err for malformed data
+///
+/// # Format
+///
+/// RFC 6605 ECDSA public key format:
+/// - X coordinate (t bytes) where t=32 for P-256, t=48 for P-384
+/// - Y coordinate (t bytes)
+///
+/// Signature format:
+/// - R component (t bytes)
+/// - S component (t bytes)
 ///
 /// Source: C implementation dnsmasq_ecdsa_verify(), src/crypto.c lines 584-656
 fn verify_ecdsa_signature(
@@ -594,29 +629,43 @@ fn verify_ecdsa_signature(
     message: &[u8],
     algorithm: Algorithm,
 ) -> Result<bool, CryptoError> {
-    let (coord_len, verification_alg) = match algorithm {
-        Algorithm::EcdsaP256Sha256 => (32, &signature::ECDSA_P256_SHA256_ASN1),
-        Algorithm::EcdsaP384Sha384 => (48, &signature::ECDSA_P384_SHA384_ASN1),
+    use ring::signature;
+    
+    // Determine coordinate length and verification algorithm based on curve
+    let (coord_len, verification_alg): (usize, &'static dyn signature::VerificationAlgorithm) = match algorithm {
+        Algorithm::EcdsaP256Sha256 => (32, &signature::ECDSA_P256_SHA256_FIXED),
+        Algorithm::EcdsaP384Sha384 => (48, &signature::ECDSA_P384_SHA384_FIXED),
         _ => return Err(CryptoError::UnsupportedAlgorithm(algorithm as u8)),
     };
     
-    // Parse public key
+    // Validate lengths
+    if public_key.len() != 2 * coord_len {
+        return Err(CryptoError::InvalidKeyFormat);
+    }
+    if signature.len() != 2 * coord_len {
+        return Err(CryptoError::InvalidSignatureFormat);
+    }
+    
+    // Parse public key coordinates
     let key = parse_ecdsa_public_key(public_key, coord_len)?;
     
-    // Parse signature
-    let sig = parse_ecdsa_signature(signature, coord_len)?;
+    // Construct uncompressed point format: 0x04 || x || y
+    // This is the format ring expects for ECDSA public keys
+    let mut public_key_bytes = Vec::with_capacity(1 + 2 * coord_len);
+    public_key_bytes.push(0x04); // Uncompressed point indicator
+    public_key_bytes.extend_from_slice(&key.x);
+    public_key_bytes.extend_from_slice(&key.y);
     
-    // ECDSA signatures in DNS are r||s format, but ring expects ASN.1 DER format
-    // We need to convert the raw r||s to DER encoding
-    // This is a simplified placeholder - production code would properly encode to DER
+    // Create unparsed public key
+    let unparsed_public_key = signature::UnparsedPublicKey::new(verification_alg, &public_key_bytes);
     
-    // For proper implementation, we would:
-    // 1. Construct uncompressed point format: 0x04 || x || y
-    // 2. Convert r||s signature to DER format
-    // 3. Use ring::signature::UnparsedPublicKey with verification_alg
-    // 4. Call verify() with the message and signature
-    
-    Err(CryptoError::UnsupportedAlgorithm(algorithm as u8))
+    // Verify signature
+    // Ring's ECDSA_*_FIXED algorithms accept signatures in r||s format directly
+    // which matches the DNS RRSIG signature format
+    match unparsed_public_key.verify(message, signature) {
+        Ok(()) => Ok(true),
+        Err(ring::error::Unspecified) => Ok(false),
+    }
 }
 
 /// Verify EdDSA signature
