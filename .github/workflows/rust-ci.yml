@@ -1,0 +1,610 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ main, develop, blitzy-* ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/rust-ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/rust-ci.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Minimum supported Rust version - enforced by rust-toolchain.toml
+  MSRV: "1.91.0"
+
+jobs:
+  # Job 1: Format validation - fast fail for style issues
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # Job 2: Clippy linting - deny warnings policy
+  clippy:
+    name: Clippy Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Run clippy with all features
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+      - name: Run clippy with default features
+        run: cargo clippy --all-targets -- -D warnings
+
+  # Job 3: Security audit
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run security audit
+        run: cargo audit
+
+  # Job 4: Multi-platform build matrix
+  build:
+    name: Build (${{ matrix.os }}, ${{ matrix.features }})
+    needs: [format, clippy]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        features:
+          - "default"
+          - "all-features"
+          - "dhcp,dns"
+          - "dhcp,dns,tftp,dnssec"
+          - "dhcp,dns,ipv6,dbus"
+          - "dhcp-v4,dns-cache,dns-forward"
+          - "dhcp,dns,tftp,ipv6,dnssec,auth-dns"
+          - "minimal"
+        include:
+          # Linux-specific feature combinations
+          - os: ubuntu-latest
+            features: "dhcp,dns,netlink,inotify,ipset,nftables"
+          - os: ubuntu-latest
+            features: "dhcp,dns,dbus,conntrack,ipset"
+          # macOS-specific features
+          - os: macos-latest
+            features: "dhcp,dns,tftp"
+          # Define minimal features
+          - features: "minimal"
+            feature_flags: "--no-default-features"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Build with feature set
+        run: |
+          if [ "${{ matrix.features }}" = "all-features" ]; then
+            cargo build --all-features --verbose
+          elif [ "${{ matrix.features }}" = "minimal" ]; then
+            cargo build ${{ matrix.feature_flags }} --verbose
+          elif [ "${{ matrix.features }}" = "default" ]; then
+            cargo build --verbose
+          else
+            cargo build --features "${{ matrix.features }}" --verbose
+          fi
+
+      - name: Build release with feature set
+        run: |
+          if [ "${{ matrix.features }}" = "all-features" ]; then
+            cargo build --all-features --release --verbose
+          elif [ "${{ matrix.features }}" = "minimal" ]; then
+            cargo build ${{ matrix.feature_flags }} --release --verbose
+          elif [ "${{ matrix.features }}" = "default" ]; then
+            cargo build --release --verbose
+          else
+            cargo build --features "${{ matrix.features }}" --release --verbose
+          fi
+
+  # Job 5: Comprehensive testing
+  test:
+    name: Test Suite (${{ matrix.os }})
+    needs: [format, clippy]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Run unit tests with all features
+        run: cargo test --all-features --lib --verbose
+
+      - name: Run integration tests with all features
+        run: cargo test --all-features --test '*' --verbose
+
+      - name: Run doc tests
+        run: cargo test --all-features --doc --verbose
+
+      - name: Run unit tests with default features
+        run: cargo test --lib --verbose
+
+      - name: Run integration tests with default features
+        run: cargo test --test '*' --verbose
+
+  # Job 6: Code coverage measurement
+  coverage:
+    name: Code Coverage
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Run cargo-tarpaulin
+        run: |
+          cargo tarpaulin \
+            --all-features \
+            --workspace \
+            --timeout 300 \
+            --out Xml \
+            --out Html \
+            --output-dir coverage \
+            --fail-under 80 \
+            -- --test-threads 1
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage/cobertura.xml
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Job 7: Documentation generation validation
+  docs:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Generate documentation
+        run: cargo doc --all-features --no-deps --document-private-items
+
+      - name: Check for broken documentation links
+        run: cargo doc --all-features --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  # Job 8: Benchmarks compilation check
+  bench:
+    name: Benchmark Compilation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Check benchmark compilation
+        run: cargo bench --no-run --all-features
+
+  # Job 9: Feature flag compatibility matrix
+  feature-matrix:
+    name: Feature Combinations
+    needs: [format, clippy]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature_set:
+          # Individual subsystems
+          - "dhcp-v4"
+          - "dhcp-v6"
+          - "dns-cache"
+          - "dns-forward"
+          - "tftp"
+          - "dnssec"
+          - "auth-dns"
+          # IPv6 combinations
+          - "ipv6"
+          - "ipv6,radv"
+          - "ipv6,slaac"
+          - "ipv6,radv,slaac"
+          # Platform integration
+          - "dbus"
+          - "inotify"
+          - "netlink"
+          - "conntrack"
+          - "ipset"
+          - "nftables"
+          # Advanced combinations
+          - "dns,dnssec,auth-dns"
+          - "dhcp,ipv6,radv,slaac"
+          - "dns,dhcp,tftp,dnssec"
+          - "scripts"
+          - "lua"
+          - "idn"
+          - "loop-detect"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Build with feature set
+        run: cargo build --no-default-features --features "${{ matrix.feature_set }}" --verbose
+
+      - name: Test with feature set
+        run: cargo test --no-default-features --features "${{ matrix.feature_set }}" --verbose
+
+  # Job 10: Minimal build verification
+  minimal:
+    name: Minimal Build (No Default Features)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Build without default features
+        run: cargo build --no-default-features --verbose
+
+      - name: Check that binary compiles
+        run: cargo check --no-default-features --verbose
+
+  # Job 11: MSRV verification
+  msrv:
+    name: Minimum Supported Rust Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain at MSRV
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: msrv-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            msrv-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: msrv-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            msrv-cargo-index-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Verify rust-toolchain.toml matches MSRV
+        run: |
+          TOOLCHAIN_VERSION=$(grep 'channel' rust-toolchain.toml | cut -d'"' -f2)
+          if [ "$TOOLCHAIN_VERSION" != "${{ env.MSRV }}" ]; then
+            echo "Error: rust-toolchain.toml version ($TOOLCHAIN_VERSION) does not match MSRV (${{ env.MSRV }})"
+            exit 1
+          fi
+
+      - name: Build with MSRV
+        run: cargo build --all-features --verbose
+
+      - name: Test with MSRV
+        run: cargo test --all-features --verbose
+
+  # Job 12: Final status check
+  ci-success:
+    name: CI Success Gate
+    if: always()
+    needs:
+      - format
+      - clippy
+      - security
+      - build
+      - test
+      - coverage
+      - docs
+      - bench
+      - feature-matrix
+      - minimal
+      - msrv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [ "${{ needs.format.result }}" != "success" ] || \
+             [ "${{ needs.clippy.result }}" != "success" ] || \
+             [ "${{ needs.security.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.coverage.result }}" != "success" ] || \
+             [ "${{ needs.docs.result }}" != "success" ] || \
+             [ "${{ needs.bench.result }}" != "success" ] || \
+             [ "${{ needs.feature-matrix.result }}" != "success" ] || \
+             [ "${{ needs.minimal.result }}" != "success" ] || \
+             [ "${{ needs.msrv.result }}" != "success" ]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI jobs passed successfully"
