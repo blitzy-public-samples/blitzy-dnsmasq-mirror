@@ -52,7 +52,7 @@
 //! - Thread-safety without locks (thread-local storage)
 //! - SIMD optimizations on supported platforms
 
-use rand::{thread_rng, Rng, RngCore};
+use rand::{thread_rng, Rng};
 use tracing::{debug, info, trace};
 
 /// Generate a cryptographically-strong 16-bit random number.
