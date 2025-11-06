@@ -131,7 +131,7 @@ impl ZoneRecord {
                 name: self.name.clone(),
                 class: self.class,
                 ttl: self.ttl,
-                text: text.clone(),
+                data: text.clone(),
             },
         }
     }

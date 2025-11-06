@@ -27,7 +27,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use bytes::BytesMut;
+use bytes::{BytesMut, BufMut};
 use nom::IResult;
 use nom::bytes::complete::take;
 use nom::number::complete::{be_u16, be_u32};
@@ -36,7 +36,7 @@ use nom::sequence::tuple;
 use nom::multi::count;
 use thiserror::Error;
 
-use crate::dns::compression::extract_name;
+use crate::dns::compression::{extract_name, CompressionError};
 use crate::constants::EDNS_PACKET_SIZE;
 
 /// DNS protocol constants from dns-protocol.h
@@ -97,6 +97,31 @@ impl From<std::io::Error> for ProtocolError {
     }
 }
 
+impl From<CompressionError> for ProtocolError {
+    fn from(e: CompressionError) -> Self {
+        match e {
+            CompressionError::PacketTooShort { offset, attempted, packet_len } => {
+                ProtocolError::PacketTooShort {
+                    expected: offset + attempted,
+                    actual: packet_len,
+                }
+            }
+            CompressionError::InvalidOffset { offset, .. } => {
+                ProtocolError::InvalidCompressionPointer(offset)
+            }
+            CompressionError::TooManyHops => {
+                ProtocolError::MalformedPacket("Too many compression pointer hops".to_string())
+            }
+            CompressionError::NameTooLong { length } => {
+                ProtocolError::NameTooLong(length)
+            }
+            CompressionError::InvalidLabelType { label_type } => {
+                ProtocolError::MalformedPacket(format!("Unsupported label type: {:#x}", label_type))
+            }
+        }
+    }
+}
+
 /// DNS Record Type enumeration (RFC 1035 Section 3.2.2)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -116,6 +141,7 @@ pub enum RecordType {
     NSEC = 47,      // DNSSEC Next Secure
     DNSKEY = 48,    // DNSSEC Public Key
     NSEC3 = 50,     // DNSSEC Next Secure v3
+    ANY = 255,      // QTYPE for queries matching any record type
 }
 
 impl RecordType {
@@ -137,6 +163,7 @@ impl RecordType {
             47 => Ok(RecordType::NSEC),
             48 => Ok(RecordType::DNSKEY),
             50 => Ok(RecordType::NSEC3),
+            255 => Ok(RecordType::ANY),
             _ => Err(ProtocolError::UnsupportedRecordType(value)),
         }
     }
@@ -155,6 +182,7 @@ pub enum RecordClass {
     CS = 2,   // CSNET (obsolete)
     CH = 3,   // CHAOS
     HS = 4,   // Hesiod
+    ANY = 255, // QCLASS for queries matching any class
 }
 
 impl RecordClass {
@@ -165,6 +193,7 @@ impl RecordClass {
             2 => Ok(RecordClass::CS),
             3 => Ok(RecordClass::CH),
             4 => Ok(RecordClass::HS),
+            255 => Ok(RecordClass::ANY),
             _ => Err(ProtocolError::MalformedPacket(format!("Unknown class: {}", value))),
         }
     }
@@ -327,11 +356,13 @@ impl DnsQuestion {
 }
 
 /// DNS Resource Record variants (RFC 1035 Section 3.2.1)
+/// All records include name, class, and TTL fields as per RFC 1035
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResourceRecord {
     /// A record - IPv4 address (RFC 1035)
     A {
         name: String,
+        class: RecordClass,
         ttl: u32,
         address: Ipv4Addr,
     },
@@ -339,6 +370,7 @@ pub enum ResourceRecord {
     /// AAAA record - IPv6 address (RFC 3596)
     AAAA {
         name: String,
+        class: RecordClass,
         ttl: u32,
         address: Ipv6Addr,
     },
@@ -346,6 +378,7 @@ pub enum ResourceRecord {
     /// CNAME record - Canonical name alias (RFC 1035)
     CNAME {
         name: String,
+        class: RecordClass,
         ttl: u32,
         cname: String,
     },
@@ -353,6 +386,7 @@ pub enum ResourceRecord {
     /// MX record - Mail exchange (RFC 1035)
     MX {
         name: String,
+        class: RecordClass,
         ttl: u32,
         preference: u16,
         exchange: String,
@@ -361,6 +395,7 @@ pub enum ResourceRecord {
     /// NS record - Name server (RFC 1035)
     NS {
         name: String,
+        class: RecordClass,
         ttl: u32,
         nsdname: String,
     },
@@ -368,6 +403,7 @@ pub enum ResourceRecord {
     /// PTR record - Pointer for reverse lookup (RFC 1035)
     PTR {
         name: String,
+        class: RecordClass,
         ttl: u32,
         ptrdname: String,
     },
@@ -375,6 +411,7 @@ pub enum ResourceRecord {
     /// SOA record - Start of authority (RFC 1035)
     SOA {
         name: String,
+        class: RecordClass,
         ttl: u32,
         mname: String,      // Primary name server
         rname: String,      // Responsible party email
@@ -388,6 +425,7 @@ pub enum ResourceRecord {
     /// SRV record - Service locator (RFC 2782)
     SRV {
         name: String,
+        class: RecordClass,
         ttl: u32,
         priority: u16,
         weight: u16,
@@ -398,11 +436,14 @@ pub enum ResourceRecord {
     /// TXT record - Text strings (RFC 1035)
     TXT {
         name: String,
+        class: RecordClass,
         ttl: u32,
         data: Vec<String>,
     },
     
     /// OPT pseudo-record - EDNS0 (RFC 6891)
+    /// Note: OPT records don't have a traditional class field; the class field
+    /// is reused for UDP payload size
     OPT {
         udp_payload_size: u16,
         extended_rcode: u8,
@@ -414,6 +455,7 @@ pub enum ResourceRecord {
     /// RRSIG record - DNSSEC signature (RFC 4034)
     RRSIG {
         name: String,
+        class: RecordClass,
         ttl: u32,
         type_covered: u16,
         algorithm: u8,
@@ -429,6 +471,7 @@ pub enum ResourceRecord {
     /// DNSKEY record - DNSSEC public key (RFC 4034)
     DNSKEY {
         name: String,
+        class: RecordClass,
         ttl: u32,
         flags: u16,
         protocol: u8,
@@ -439,6 +482,7 @@ pub enum ResourceRecord {
     /// DS record - Delegation Signer (RFC 4034)
     DS {
         name: String,
+        class: RecordClass,
         ttl: u32,
         key_tag: u16,
         algorithm: u8,
@@ -449,6 +493,7 @@ pub enum ResourceRecord {
     /// NSEC record - Next Secure (RFC 4034)
     NSEC {
         name: String,
+        class: RecordClass,
         ttl: u32,
         next_domain: String,
         type_bitmaps: Vec<u8>,
@@ -457,6 +502,7 @@ pub enum ResourceRecord {
     /// NSEC3 record - Next Secure v3 (RFC 5155)
     NSEC3 {
         name: String,
+        class: RecordClass,
         ttl: u32,
         hash_algorithm: u8,
         flags: u8,
@@ -465,6 +511,71 @@ pub enum ResourceRecord {
         next_hashed_owner: Vec<u8>,
         type_bitmaps: Vec<u8>,
     },
+}
+
+impl ResourceRecord {
+    /// Get the record type for this resource record
+    pub fn record_type(&self) -> RecordType {
+        match self {
+            ResourceRecord::A { .. } => RecordType::A,
+            ResourceRecord::AAAA { .. } => RecordType::AAAA,
+            ResourceRecord::CNAME { .. } => RecordType::CNAME,
+            ResourceRecord::MX { .. } => RecordType::MX,
+            ResourceRecord::NS { .. } => RecordType::NS,
+            ResourceRecord::PTR { .. } => RecordType::PTR,
+            ResourceRecord::SOA { .. } => RecordType::SOA,
+            ResourceRecord::SRV { .. } => RecordType::SRV,
+            ResourceRecord::TXT { .. } => RecordType::TXT,
+            ResourceRecord::OPT { .. } => RecordType::OPT,
+            ResourceRecord::RRSIG { .. } => RecordType::RRSIG,
+            ResourceRecord::DNSKEY { .. } => RecordType::DNSKEY,
+            ResourceRecord::DS { .. } => RecordType::DS,
+            ResourceRecord::NSEC { .. } => RecordType::NSEC,
+            ResourceRecord::NSEC3 { .. } => RecordType::NSEC3,
+        }
+    }
+    
+    /// Get the name field from any resource record
+    pub fn name(&self) -> &str {
+        match self {
+            ResourceRecord::A { name, .. } => name,
+            ResourceRecord::AAAA { name, .. } => name,
+            ResourceRecord::CNAME { name, .. } => name,
+            ResourceRecord::MX { name, .. } => name,
+            ResourceRecord::NS { name, .. } => name,
+            ResourceRecord::PTR { name, .. } => name,
+            ResourceRecord::SOA { name, .. } => name,
+            ResourceRecord::SRV { name, .. } => name,
+            ResourceRecord::TXT { name, .. } => name,
+            ResourceRecord::OPT { .. } => "",  // OPT doesn't have a name field
+            ResourceRecord::RRSIG { name, .. } => name,
+            ResourceRecord::DNSKEY { name, .. } => name,
+            ResourceRecord::DS { name, .. } => name,
+            ResourceRecord::NSEC { name, .. } => name,
+            ResourceRecord::NSEC3 { name, .. } => name,
+        }
+    }
+    
+    /// Get the TTL from any resource record (except OPT)
+    pub fn ttl(&self) -> u32 {
+        match self {
+            ResourceRecord::A { ttl, .. } => *ttl,
+            ResourceRecord::AAAA { ttl, .. } => *ttl,
+            ResourceRecord::CNAME { ttl, .. } => *ttl,
+            ResourceRecord::MX { ttl, .. } => *ttl,
+            ResourceRecord::NS { ttl, .. } => *ttl,
+            ResourceRecord::PTR { ttl, .. } => *ttl,
+            ResourceRecord::SOA { ttl, .. } => *ttl,
+            ResourceRecord::SRV { ttl, .. } => *ttl,
+            ResourceRecord::TXT { ttl, .. } => *ttl,
+            ResourceRecord::OPT { .. } => 0,  // OPT doesn't have a TTL
+            ResourceRecord::RRSIG { ttl, .. } => *ttl,
+            ResourceRecord::DNSKEY { ttl, .. } => *ttl,
+            ResourceRecord::DS { ttl, .. } => *ttl,
+            ResourceRecord::NSEC { ttl, .. } => *ttl,
+            ResourceRecord::NSEC3 { ttl, .. } => *ttl,
+        }
+    }
 }
 
 /// DNS Message structure containing all sections
@@ -585,7 +696,7 @@ impl Default for DnsMessage {
 fn parse_question_at(packet: &[u8], offset: &mut usize) -> Result<DnsQuestion, ProtocolError> {
     // Extract domain name using compression module
     let name_result = extract_name(packet, offset, 4)?;
-    let qname = name_result.name;
+    let qname = name_result.to_string();
     
     // Parse QTYPE and QCLASS
     if *offset + 4 > packet.len() {
@@ -621,7 +732,7 @@ pub fn parse_question(data: &[u8]) -> IResult<&[u8], DnsQuestion> {
 fn parse_resource_record_at(packet: &[u8], offset: &mut usize) -> Result<ResourceRecord, ProtocolError> {
     // Extract name
     let name_result = extract_name(packet, offset, 10)?;
-    let name = name_result.name;
+    let name = name_result.to_string();
     
     // Parse TYPE, CLASS, TTL, RDLENGTH
     if *offset + 10 > packet.len() {
@@ -649,12 +760,15 @@ fn parse_resource_record_at(packet: &[u8], offset: &mut usize) -> Result<Resourc
     let rdata = &packet[*offset..*offset + rdlength];
     *offset += rdlength;
     
+    // Convert class to RecordClass enum
+    let class = RecordClass::from_u16(rr_class).unwrap_or(RecordClass::IN);
+    
     // Parse RDATA based on type
-    parse_rdata(name, rr_type, ttl, rdata, packet)
+    parse_rdata(name, rr_type, class, ttl, rdata, packet)
 }
 
 /// Parse RDATA based on record type
-fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: &[u8]) -> Result<ResourceRecord, ProtocolError> {
+fn parse_rdata(name: String, rr_type: u16, class: RecordClass, ttl: u32, rdata: &[u8], full_packet: &[u8]) -> Result<ResourceRecord, ProtocolError> {
     match rr_type {
         1 => { // A record
             if rdata.len() != 4 {
@@ -662,6 +776,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             }
             Ok(ResourceRecord::A {
                 name,
+                class,
                 ttl,
                 address: Ipv4Addr::new(rdata[0], rdata[1], rdata[2], rdata[3]),
             })
@@ -675,6 +790,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             bytes.copy_from_slice(rdata);
             Ok(ResourceRecord::AAAA {
                 name,
+                class,
                 ttl,
                 address: Ipv6Addr::from(bytes),
             })
@@ -685,8 +801,9 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             let cname_result = extract_name(full_packet, &mut offset, 0)?;
             Ok(ResourceRecord::CNAME {
                 name,
+                class,
                 ttl,
-                cname: cname_result.name,
+                cname: cname_result.to_string(),
             })
         }
         
@@ -695,8 +812,9 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             let ns_result = extract_name(full_packet, &mut offset, 0)?;
             Ok(ResourceRecord::NS {
                 name,
+                class,
                 ttl,
-                nsdname: ns_result.name,
+                nsdname: ns_result.to_string(),
             })
         }
         
@@ -705,8 +823,9 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             let ptr_result = extract_name(full_packet, &mut offset, 0)?;
             Ok(ResourceRecord::PTR {
                 name,
+                class,
                 ttl,
-                ptrdname: ptr_result.name,
+                ptrdname: ptr_result.to_string(),
             })
         }
         
@@ -720,9 +839,10 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             let exchange_result = extract_name(full_packet, &mut offset, 0)?;
             Ok(ResourceRecord::MX {
                 name,
+                class,
                 ttl,
                 preference,
-                exchange: exchange_result.name,
+                exchange: exchange_result.to_string(),
             })
         }
         
@@ -744,9 +864,10 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::SOA {
                 name,
+                class,
                 ttl,
-                mname: mname_result.name,
-                rname: rname_result.name,
+                mname: mname_result.to_string(),
+                rname: rname_result.to_string(),
                 serial,
                 refresh,
                 retry,
@@ -769,11 +890,12 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::SRV {
                 name,
+                class,
                 ttl,
                 priority,
                 weight,
                 port,
-                target: target_result.name,
+                target: target_result.to_string(),
             })
         }
         
@@ -792,6 +914,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             }
             Ok(ResourceRecord::TXT {
                 name,
+                class,
                 ttl,
                 data: strings,
             })
@@ -834,6 +957,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::RRSIG {
                 name,
+                class,
                 ttl,
                 type_covered,
                 algorithm,
@@ -842,7 +966,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
                 signature_expiration,
                 signature_inception,
                 key_tag,
-                signer_name: signer_result.name,
+                signer_name: signer_result.to_string(),
                 signature,
             })
         }
@@ -859,6 +983,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::DNSKEY {
                 name,
+                class,
                 ttl,
                 flags,
                 protocol,
@@ -879,6 +1004,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::DS {
                 name,
+                class,
                 ttl,
                 key_tag,
                 algorithm,
@@ -895,8 +1021,9 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::NSEC {
                 name,
+                class,
                 ttl,
-                next_domain: next_result.name,
+                next_domain: next_result.to_string(),
                 type_bitmaps,
             })
         }
@@ -927,6 +1054,7 @@ fn parse_rdata(name: String, rr_type: u16, ttl: u32, rdata: &[u8], full_packet: 
             
             Ok(ResourceRecord::NSEC3 {
                 name,
+                class,
                 ttl,
                 hash_algorithm,
                 flags,
@@ -990,28 +1118,28 @@ fn serialize_name(name: &str, buf: &mut BytesMut) -> Result<(), ProtocolError> {
 /// Serialize a resource record to wire format
 fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolError> {
     match rr {
-        ResourceRecord::A { name, ttl, address } => {
+        ResourceRecord::A { name, class, ttl, address } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::A.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             buf.put_u16(4); // RDLENGTH
             buf.put_slice(&address.octets());
         }
         
-        ResourceRecord::AAAA { name, ttl, address } => {
+        ResourceRecord::AAAA { name, class, ttl, address } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::AAAA.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             buf.put_u16(16); // RDLENGTH
             buf.put_slice(&address.octets());
         }
         
-        ResourceRecord::CNAME { name, ttl, cname } => {
+        ResourceRecord::CNAME { name, class, ttl, cname } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::CNAME.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             // Calculate RDLENGTH
@@ -1021,10 +1149,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::NS { name, ttl, nsdname } => {
+        ResourceRecord::NS { name, class, ttl, nsdname } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::NS.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1033,10 +1161,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::PTR { name, ttl, ptrdname } => {
+        ResourceRecord::PTR { name, class, ttl, ptrdname } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::PTR.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1045,10 +1173,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::MX { name, ttl, preference, exchange } => {
+        ResourceRecord::MX { name, class, ttl, preference, exchange } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::MX.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1058,10 +1186,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::SOA { name, ttl, mname, rname, serial, refresh, retry, expire, minimum } => {
+        ResourceRecord::SOA { name, class, ttl, mname, rname, serial, refresh, retry, expire, minimum } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::SOA.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1076,10 +1204,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::SRV { name, ttl, priority, weight, port, target } => {
+        ResourceRecord::SRV { name, class, ttl, priority, weight, port, target } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::SRV.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1091,10 +1219,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::TXT { name, ttl, data } => {
+        ResourceRecord::TXT { name, class, ttl, data } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::TXT.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1128,11 +1256,11 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(data);
         }
         
-        ResourceRecord::RRSIG { name, ttl, type_covered, algorithm, labels, original_ttl,
+        ResourceRecord::RRSIG { name, class, ttl, type_covered, algorithm, labels, original_ttl,
                                 signature_expiration, signature_inception, key_tag, signer_name, signature } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::RRSIG.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1149,10 +1277,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::DNSKEY { name, ttl, flags, protocol, algorithm, public_key } => {
+        ResourceRecord::DNSKEY { name, class, ttl, flags, protocol, algorithm, public_key } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::DNSKEY.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let rdlength = 4 + public_key.len();
@@ -1163,10 +1291,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(public_key);
         }
         
-        ResourceRecord::DS { name, ttl, key_tag, algorithm, digest_type, digest } => {
+        ResourceRecord::DS { name, class, ttl, key_tag, algorithm, digest_type, digest } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::DS.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let rdlength = 4 + digest.len();
@@ -1177,10 +1305,10 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(digest);
         }
         
-        ResourceRecord::NSEC { name, ttl, next_domain, type_bitmaps } => {
+        ResourceRecord::NSEC { name, class, ttl, next_domain, type_bitmaps } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::NSEC.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1190,11 +1318,11 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
             buf.put_slice(&rdata_buf);
         }
         
-        ResourceRecord::NSEC3 { name, ttl, hash_algorithm, flags, iterations, salt,
+        ResourceRecord::NSEC3 { name, class, ttl, hash_algorithm, flags, iterations, salt,
                                 next_hashed_owner, type_bitmaps } => {
             serialize_name(name, buf)?;
             buf.put_u16(RecordType::NSEC3.to_u16());
-            buf.put_u16(RecordClass::IN.to_u16());
+            buf.put_u16(class.to_u16());
             buf.put_u32(*ttl);
             
             let mut rdata_buf = BytesMut::new();
@@ -1364,6 +1492,7 @@ mod tests {
     fn test_a_record_serialization() {
         let rr = ResourceRecord::A {
             name: "example.com".to_string(),
+            class: RecordClass::IN,
             ttl: 300,
             address: Ipv4Addr::new(192, 0, 2, 1),
         };
@@ -1393,6 +1522,7 @@ mod tests {
         
         let answer = ResourceRecord::A {
             name: "example.com".to_string(),
+            class: RecordClass::IN,
             ttl: 300,
             address: Ipv4Addr::new(192, 0, 2, 1),
         };
