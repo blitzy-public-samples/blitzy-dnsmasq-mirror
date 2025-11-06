@@ -1,0 +1,64 @@
+# Mixed DHCPv4 and DHCPv6 lease database fixture
+# Tests dual-stack DHCP lease parsing and coexistence of v4/v6 entries
+# Format matches C implementation's lease_update_file() from src/lease.c lines 542-615
+#
+# DHCPv4 lease format: <timestamp> <hw_addr> <ip_addr> <hostname> <client_id>
+# DHCPv6 DUID format: duid <hex_bytes>
+# DHCPv6 lease format: <timestamp> [T]<IAID> <ipv6_addr> <hostname> <client_duid>
+
+# DHCPv4 leases section
+# Active DHCPv4 lease with standard Ethernet MAC and client ID
+1732118400 52:54:00:12:34:56 192.168.1.100 workstation-01 01:52:54:00:12:34:56
+
+# Active DHCPv4 lease without client ID (uses * placeholder)
+1732118450 52:54:00:ab:cd:ef 192.168.1.101 laptop-02 *
+
+# Expired DHCPv4 lease (old timestamp)
+1609459200 52:54:00:11:22:33 192.168.1.102 old-device *
+
+# Active DHCPv4 lease with non-Ethernet hardware type (type 06 = IEEE 802 networks)
+1732118500 06-00:11:22:33:44:55 192.168.1.103 router-01 01:00:11:22:33:44:55
+
+# Active DHCPv4 lease without hostname (uses * placeholder)
+1732118550 52:54:00:aa:bb:cc 192.168.1.104 * 01:52:54:00:aa:bb:cc
+
+# Expired DHCPv4 lease with complex client ID
+1609459300 52:54:00:de:ad:be 192.168.1.105 expired-host ff:de:ad:be:ef:00:01:02
+
+# Active DHCPv4 lease with long client ID
+1732118600 52:54:00:99:88:77 192.168.1.106 server-01 01:52:54:00:99:88:77:ab:cd:ef:12
+
+# DHCPv6 server DUID (required before any DHCPv6 leases)
+duid 00:01:00:01:2d:3e:4f:5a:52:54:00:11:22:33
+
+# DHCPv6 leases section
+# Active DHCPv6 NA (Non-Temporary Address) lease
+1732118700 12345 2001:db8::100 workstation-ipv6 00:01:00:01:2d:3e:4f:60:52:54:00:12:34:56
+
+# Active DHCPv6 TA (Temporary Address) lease with T prefix
+1732118750 T54321 2001:db8::200 laptop-temp *
+
+# Expired DHCPv6 lease
+1609459400 67890 2001:db8::150 old-ipv6-device 00:01:00:01:2a:1b:2c:3d:52:54:00:11:22:33
+
+# Active DHCPv6 lease without hostname
+1732118800 11111 2001:db8::300 * 00:03:00:01:52:54:00:ab:cd:ef
+
+# Active DHCPv6 TA lease without client DUID
+1732118850 T99999 2001:db8::400 temp-host *
+
+# Expired DHCPv6 TA lease
+1609459500 T11223 2001:db8::250 expired-temp 00:01:00:01:2a:1b:2c:3d:52:54:00:de:ad:be
+
+# Active DHCPv6 lease with complex DUID (DUID-LL type)
+1732118900 44444 2001:db8::500 server-ipv6 00:03:00:01:52:54:00:99:88:77
+
+# Active DHCPv6 lease for dual-stack host (same hostname as v4)
+1732118950 55555 2001:db8::106 server-01 00:01:00:01:2d:3e:4f:61:52:54:00:99:88:77
+
+# Multiple leases testing edge cases
+# IPv4 lease at boundary timestamp
+1732119000 52:54:00:ff:ee:dd 192.168.1.200 boundary-test 01:52:54:00:ff:ee:dd
+
+# IPv6 NA lease at same timestamp
+1732119000 77777 2001:db8::600 boundary-ipv6 00:01:00:01:2d:3e:4f:62:52:54:00:ff:ee:dd
