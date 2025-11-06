@@ -57,149 +57,9 @@
 use std::fmt;
 use tracing::debug;
 
+use super::protocol::Dhcpv6MessageType;
 use crate::dhcp::v6::options::Dhcp6Option;
 use crate::types::errors::{DhcpError, DnsmasqError};
-
-/// DHCPv6 message types per RFC 3315 Section 5.3
-///
-/// Represents all DHCPv6 message types with their numeric codes. This enum
-/// replaces C's preprocessor constants (DHCP6SOLICIT, DHCP6ADVERTISE, etc.)
-/// with type-safe Rust enum providing exhaustive pattern matching.
-///
-/// # C Code Replaced
-///
-/// From `src/dhcp6-protocol.h`:
-/// ```c
-/// #define DHCP6SOLICIT              1
-/// #define DHCP6ADVERTISE            2
-/// #define DHCP6REQUEST              3
-/// // ... etc
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum Dhcp6MessageType {
-    /// Client locates servers (broadcasts)
-    Solicit = 1,
-    /// Server announces availability
-    Advertise = 2,
-    /// Client requests configuration
-    Request = 3,
-    /// Client confirms addresses still valid
-    Confirm = 4,
-    /// Client extends address lifetimes (T1 timer)
-    Renew = 5,
-    /// Client extends from any server (T2 timer)
-    Rebind = 6,
-    /// Server responds to client
-    Reply = 7,
-    /// Client relinquishes addresses
-    Release = 8,
-    /// Client reports address conflict
-    Decline = 9,
-    /// Server triggers reconfiguration
-    Reconfigure = 10,
-    /// Client requests configuration without address
-    InformationRequest = 11,
-    /// Relay agent forwards client message
-    RelayForw = 12,
-    /// Relay agent forwards server response
-    RelayRepl = 13,
-}
-
-impl Dhcp6MessageType {
-    /// Convert from numeric message type code
-    ///
-    /// # Arguments
-    ///
-    /// * `code` - Numeric DHCPv6 message type (1-13)
-    ///
-    /// # Returns
-    ///
-    /// `Some(Dhcp6MessageType)` if valid, `None` if unknown code
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let msg_type = Dhcp6MessageType::from_u8(1);
-    /// assert_eq!(msg_type, Some(Dhcp6MessageType::Solicit));
-    /// ```
-    pub fn from_u8(code: u8) -> Option<Self> {
-        match code {
-            1 => Some(Self::Solicit),
-            2 => Some(Self::Advertise),
-            3 => Some(Self::Request),
-            4 => Some(Self::Confirm),
-            5 => Some(Self::Renew),
-            6 => Some(Self::Rebind),
-            7 => Some(Self::Reply),
-            8 => Some(Self::Release),
-            9 => Some(Self::Decline),
-            10 => Some(Self::Reconfigure),
-            11 => Some(Self::InformationRequest),
-            12 => Some(Self::RelayForw),
-            13 => Some(Self::RelayRepl),
-            _ => None,
-        }
-    }
-
-    /// Convert to numeric message type code
-    ///
-    /// # Returns
-    ///
-    /// Numeric DHCPv6 message type code (1-13)
-    pub fn to_u8(self) -> u8 {
-        self as u8
-    }
-
-    /// Check if message type requires a response
-    ///
-    /// # Returns
-    ///
-    /// `true` if server must respond to this message type
-    pub fn requires_response(self) -> bool {
-        matches!(
-            self,
-            Self::Solicit
-                | Self::Request
-                | Self::Confirm
-                | Self::Renew
-                | Self::Rebind
-                | Self::InformationRequest
-                | Self::Release
-                | Self::Decline
-        )
-    }
-
-    /// Check if message is from relay agent
-    ///
-    /// # Returns
-    ///
-    /// `true` for RELAY-FORW and RELAY-REPL message types
-    pub fn is_relay_message(self) -> bool {
-        matches!(self, Self::RelayForw | Self::RelayRepl)
-    }
-}
-
-impl fmt::Display for Dhcp6MessageType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Self::Solicit => "SOLICIT",
-            Self::Advertise => "ADVERTISE",
-            Self::Request => "REQUEST",
-            Self::Confirm => "CONFIRM",
-            Self::Renew => "RENEW",
-            Self::Rebind => "REBIND",
-            Self::Reply => "REPLY",
-            Self::Release => "RELEASE",
-            Self::Decline => "DECLINE",
-            Self::Reconfigure => "RECONFIGURE",
-            Self::InformationRequest => "INFORMATION-REQUEST",
-            Self::RelayForw => "RELAY-FORW",
-            Self::RelayRepl => "RELAY-REPL",
-        };
-        write!(f, "{}", name)
-    }
-}
 
 /// DHCPv6 protocol states
 ///
@@ -253,7 +113,7 @@ impl fmt::Display for Dhcp6MessageType {
 /// }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Dhcp6State {
+pub enum Dhcpv6State {
     /// Initial state: awaiting client SOLICIT
     Solicit,
     /// Server has sent ADVERTISE, awaiting REQUEST
@@ -276,7 +136,7 @@ pub enum Dhcp6State {
     InformationRequest,
 }
 
-impl fmt::Display for Dhcp6State {
+impl fmt::Display for Dhcpv6State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             Self::Solicit => "SOLICIT",
@@ -321,16 +181,16 @@ impl fmt::Display for Dhcp6State {
 /// }
 /// ```
 #[derive(Debug)]
-pub struct StateTransition {
+pub struct Dhcpv6StateMachine {
     /// Current state in the DHCPv6 exchange
-    current_state: Dhcp6State,
+    current_state: Dhcpv6State,
     /// Whether rapid commit is active (2-message exchange)
     rapid_commit: bool,
     /// Transaction ID for correlation
     transaction_id: u32,
 }
 
-impl StateTransition {
+impl Dhcpv6StateMachine {
     /// Create new state transition starting from SOLICIT
     ///
     /// # Arguments
@@ -339,12 +199,12 @@ impl StateTransition {
     ///
     /// # Returns
     ///
-    /// New `StateTransition` in Solicit state
+    /// New `Dhcpv6StateMachine` in Solicit state
     ///
     /// # Examples
     ///
     /// ```rust,ignore
-    /// let transition = StateTransition::new(0x123456);
+    /// let transition = Dhcpv6StateMachine::new(0x123456);
     /// ```
     pub fn new(transaction_id: u32) -> Self {
         debug!(
@@ -352,7 +212,7 @@ impl StateTransition {
             "Creating new DHCPv6 state transition (initial state: SOLICIT)"
         );
         Self {
-            current_state: Dhcp6State::Solicit,
+            current_state: Dhcpv6State::Solicit,
             rapid_commit: false,
             transaction_id,
         }
@@ -368,7 +228,7 @@ impl StateTransition {
     ///
     /// # Returns
     ///
-    /// `Ok(StateTransition)` if message type is valid initial state,
+    /// `Ok(Dhcpv6StateMachine)` if message type is valid initial state,
     /// `Err(DnsmasqError)` if message type cannot start a transaction
     ///
     /// # Errors
@@ -379,30 +239,30 @@ impl StateTransition {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// let transition = StateTransition::from_message_type(
-    ///     Dhcp6MessageType::Solicit,
+    /// let transition = Dhcpv6StateMachine::from_message_type(
+    ///     Dhcpv6MessageType::Solicit,
     ///     0x123456,
     ///     &options
     /// )?;
     /// ```
     pub fn from_message_type(
-        msg_type: Dhcp6MessageType,
+        msg_type: Dhcpv6MessageType,
         transaction_id: u32,
         options: &[Dhcp6Option],
     ) -> Result<Self, DnsmasqError> {
         // Check for rapid commit option in SOLICIT messages
-        let rapid_commit = msg_type == Dhcp6MessageType::Solicit
+        let rapid_commit = msg_type == Dhcpv6MessageType::Solicit
             && options.iter().any(|opt| matches!(opt, Dhcp6Option::RapidCommit));
 
         let initial_state = match msg_type {
-            Dhcp6MessageType::Solicit => Dhcp6State::Solicit,
-            Dhcp6MessageType::Request => Dhcp6State::Request,
-            Dhcp6MessageType::Confirm => Dhcp6State::Confirm,
-            Dhcp6MessageType::Renew => Dhcp6State::Renew,
-            Dhcp6MessageType::Rebind => Dhcp6State::Rebind,
-            Dhcp6MessageType::Release => Dhcp6State::Release,
-            Dhcp6MessageType::Decline => Dhcp6State::Decline,
-            Dhcp6MessageType::InformationRequest => Dhcp6State::InformationRequest,
+            Dhcpv6MessageType::Solicit => Dhcpv6State::Solicit,
+            Dhcpv6MessageType::Request => Dhcpv6State::Request,
+            Dhcpv6MessageType::Confirm => Dhcpv6State::Confirm,
+            Dhcpv6MessageType::Renew => Dhcpv6State::Renew,
+            Dhcpv6MessageType::Rebind => Dhcpv6State::Rebind,
+            Dhcpv6MessageType::Release => Dhcpv6State::Release,
+            Dhcpv6MessageType::Decline => Dhcpv6State::Decline,
+            Dhcpv6MessageType::InformationRequest => Dhcpv6State::InformationRequest,
             _ => {
                 return Err(DnsmasqError::Dhcp(DhcpError::StateMachineError {
                     message: format!(
@@ -448,18 +308,18 @@ impl StateTransition {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// StateTransition::validate(
-    ///     Dhcp6State::Solicit,
-    ///     Dhcp6State::Advertise
+    /// Dhcpv6StateMachine::validate(
+    ///     Dhcpv6State::Solicit,
+    ///     Dhcpv6State::Advertise
     /// )?; // OK
     ///
-    /// StateTransition::validate(
-    ///     Dhcp6State::Advertise,
-    ///     Dhcp6State::Renew
+    /// Dhcpv6StateMachine::validate(
+    ///     Dhcpv6State::Advertise,
+    ///     Dhcpv6State::Renew
     /// )?; // Error
     /// ```
-    pub fn validate(from: Dhcp6State, to: Dhcp6State) -> Result<(), DnsmasqError> {
-        use Dhcp6State::*;
+    pub fn validate(from: Dhcpv6State, to: Dhcpv6State) -> Result<(), DnsmasqError> {
+        use Dhcpv6State::*;
 
         let valid = match (from, to) {
             // Standard 4-message exchange
@@ -537,11 +397,11 @@ impl StateTransition {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// let mut transition = StateTransition::new(0x123456);
-    /// transition.transition_to(Dhcp6State::Advertise)?;
-    /// assert_eq!(transition.current_state(), Dhcp6State::Advertise);
+    /// let mut transition = Dhcpv6StateMachine::new(0x123456);
+    /// transition.transition_to(Dhcpv6State::Advertise)?;
+    /// assert_eq!(transition.current_state(), Dhcpv6State::Advertise);
     /// ```
-    pub fn transition_to(&mut self, next_state: Dhcp6State) -> Result<(), DnsmasqError> {
+    pub fn transition_to(&mut self, next_state: Dhcpv6State) -> Result<(), DnsmasqError> {
         Self::validate(self.current_state, next_state)?;
 
         debug!(
@@ -588,10 +448,10 @@ impl StateTransition {
     /// ```rust,ignore
     /// if transition.requires_rapid_commit() {
     ///     // Send REPLY directly, skip ADVERTISE
-    ///     transition.transition_to(Dhcp6State::Reply)?;
+    ///     transition.transition_to(Dhcpv6State::Reply)?;
     /// } else {
     ///     // Normal 4-message exchange
-    ///     transition.transition_to(Dhcp6State::Advertise)?;
+    ///     transition.transition_to(Dhcpv6State::Advertise)?;
     /// }
     /// ```
     pub fn requires_rapid_commit(&self) -> bool {
@@ -603,7 +463,7 @@ impl StateTransition {
     /// # Returns
     ///
     /// Current state in the DHCPv6 transaction
-    pub fn current_state(&self) -> Dhcp6State {
+    pub fn current_state(&self) -> Dhcpv6State {
         self.current_state
     }
 
@@ -625,23 +485,23 @@ impl StateTransition {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// let transition = StateTransition::new(0x123456);
+    /// let transition = Dhcpv6StateMachine::new(0x123456);
     /// assert_eq!(
     ///     transition.response_message_type(),
-    ///     Dhcp6MessageType::Advertise
+    ///     Dhcpv6MessageType::Advertise
     /// );
     /// ```
-    pub fn response_message_type(&self) -> Dhcp6MessageType {
-        use Dhcp6State::*;
+    pub fn response_message_type(&self) -> Dhcpv6MessageType {
+        use Dhcpv6State::*;
 
         match self.current_state {
-            Solicit if self.rapid_commit => Dhcp6MessageType::Reply,
-            Solicit => Dhcp6MessageType::Advertise,
-            Advertise => Dhcp6MessageType::Reply,
+            Solicit if self.rapid_commit => Dhcpv6MessageType::Reply,
+            Solicit => Dhcpv6MessageType::Advertise,
+            Advertise => Dhcpv6MessageType::Reply,
             Request | Renew | Rebind | Confirm | Release | Decline | InformationRequest => {
-                Dhcp6MessageType::Reply
+                Dhcpv6MessageType::Reply
             }
-            Reply => Dhcp6MessageType::Reply, // Retransmission
+            Reply => Dhcpv6MessageType::Reply, // Retransmission
         }
     }
 
@@ -662,11 +522,11 @@ impl StateTransition {
     pub fn requires_address_allocation(&self) -> bool {
         matches!(
             self.current_state,
-            Dhcp6State::Solicit
-                | Dhcp6State::Request
-                | Dhcp6State::Renew
-                | Dhcp6State::Rebind
-                | Dhcp6State::Confirm
+            Dhcpv6State::Solicit
+                | Dhcpv6State::Request
+                | Dhcpv6State::Renew
+                | Dhcpv6State::Rebind
+                | Dhcpv6State::Confirm
         )
     }
 
@@ -678,7 +538,7 @@ impl StateTransition {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.current_state,
-            Dhcp6State::Reply | Dhcp6State::Release
+            Dhcpv6State::Reply | Dhcpv6State::Release
         )
     }
 }
@@ -689,29 +549,29 @@ mod tests {
 
     #[test]
     fn test_message_type_conversion() {
-        assert_eq!(Dhcp6MessageType::from_u8(1), Some(Dhcp6MessageType::Solicit));
-        assert_eq!(Dhcp6MessageType::from_u8(7), Some(Dhcp6MessageType::Reply));
-        assert_eq!(Dhcp6MessageType::from_u8(99), None);
+        assert_eq!(Dhcpv6MessageType::from_u8(1), Some(Dhcpv6MessageType::Solicit));
+        assert_eq!(Dhcpv6MessageType::from_u8(7), Some(Dhcpv6MessageType::Reply));
+        assert_eq!(Dhcpv6MessageType::from_u8(99), None);
 
-        assert_eq!(Dhcp6MessageType::Solicit.to_u8(), 1);
-        assert_eq!(Dhcp6MessageType::Reply.to_u8(), 7);
+        assert_eq!(Dhcpv6MessageType::Solicit.to_u8(), 1);
+        assert_eq!(Dhcpv6MessageType::Reply.to_u8(), 7);
     }
 
     #[test]
     fn test_message_type_predicates() {
-        assert!(Dhcp6MessageType::Solicit.requires_response());
-        assert!(!Dhcp6MessageType::Advertise.requires_response());
-        assert!(Dhcp6MessageType::Request.requires_response());
+        assert!(Dhcpv6MessageType::Solicit.requires_response());
+        assert!(!Dhcpv6MessageType::Advertise.requires_response());
+        assert!(Dhcpv6MessageType::Request.requires_response());
 
-        assert!(Dhcp6MessageType::RelayForw.is_relay_message());
-        assert!(Dhcp6MessageType::RelayRepl.is_relay_message());
-        assert!(!Dhcp6MessageType::Solicit.is_relay_message());
+        assert!(Dhcpv6MessageType::RelayForw.is_relay_message());
+        assert!(Dhcpv6MessageType::RelayRepl.is_relay_message());
+        assert!(!Dhcpv6MessageType::Solicit.is_relay_message());
     }
 
     #[test]
     fn test_state_transition_new() {
-        let transition = StateTransition::new(0x123456);
-        assert_eq!(transition.current_state(), Dhcp6State::Solicit);
+        let transition = Dhcpv6StateMachine::new(0x123456);
+        assert_eq!(transition.current_state(), Dhcpv6State::Solicit);
         assert_eq!(transition.transaction_id(), 0x123456);
         assert!(!transition.requires_rapid_commit());
     }
@@ -721,21 +581,21 @@ mod tests {
         let options = vec![];
         
         let transition =
-            StateTransition::from_message_type(Dhcp6MessageType::Solicit, 0x123, &options)
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Solicit, 0x123, &options)
                 .unwrap();
-        assert_eq!(transition.current_state(), Dhcp6State::Solicit);
+        assert_eq!(transition.current_state(), Dhcpv6State::Solicit);
         assert!(!transition.requires_rapid_commit());
 
         // Test with rapid commit option
         let options_rc = vec![Dhcp6Option::RapidCommit];
         let transition_rc =
-            StateTransition::from_message_type(Dhcp6MessageType::Solicit, 0x456, &options_rc)
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Solicit, 0x456, &options_rc)
                 .unwrap();
         assert!(transition_rc.requires_rapid_commit());
 
         // Invalid initial message types
-        assert!(StateTransition::from_message_type(
-            Dhcp6MessageType::Advertise,
+        assert!(Dhcpv6StateMachine::from_message_type(
+            Dhcpv6MessageType::Advertise,
             0x789,
             &options
         )
@@ -745,32 +605,32 @@ mod tests {
     #[test]
     fn test_valid_state_transitions() {
         // Standard 4-message exchange
-        assert!(StateTransition::validate(Dhcp6State::Solicit, Dhcp6State::Advertise).is_ok());
-        assert!(StateTransition::validate(Dhcp6State::Advertise, Dhcp6State::Request).is_ok());
-        assert!(StateTransition::validate(Dhcp6State::Request, Dhcp6State::Reply).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Solicit, Dhcpv6State::Advertise).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Advertise, Dhcpv6State::Request).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Request, Dhcpv6State::Reply).is_ok());
 
         // Rapid commit
-        assert!(StateTransition::validate(Dhcp6State::Solicit, Dhcp6State::Reply).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Solicit, Dhcpv6State::Reply).is_ok());
 
         // Lease lifecycle
-        assert!(StateTransition::validate(Dhcp6State::Reply, Dhcp6State::Renew).is_ok());
-        assert!(StateTransition::validate(Dhcp6State::Reply, Dhcp6State::Rebind).is_ok());
-        assert!(StateTransition::validate(Dhcp6State::Renew, Dhcp6State::Reply).is_ok());
-        assert!(StateTransition::validate(Dhcp6State::Rebind, Dhcp6State::Reply).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Reply, Dhcpv6State::Renew).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Reply, Dhcpv6State::Rebind).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Renew, Dhcpv6State::Reply).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Rebind, Dhcpv6State::Reply).is_ok());
 
         // Release and decline
-        assert!(StateTransition::validate(Dhcp6State::Reply, Dhcp6State::Release).is_ok());
-        assert!(StateTransition::validate(Dhcp6State::Request, Dhcp6State::Decline).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Reply, Dhcpv6State::Release).is_ok());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Request, Dhcpv6State::Decline).is_ok());
 
         // Information request
-        assert!(StateTransition::validate(
-            Dhcp6State::Solicit,
-            Dhcp6State::InformationRequest
+        assert!(Dhcpv6StateMachine::validate(
+            Dhcpv6State::Solicit,
+            Dhcpv6State::InformationRequest
         )
         .is_ok());
-        assert!(StateTransition::validate(
-            Dhcp6State::InformationRequest,
-            Dhcp6State::Reply
+        assert!(Dhcpv6StateMachine::validate(
+            Dhcpv6State::InformationRequest,
+            Dhcpv6State::Reply
         )
         .is_ok());
     }
@@ -778,65 +638,65 @@ mod tests {
     #[test]
     fn test_invalid_state_transitions() {
         // Cannot jump from ADVERTISE to RENEW
-        assert!(StateTransition::validate(Dhcp6State::Advertise, Dhcp6State::Renew).is_err());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Advertise, Dhcpv6State::Renew).is_err());
 
         // Cannot go from RELEASE to SOLICIT (must be new transaction)
-        assert!(StateTransition::validate(Dhcp6State::Release, Dhcp6State::Solicit).is_err());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Release, Dhcpv6State::Solicit).is_err());
 
         // Cannot skip REQUEST in normal exchange
-        assert!(StateTransition::validate(Dhcp6State::Advertise, Dhcp6State::Reply).is_err());
+        assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Advertise, Dhcpv6State::Reply).is_err());
     }
 
     #[test]
     fn test_transition_to() {
-        let mut transition = StateTransition::new(0x123);
+        let mut transition = Dhcpv6StateMachine::new(0x123);
 
         // Valid transition
-        assert!(transition.transition_to(Dhcp6State::Advertise).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Advertise);
+        assert!(transition.transition_to(Dhcpv6State::Advertise).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Advertise);
 
         // Valid next transition
-        assert!(transition.transition_to(Dhcp6State::Request).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Request);
+        assert!(transition.transition_to(Dhcpv6State::Request).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Request);
 
         // Invalid transition
-        assert!(transition.transition_to(Dhcp6State::Renew).is_err());
-        assert_eq!(transition.current_state(), Dhcp6State::Request); // State unchanged
+        assert!(transition.transition_to(Dhcpv6State::Renew).is_err());
+        assert_eq!(transition.current_state(), Dhcpv6State::Request); // State unchanged
     }
 
     #[test]
     fn test_response_message_type() {
-        let mut transition = StateTransition::new(0x123);
+        let mut transition = Dhcpv6StateMachine::new(0x123);
         assert_eq!(
             transition.response_message_type(),
-            Dhcp6MessageType::Advertise
+            Dhcpv6MessageType::Advertise
         );
 
-        transition.transition_to(Dhcp6State::Advertise).unwrap();
+        transition.transition_to(Dhcpv6State::Advertise).unwrap();
         assert_eq!(
             transition.response_message_type(),
-            Dhcp6MessageType::Reply
+            Dhcpv6MessageType::Reply
         );
 
         // Test rapid commit bypass
         let options_rc = vec![Dhcp6Option::RapidCommit];
         let transition_rc =
-            StateTransition::from_message_type(Dhcp6MessageType::Solicit, 0x456, &options_rc)
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Solicit, 0x456, &options_rc)
                 .unwrap();
         assert_eq!(
             transition_rc.response_message_type(),
-            Dhcp6MessageType::Reply
+            Dhcpv6MessageType::Reply
         ); // Skips ADVERTISE
     }
 
     #[test]
     fn test_requires_address_allocation() {
-        let transition = StateTransition::new(0x123);
+        let transition = Dhcpv6StateMachine::new(0x123);
         assert!(transition.requires_address_allocation()); // SOLICIT requires allocation
 
         let options = vec![];
-        let info_req = StateTransition::from_message_type(
-            Dhcp6MessageType::InformationRequest,
+        let info_req = Dhcpv6StateMachine::from_message_type(
+            Dhcpv6MessageType::InformationRequest,
             0x456,
             &options,
         )
@@ -846,27 +706,27 @@ mod tests {
 
     #[test]
     fn test_is_terminal() {
-        let mut transition = StateTransition::new(0x123);
+        let mut transition = Dhcpv6StateMachine::new(0x123);
         assert!(!transition.is_terminal()); // SOLICIT not terminal
 
-        transition.transition_to(Dhcp6State::Advertise).unwrap();
-        transition.transition_to(Dhcp6State::Request).unwrap();
-        transition.transition_to(Dhcp6State::Reply).unwrap();
+        transition.transition_to(Dhcpv6State::Advertise).unwrap();
+        transition.transition_to(Dhcpv6State::Request).unwrap();
+        transition.transition_to(Dhcpv6State::Reply).unwrap();
         assert!(transition.is_terminal()); // REPLY is terminal
 
         let options = vec![];
         let mut release =
-            StateTransition::from_message_type(Dhcp6MessageType::Release, 0x789, &options)
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Release, 0x789, &options)
                 .unwrap();
         assert!(release.is_terminal()); // RELEASE is terminal
     }
 
     #[test]
     fn test_display_formatting() {
-        assert_eq!(format!("{}", Dhcp6MessageType::Solicit), "SOLICIT");
-        assert_eq!(format!("{}", Dhcp6MessageType::Reply), "REPLY");
-        assert_eq!(format!("{}", Dhcp6State::Solicit), "SOLICIT");
-        assert_eq!(format!("{}", Dhcp6State::Renew), "RENEW");
+        assert_eq!(format!("{}", Dhcpv6MessageType::Solicit), "SOLICIT");
+        assert_eq!(format!("{}", Dhcpv6MessageType::Reply), "REPLY");
+        assert_eq!(format!("{}", Dhcpv6State::Solicit), "SOLICIT");
+        assert_eq!(format!("{}", Dhcpv6State::Renew), "RENEW");
     }
 
     #[test]
@@ -874,40 +734,40 @@ mod tests {
         // Create transition with rapid commit
         let options_rc = vec![Dhcp6Option::RapidCommit];
         let mut transition =
-            StateTransition::from_message_type(Dhcp6MessageType::Solicit, 0x123, &options_rc)
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Solicit, 0x123, &options_rc)
                 .unwrap();
 
         assert!(transition.requires_rapid_commit());
-        assert_eq!(transition.current_state(), Dhcp6State::Solicit);
+        assert_eq!(transition.current_state(), Dhcpv6State::Solicit);
 
         // Can transition directly to REPLY (bypass ADVERTISE)
-        assert!(transition.transition_to(Dhcp6State::Reply).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Reply);
+        assert!(transition.transition_to(Dhcpv6State::Reply).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Reply);
         assert!(transition.is_terminal());
     }
 
     #[test]
     fn test_full_4_message_exchange() {
-        let mut transition = StateTransition::new(0x123456);
+        let mut transition = Dhcpv6StateMachine::new(0x123456);
 
         // SOLICIT
-        assert_eq!(transition.current_state(), Dhcp6State::Solicit);
+        assert_eq!(transition.current_state(), Dhcpv6State::Solicit);
         assert_eq!(
             transition.response_message_type(),
-            Dhcp6MessageType::Advertise
+            Dhcpv6MessageType::Advertise
         );
 
         // ADVERTISE
-        assert!(transition.transition_to(Dhcp6State::Advertise).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Advertise);
+        assert!(transition.transition_to(Dhcpv6State::Advertise).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Advertise);
 
         // REQUEST
-        assert!(transition.transition_to(Dhcp6State::Request).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Request);
+        assert!(transition.transition_to(Dhcpv6State::Request).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Request);
 
         // REPLY
-        assert!(transition.transition_to(Dhcp6State::Reply).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Reply);
+        assert!(transition.transition_to(Dhcpv6State::Reply).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Reply);
         assert!(transition.is_terminal());
     }
 
@@ -915,34 +775,34 @@ mod tests {
     fn test_lease_renewal_cycle() {
         let options = vec![];
         let mut transition =
-            StateTransition::from_message_type(Dhcp6MessageType::Renew, 0x789, &options).unwrap();
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Renew, 0x789, &options).unwrap();
 
-        assert_eq!(transition.current_state(), Dhcp6State::Renew);
+        assert_eq!(transition.current_state(), Dhcpv6State::Renew);
         assert!(transition.requires_address_allocation());
 
         // RENEW → REPLY
-        assert!(transition.transition_to(Dhcp6State::Reply).is_ok());
-        assert_eq!(transition.current_state(), Dhcp6State::Reply);
+        assert!(transition.transition_to(Dhcpv6State::Reply).is_ok());
+        assert_eq!(transition.current_state(), Dhcpv6State::Reply);
     }
 
     #[test]
     fn test_information_request_stateless() {
         let options = vec![];
-        let mut transition = StateTransition::from_message_type(
-            Dhcp6MessageType::InformationRequest,
+        let mut transition = Dhcpv6StateMachine::from_message_type(
+            Dhcpv6MessageType::InformationRequest,
             0xABC,
             &options,
         )
         .unwrap();
 
-        assert_eq!(transition.current_state(), Dhcp6State::InformationRequest);
+        assert_eq!(transition.current_state(), Dhcpv6State::InformationRequest);
         assert!(!transition.requires_address_allocation()); // Stateless
 
         // INFORMATION-REQUEST → REPLY
-        assert!(transition.transition_to(Dhcp6State::Reply).is_ok());
+        assert!(transition.transition_to(Dhcpv6State::Reply).is_ok());
         assert_eq!(
             transition.response_message_type(),
-            Dhcp6MessageType::Reply
+            Dhcpv6MessageType::Reply
         );
     }
 }
