@@ -646,6 +646,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.10",
  "tempfile",
+ "thiserror",
  "tokio",
  "tokio-util",
  "toml",

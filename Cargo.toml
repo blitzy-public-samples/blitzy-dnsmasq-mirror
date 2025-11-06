@@ -129,9 +129,9 @@ socket2 = { version = "0.5", features = ["all"] }
 
 # nix: Unix system call wrappers with type safety
 # - Replaces: Raw libc calls for netlink, signals, privileges
-# - Features: net (networking), socket (sockets), signal (signals), process (fork/exec)
+# - Features: net (networking), socket (sockets), signal (signals), process (fork/exec), inotify (file watching)
 # - Platforms: Linux, BSD, macOS, Solaris
-nix = { version = "0.29", features = ["net", "socket", "signal", "process", "fs", "feature", "user"] }
+nix = { version = "0.29", features = ["net", "socket", "signal", "process", "fs", "feature", "user", "inotify"] }
 
 # libc: Raw FFI bindings to platform C libraries
 # - Provides: Direct access to C library functions for platform-specific operations
@@ -229,6 +229,15 @@ tracing = "0.1"
 # tracing-subscriber: Log formatting and output configuration
 # - Features: env-filter (RUST_LOG filtering), json (JSON output)
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# -----------------------------------------------------------------------------
+# Error Handling
+# -----------------------------------------------------------------------------
+# thiserror: Ergonomic error handling with derive macros
+# - Provides: #[derive(Error)] for custom error types with Display impl
+# - Replaces: Manual error formatting and C die() fatal errors
+# - Usage: Used across all modules for structured error propagation
+thiserror = "1.0"
 
 # -----------------------------------------------------------------------------
 # System Integrations (Section 0.11.7) - Optional Features

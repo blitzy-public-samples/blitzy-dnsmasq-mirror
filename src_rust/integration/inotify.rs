@@ -70,10 +70,11 @@
 
 use nix::fcntl::OFlag;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify, InotifyEvent, WatchDescriptor};
-use nix::unistd::readlink;
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::option::Option;
+use std::os::fd::AsFd;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::sync::Arc;
@@ -583,7 +584,7 @@ impl InotifyWatcher {
     ) -> InotifyResult<()> {
         // Get raw file descriptor from inotify handle
         // SAFETY: We maintain exclusive ownership of the inotify fd
-        let fd = watcher.inotify.as_raw_fd();
+        let fd = watcher.inotify.as_fd().as_raw_fd();
         let async_fd = AsyncFd::new(fd)
             .map_err(|e| InotifyError::Io(io::Error::new(ErrorKind::Other, e)))?;
 
@@ -649,7 +650,7 @@ impl InotifyWatcher {
 
         loop {
             // Try to read symlink
-            match readlink(&current_path) {
+            match fs::read_link(&current_path) {
                 Ok(target) => {
                     links_followed += 1;
                     if links_followed > MAXSYMLINKS {
@@ -679,19 +680,17 @@ impl InotifyWatcher {
 
                     current_path = resolved_target;
                 }
-                Err(nix::Error::EINVAL) => {
-                    // Not a symlink, return current path
+                Err(e) if e.kind() == ErrorKind::InvalidInput => {
+                    // Not a symlink (EINVAL), return current path
                     return Ok(current_path);
                 }
-                Err(nix::Error::ENOENT) => {
-                    // File doesn't exist yet, return current path (watch will be on directory)
+                Err(e) if e.kind() == ErrorKind::NotFound => {
+                    // File doesn't exist yet (ENOENT), return current path (watch will be on directory)
                     return Ok(current_path);
                 }
                 Err(e) => {
                     // Unexpected error
-                    return Err(InotifyError::Io(io::Error::from_raw_os_error(
-                        e as i32,
-                    )));
+                    return Err(InotifyError::Io(e));
                 }
             }
         }
@@ -702,7 +701,7 @@ impl InotifyWatcher {
     /// Exposed for advanced use cases that need to integrate inotify fd with
     /// custom event loops or polling mechanisms.
     pub fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
-        self.inotify.as_raw_fd()
+        self.inotify.as_fd().as_raw_fd()
     }
 }
 
