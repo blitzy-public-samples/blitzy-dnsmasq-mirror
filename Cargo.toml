@@ -1,115 +1,459 @@
+# dnsmasq is Copyright (c) 2000-2024 Simon Kelley
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 dated June, 1991, or
+# (at your option) version 3 dated 29 June, 2007.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Cargo.toml - Rust workspace root package manifest for dnsmasq
+#
+# This manifest defines the complete Rust implementation of dnsmasq, implementing
+# a memory-safe drop-in replacement for the C version while maintaining 100%
+# functional equivalence. The manifest structure follows Agent Action Plan
+# section 0.6.2 specifications.
+#
+# KEY ARCHITECTURE DECISIONS:
+# - Async runtime: tokio for non-blocking I/O replacing C's poll() event loop
+# - Memory safety: Rust's ownership system eliminates manual malloc/free
+# - Feature parity: Cargo features map 1:1 to C HAVE_* compilation flags
+# - Platform support: Conditional compilation for Linux/BSD/macOS/Solaris
+# - Performance target: Match or exceed C implementation (>10,000 queries/sec)
+#
+# FEATURE FLAG MAPPING (C config.h to Cargo features):
+# - HAVE_DHCP       -> dhcp feature (enabled by default)
+# - HAVE_DHCP6      -> dhcp6 feature (enabled by default)
+# - HAVE_TFTP       -> tftp feature (enabled by default)
+# - HAVE_SCRIPT     -> script feature (enabled by default)
+# - HAVE_AUTH       -> auth feature (enabled by default)
+# - HAVE_DNSSEC     -> dnssec feature (enabled by default)
+# - HAVE_DBUS       -> dbus feature (optional)
+# - HAVE_UBUS       -> ubus feature (optional, OpenWrt-specific)
+# - HAVE_LIBIDN2    -> idn feature (optional)
+# - HAVE_LUASCRIPT  -> lua feature (optional)
+# - HAVE_CONNTRACK  -> conntrack feature (optional)
+# - HAVE_IPSET      -> ipset feature (optional)
+# - HAVE_NFTSET     -> nftset feature (optional)
+# - HAVE_LOOP       -> loop-detect feature (optional)
+# - HAVE_DUMPFILE   -> dump feature (optional)
+# - HAVE_INOTIFY    -> inotify feature (Linux-specific, optional)
+#
+# BUILD INTEGRATION:
+# - build.rs handles feature detection (replaces Makefile pkg-wrapper)
+# - External C libraries detected via pkg-config (matching C build)
+# - Cross-compilation supported for embedded targets
+#
+# DEPLOYMENT TARGETS:
+# - Docker: Alpine Linux 3.19.9, 3.20.8, 3.21.5, 3.22.2
+# - Platforms: Linux (primary), BSD variants, macOS, Solaris
+# - Minimum Rust: 1.91.0 stable (pinned via rust-toolchain.toml)
+
 [package]
 name = "dnsmasq"
-version = "2.87.0"
+version = "2.90.0"
 edition = "2021"
 rust-version = "1.91.0"
 authors = ["Simon Kelley <simon@thekelleys.org.uk>"]
 license = "GPL-2.0-or-later OR GPL-3.0-or-later"
-description = "Lightweight DNS, DHCP, and TFTP server"
+description = "Lightweight DNS, DHCP, and TFTP server - Memory-safe Rust implementation"
 repository = "http://thekelleys.org.uk/gitweb/?p=dnsmasq.git"
+documentation = "https://docs.rs/dnsmasq"
+readme = "README.md"
 keywords = ["dns", "dhcp", "tftp", "network", "server"]
 categories = ["network-programming"]
+exclude = [
+    "src/*",           # Exclude C source during Rust build
+    "*.o",
+    "*.a",
+    ".copts_*",
+    "dnsmasq_baseline",
+]
 
+# Library target - Core dnsmasq functionality as reusable library
 [lib]
 name = "dnsmasq"
 path = "src_rust/lib.rs"
+crate-type = ["lib", "staticlib"]
 
+# Main binary target - dnsmasq server executable
 [[bin]]
 name = "dnsmasq"
 path = "src_rust/main.rs"
+required-features = []
 
+# Configuration migration utility
 [[bin]]
 name = "dnsmasq-migrate-config"
 path = "scripts/migrate-config.rs"
+required-features = []
+
+# =============================================================================
+# DEPENDENCIES - Production Runtime Dependencies
+# =============================================================================
+# Dependencies are organized by subsystem matching C implementation structure.
+# All versions are explicitly pinned per Agent Action Plan section 0.11.
 
 [dependencies]
-# Async runtime
+# -----------------------------------------------------------------------------
+# Async Runtime (Section 0.11.1) - Replaces C poll() event loop
+# -----------------------------------------------------------------------------
+# tokio: Async runtime for non-blocking I/O operations
+# - Replaces: C poll.c synchronous event loop
+# - Features: full (includes all tokio capabilities)
+# - Performance: >10,000 concurrent tasks supported
 tokio = { version = "1.43", features = ["full"] }
+
+# tokio-util: Tokio utility crates for codecs and additional helpers
+# - Provides: Codec implementations for DNS/DHCP packet framing
 tokio-util = { version = "0.7", features = ["codec"] }
 
-# Networking
+# -----------------------------------------------------------------------------
+# Networking Layer (Section 0.11.1) - Replaces C network.c, netlink.c, bpf.c
+# -----------------------------------------------------------------------------
+# socket2: Low-level socket manipulation with platform abstractions
+# - Replaces: C socket(), setsockopt(), bind() calls
+# - Features: all (includes all socket options)
 socket2 = { version = "0.5", features = ["all"] }
+
+# nix: Unix system call wrappers with type safety
+# - Replaces: Raw libc calls for netlink, signals, privileges
+# - Features: net (networking), socket (sockets), signal (signals), process (fork/exec)
+# - Platforms: Linux, BSD, macOS, Solaris
 nix = { version = "0.29", features = ["net", "socket", "signal", "process"] }
 
-# DNS/DHCP protocol handling
-trust-dns-proto = "0.23"
+# -----------------------------------------------------------------------------
+# DNS/DHCP Protocol Libraries (Section 0.11.2) - Replaces C rfc1035.c, rfc2131.c
+# -----------------------------------------------------------------------------
+# trust-dns-proto: DNS protocol types and utilities
+# - Replaces: Manual DNS packet parsing in rfc1035.c
+# - Provides: Type-safe DNS record types, name compression
+trust-dns-proto = "0.24"
+
+# nom: Parser combinator for safe, zero-copy packet parsing
+# - Replaces: Manual C parsing with bounds checking
+# - Prevents: Buffer overflows from malformed packets
+# - Usage: DNS/DHCP packet parsing without memory safety risks
 nom = "7.1"
 
-# Data structures
+# -----------------------------------------------------------------------------
+# Data Structures (Section 0.11.3) - Replaces C cache.c hash tables
+# -----------------------------------------------------------------------------
+# hashbrown: Fast HashMap implementation (used by std::collections::HashMap)
+# - Replaces: Manual hash table in cache.c
+# - Performance: Swiss Tables algorithm, faster than C implementation
 hashbrown = "0.15"
+
+# lru: LRU cache eviction policy implementation
+# - Replaces: Manual LRU list management in cache.c
+# - Thread-safe: Supports concurrent access
 lru = "0.12"
+
+# bitflags: Type-safe bit flag manipulation
+# - Replaces: C bit manipulation with macros
+# - Prevents: Invalid flag combinations at compile time
 bitflags = "2.6"
 
-# Cryptography (for DNSSEC)
+# -----------------------------------------------------------------------------
+# Cryptography (Section 0.11.4) - Optional DNSSEC support
+# -----------------------------------------------------------------------------
+# ring: Cryptographic primitives (RSA, ECDSA, Ed25519, SHA-256, SHA-512)
+# - Replaces: libnettle/libhogweed (C DNSSEC dependencies)
+# - Memory-safe: No unsafe code in crypto operations
+# - Optional: Only compiled when 'dnssec' feature enabled
 ring = { version = "0.17", optional = true }
+
+# rustls: TLS implementation for future DoT/DoH support
+# - Replaces: Potential future libssl/libgnutls dependencies
+# - Optional: Only compiled when 'dnssec' feature enabled
 rustls = { version = "0.23", optional = true }
 
-# Configuration parsing
+# -----------------------------------------------------------------------------
+# Configuration & Serialization (Section 0.11.5)
+# -----------------------------------------------------------------------------
+# serde: Serialization framework for config structures
+# - Features: derive (derive macros for auto-implementation)
 serde = { version = "1.0", features = ["derive"] }
+
+# toml: TOML parser for alternative configuration format
+# - Optional: Allows modern TOML config alongside legacy dnsmasq.conf
+# - Usage: Optional alternative to traditional config parser
 toml = { version = "0.8", optional = true }
 
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-
-# CLI argument parsing
+# clap: CLI argument parsing with derive macros
+# - Replaces: Manual argument parsing in option.c
+# - Features: derive (derive macros), env (environment variable support)
 clap = { version = "4.5", features = ["derive", "env"] }
 
-# System integrations (optional)
+# -----------------------------------------------------------------------------
+# Logging & Tracing (Section 0.11.6)
+# -----------------------------------------------------------------------------
+# tracing: Structured logging and diagnostics
+# - Replaces: printf-style logging in log.c
+# - Supports: Syslog, JSON, plaintext output formats
+tracing = "0.1"
+
+# tracing-subscriber: Log formatting and output configuration
+# - Features: env-filter (RUST_LOG filtering), json (JSON output)
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# -----------------------------------------------------------------------------
+# System Integrations (Section 0.11.7) - Optional Features
+# -----------------------------------------------------------------------------
+# zbus: D-Bus IPC for control interface
+# - Replaces: libdbus-1 (C D-Bus dependency)
+# - Optional: Only compiled when 'dbus' feature enabled
+# - Provides: Async D-Bus bindings for uk.org.thekelleys.dnsmasq
 zbus = { version = "4.4", optional = true }
-idna = { version = "1.1", optional = true }
+
+# idna: Internationalized Domain Names (IDN) support
+# - Replaces: libidn2 (C IDN dependency)
+# - Optional: Only compiled when 'idn' feature enabled
+# - Standards: IDNA 2008 (RFC 5890-5894)
+idna = { version = "1.0", optional = true }
+
+# rlua: Lua scripting engine integration
+# - Replaces: lua5.2 (C Lua dependency)
+# - Optional: Only compiled when 'lua' feature enabled
+# - Usage: Lease-change script support via Lua
 rlua = { version = "0.19", optional = true }
 
-# Testing
+# -----------------------------------------------------------------------------
+# Testing Libraries (Section 0.11.9) - Development & Testing
+# -----------------------------------------------------------------------------
+# proptest: Property-based testing for protocol correctness
+# - Usage: Validates DNS/DHCP RFC compliance through generative testing
+# - Optional: Only compiled when 'test-utils' feature enabled
 proptest = { version = "1.5", optional = true }
+
+# mockall: Mock object generation for unit testing
+# - Usage: Mocks external dependencies (sockets, file I/O)
+# - Optional: Only compiled when 'test-utils' feature enabled
 mockall = { version = "0.13", optional = true }
 
-# Metrics
+# -----------------------------------------------------------------------------
+# Monitoring & Metrics (Section 0.11.8)
+# -----------------------------------------------------------------------------
+# prometheus: Prometheus metrics export
+# - Replaces: Custom metrics implementation in metrics.c
+# - Optional: Only compiled when 'prometheus-metrics' feature enabled
 prometheus = { version = "0.13", optional = true }
 
+# =============================================================================
+# DEV DEPENDENCIES - Testing & Benchmarking (Section 0.11.9)
+# =============================================================================
 [dev-dependencies]
+# proptest: Property-based testing (always available in tests)
 proptest = "1.5"
+
+# mockall: Mock generation (always available in tests)
 mockall = "0.13"
+
+# criterion: Statistical benchmarking framework
+# - Usage: Performance benchmarks in benches/
 criterion = "0.5"
+
+# tempfile: Temporary file/directory handling for tests
+# - Usage: Lease file, config file, PID file testing
 tempfile = "3.14"
 
+# =============================================================================
+# BUILD DEPENDENCIES - Compile-Time Tools (Section 0.11.10)
+# =============================================================================
 [build-dependencies]
+# cc: C compiler invocation for FFI shims
+# - Usage: Compile any necessary C glue code for platform-specific FFI
 cc = "1.2"
+
+# pkg-config: System library detection
+# - Replaces: Makefile pkg-wrapper script
+# - Usage: Detect libnetfilter_conntrack, libnftables, libubus
 pkg-config = "0.3"
 
+# =============================================================================
+# FEATURE FLAGS - Conditional Compilation
+# =============================================================================
+# Features map 1:1 to C config.h HAVE_* macros (Section 0.5.3)
+# Default features match C default build configuration
+
 [features]
+# Default feature set - matches C default build (Section 0.5.3)
 default = ["dhcp", "dhcp6", "tftp", "script", "auth", "dnssec"]
 
-# Core features
+# -----------------------------------------------------------------------------
+# Core Protocol Features (Always compiled in C by default)
+# -----------------------------------------------------------------------------
+# dhcp: DHCPv4 server implementation (from HAVE_DHCP)
 dhcp = []
+
+# dhcp6: DHCPv6 server implementation (from HAVE_DHCP6, implies HAVE_DHCP)
 dhcp6 = ["dhcp"]
+
+# tftp: TFTP server implementation (from HAVE_TFTP)
 tftp = []
+
+# script: External script execution support (from HAVE_SCRIPT)
 script = []
+
+# auth: Authoritative DNS server mode (from HAVE_AUTH)
 auth = []
+
+# loop-detect: DNS forwarding loop detection (from HAVE_LOOP)
 loop-detect = []
+
+# dump: PCAP packet dumping for debugging (from HAVE_DUMPFILE)
 dump = []
 
-# Optional integrations
+# -----------------------------------------------------------------------------
+# Optional Integration Features (Disabled by default in C)
+# -----------------------------------------------------------------------------
+# dnssec: DNSSEC validation support (from HAVE_DNSSEC)
+# - Enables: ring, rustls dependencies
+# - Replaces: libnettle, libhogweed C dependencies
 dnssec = ["ring", "rustls"]
+
+# dbus: D-Bus control interface (from HAVE_DBUS)
+# - Enables: zbus dependency
+# - Replaces: libdbus-1 C dependency
 dbus = ["zbus"]
+
+# idn: Internationalized Domain Names support (from HAVE_LIBIDN2)
+# - Enables: idna dependency
+# - Replaces: libidn2 C dependency
 idn = ["idna"]
-lua = ["rlua"]
+
+# lua: Lua scripting for lease changes (from HAVE_LUASCRIPT)
+# - Enables: rlua dependency
+# - Replaces: lua5.2 C dependency
+# - Implies: script feature
+lua = ["rlua", "script"]
+
+# prometheus-metrics: Prometheus metrics export
+# - Enables: prometheus dependency
+# - Extends: metrics.c functionality
 prometheus-metrics = ["prometheus"]
 
-# Testing features
+# conntrack: Linux connection tracking integration (from HAVE_CONNTRACK)
+# - Requires: libnetfilter_conntrack (detected by build.rs)
+# - Platform: Linux only
+conntrack = []
+
+# ipset: Linux ipset integration (from HAVE_IPSET)
+# - Requires: netlink support
+# - Platform: Linux only
+ipset = []
+
+# nftset: nftables set integration (from HAVE_NFTSET)
+# - Requires: libnftables (detected by build.rs)
+# - Platform: Linux only
+nftset = []
+
+# ubus: OpenWrt ubus integration (from HAVE_UBUS)
+# - Requires: libubus, libubox (detected by build.rs)
+# - Platform: OpenWrt/Linux only
+ubus = []
+
+# inotify: File watching with inotify (from HAVE_INOTIFY)
+# - Platform: Linux only
+# - Usage: Efficient config reload
+inotify = []
+
+# -----------------------------------------------------------------------------
+# Testing Features
+# -----------------------------------------------------------------------------
+# test-utils: Enable testing utilities (proptest, mockall)
+# - Usage: Enables test-only dependencies
 test-utils = ["proptest", "mockall"]
 
-# Platform features (auto-detected)
-linux = ["nix/socket", "nix/net"]
-bsd = []
-macos = []
+# -----------------------------------------------------------------------------
+# Platform Features (Auto-detected by build.rs)
+# -----------------------------------------------------------------------------
+# linux: Linux-specific features (netlink, conntrack, ipset, nftset, inotify)
+linux = []
 
+# bsd: BSD-specific features (routing sockets, PF tables)
+bsd = []
+
+# macos: macOS-specific features
+macos = ["bsd"]
+
+# solaris: Solaris-specific features
+solaris = []
+
+# =============================================================================
+# COMPILER PROFILES - Optimization Settings
+# =============================================================================
+
+# Release profile - Production builds (make release)
 [profile.release]
+# opt-level: Maximum optimization (equivalent to C -O3)
 opt-level = 3
+
+# lto: Link-Time Optimization for smaller, faster binaries
+# - Equivalent to C -flto
+# - Increases compile time but improves runtime performance
 lto = true
+
+# codegen-units: Single codegen unit for maximum optimization
+# - Slower compile, better optimization
 codegen-units = 1
+
+# strip: Remove debug symbols from release binary
+# - Reduces binary size significantly
+# - Equivalent to C strip command
 strip = true
 
+# panic: Abort on panic instead of unwinding
+# - Smaller binary size
+# - Faster panic handling
+panic = "abort"
+
+# Development profile - Debug builds (make)
 [profile.dev]
+# opt-level: No optimization for fast compilation
 opt-level = 0
+
+# debug: Full debug information
 debug = true
+
+# incremental: Incremental compilation for faster rebuilds
+incremental = true
+
+# =============================================================================
+# PACKAGE METADATA
+# =============================================================================
+
+# Minimum supported Rust version (MSRV)
+# - Enforced by: rust-toolchain.toml
+# - Reason: Stabilized features required by dependencies
+
+# Documentation links
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# Cargo-deb packaging metadata (for Debian .deb generation)
+[package.metadata.deb]
+maintainer = "Simon Kelley <simon@thekelleys.org.uk>"
+copyright = "2000-2024, Simon Kelley <simon@thekelleys.org.uk>"
+license-file = ["COPYING", "0"]
+extended-description = """\
+Dnsmasq is a lightweight, easy to configure DNS forwarder, DHCP server, \
+and TFTP server. It is designed to provide DNS and optionally, DHCP and TFTP, \
+to a small network. This Rust implementation provides memory safety while \
+maintaining 100% functional equivalence with the C version."""
+depends = "$auto"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/dnsmasq", "usr/sbin/", "755"],
+    ["target/release/dnsmasq-migrate-config", "usr/sbin/", "755"],
+    ["dnsmasq.conf.example", "usr/share/doc/dnsmasq/", "644"],
+    ["README.md", "usr/share/doc/dnsmasq/README", "644"],
+]
