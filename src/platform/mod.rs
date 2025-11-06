@@ -157,13 +157,18 @@ pub mod generic;
 /// ```
 ///
 /// Rust uses Result types with detailed error context:
-/// ```rust
+/// ```rust,no_run
+/// # use nix::sys::socket::{socket, AddressFamily, SockType, SockFlag};
+/// # use dnsmasq::platform::PlatformError;
+/// # fn example() -> Result<(), PlatformError> {
 /// // Rust error handling
 /// let fd = socket(AddressFamily::Netlink, SockType::Raw, SockFlag::empty(), None)
 ///     .map_err(|e| PlatformError::IoError {
 ///         operation: "create netlink socket".to_string(),
-///         source: e,
+///         source: std::io::Error::from_raw_os_error(e as i32),
 ///     })?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Error)]
 pub enum PlatformError {
@@ -200,8 +205,37 @@ impl From<std::io::Error> for PlatformError {
 impl From<PlatformError> for DnsmasqError {
     fn from(err: PlatformError) -> Self {
         // Wrap PlatformError in the appropriate DnsmasqError variant
-        // For now, treat as Network error since platform operations are network-related
-        DnsmasqError::Network(crate::types::errors::NetworkError::Other(err.to_string()))
+        // Platform operations are system-level, so we convert to SystemError
+        match err {
+            PlatformError::IoError { operation, source } => {
+                DnsmasqError::System(crate::types::errors::SystemError::FileSystemError {
+                    operation,
+                    path: "platform operation".to_string(),
+                    source,
+                })
+            }
+            PlatformError::PermissionDenied { operation } => {
+                DnsmasqError::System(crate::types::errors::SystemError::FileSystemError {
+                    operation: operation.clone(),
+                    path: "platform operation".to_string(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        operation,
+                    ),
+                })
+            }
+            _ => {
+                // For other platform errors, use a generic system error
+                DnsmasqError::System(crate::types::errors::SystemError::FileSystemError {
+                    operation: "platform operation".to_string(),
+                    path: err.to_string(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        err.to_string(),
+                    ),
+                })
+            }
+        }
     }
 }
 
