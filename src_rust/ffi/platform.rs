@@ -1035,7 +1035,8 @@ pub mod conntrack {
 /// validated for correct UTF-8 before passing to libnftables.
 #[cfg(all(target_os = "linux", feature = "nftset"))]
 pub mod nftables {
-    use super::{IoResult, CString, IoError, ErrorKind, CStr};
+    use super::{IoResult, IoError, ErrorKind};
+    use std::ffi::{CString, CStr};
 
     /// Opaque type from libnftables representing an nftables context
     #[repr(C)]
@@ -1160,7 +1161,9 @@ pub mod nftables {
 /// conversions validated before passing to C.
 #[cfg(all(target_os = "linux", feature = "ubus"))]
 pub mod ubus {
-    use super::{IoResult, CString, IoError, ErrorKind, ptr, CStr};
+    use super::{IoResult, IoError, ErrorKind};
+    use std::ffi::{CString, CStr};
+    use std::ptr;
 
     // Opaque types from libubus/libubox
     /// Opaque type from libubus representing a ubus context
