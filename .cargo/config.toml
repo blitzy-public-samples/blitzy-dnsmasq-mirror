@@ -1,0 +1,23 @@
+[build]
+# Use all available CPU cores for compilation
+# jobs setting removed - cargo auto-detects optimal value
+
+[target.x86_64-unknown-linux-gnu]
+# Link against system libraries
+rustflags = ["-C", "link-arg=-Wl,--as-needed"]
+
+[profile.dev]
+# Faster compile times in development
+incremental = true
+codegen-units = 256
+
+[profile.release]
+# Optimize for size and performance in release
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+
+[net]
+# Use sparse registry for faster dependency resolution
+git-fetch-with-cli = false

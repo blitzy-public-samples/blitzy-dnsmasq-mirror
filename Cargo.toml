@@ -1,0 +1,115 @@
+[package]
+name = "dnsmasq"
+version = "2.87.0"
+edition = "2021"
+rust-version = "1.91.0"
+authors = ["Simon Kelley <simon@thekelleys.org.uk>"]
+license = "GPL-2.0-or-later OR GPL-3.0-or-later"
+description = "Lightweight DNS, DHCP, and TFTP server"
+repository = "http://thekelleys.org.uk/gitweb/?p=dnsmasq.git"
+keywords = ["dns", "dhcp", "tftp", "network", "server"]
+categories = ["network-programming"]
+
+[lib]
+name = "dnsmasq"
+path = "src_rust/lib.rs"
+
+[[bin]]
+name = "dnsmasq"
+path = "src_rust/main.rs"
+
+[[bin]]
+name = "dnsmasq-migrate-config"
+path = "scripts/migrate-config.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# Networking
+socket2 = { version = "0.5", features = ["all"] }
+nix = { version = "0.29", features = ["net", "socket", "signal", "process"] }
+
+# DNS/DHCP protocol handling
+trust-dns-proto = "0.23"
+nom = "7.1"
+
+# Data structures
+hashbrown = "0.15"
+lru = "0.12"
+bitflags = "2.6"
+
+# Cryptography (for DNSSEC)
+ring = { version = "0.17", optional = true }
+rustls = { version = "0.23", optional = true }
+
+# Configuration parsing
+serde = { version = "1.0", features = ["derive"] }
+toml = { version = "0.8", optional = true }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# System integrations (optional)
+zbus = { version = "4.4", optional = true }
+idna = { version = "1.1", optional = true }
+rlua = { version = "0.19", optional = true }
+
+# Testing
+proptest = { version = "1.5", optional = true }
+mockall = { version = "0.13", optional = true }
+
+# Metrics
+prometheus = { version = "0.13", optional = true }
+
+[dev-dependencies]
+proptest = "1.5"
+mockall = "0.13"
+criterion = "0.5"
+tempfile = "3.14"
+
+[build-dependencies]
+cc = "1.2"
+pkg-config = "0.3"
+
+[features]
+default = ["dhcp", "dhcp6", "tftp", "script", "auth", "dnssec"]
+
+# Core features
+dhcp = []
+dhcp6 = ["dhcp"]
+tftp = []
+script = []
+auth = []
+loop-detect = []
+dump = []
+
+# Optional integrations
+dnssec = ["ring", "rustls"]
+dbus = ["zbus"]
+idn = ["idna"]
+lua = ["rlua"]
+prometheus-metrics = ["prometheus"]
+
+# Testing features
+test-utils = ["proptest", "mockall"]
+
+# Platform features (auto-detected)
+linux = ["nix/socket", "nix/net"]
+bsd = []
+macos = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
