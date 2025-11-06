@@ -243,6 +243,143 @@ pub const LOOP_TEST_TYPE: u16 = T_TXT;
 pub const LOOP_TEST_DOMAIN: &str = "test.";
 
 // ============================================================================
+// DNS Opcode Enum
+// ============================================================================
+
+/// DNS operation codes (OPCODE) per RFC 1035 Section 4.1.1
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnsOpcode {
+    /// Standard query (OPCODE 0)
+    Query,
+    /// Inverse query (OPCODE 1) - obsolete
+    IQuery,
+    /// Server status request (OPCODE 2)
+    Status,
+}
+
+impl DnsOpcode {
+    /// Convert opcode value to enum variant
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            QUERY => Some(DnsOpcode::Query),
+            _ => None,
+        }
+    }
+
+    /// Convert enum variant to opcode value
+    pub fn to_code(self) -> u8 {
+        match self {
+            DnsOpcode::Query => QUERY,
+            DnsOpcode::IQuery => 1,
+            DnsOpcode::Status => 2,
+        }
+    }
+}
+
+// ============================================================================
+// DNS Resource Record Type Enum
+// ============================================================================
+
+/// DNS resource record types per RFC 1035 and extensions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DnsRrType {
+    /// IPv4 address (type 1)
+    A,
+    /// Name server (type 2)
+    NS,
+    /// Canonical name (type 5)
+    CNAME,
+    /// Start of authority (type 6)
+    SOA,
+    /// Pointer record (type 12)
+    PTR,
+    /// Mail exchange (type 15)
+    MX,
+    /// Text record (type 16)
+    TXT,
+    /// IPv6 address (type 28, RFC 3596)
+    AAAA,
+    /// Service locator (type 33, RFC 2763)
+    SRV,
+    /// Naming authority pointer (type 35, RFC 2915)
+    NAPTR,
+    /// Delegation signer (type 43, DNSSEC)
+    DS,
+    /// Resource record signature (type 46, DNSSEC)
+    RRSIG,
+    /// Next secure (type 47, DNSSEC)
+    NSEC,
+    /// DNS public key (type 48, DNSSEC)
+    DNSKEY,
+    /// Next secure version 3 (type 50, DNSSEC)
+    NSEC3,
+    /// Transaction signature (type 250, RFC 2845)
+    TSIG,
+    /// Zone transfer (type 252, query only)
+    AXFR,
+    /// All records (type 255, query only)
+    ANY,
+    /// Certification authority authorization (type 257, RFC 6844)
+    CAA,
+    /// Other/unknown type with numeric value
+    Other(u16),
+}
+
+impl DnsRrType {
+    /// Convert RR type value to enum variant
+    pub fn from_code(code: u16) -> Self {
+        match code {
+            T_A => DnsRrType::A,
+            T_NS => DnsRrType::NS,
+            T_CNAME => DnsRrType::CNAME,
+            T_SOA => DnsRrType::SOA,
+            T_PTR => DnsRrType::PTR,
+            T_MX => DnsRrType::MX,
+            T_TXT => DnsRrType::TXT,
+            T_AAAA => DnsRrType::AAAA,
+            T_SRV => DnsRrType::SRV,
+            T_NAPTR => DnsRrType::NAPTR,
+            T_DS => DnsRrType::DS,
+            T_RRSIG => DnsRrType::RRSIG,
+            T_NSEC => DnsRrType::NSEC,
+            T_DNSKEY => DnsRrType::DNSKEY,
+            T_NSEC3 => DnsRrType::NSEC3,
+            T_TSIG => DnsRrType::TSIG,
+            T_AXFR => DnsRrType::AXFR,
+            T_ANY => DnsRrType::ANY,
+            T_CAA => DnsRrType::CAA,
+            other => DnsRrType::Other(other),
+        }
+    }
+
+    /// Convert enum variant to RR type value
+    pub fn to_code(self) -> u16 {
+        match self {
+            DnsRrType::A => T_A,
+            DnsRrType::NS => T_NS,
+            DnsRrType::CNAME => T_CNAME,
+            DnsRrType::SOA => T_SOA,
+            DnsRrType::PTR => T_PTR,
+            DnsRrType::MX => T_MX,
+            DnsRrType::TXT => T_TXT,
+            DnsRrType::AAAA => T_AAAA,
+            DnsRrType::SRV => T_SRV,
+            DnsRrType::NAPTR => T_NAPTR,
+            DnsRrType::DS => T_DS,
+            DnsRrType::RRSIG => T_RRSIG,
+            DnsRrType::NSEC => T_NSEC,
+            DnsRrType::DNSKEY => T_DNSKEY,
+            DnsRrType::NSEC3 => T_NSEC3,
+            DnsRrType::TSIG => T_TSIG,
+            DnsRrType::AXFR => T_AXFR,
+            DnsRrType::ANY => T_ANY,
+            DnsRrType::CAA => T_CAA,
+            DnsRrType::Other(code) => code,
+        }
+    }
+}
+
+// ============================================================================
 // EDNS0 Option Codes
 // ============================================================================
 
@@ -390,6 +527,9 @@ impl ResponseCode {
         }
     }
 }
+
+/// Type alias for DNS response code (preferred name in public API)
+pub type DnsRcode = ResponseCode;
 
 // ============================================================================
 // Extended DNS Error Codes (RFC 8914)

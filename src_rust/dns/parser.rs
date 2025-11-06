@@ -3,8 +3,26 @@
 //! Provides safe DNS packet parsing using the trust-dns-proto library.
 //! Replaces manual C parsing from rfc1035.c with memory-safe Rust implementation.
 
-use trust_dns_proto::op::Message;
+use trust_dns_proto::op::{Message, Query};
 use trust_dns_proto::serialize::binary::BinDecodable;
+
+/// Type alias for DNS message (parsed packet)
+pub type DnsMessage = Message;
+
+/// Type alias for DNS question
+pub type DnsQuestion = Query;
+
+/// DNS packet parser wrapper
+pub struct DnsParser;
+
+impl DnsParser {
+    /// Parse a DNS packet from raw bytes
+    ///
+    /// This is a wrapper around parse_dns_packet for use with the DnsParser type.
+    pub fn parse(data: &[u8]) -> Result<DnsMessage, Box<dyn std::error::Error>> {
+        parse_dns_packet(data)
+    }
+}
 
 /// Parse a DNS packet from raw bytes
 ///

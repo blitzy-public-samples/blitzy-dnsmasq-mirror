@@ -369,13 +369,20 @@ pub mod dnssec;
 // This maintains a clean public API while keeping implementation details
 // encapsulated in submodules.
 
+pub use self::auth::{AuthRecord, AuthServer, AuthZone, ZoneEntry};
+pub use self::blockdata::BlockData;
 pub use self::cache::{Cache, CacheConfig};
-pub use self::cache_types::{CacheEntry, CacheRecordType};
+pub use self::cache_types::{CacheEntry, CacheEntryType};
+pub use self::domain::{validate_domain_name, normalize_domain, is_subdomain, DomainError};
+pub use self::edns0::{ClientSubnet, Edns0Option, Edns0OptionCode};
 pub use self::forwarder::{Forwarder, ForwardConfig, ForwardQuery};
+pub use self::hash::{QuestionHashTable, DnsQuestion as HashDnsQuestion};
 pub use self::parser::{DnsMessage, DnsParser, DnsQuestion};
+pub use self::pattern::{DomainPattern, DomainPatternMatcher};
 pub use self::protocol::{DnsOpcode, DnsRcode, DnsRrType, DnsHeader};
+pub use self::rrfilter::{RrFilter, FilterAction, FilterRule};
 pub use self::serializer::{DnsSerializer, SerializationError};
-pub use self::upstream::{UpstreamServer, UpstreamConfig};
+pub use self::upstream::{UpstreamServer, UpstreamPool};
 
 #[cfg(feature = "dnssec")]
 pub use self::dnssec::{DnssecValidator, DnssecConfig, ValidationResult};
