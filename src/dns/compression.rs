@@ -812,7 +812,7 @@ mod tests {
         let name = extract_name(&packet, &mut offset, 4).unwrap();
 
         assert_eq!(name.labels, vec!["example", "com"]);
-        assert_eq!(name.compressed, false);
+        assert!(!name.compressed);
         assert_eq!(offset, 12 + 13); // After name, before extrabytes
     }
 
@@ -835,7 +835,7 @@ mod tests {
         let name = extract_name(&packet, &mut offset, 0).unwrap();
 
         assert_eq!(name.labels, vec!["www", "example", "com"]);
-        assert_eq!(name.compressed, true);
+        assert!(name.compressed);
         assert_eq!(offset, 31); // After "www" (4 bytes) + pointer (2 bytes) = offset 25 + 6 = 31
     }
 
