@@ -20,6 +20,10 @@ pub mod runtime;
 // Integration module - external system services (D-Bus, ubus, scripts)
 pub mod integration;
 
+// DHCP subsystem - Dynamic Host Configuration Protocol servers
+#[cfg(feature = "dhcp")]
+pub mod dhcp;
+
 // TFTP subsystem - Trivial File Transfer Protocol server
 #[cfg(feature = "tftp")]
 pub mod tftp;

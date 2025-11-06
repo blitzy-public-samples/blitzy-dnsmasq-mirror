@@ -69,8 +69,8 @@
 //!
 //! ## Usage Example
 //!
-//! ```rust,no_run
-//! use dnsmasq_rs::dhcp::{DhcpV4Server, LeaseDatabase};
+//! ```rust,ignore
+//! use dnsmasq::dhcp::{Dhcpv4Server, LeaseDatabase};
 //! use std::net::Ipv4Addr;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,7 +78,7 @@
 //! let lease_db = LeaseDatabase::new(1000); // Max 1000 leases
 //!
 //! // Create DHCPv4 server
-//! let mut dhcp_server = DhcpV4Server::new(
+//! let mut dhcp_server = Dhcpv4Server::new(
 //!     Ipv4Addr::new(192, 168, 1, 1),  // Server IP
 //!     lease_db,
 //! );
@@ -162,18 +162,18 @@ pub use lease::{Lease, LeaseDatabase};
 pub use lease_store::LeaseStore;
 
 // Re-export packet construction utilities
-pub use outpacket::OutPacketBuilder;
+pub use outpacket::OutPacket;
 
 // Re-export common utilities
 pub use common::find_config;
 
 // DHCPv4 server re-exports (conditional on dhcp-v4 feature)
 #[cfg(feature = "dhcp-v4")]
-pub use v4::server::DhcpV4Server;
+pub use v4::server::Dhcpv4Server;
 
 // DHCPv6 server re-exports (conditional on dhcp-v6 feature)
 #[cfg(feature = "dhcp-v6")]
-pub use v6::server::Dhcp6Server;
+pub use v6::server::Dhcpv6Server;
 
 // IPv6 Router Advertisement re-exports (conditional on ipv6 feature)
 #[cfg(feature = "ipv6")]
@@ -193,23 +193,26 @@ mod tests {
         // This is a compile-time verification that all modules exist
         
         // Common module should always be available
-        assert!(std::any::type_name::<fn() -> ()>().contains("dhcp"));
+        use crate::dhcp::common::DhcpConfig;
+        let type_name = std::any::type_name::<DhcpConfig>();
+        assert!(type_name.contains("dhcp"));
+        assert!(type_name.contains("DhcpConfig"));
     }
 
     #[cfg(feature = "dhcp-v4")]
     #[test]
     fn test_dhcpv4_feature_enabled() {
         // Verify DHCPv4 types are available when feature is enabled
-        let type_name = std::any::type_name::<DhcpV4Server>();
-        assert!(type_name.contains("DhcpV4Server"));
+        let type_name = std::any::type_name::<Dhcpv4Server>();
+        assert!(type_name.contains("Dhcpv4Server"));
     }
 
     #[cfg(feature = "dhcp-v6")]
     #[test]
     fn test_dhcpv6_feature_enabled() {
         // Verify DHCPv6 types are available when feature is enabled
-        let type_name = std::any::type_name::<Dhcp6Server>();
-        assert!(type_name.contains("Dhcp6Server"));
+        let type_name = std::any::type_name::<Dhcpv6Server>();
+        assert!(type_name.contains("Dhcpv6Server"));
     }
 
     #[cfg(feature = "ipv6")]
