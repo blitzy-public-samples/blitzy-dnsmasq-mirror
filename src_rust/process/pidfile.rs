@@ -91,6 +91,7 @@ use tracing::{debug, error, info, warn};
 /// ```no_run
 /// use std::path::Path;
 /// use nix::unistd::{Uid, Gid};
+/// use dnsmasq::process::write_pidfile;
 ///
 /// # async fn example() -> std::io::Result<()> {
 /// // Write PID file as root, transfer ownership to dnsmasq user
@@ -265,6 +266,7 @@ pub async fn write_pidfile(
 ///
 /// ```no_run
 /// use std::path::Path;
+/// use dnsmasq::process::remove_pidfile;
 ///
 /// # async fn example() {
 /// // Remove PID file during shutdown

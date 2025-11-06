@@ -71,8 +71,10 @@
 //!     HelperHandle, PrivilegeError
 //! };
 //! use std::path::Path;
+//! use nix::unistd::{Uid, Gid};
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Step 1: After binding privileged sockets, fork helper if scripts configured
 //! let helper = if let Some(script_path) = get_script_config() {
 //!     let (helper_handle, control_socket) = create_helper(
@@ -87,7 +89,7 @@
 //!
 //! // Step 2: Write PID file while still running as root
 //! let pidfile_path = Path::new("/var/run/dnsmasq.pid");
-//! write_pidfile(pidfile_path, 1000, 1000)?;  // chown to target user
+//! write_pidfile(pidfile_path, Some(Uid::from_raw(1000)), Some(Gid::from_raw(1000))).await?;
 //!
 //! // Step 3: Drop privileges to unprivileged user
 //! drop_privileges(
@@ -103,7 +105,7 @@
 //! if let Some(mut helper) = helper {
 //!     helper.shutdown().await?;
 //! }
-//! remove_pidfile(pidfile_path)?;
+//! remove_pidfile(pidfile_path).await;
 //! # Ok(())
 //! # }
 //! # fn get_script_config() -> Option<std::path::PathBuf> { None }
