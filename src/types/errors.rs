@@ -623,6 +623,17 @@ pub enum SystemError {
         #[source]
         source: io::Error,
     },
+
+    /// Platform-specific operation failed
+    ///
+    /// Covers platform-specific errors from launchd (macOS), systemd (Linux),
+    /// or other OS-specific integration points. Used when platform-specific
+    /// errors need to propagate through the generic error system.
+    #[error("Platform error: {message}")]
+    PlatformError {
+        /// Description of the platform-specific failure
+        message: String,
+    },
 }
 
 /// TFTP server errors
