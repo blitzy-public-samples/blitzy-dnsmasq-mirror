@@ -274,7 +274,7 @@ impl DhcpOption {
             }
 
             OPTION_ROUTER | OPTION_DNSSERVER => {
-                if length % 4 != 0 {
+                if !length.is_multiple_of(4) {
                     return Err(OptionError::InvalidOptionLength {
                         code,
                         actual: length,
@@ -696,6 +696,11 @@ impl DhcpOption {
             | DhcpOption::ClientUuid(d) => d.len().min(255),
             DhcpOption::Unknown { data, .. } => data.len().min(255),
         }
+    }
+
+    /// Check if the option has no data payload
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
