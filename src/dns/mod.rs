@@ -116,7 +116,7 @@
 //!     .with_cache_size(1000);
 //!
 //! // Create and run the DNS server
-//! let server = DnsServer::new(config, cache)?;
+//! let mut server = DnsServer::new(config, cache)?;
 //! server.run().await?;
 //! # Ok(())
 //! # }
@@ -385,7 +385,9 @@ mod tests {
     fn test_error_conversion() {
         // Test that DnsError can be converted to DnsmasqError
         // This validates the From implementation in the errors module
-        let dns_error = DnsError::Protocol("test error".to_string());
+        let dns_error = DnsError::ProtocolError {
+            message: "test error".to_string()
+        };
         let _: DnsmasqError = dns_error.into();
     }
 }

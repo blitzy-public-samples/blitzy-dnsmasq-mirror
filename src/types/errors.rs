@@ -217,6 +217,13 @@ pub enum DnsError {
         /// Timeout duration in milliseconds
         timeout_ms: u64,
     },
+
+    /// DNS record or zone not found
+    #[error("DNS not found: {message}")]
+    NotFound {
+        /// Description of what was not found
+        message: String,
+    },
 }
 
 /// DHCP subsystem errors
