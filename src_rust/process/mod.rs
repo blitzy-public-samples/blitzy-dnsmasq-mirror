@@ -203,6 +203,63 @@ pub use privileges::{drop_privileges, PrivilegeError};
 /// Re-exported from [`pidfile`] module for convenience. See module documentation for details.
 pub use pidfile::{remove_pidfile, write_pidfile};
 
+/// High-level process management coordinator
+///
+/// This type provides a unified interface for process management operations,
+/// coordinating helper process, privilege dropping, and PID file management.
+pub struct ProcessManager {
+    /// Optional helper process handle
+    helper: Option<HelperHandle>,
+    /// Path to PID file (if configured)
+    pidfile_path: Option<std::path::PathBuf>,
+}
+
+impl ProcessManager {
+    /// Create a new ProcessManager
+    pub fn new() -> Self {
+        Self {
+            helper: None,
+            pidfile_path: None,
+        }
+    }
+
+    /// Set the helper process handle
+    pub fn set_helper(&mut self, helper: HelperHandle) {
+        self.helper = Some(helper);
+    }
+
+    /// Set the PID file path
+    pub fn set_pidfile_path(&mut self, path: std::path::PathBuf) {
+        self.pidfile_path = Some(path);
+    }
+
+    /// Get a mutable reference to the helper handle
+    pub fn helper_mut(&mut self) -> Option<&mut HelperHandle> {
+        self.helper.as_mut()
+    }
+
+    /// Shutdown the process manager, cleaning up resources
+    pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Shutdown helper if present
+        if let Some(helper) = self.helper.take() {
+            helper.shutdown().await?;
+        }
+
+        // Remove PID file if present
+        if let Some(path) = &self.pidfile_path {
+            let _ = remove_pidfile(path); // Ignore errors on shutdown
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for ProcessManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

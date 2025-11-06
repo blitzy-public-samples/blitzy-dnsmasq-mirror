@@ -126,7 +126,7 @@ socket2 = { version = "0.5", features = ["all"] }
 # - Replaces: Raw libc calls for netlink, signals, privileges
 # - Features: net (networking), socket (sockets), signal (signals), process (fork/exec)
 # - Platforms: Linux, BSD, macOS, Solaris
-nix = { version = "0.29", features = ["net", "socket", "signal", "process", "fs", "feature"] }
+nix = { version = "0.29", features = ["net", "socket", "signal", "process", "fs", "feature", "user"] }
 
 # -----------------------------------------------------------------------------
 # DNS/DHCP Protocol Libraries (Section 0.11.2) - Replaces C rfc1035.c, rfc2131.c
