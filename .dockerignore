@@ -1,0 +1,222 @@
+# Docker build exclusion patterns for dnsmasq Rust refactoring project
+# Optimizes build context size and reduces image size per Section 0.7.9
+
+# ============================================================================
+# Rust Build Artifacts
+# ============================================================================
+target/
+**/*.rs.bk
+**/*.pdb
+
+# Cargo lock file for workspace (included for binaries, excluded for libraries)
+# Keep Cargo.lock for reproducible binary builds
+# Cargo.lock
+
+# ============================================================================
+# Git Metadata and Version Control
+# ============================================================================
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# ============================================================================
+# Development and Editor Files
+# ============================================================================
+# Vim
+*.swp
+*.swo
+*.swn
+*~
+
+# Emacs
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================================================================
+# IDE and Editor Configurations
+# ============================================================================
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# Documentation (not needed in runtime image)
+# ============================================================================
+docs/
+README.md
+CHANGELOG.md
+LICENSE
+COPYING*
+BUILDING.md
+CONTRIBUTING.md
+*.md
+!src/**/*.md
+
+# ============================================================================
+# Testing and Benchmarking
+# ============================================================================
+tests/
+benches/
+examples/
+fixtures/
+test-results/
+
+# ============================================================================
+# CI/CD Configuration
+# ============================================================================
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+azure-pipelines.yml
+.drone.yml
+.buildkite/
+
+# ============================================================================
+# C Build Artifacts (from original dnsmasq C implementation)
+# ============================================================================
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.mo
+dnsmasq
+dnsmasq-*
+!dnsmasq-rs
+src/*.o
+bld/*.o
+
+# C build system files
+Makefile
+config.h
+autom4te.cache/
+configure
+configure.ac
+*.m4
+
+# ============================================================================
+# Coverage and Profiling Data
+# ============================================================================
+*.profdata
+*.profraw
+*.gcda
+*.gcno
+*.lcov
+cobertura.xml
+coverage/
+tarpaulin-report.html
+lcov.info
+
+# ============================================================================
+# Dependency Directories (will be rebuilt in Docker)
+# ============================================================================
+node_modules/
+vendor/
+
+# ============================================================================
+# Logs and Temporary Files
+# ============================================================================
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+*.pid
+
+# ============================================================================
+# Distribution and Packaging
+# ============================================================================
+dist/
+build/
+*.egg-info/
+*.egg
+debian/
+rpm/
+contrib/
+
+# ============================================================================
+# Rust-Specific Development Tools
+# ============================================================================
+rust-toolchain.toml
+rustfmt.toml
+clippy.toml
+.cargo/config.toml
+
+# ============================================================================
+# Docker Development Files
+# ============================================================================
+Dockerfile.dev
+docker-compose.dev.yml
+docker-compose.override.yml
+.dockerignore
+
+# ============================================================================
+# Security and Secrets (extra safety)
+# ============================================================================
+*.pem
+*.key
+*.crt
+*.p12
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+
+# ============================================================================
+# Backup Files
+# ============================================================================
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+
+# ============================================================================
+# Archive Files (not needed in build context)
+# ============================================================================
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+*.7z
+*.bz2
+*.xz
+
+# ============================================================================
+# Man Pages and Locale Files (handle separately in multi-stage build)
+# ============================================================================
+man/
+man-pages/
+po/
+
+# ============================================================================
+# Tools and Utilities (not needed in runtime image)
+# ============================================================================
+tools/dnsmasq-migrate-config/
+tools/systemd/
