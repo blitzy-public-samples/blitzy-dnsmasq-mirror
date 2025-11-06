@@ -515,11 +515,11 @@ impl MetricsCollector {
             let value = self.get(metric);
 
             // Write HELP comment
-            write!(&mut output, "# HELP {} {}\n", name, help)
+            writeln!(&mut output, "# HELP {} {}", name, help)
                 .expect("String write should never fail");
 
             // Write TYPE declaration (all metrics are counters)
-            write!(&mut output, "# TYPE {} counter\n", name)
+            writeln!(&mut output, "# TYPE {} counter", name)
                 .expect("String write should never fail");
 
             // Write metric value
@@ -576,10 +576,9 @@ impl AtomicMetricsCollector {
     /// let collector = AtomicMetricsCollector::new();
     /// ```
     pub fn new() -> Self {
-        // Initialize array of AtomicU64 with zeroes
-        const ZERO: AtomicU64 = AtomicU64::new(0);
+        // Initialize array of AtomicU64 with zeroes using from_fn
         Self {
-            counters: [ZERO; MetricLabel::COUNT],
+            counters: std::array::from_fn(|_| AtomicU64::new(0)),
         }
     }
 
@@ -669,11 +668,11 @@ impl AtomicMetricsCollector {
             let value = self.get(metric);
 
             // Write HELP comment
-            write!(&mut output, "# HELP {} {}\n", name, help)
+            writeln!(&mut output, "# HELP {} {}", name, help)
                 .expect("String write should never fail");
 
             // Write TYPE declaration (all metrics are counters)
-            write!(&mut output, "# TYPE {} counter\n", name)
+            writeln!(&mut output, "# TYPE {} counter", name)
                 .expect("String write should never fail");
 
             // Write metric value
