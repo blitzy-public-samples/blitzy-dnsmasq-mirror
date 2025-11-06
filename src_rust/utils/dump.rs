@@ -51,8 +51,7 @@
 //! - Original C implementation: src/dump.c
 
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
-use std::mem::size_of;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -91,9 +90,6 @@ const IP_DEFAULT_TTL: u8 = 64;
 const IP_VERSION_6: u8 = 6;
 const IPV6_DEFAULT_HOPS: u8 = 64;
 
-/// Size of IPv6 address in bytes
-const IN6ADDRSZ: usize = 16;
-
 /// Libpcap Global File Header
 ///
 /// Written once at the beginning of a PCAP file to identify file format,
@@ -111,10 +107,15 @@ const IN6ADDRSZ: usize = 16;
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PcapGlobalHeader {
+    /// Magic number 0xa1b2c3d4 for native byte order
     pub magic_number: u32,
+    /// Major version (always 2)
     pub version_major: u16,
+    /// Minor version (always 4)
     pub version_minor: u16,
+    /// Maximum packet capture length
     pub snaplen: u32,
+    /// Data link type (101 = DLT_RAW)
     pub network: u32,
 }
 
@@ -191,9 +192,13 @@ impl PcapGlobalHeader {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PcapRecordHeader {
+    /// Timestamp seconds since Unix epoch
     pub ts_sec: u32,
+    /// Timestamp microseconds
     pub ts_usec: u32,
+    /// Number of octets saved in file
     pub incl_len: u32,
+    /// Original packet length (same as incl_len, no truncation)
     pub orig_len: u32,
 }
 
@@ -261,7 +266,7 @@ pub struct PacketDumper {
     file: File,
     file_path: PathBuf,
     packet_count: AtomicU32,
-    snaplen: u32,
+    _snaplen: u32,
 }
 
 impl PacketDumper {
@@ -290,6 +295,7 @@ impl PacketDumper {
     /// # Examples
     ///
     /// ```no_run
+    /// # use dnsmasq::utils::dump::PacketDumper;
     /// # use std::path::Path;
     /// # async fn example() -> std::io::Result<()> {
     /// let dumper = PacketDumper::new(Path::new("/tmp/packets.pcap"), 4296).await?;
@@ -297,9 +303,13 @@ impl PacketDumper {
     /// # }
     /// ```
     pub async fn new(file_path: &Path, snaplen: u32) -> IoResult<Self> {
-        let file_exists = metadata(file_path).await.is_ok();
+        // Check if file exists AND has valid content (at least header size)
+        let file_has_content = metadata(file_path)
+            .await
+            .map(|m| m.len() >= 24) // PCAP header is 24 bytes
+            .unwrap_or(false);
 
-        let (file, initial_count) = if file_exists {
+        let (file, initial_count) = if file_has_content {
             // Open existing file, validate header, count packets
             debug!("Opening existing PCAP file: {:?}", file_path);
             
@@ -366,7 +376,7 @@ impl PacketDumper {
             file,
             file_path: file_path.to_path_buf(),
             packet_count: AtomicU32::new(initial_count),
-            snaplen,
+            _snaplen: snaplen,
         })
     }
 
@@ -452,6 +462,7 @@ impl PacketDumper {
     /// # Examples
     ///
     /// ```no_run
+    /// # use dnsmasq::utils::dump::PacketDumper;
     /// # use std::net::{SocketAddr, Ipv4Addr};
     /// # async fn example(dumper: &mut PacketDumper) -> std::io::Result<()> {
     /// let dns_packet = vec![0u8; 512];
@@ -480,8 +491,6 @@ impl PacketDumper {
             return Ok(());
         };
 
-        let packet_len = packet.len();
-        
         // Construct packet with IP and transport headers
         let full_packet = match family {
             SocketAddr::V4(_) => {
@@ -961,6 +970,7 @@ impl PacketDumper {
 /// # Examples
 ///
 /// ```no_run
+/// # use dnsmasq::utils::dump::init_packet_dump;
 /// # use std::path::Path;
 /// # async fn example() -> std::io::Result<()> {
 /// let dumper = init_packet_dump(Path::new("/var/log/dnsmasq.pcap")).await?;
