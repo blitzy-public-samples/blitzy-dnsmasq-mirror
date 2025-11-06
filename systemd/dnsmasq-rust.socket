@@ -1,0 +1,99 @@
+# systemd socket activation unit for dnsmasq-rust
+#
+# This socket unit enables on-demand activation of the dnsmasq-rust service.
+# systemd will listen on the configured ports and automatically start
+# dnsmasq-rust.service when network traffic arrives.
+#
+# Benefits of socket activation:
+# - Reduced resource usage when service is idle
+# - Faster system boot (service starts on-demand)
+# - Automatic service restart on failure (systemd keeps sockets open)
+# - Simplified privilege handling (systemd binds privileged ports)
+#
+# To use socket activation:
+#   systemctl enable dnsmasq-rust.socket
+#   systemctl start dnsmasq-rust.socket
+#
+# The service will start automatically when DNS or DHCP requests arrive.
+
+[Unit]
+Description=dnsmasq-rust DNS/DHCP Socket Activation
+Documentation=man:dnsmasq(8)
+Documentation=https://thekelleys.org.uk/dnsmasq/doc.html
+# Ensure network is configured before binding sockets
+After=network.target
+# Socket activation must complete before network services depend on DNS
+Before=network-online.target nss-lookup.target
+# Request DNS resolution target (for proper ordering)
+Wants=nss-lookup.target
+
+[Socket]
+# DNS Service - Port 53 UDP (primary DNS transport)
+# ListenDatagram for UDP sockets
+# Supports both IPv4 and IPv6 (systemd handles dual-stack automatically)
+ListenDatagram=0.0.0.0:53
+ListenDatagram=[::]:53
+
+# DNS Service - Port 53 TCP (for large responses, zone transfers)
+# ListenStream for TCP sockets
+# Required for responses >512 bytes and DNSSEC
+ListenStream=0.0.0.0:53
+ListenStream=[::]:53
+
+# DHCPv4 Server - Port 67 UDP
+# DHCP server listens on port 67, responds to clients on port 68
+# Binding to 0.0.0.0 allows responses to broadcast requests
+ListenDatagram=0.0.0.0:67
+
+# DHCPv6 Server - Port 547 UDP
+# DHCPv6 uses link-local multicast (ff02::1:2) and port 547
+# Binding to [::] allows all IPv6 addresses
+ListenDatagram=[::]:547
+
+# Socket Configuration Options
+#
+# BindIPv6Only=both: Allow IPv4-mapped IPv6 addresses (default, enables dual-stack)
+# This is the standard systemd behavior for IPv6 sockets
+BindIPv6Only=both
+
+# ReusePort=yes: Allow multiple processes to bind to the same port
+# Useful for load balancing across multiple dnsmasq instances (optional)
+# Disabled by default to match single-instance C dnsmasq behavior
+# ReusePort=no
+
+# FreeBind=yes: Allow binding to non-existent IP addresses
+# Useful when interfaces come up after socket activation
+# Matches dnsmasq's behavior of binding to all interfaces
+FreeBind=yes
+
+# Backlog=128: TCP listen backlog (number of pending connections)
+# Default is typically sufficient for DNS TCP
+Backlog=128
+
+# SocketMode=0666: Socket file permissions (not applicable for network sockets)
+# Only used for AF_UNIX sockets, included for completeness
+# Network sockets use standard port-based permissions
+
+# Service Integration
+#
+# TriggerLimitIntervalSec and TriggerLimitBurst: Rate limiting for service starts
+# Prevent excessive service restarts if crashing repeatedly
+# Default values (200 starts in 2 seconds) are reasonable
+# Uncomment to customize:
+# TriggerLimitIntervalSec=2s
+# TriggerLimitBurst=200
+
+# Accept=no: Service handles all connections (default)
+# If Accept=yes, systemd would spawn a new service instance per connection
+# dnsmasq-rust handles multiple clients in a single process
+Accept=no
+
+[Install]
+# WantedBy=sockets.target: Enable socket at boot
+# Sockets are activated early in boot process
+WantedBy=sockets.target
+
+# Also=dnsmasq-rust.service: Optionally enable service unit when socket is enabled
+# This ensures the service unit is properly configured even with socket activation
+# Comment out if you want pure on-demand activation
+Also=dnsmasq-rust.service
