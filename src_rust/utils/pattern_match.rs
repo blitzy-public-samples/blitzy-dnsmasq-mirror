@@ -712,13 +712,23 @@ mod tests {
     
     #[test]
     fn test_total_length_limits() {
-        // Valid: 253 characters total
-        let long_name = format!("{}.{}.com", "a".repeat(120), "b".repeat(127));
+        // Valid: 253 characters total (with valid label lengths <= 63)
+        // Create a name with multiple 63-char labels to reach 253 total
+        // 63 + 1 (dot) + 63 + 1 (dot) + 63 + 1 (dot) + 61 = 253
+        let long_name = format!("{}.{}.{}.{}", 
+            "a".repeat(63), 
+            "b".repeat(63), 
+            "c".repeat(63), 
+            "d".repeat(61));
         assert_eq!(long_name.len(), 253);
         assert!(is_valid_dns_name(&long_name));
         
         // Invalid: 254 characters total
-        let too_long = format!("{}.{}.com", "a".repeat(121), "b".repeat(127));
+        let too_long = format!("{}.{}.{}.{}", 
+            "a".repeat(63), 
+            "b".repeat(63), 
+            "c".repeat(63), 
+            "d".repeat(62));
         assert_eq!(too_long.len(), 254);
         assert!(!is_valid_dns_name(&too_long));
     }
@@ -767,9 +777,21 @@ mod tests {
     
     #[test]
     fn test_pattern_length_excludes_wildcards() {
-        // Pattern with many wildcards should still be valid if length without wildcards is valid
-        let pattern_with_wildcards = format!("*-*-*.{}.com", "a".repeat(240));
-        // Length calculation: 240 (a's) + 1 (dot) + 3 (com) + 1 (dot) + label with wildcards
+        // Pattern with wildcards should still be valid if length without wildcards is valid
+        // Use 2 wildcards per label (max allowed) in first label
+        // Each label must be <= 63 chars (excluding wildcards)
+        // Build a pattern with multiple labels to test length calculation
+        let pattern_with_wildcards = format!("*-prod-*.{}.{}.{}", 
+            "a".repeat(60), 
+            "b".repeat(60), 
+            "c".repeat(60));
+        // Length calculation without wildcards: 
+        // First label: "-prod-" (6 chars, 2 wildcards excluded)
+        // Second label: 60 a's
+        // Third label: 60 b's  
+        // Fourth label: 60 c's
+        // Dots: 3
+        // Total: 6 + 60 + 60 + 60 + 3 = 189 chars (well within 253 limit)
         // The wildcards are excluded from length count
         assert!(is_valid_dns_name_pattern(&pattern_with_wildcards));
     }
