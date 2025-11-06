@@ -39,7 +39,7 @@
 //! # Example Usage
 //!
 //! ```no_run
-//! use dnsmasq_rs::runtime::signal::{setup_signal_handlers, SignalEvent};
+//! use dnsmasq::runtime::signal::{setup_signal_handlers, SignalEvent};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -70,9 +70,9 @@
 
 use std::process;
 use thiserror::Error;
-use tokio::signal::unix::{signal, Signal, SignalKind};
+use tokio::signal::unix::{Signal, SignalKind, signal};
 use tokio::sync::mpsc;
-use tokio::time::{sleep_until, Instant, Duration, interval, Sleep};
+use tokio::time::{Duration, Instant, Sleep, interval, sleep_until};
 use tracing::info;
 
 /// Signal events that can occur during daemon operation
@@ -226,7 +226,7 @@ impl SignalHandler {
     /// # Example
     ///
     /// ```no_run
-    /// # use dnsmasq_rs::runtime::signal::{setup_signal_handlers, SignalEvent};
+    /// # use dnsmasq::runtime::signal::{setup_signal_handlers, SignalEvent};
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut handler = setup_signal_handlers()?;
@@ -285,7 +285,7 @@ impl SignalHandler {
 /// # Example
 ///
 /// ```no_run
-/// use dnsmasq_rs::runtime::signal::setup_signal_handlers;
+/// use dnsmasq::runtime::signal::setup_signal_handlers;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -450,7 +450,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
 /// # Example
 ///
 /// ```no_run
-/// use dnsmasq_rs::runtime::signal::{schedule_timer, SignalEvent};
+/// use dnsmasq::runtime::signal::{schedule_timer, SignalEvent};
 /// use tokio::time::Duration;
 ///
 /// #[tokio::main]
@@ -483,7 +483,7 @@ pub async fn schedule_timer(duration: Duration) -> SignalEvent {
 /// # Example
 ///
 /// ```no_run
-/// use dnsmasq_rs::runtime::signal::create_interval_timer;
+/// use dnsmasq::runtime::signal::create_interval_timer;
 /// use tokio::time::Duration;
 ///
 /// #[tokio::main]
@@ -517,7 +517,7 @@ pub fn create_interval_timer(period: Duration) -> tokio::time::Interval {
 /// # Example
 ///
 /// ```no_run
-/// use dnsmasq_rs::runtime::signal::create_cancellable_timer;
+/// use dnsmasq::runtime::signal::create_cancellable_timer;
 /// use tokio::time::Duration;
 ///
 /// #[tokio::main]

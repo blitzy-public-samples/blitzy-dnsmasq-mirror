@@ -13,7 +13,7 @@
 //!
 //! Corresponds to rfc1035.c, rfc2131.c, rfc3315.c, and tftp.c in the C implementation.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 // Placeholder benchmark - will be implemented when protocol modules are complete
 fn packet_parsing_benchmark(_c: &mut Criterion) {

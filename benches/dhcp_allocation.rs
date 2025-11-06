@@ -13,7 +13,7 @@
 //!
 //! Corresponds to dhcp.c and lease.c in the C implementation.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 // Placeholder benchmark - will be implemented when DHCP module is complete
 fn dhcp_allocation_benchmark(_c: &mut Criterion) {

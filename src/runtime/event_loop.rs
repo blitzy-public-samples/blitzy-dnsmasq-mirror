@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use bytes::BytesMut;
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, Semaphore, RwLock};
+use tokio::sync::{RwLock, Semaphore, broadcast};
 use tokio::time::{interval, sleep, timeout};
 use tracing::{error, info, warn};
 
@@ -33,7 +33,7 @@ impl EventLoopHandle {
         info!("Requesting event loop shutdown");
         let _ = self.shutdown_tx.send(());
     }
-    
+
     /// Request configuration reload
     pub fn reload_config(&self) {
         // This would trigger a config reload signal
@@ -61,10 +61,10 @@ pub async fn run_event_loop(
     mut signal_handler: SignalHandler,
 ) -> DnsmasqResult<()> {
     info!("Starting main event loop");
-    
+
     // Create shutdown channel
     let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
-    
+
     // Bind DNS listener if enabled
     let dns_socket = if config.enable_dns {
         match bind_dns_listener(&config).await {
@@ -80,7 +80,7 @@ pub async fn run_event_loop(
     } else {
         None
     };
-    
+
     // Bind DHCP listener if enabled
     let dhcp_socket = if config.enable_dhcp {
         match bind_dhcp_listener(&config).await {
@@ -96,7 +96,7 @@ pub async fn run_event_loop(
     } else {
         None
     };
-    
+
     // Bind TFTP listener if enabled
     let tftp_socket = if config.enable_tftp {
         match bind_tftp_listener(&config).await {
@@ -112,20 +112,20 @@ pub async fn run_event_loop(
     } else {
         None
     };
-    
+
     // Create TCP connection semaphore
     let tcp_semaphore = Arc::new(Semaphore::new(MAX_TCP_PROCESSES));
-    
+
     // Create maintenance timer (runs every 60 seconds)
     let mut maintenance_interval = interval(Duration::from_secs(60));
-    
+
     // Create packet buffer
     let mut dns_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
     let mut dhcp_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
     let mut tftp_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
-    
+
     info!("Event loop ready, entering main loop");
-    
+
     // Main event loop
     loop {
         tokio::select! {
@@ -141,21 +141,21 @@ pub async fn run_event_loop(
             } => {
                 info!("DNS query from {}, {} bytes", addr, len);
                 dns_buf.truncate(len);
-                
+
                 // Handle DNS query (stub - would call DNS subsystem)
                 let state = state.clone();
                 let config = config.clone();
                 let packet = dns_buf.clone();
-                
+
                 tokio::spawn(async move {
                     if let Err(e) = handle_dns_query(state, config, packet, addr).await {
                         error!("DNS query handler error: {}", e);
                     }
                 });
-                
+
                 dns_buf.clear();
             }
-            
+
             // DHCP packet received
             Ok((len, addr)) = async {
                 match &dhcp_socket {
@@ -168,21 +168,21 @@ pub async fn run_event_loop(
             } => {
                 info!("DHCP packet from {}, {} bytes", addr, len);
                 dhcp_buf.truncate(len);
-                
+
                 // Handle DHCP packet (stub - would call DHCP subsystem)
                 let state = state.clone();
                 let config = config.clone();
                 let packet = dhcp_buf.clone();
-                
+
                 tokio::spawn(async move {
                     if let Err(e) = handle_dhcp_packet(state, config, packet, addr).await {
                         error!("DHCP packet handler error: {}", e);
                     }
                 });
-                
+
                 dhcp_buf.clear();
             }
-            
+
             // TFTP packet received
             Ok((len, addr)) = async {
                 match &tftp_socket {
@@ -195,25 +195,25 @@ pub async fn run_event_loop(
             } => {
                 info!("TFTP packet from {}, {} bytes", addr, len);
                 tftp_buf.truncate(len);
-                
+
                 // Handle TFTP packet (stub - would call TFTP subsystem)
                 let state = state.clone();
                 let config = config.clone();
                 let packet = tftp_buf.clone();
-                
+
                 tokio::spawn(async move {
                     if let Err(e) = handle_tftp_packet(state, config, packet, addr).await {
                         error!("TFTP packet handler error: {}", e);
                     }
                 });
-                
+
                 tftp_buf.clear();
             }
-            
+
             // Signal received
             Some(signal_event) = signal_handler.recv() => {
                 info!("Signal event: {:?}", signal_event);
-                
+
                 match signal_event {
                     SignalEvent::Terminate => {
                         info!("Shutdown signal received");
@@ -248,7 +248,7 @@ pub async fn run_event_loop(
                     }
                 }
             }
-            
+
             // Maintenance timer tick
             _ = maintenance_interval.tick() => {
                 info!("Running periodic maintenance");
@@ -256,7 +256,7 @@ pub async fn run_event_loop(
                     error!("Maintenance error: {}", e);
                 }
             }
-            
+
             // Shutdown signal
             _ = shutdown_rx.recv() => {
                 info!("Shutdown requested via handle");
@@ -264,55 +264,71 @@ pub async fn run_event_loop(
             }
         }
     }
-    
+
     info!("Event loop exiting, performing cleanup");
-    
+
     // Graceful shutdown
     signal_handler.close();
-    
+
     // Flush state (e.g., lease file)
     if let Err(e) = flush_state(&state).await {
         error!("Failed to flush state during shutdown: {}", e);
     }
-    
+
     info!("Event loop shutdown complete");
     Ok(())
 }
 
 /// Bind DNS listener socket
 async fn bind_dns_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
-    let bind_addr = format!("{}:{}", config.listen_address.as_deref().unwrap_or("0.0.0.0"), 53);
+    let bind_addr = format!(
+        "{}:{}",
+        config.listen_address.as_deref().unwrap_or("0.0.0.0"),
+        53
+    );
     info!("Binding DNS listener to {}", bind_addr);
-    
-    let socket = UdpSocket::bind(&bind_addr).await
+
+    let socket = UdpSocket::bind(&bind_addr)
+        .await
         .map_err(|e| DnsmasqError::NetworkError(format!("Failed to bind DNS socket: {}", e)))?;
-    
+
     Ok(socket)
 }
 
 /// Bind DHCP listener socket
 async fn bind_dhcp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
-    let bind_addr = format!("{}:{}", config.listen_address.as_deref().unwrap_or("0.0.0.0"), 67);
+    let bind_addr = format!(
+        "{}:{}",
+        config.listen_address.as_deref().unwrap_or("0.0.0.0"),
+        67
+    );
     info!("Binding DHCP listener to {}", bind_addr);
-    
-    let socket = UdpSocket::bind(&bind_addr).await
+
+    let socket = UdpSocket::bind(&bind_addr)
+        .await
         .map_err(|e| DnsmasqError::NetworkError(format!("Failed to bind DHCP socket: {}", e)))?;
-    
+
     // Set broadcast option for DHCP
-    socket.set_broadcast(true)
+    socket
+        .set_broadcast(true)
         .map_err(|e| DnsmasqError::NetworkError(format!("Failed to set broadcast: {}", e)))?;
-    
+
     Ok(socket)
 }
 
 /// Bind TFTP listener socket
 async fn bind_tftp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
-    let bind_addr = format!("{}:{}", config.listen_address.as_deref().unwrap_or("0.0.0.0"), 69);
+    let bind_addr = format!(
+        "{}:{}",
+        config.listen_address.as_deref().unwrap_or("0.0.0.0"),
+        69
+    );
     info!("Binding TFTP listener to {}", bind_addr);
-    
-    let socket = UdpSocket::bind(&bind_addr).await
+
+    let socket = UdpSocket::bind(&bind_addr)
+        .await
         .map_err(|e| DnsmasqError::NetworkError(format!("Failed to bind TFTP socket: {}", e)))?;
-    
+
     Ok(socket)
 }
 
@@ -350,10 +366,7 @@ async fn handle_tftp_packet(
 }
 
 /// Reload configuration (stub implementation)
-async fn reload_configuration(
-    _config: &Config,
-    _state: &RwLock<DaemonState>,
-) -> DnsmasqResult<()> {
+async fn reload_configuration(_config: &Config, _state: &RwLock<DaemonState>) -> DnsmasqResult<()> {
     info!("Reloading configuration");
     // TODO: Implement configuration reload
     Ok(())
@@ -387,7 +400,7 @@ async fn flush_state(_state: &RwLock<DaemonState>) -> DnsmasqResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_constants() {
         assert_eq!(MAX_TCP_PROCESSES, 20);

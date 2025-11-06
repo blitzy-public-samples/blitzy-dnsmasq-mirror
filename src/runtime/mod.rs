@@ -85,27 +85,27 @@
 //! - Exit codes match C version for script compatibility
 
 // Module declarations - each corresponds to a separate .rs file in src/runtime/
-pub mod event_loop;
 pub mod daemon;
-pub mod signal;
+pub mod event_loop;
 pub mod helpers;
+pub mod signal;
 
 // Primary runtime function re-exports for main.rs
+pub use daemon::{create_pid_file, daemonize, drop_privileges};
 pub use event_loop::run_event_loop;
-pub use daemon::{daemonize, drop_privileges, create_pid_file};
-pub use signal::setup_signal_handlers;
 pub use helpers::spawn_helper_process;
+pub use signal::setup_signal_handlers;
 
 // Type re-exports for configuration and state management
-pub use event_loop::EventLoopHandle;
 pub use daemon::{DaemonConfig, PrivilegeConfig};
+pub use event_loop::EventLoopHandle;
+pub use helpers::{HelperHandle, ScriptEvent};
 pub use signal::{SignalEvent, SignalHandler};
-pub use helpers::{ScriptEvent, HelperHandle};
 
 // Error type re-exports for external error handling
 pub use daemon::DaemonError;
-pub use signal::SignalError;
 pub use helpers::HelperError;
+pub use signal::SignalError;
 
 // Optional test utilities for integration testing
 #[cfg(test)]

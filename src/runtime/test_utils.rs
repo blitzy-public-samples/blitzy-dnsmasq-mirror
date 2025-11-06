@@ -1,5 +1,5 @@
 //! Test utilities for runtime module
-//! 
+//!
 //! This module provides helper functions and mocks for testing the runtime subsystem.
 
 use super::*;
@@ -37,14 +37,14 @@ pub async fn wait_for_signal_with_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_daemon_config_creation() {
         let config = test_daemon_config();
         assert!(!config.daemonize);
         assert!(config.debug);
     }
-    
+
     #[test]
     fn test_privilege_config_creation() {
         let config = test_privilege_config();

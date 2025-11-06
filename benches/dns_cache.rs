@@ -13,7 +13,7 @@
 //!
 //! Corresponds to cache.c in the C implementation.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 // Placeholder benchmark - will be implemented when DNS cache module is complete
 fn dns_cache_benchmark(_c: &mut Criterion) {

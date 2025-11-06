@@ -10,28 +10,28 @@ use std::path::PathBuf;
 pub struct Config {
     /// Whether to daemonize (fork to background)
     pub daemonize: bool,
-    
+
     /// Debug mode (don't fork, verbose logging)
     pub debug: bool,
-    
+
     /// User to drop privileges to
     pub user: Option<String>,
-    
+
     /// Group to drop privileges to
     pub group: Option<String>,
-    
+
     /// PID file path
     pub pid_file: Option<PathBuf>,
-    
+
     /// Enable DNS server
     pub enable_dns: bool,
-    
+
     /// Enable DHCP server
     pub enable_dhcp: bool,
-    
+
     /// Enable TFTP server
     pub enable_tftp: bool,
-    
+
     /// Listen address for all services
     pub listen_address: Option<String>,
 }

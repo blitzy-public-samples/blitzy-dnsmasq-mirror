@@ -65,6 +65,7 @@
 //! # Example Usage
 //!
 //! ```rust,no_run
+//! use dnsmasq::runtime::{spawn_helper_process, ScriptEvent};
 //! use std::path::PathBuf;
 //! use std::time::Duration;
 //!
@@ -84,14 +85,14 @@
 //!     interface: "eth0".to_string(),
 //!     expiry: 1234567890,
 //!     client_id: Some("client-id-hex".to_string()),
-//!     tags: vec!["tag1".to_string()],
+//!     tags: Box::new(vec!["tag1".to_string()]),
 //!     vendor_class: None,
 //!     supplied_hostname: Some("client-supplied".to_string()),
 //!     circuit_id: None,
 //!     remote_id: None,
 //!     subscriber_id: None,
 //!     relay_address: None,
-//!     user_classes: vec![],
+//!     user_classes: Box::new(vec![]),
 //!     time_remaining: 3600,
 //!     old_hostname: None,
 //! };
@@ -104,12 +105,13 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Command, Stdio};
+use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time;
 use tracing::{debug, error, info, warn};
@@ -148,7 +150,7 @@ pub enum ScriptEvent {
         /// DHCP client identifier (option 61) in hex format, if present
         client_id: Option<String>,
         /// DHCP tags configured for this lease
-        tags: Vec<String>,
+        tags: Box<Vec<String>>,
         /// Vendor class identifier (option 60 for DHCPv4, option 16 for DHCPv6)
         vendor_class: Option<String>,
         /// Hostname supplied by client in DHCP option 12
@@ -162,7 +164,7 @@ pub enum ScriptEvent {
         /// Relay agent IP address (giaddr for DHCPv4, relay link-address for DHCPv6)
         relay_address: Option<String>,
         /// User class options (option 77) sent by client
-        user_classes: Vec<String>,
+        user_classes: Box<Vec<String>>,
         /// Time remaining until lease expires (seconds)
         time_remaining: u32,
         /// Old hostname if this is an ACTION_OLD_HOSTNAME event
@@ -263,7 +265,7 @@ impl ScriptEvent {
     /// Returns the action string that will be passed as the first command-line argument to
     /// scripts and as the first parameter to Lua functions. Matches the action strings from
     /// helper.c (lines 396-423).
-    fn action(&self) -> &str {
+    pub fn action(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { .. } => "add",
             ScriptEvent::DhcpLeaseOld { .. } => "old",
@@ -279,7 +281,7 @@ impl ScriptEvent {
     ///
     /// Returns the hardware address that will be passed as the second command-line argument.
     /// For DHCP events, this is the MAC address; for DHCPv6, it's the DUID.
-    fn mac_or_duid(&self) -> &str {
+    pub fn mac_or_duid(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { mac, .. }
             | ScriptEvent::DhcpLeaseOld { mac, .. }
@@ -294,7 +296,7 @@ impl ScriptEvent {
     /// Get the IP address for script invocation
     ///
     /// Returns the IP address that will be passed as the third command-line argument.
-    fn ip_address(&self) -> &str {
+    pub fn ip_address(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { ip, .. }
             | ScriptEvent::DhcpLeaseOld { ip, .. }
@@ -310,7 +312,7 @@ impl ScriptEvent {
     ///
     /// Returns the hostname that will be passed as the fourth command-line argument.
     /// May be empty string if no hostname is available.
-    fn hostname(&self) -> &str {
+    pub fn hostname(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { hostname, .. }
             | ScriptEvent::DhcpLeaseOld { hostname, .. }
@@ -417,6 +419,7 @@ impl HelperHandle {
     /// # Example
     ///
     /// ```rust,no_run
+    /// # use dnsmasq::runtime::{HelperHandle, HelperError, ScriptEvent};
     /// # use std::path::PathBuf;
     /// # use std::time::Duration;
     /// # async fn example(handle: HelperHandle) -> Result<(), HelperError> {
@@ -427,14 +430,14 @@ impl HelperHandle {
     ///     interface: "eth0".to_string(),
     ///     expiry: 1234567890,
     ///     client_id: None,
-    ///     tags: vec![],
+    ///     tags: Box::new(vec![]),
     ///     vendor_class: None,
     ///     supplied_hostname: None,
     ///     circuit_id: None,
     ///     remote_id: None,
     ///     subscriber_id: None,
     ///     relay_address: None,
-    ///     user_classes: vec![],
+    ///     user_classes: Box::new(vec![]),
     ///     time_remaining: 3600,
     ///     old_hostname: None,
     /// };
@@ -444,7 +447,9 @@ impl HelperHandle {
     /// # }
     /// ```
     pub async fn send_event(&self, event: ScriptEvent) -> Result<(), HelperError> {
-        self.sender.send(event).map_err(|_| HelperError::ChannelClosed)
+        self.sender
+            .send(event)
+            .map_err(|_| HelperError::ChannelClosed)
     }
 
     /// Close the helper task gracefully
@@ -467,6 +472,7 @@ impl HelperHandle {
     /// # Example
     ///
     /// ```rust,no_run
+    /// # use dnsmasq::runtime::HelperHandle;
     /// # async fn example(handle: &HelperHandle) {
     /// if !handle.is_closed() {
     ///     // Safe to send events
@@ -511,6 +517,7 @@ impl HelperHandle {
 /// # Example
 ///
 /// ```rust,no_run
+/// use dnsmasq::runtime::{spawn_helper_process, HelperError};
 /// use std::path::PathBuf;
 /// use std::time::Duration;
 ///
@@ -553,19 +560,19 @@ pub fn spawn_helper_process(
     #[allow(unused_variables)] lua_script_path: Option<PathBuf>,
     script_timeout: Duration,
 ) -> Result<HelperHandle, HelperError> {
-    let (sender, mut receiver) = mpsc::unbounded_channel();
+    let (sender, mut receiver) = mpsc::unbounded_channel::<ScriptEvent>();
 
     #[cfg(feature = "lua")]
     let lua = if let Some(lua_path) = lua_script_path {
         info!("Loading Lua script: {}", lua_path.display());
         let lua = Lua::new();
-        
+
         // Load Lua script file
         lua.load(&std::fs::read_to_string(&lua_path)?)
             .set_name(lua_path.to_string_lossy().as_ref())
             .exec()
             .map_err(|e| HelperError::LuaError(e.to_string()))?;
-        
+
         // Verify lease() function exists
         let lease_fn: Result<mlua::Function, _> = lua.globals().get("lease");
         if lease_fn.is_err() {
@@ -573,14 +580,14 @@ pub fn spawn_helper_process(
                 "lease() function missing in Lua script".to_string(),
             ));
         }
-        
+
         // Call init() function if it exists
-        if let Ok(init_fn) = lua.globals().get::<_, mlua::Function>("init") {
-            init_fn.call::<_, ()>(()).map_err(|e| {
-                HelperError::LuaError(format!("init() function failed: {}", e))
-            })?;
+        if let Ok(init_fn) = lua.globals().get::<mlua::Function>("init") {
+            init_fn
+                .call::<()>(())
+                .map_err(|e| HelperError::LuaError(format!("init() function failed: {}", e)))?;
         }
-        
+
         info!("Lua script loaded successfully");
         Some(lua)
     } else {
@@ -589,10 +596,10 @@ pub fn spawn_helper_process(
 
     tokio::spawn(async move {
         info!("Helper task started");
-        
+
         while let Some(event) = receiver.recv().await {
             debug!("Processing event: {:?}", event.action());
-            
+
             // Execute Lua function first if configured
             #[cfg(feature = "lua")]
             if let Some(ref lua) = lua {
@@ -600,7 +607,7 @@ pub fn spawn_helper_process(
                     error!("Lua execution failed: {}", e);
                 }
             }
-            
+
             // Execute external script if configured
             if let Some(ref path) = script_path {
                 if let Err(e) = execute_script(path, &event, script_timeout).await {
@@ -608,14 +615,14 @@ pub fn spawn_helper_process(
                 }
             }
         }
-        
+
         info!("Helper task shutting down");
-        
+
         // Call Lua shutdown() function if it exists
         #[cfg(feature = "lua")]
         if let Some(lua) = lua {
-            if let Ok(shutdown_fn) = lua.globals().get::<_, mlua::Function>("shutdown") {
-                if let Err(e) = shutdown_fn.call::<_, ()>(()) {
+            if let Ok(shutdown_fn) = lua.globals().get::<mlua::Function>("shutdown") {
+                if let Err(e) = shutdown_fn.call::<()>(()) {
                     warn!("Lua shutdown() function failed: {}", e);
                 }
             }
@@ -648,7 +655,9 @@ async fn execute_script(
     populate_environment_variables(&mut env_vars, event);
 
     // Extract script name from path for argv[0]
-    let script_name = script_path.file_name().unwrap_or_else(|| OsStr::new("script"));
+    let script_name = script_path
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("script"));
 
     // Build command with arguments: <script> <action> <mac> <ip> <hostname>
     let mut cmd = Command::new(script_path);
@@ -773,7 +782,10 @@ async fn execute_script(
 /// Note: Empty options are omitted rather than set to empty strings, matching C behavior.
 fn populate_environment_variables(env: &mut HashMap<String, String>, event: &ScriptEvent) {
     // Set action type
-    env.insert("DNSMASQ_LEASE_ACTION".to_string(), event.action().to_string());
+    env.insert(
+        "DNSMASQ_LEASE_ACTION".to_string(),
+        event.action().to_string(),
+    );
 
     match event {
         ScriptEvent::DhcpLease {
@@ -797,58 +809,64 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
             env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), expiry.to_string());
-            
+
             if let Some(cid) = client_id {
                 env.insert("DNSMASQ_CLIENT_ID".to_string(), cid.clone());
             }
-            
+
             // Split hostname into hostname and domain
             if let Some(dot_pos) = hostname.find('.') {
-                env.insert("DNSMASQ_DOMAIN".to_string(), hostname[dot_pos + 1..].to_string());
+                env.insert(
+                    "DNSMASQ_DOMAIN".to_string(),
+                    hostname[dot_pos + 1..].to_string(),
+                );
             }
-            
+
             if let Some(vc) = vendor_class {
                 env.insert("DNSMASQ_VENDOR_CLASS".to_string(), vc.clone());
             }
-            
+
             if let Some(sh) = supplied_hostname {
                 env.insert("DNSMASQ_SUPPLIED_HOSTNAME".to_string(), sh.clone());
             }
-            
+
             if let Some(cid) = circuit_id {
                 env.insert("DNSMASQ_CIRCUIT_ID".to_string(), cid.clone());
             }
-            
+
             if let Some(rid) = remote_id {
                 env.insert("DNSMASQ_REMOTE_ID".to_string(), rid.clone());
             }
-            
+
             if let Some(sid) = subscriber_id {
                 env.insert("DNSMASQ_SUBSCRIBER_ID".to_string(), sid.clone());
             }
-            
+
             if let Some(ra) = relay_address {
                 env.insert("DNSMASQ_RELAY_ADDRESS".to_string(), ra.clone());
             }
-            
+
             if !tags.is_empty() {
                 env.insert("DNSMASQ_TAGS".to_string(), tags.join(" "));
             }
-            
+
             if *time_remaining > 0 {
-                env.insert("DNSMASQ_TIME_REMAINING".to_string(), time_remaining.to_string());
+                env.insert(
+                    "DNSMASQ_TIME_REMAINING".to_string(),
+                    time_remaining.to_string(),
+                );
             }
-            
+
             if let Some(old_host) = old_hostname {
                 env.insert("DNSMASQ_OLD_HOSTNAME".to_string(), old_host.clone());
             }
-            
+
             // User classes
             for (i, user_class) in user_classes.iter().enumerate() {
                 env.insert(format!("DNSMASQ_USER_CLASS{}", i), user_class.clone());
             }
         }
-        
+
         ScriptEvent::DhcpLeaseOld {
             interface,
             expiry,
@@ -859,31 +877,35 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
             env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), expiry.to_string());
-            
+
             if let Some(cid) = client_id {
                 env.insert("DNSMASQ_CLIENT_ID".to_string(), cid.clone());
             }
         }
-        
+
         ScriptEvent::DhcpLeaseDel { interface, .. } => {
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
         }
-        
-        ScriptEvent::TftpTransfer { file_size, interface, .. } => {
+
+        ScriptEvent::TftpTransfer {
+            file_size,
+            interface,
+            ..
+        } => {
             env.insert("DNSMASQ_FILE_SIZE".to_string(), file_size.to_string());
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
         }
-        
+
         ScriptEvent::ArpAdd { interface, .. } | ScriptEvent::ArpDel { interface, .. } => {
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
         }
-        
+
         ScriptEvent::RelaySnoop { interface, .. } => {
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
@@ -905,7 +927,7 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
 #[cfg(feature = "lua")]
 fn execute_lua_function(lua: &Lua, event: &ScriptEvent) -> Result<(), HelperError> {
     let action = event.action();
-    
+
     let function_name = match event {
         ScriptEvent::DhcpLease { .. }
         | ScriptEvent::DhcpLeaseOld { .. }
@@ -914,7 +936,7 @@ fn execute_lua_function(lua: &Lua, event: &ScriptEvent) -> Result<(), HelperErro
         ScriptEvent::ArpAdd { .. } | ScriptEvent::ArpDel { .. } => "arp",
         ScriptEvent::RelaySnoop { .. } => "snoop",
     };
-    
+
     // Get the Lua function (may not exist for optional functions like tftp, arp, snoop)
     let lua_fn: mlua::Function = match lua.globals().get(function_name) {
         Ok(f) => f,
@@ -923,10 +945,12 @@ fn execute_lua_function(lua: &Lua, event: &ScriptEvent) -> Result<(), HelperErro
             return Ok(());
         }
     };
-    
+
     // Create data table
-    let data_table = lua.create_table().map_err(|e| HelperError::LuaError(e.to_string()))?;
-    
+    let data_table = lua
+        .create_table()
+        .map_err(|e| HelperError::LuaError(e.to_string()))?;
+
     // Populate table based on event type
     match event {
         ScriptEvent::DhcpLease {
@@ -948,89 +972,137 @@ fn execute_lua_function(lua: &Lua, event: &ScriptEvent) -> Result<(), HelperErro
             old_hostname,
             ..
         } => {
-            data_table.set("mac_address", mac.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("ip_address", ip.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("hostname", hostname.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("interface", interface.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("lease_expires", *expiry).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            
+            data_table
+                .set("mac_address", mac.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("ip_address", ip.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("hostname", hostname.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("interface", interface.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("lease_expires", *expiry)
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+
             if let Some(cid) = client_id {
-                data_table.set("client_id", cid.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("client_id", cid.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(vc) = vendor_class {
-                data_table.set("vendor_class", vc.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("vendor_class", vc.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(sh) = supplied_hostname {
-                data_table.set("supplied_hostname", sh.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("supplied_hostname", sh.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(cid) = circuit_id {
-                data_table.set("circuit_id", cid.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("circuit_id", cid.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(rid) = remote_id {
-                data_table.set("remote_id", rid.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("remote_id", rid.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(sid) = subscriber_id {
-                data_table.set("subscriber_id", sid.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("subscriber_id", sid.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(ra) = relay_address {
-                data_table.set("relay_address", ra.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("relay_address", ra.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if !tags.is_empty() {
-                data_table.set("tags", tags.join(" ")).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("tags", tags.join(" "))
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if *time_remaining > 0 {
-                data_table.set("time_remaining", *time_remaining).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("time_remaining", *time_remaining)
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
             if let Some(old_host) = old_hostname {
-                data_table.set("old_hostname", old_host.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+                data_table
+                    .set("old_hostname", old_host.clone())
+                    .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
-            
+
             // User classes
             for (i, user_class) in user_classes.iter().enumerate() {
-                data_table.set(format!("user_class{}", i), user_class.clone())
+                data_table
+                    .set(format!("user_class{}", i), user_class.clone())
                     .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
         }
-        
+
         ScriptEvent::TftpTransfer {
             file_size,
             destination,
             filename,
             ..
         } => {
-            data_table.set("file_size", file_size.to_string()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("destination_address", destination.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("file_name", filename.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("file_size", file_size.to_string())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("destination_address", destination.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("file_name", filename.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
         }
-        
+
         ScriptEvent::ArpAdd { mac, ip, .. } | ScriptEvent::ArpDel { mac, ip, .. } => {
-            data_table.set("mac_address", mac.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("client_address", ip.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("mac_address", mac.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("client_address", ip.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
         }
-        
+
         ScriptEvent::RelaySnoop {
             client_address,
             prefix,
             interface,
         } => {
-            data_table.set("client_address", client_address.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("prefix", prefix.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
-            data_table.set("client_interface", interface.clone()).map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("client_address", client_address.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("prefix", prefix.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
+            data_table
+                .set("client_interface", interface.clone())
+                .map_err(|e| HelperError::LuaError(e.to_string()))?;
         }
-        
+
         _ => {}
     }
-    
+
     // Call Lua function: function_name(action, data_table)
     info!(
         lua_function = function_name,
         action = action,
         "Calling Lua function"
     );
-    
-    lua_fn.call::<_, ()>((action, data_table))
+
+    lua_fn
+        .call::<()>((action, data_table))
         .map_err(|e| HelperError::LuaError(e.to_string()))?;
-    
+
     Ok(())
 }
 
@@ -1047,18 +1119,18 @@ mod tests {
             interface: "eth0".to_string(),
             expiry: 0,
             client_id: None,
-            tags: vec![],
+            tags: Box::new(vec![]),
             vendor_class: None,
             supplied_hostname: None,
             circuit_id: None,
             remote_id: None,
             subscriber_id: None,
             relay_address: None,
-            user_classes: vec![],
+            user_classes: Box::new(vec![]),
             time_remaining: 0,
             old_hostname: None,
         };
-        
+
         assert_eq!(event.action(), "add");
         assert_eq!(event.mac_or_duid(), "00:11:22:33:44:55");
         assert_eq!(event.ip_address(), "192.168.1.100");
@@ -1074,24 +1146,27 @@ mod tests {
             interface: "eth0".to_string(),
             expiry: 1234567890,
             client_id: Some("client-id-hex".to_string()),
-            tags: vec!["tag1".to_string(), "tag2".to_string()],
+            tags: Box::new(vec!["tag1".to_string(), "tag2".to_string()]),
             vendor_class: Some("vendor".to_string()),
             supplied_hostname: Some("supplied".to_string()),
             circuit_id: Some("circuit".to_string()),
             remote_id: Some("remote".to_string()),
             subscriber_id: Some("subscriber".to_string()),
             relay_address: Some("192.168.1.1".to_string()),
-            user_classes: vec!["class0".to_string(), "class1".to_string()],
+            user_classes: Box::new(vec!["class0".to_string(), "class1".to_string()]),
             time_remaining: 3600,
             old_hostname: None,
         };
-        
+
         let mut env = HashMap::new();
         populate_environment_variables(&mut env, &event);
-        
+
         assert_eq!(env.get("DNSMASQ_LEASE_ACTION"), Some(&"add".to_string()));
         assert_eq!(env.get("DNSMASQ_INTERFACE"), Some(&"eth0".to_string()));
-        assert_eq!(env.get("DNSMASQ_CLIENT_ID"), Some(&"client-id-hex".to_string()));
+        assert_eq!(
+            env.get("DNSMASQ_CLIENT_ID"),
+            Some(&"client-id-hex".to_string())
+        );
         assert_eq!(env.get("DNSMASQ_DOMAIN"), Some(&"example.com".to_string()));
         assert_eq!(env.get("DNSMASQ_TAGS"), Some(&"tag1 tag2".to_string()));
         assert_eq!(env.get("DNSMASQ_USER_CLASS0"), Some(&"class0".to_string()));
@@ -1101,10 +1176,10 @@ mod tests {
     #[tokio::test]
     async fn test_helper_handle_close() {
         let handle = spawn_helper_process(None, None, DEFAULT_SCRIPT_TIMEOUT).unwrap();
-        
+
         assert!(!handle.is_closed());
         handle.close();
-        
+
         // After close, handle should be closed
         // Note: The actual closure is asynchronous, so we can't directly test is_closed()
         // in this synchronous context without waiting

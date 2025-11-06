@@ -11,23 +11,23 @@ pub enum DnsmasqError {
     /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
-    
+
     /// Runtime error
     #[error("Runtime error: {0}")]
     Runtime(String),
-    
+
     /// I/O error
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     /// Network error
     #[error("Network error: {0}")]
     NetworkError(String),
-    
+
     /// DNS error
     #[error("DNS error: {0}")]
     Dns(String),
-    
+
     /// DHCP error
     #[error("DHCP error: {0}")]
     Dhcp(String),
