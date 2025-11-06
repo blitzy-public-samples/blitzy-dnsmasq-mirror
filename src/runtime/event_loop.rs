@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::runtime::signal::{SignalEvent, SignalHandler};
-use crate::types::{DaemonState, DnsmasqError, DnsmasqResult};
+use crate::types::{DaemonState, DnsmasqError, DnsmasqResult, NetworkError};
 
 /// Maximum concurrent TCP connections for DNS-over-TCP
 const MAX_TCP_PROCESSES: usize = 20;
@@ -290,7 +290,10 @@ async fn bind_dns_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
 
     let socket = UdpSocket::bind(&bind_addr)
         .await
-        .map_err(|e| DnsmasqError::NetworkError(format!("Failed to bind DNS socket: {}", e)))?;
+        .map_err(|e| NetworkError::BindFailed {
+            address: bind_addr.clone(),
+            source: e,
+        })?;
 
     Ok(socket)
 }
@@ -306,12 +309,18 @@ async fn bind_dhcp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
 
     let socket = UdpSocket::bind(&bind_addr)
         .await
-        .map_err(|e| DnsmasqError::NetworkError(format!("Failed to bind DHCP socket: {}", e)))?;
+        .map_err(|e| NetworkError::BindFailed {
+            address: bind_addr.clone(),
+            source: e,
+        })?;
 
     // Set broadcast option for DHCP
     socket
         .set_broadcast(true)
-        .map_err(|e| DnsmasqError::NetworkError(format!("Failed to set broadcast: {}", e)))?;
+        .map_err(|e| NetworkError::SocketCreationFailed {
+            socket_type: "DHCP (broadcast)".to_string(),
+            source: e,
+        })?;
 
     Ok(socket)
 }
@@ -327,7 +336,10 @@ async fn bind_tftp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
 
     let socket = UdpSocket::bind(&bind_addr)
         .await
-        .map_err(|e| DnsmasqError::NetworkError(format!("Failed to bind TFTP socket: {}", e)))?;
+        .map_err(|e| NetworkError::BindFailed {
+            address: bind_addr.clone(),
+            source: e,
+        })?;
 
     Ok(socket)
 }
