@@ -18,6 +18,7 @@ use crate::platform::{
 };
 
 /// Linux platform implementation using netlink sockets
+#[derive(Default)]
 pub struct LinuxPlatform {
     // TODO: Add netlink socket and state
 }
@@ -25,7 +26,7 @@ pub struct LinuxPlatform {
 impl LinuxPlatform {
     /// Create a new Linux platform instance
     pub fn new() -> Self {
-        Self {}
+        Self::default()
     }
 }
 
