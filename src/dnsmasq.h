@@ -3014,6 +3014,11 @@ struct dhcp_pxe_vendor {
  * @var dhcp_mac::netid - Network tag (embedded) assigned on successful match
  * @var dhcp_mac::next - Next MAC match rule in list
  */
+struct dhcp_mac {
+  unsigned int mask;
+  int hwaddr_len, hwaddr_type;
+  unsigned char hwaddr[DHCP_CHADDR_MAX];
+  struct dhcp_netid netid;
   struct dhcp_mac *next;
 };
 
