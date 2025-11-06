@@ -66,9 +66,10 @@
 //! # Usage Examples
 //!
 //! ```rust
-//! use crate::utils::string::legal_hostname;
-//! use crate::utils::rand::rand16;
-//! use crate::utils::general::prettyprint_addr;
+//! use dnsmasq::utils::string::legal_hostname;
+//! use dnsmasq::utils::rand::rand16;
+//! use dnsmasq::utils::general::prettyprint_addr;
+//! use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 //!
 //! // Validate a hostname
 //! if legal_hostname("example.com") {
@@ -76,6 +77,7 @@
 //!     let query_id = rand16();
 //!     
 //!     // Format an address for logging
+//!     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 //!     let addr_str = prettyprint_addr(&socket_addr);
 //! }
 //! ```

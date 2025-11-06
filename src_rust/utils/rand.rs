@@ -26,7 +26,7 @@
 //! The public API matches the C implementation for compatibility:
 //!
 //! ```
-//! use crate::utils::rand::{rand16, rand32, rand64};
+//! use dnsmasq::utils::rand::{rand16, rand32, rand64};
 //!
 //! // DNS query ID randomization (RFC 1035)
 //! let query_id: u16 = rand16();
@@ -76,7 +76,7 @@ use tracing::{debug, info, trace};
 /// Primary use case is DNS query ID randomization to prevent cache poisoning:
 ///
 /// ```
-/// # use crate::utils::rand::rand16;
+/// # use dnsmasq::utils::rand::rand16;
 /// // Generate random DNS query ID
 /// let query_id = rand16();
 /// // Use in DNS header: header.id = query_id.to_be();
@@ -103,7 +103,7 @@ use tracing::{debug, info, trace};
 /// # Examples
 ///
 /// ```
-/// # use crate::utils::rand::rand16;
+/// # use dnsmasq::utils::rand::rand16;
 /// // DNS query ID generation
 /// let qid = rand16();
 /// assert!(qid <= 65535);
@@ -141,7 +141,7 @@ pub fn rand16() -> u16 {
 /// - Transaction identifiers requiring >16 bits of entropy
 ///
 /// ```
-/// # use crate::utils::rand::rand32;
+/// # use dnsmasq::utils::rand::rand32;
 /// // DNS source port randomization
 /// let rand_val = rand32();
 /// let src_port = 1024 + (rand_val % (65535 - 1024));
@@ -168,7 +168,7 @@ pub fn rand16() -> u16 {
 /// # Examples
 ///
 /// ```
-/// # use crate::utils::rand::rand32;
+/// # use dnsmasq::utils::rand::rand32;
 /// // Random source port in ephemeral range
 /// let port = 49152 + (rand32() % 16384); // 49152-65535
 ///
@@ -209,7 +209,7 @@ pub fn rand32() -> u32 {
 /// - Applications requiring maximum entropy (full 64-bit space)
 ///
 /// ```
-/// # use crate::utils::rand::rand64;
+/// # use dnsmasq::utils::rand::rand64;
 /// // IPv6 privacy extension interface ID
 /// let interface_id = rand64();
 /// // setaddr6part(&mut ipv6_addr, interface_id);
@@ -237,7 +237,7 @@ pub fn rand32() -> u32 {
 /// # Examples
 ///
 /// ```
-/// # use crate::utils::rand::rand64;
+/// # use dnsmasq::utils::rand::rand64;
 /// // Generate random IPv6 host identifier
 /// let host_id = rand64();
 /// assert!(host_id <= u64::MAX);
@@ -278,12 +278,12 @@ pub fn rand64() -> u64 {
 /// # Usage
 ///
 /// ```
-/// # use crate::utils::rand::rand_init;
+/// # use dnsmasq::utils::rand::rand_init;
 /// // Optional - for API compatibility with C code
 /// rand_init();
 ///
 /// // RNG is ready to use whether or not rand_init() was called
-/// # use crate::utils::rand::rand16;
+/// # use dnsmasq::utils::rand::rand16;
 /// let value = rand16();
 /// ```
 ///

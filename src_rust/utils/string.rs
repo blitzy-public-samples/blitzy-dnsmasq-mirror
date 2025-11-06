@@ -84,7 +84,7 @@ enum CheckNameResult {
 /// # Examples
 ///
 /// ```
-/// use crate::utils::string::safe_strncpy;
+/// use dnsmasq::utils::string::safe_strncpy;
 ///
 /// let result = safe_strncpy("very-long-hostname.example.com", 10);
 /// assert_eq!(result.len(), 10);
@@ -136,7 +136,8 @@ pub fn safe_strncpy(src: &str, max_size: usize) -> String {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
+/// // This is a private function, tested in the module's test suite
 /// let mut name = String::from("example.com.");
 /// let result = check_name(&mut name);
 /// assert_eq!(result, CheckNameResult::ValidAscii);
@@ -226,7 +227,7 @@ fn check_name(name: &mut String) -> CheckNameResult {
 /// # Examples
 ///
 /// ```
-/// use crate::utils::string::legal_hostname;
+/// use dnsmasq::utils::string::legal_hostname;
 ///
 /// assert!(legal_hostname("my-server"));
 /// assert!(legal_hostname("web01.example.com"));
@@ -326,7 +327,7 @@ pub fn legal_hostname(name: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use crate::utils::string::canonicalise;
+/// use dnsmasq::utils::string::canonicalise;
 ///
 /// let canon = canonicalise("Example.COM").unwrap();
 /// assert_eq!(canon, "Example.COM"); // Currently no case folding without IDN
@@ -395,7 +396,7 @@ pub fn canonicalise(input: &str) -> Result<String, CanonicaliseError> {
 /// # Examples
 ///
 /// ```
-/// use crate::utils::string::do_rfc1035_name;
+/// use dnsmasq::utils::string::do_rfc1035_name;
 ///
 /// let mut buffer = [0u8; 512];
 /// let bytes_written = do_rfc1035_name("example.com", &mut buffer, Some(512)).unwrap();
