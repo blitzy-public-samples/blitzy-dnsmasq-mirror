@@ -20,6 +20,10 @@ pub mod runtime;
 // Integration module - external system services (D-Bus, ubus, scripts)
 pub mod integration;
 
+// DNS subsystem - Domain Name System server and forwarder
+#[cfg(feature = "dns")]
+pub mod dns;
+
 // DHCP subsystem - Dynamic Host Configuration Protocol servers
 #[cfg(feature = "dhcp")]
 pub mod dhcp;
