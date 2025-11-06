@@ -43,10 +43,9 @@
 //! to keep systemd >273 happy, which requires the PID file owner to match the daemon user.
 
 use nix::unistd::{fchown, getpid, getuid, Gid, Uid};
-use std::io::{Error, ErrorKind, Result};
-use std::os::unix::fs::PermissionsExt;
+use std::io::{ErrorKind, Result};
 use std::os::unix::io::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs::{remove_file, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, warn};
@@ -116,7 +115,7 @@ pub async fn write_pidfile(
     let is_root = uid.is_root();
 
     // Format PID as string with newline (matching C: sprintf(daemon->namebuff, "%d\n", (int) getpid()))
-    let pid_string = format!("{}\n", pid);
+    let pid_string = format!("{pid}\n");
 
     // Step 1: Unlink existing file (ignore errors - file might not exist)
     // This corresponds to line 845: unlink(daemon->runfile);
@@ -143,15 +142,14 @@ pub async fn write_pidfile(
                     e
                 );
                 return Err(e);
-            } else {
-                // Silently ignore for non-root (testing mode)
-                debug!(
-                    "Failed to create PID file {} (non-root mode, ignoring): {}",
-                    pidfile_path.display(),
-                    e
-                );
-                return Ok(());
             }
+            // Silently ignore for non-root (testing mode)
+            debug!(
+                "Failed to create PID file {} (non-root mode, ignoring): {}",
+                pidfile_path.display(),
+                e
+            );
+            return Ok(());
         }
     };
 
@@ -195,14 +193,13 @@ pub async fn write_pidfile(
             // Attempt cleanup on error
             let _ = remove_file(pidfile_path).await;
             return Err(e);
-        } else {
-            debug!(
-                "Failed to write PID to file {} (non-root mode, ignoring): {}",
-                pidfile_path.display(),
-                e
-            );
-            return Ok(());
         }
+        debug!(
+            "Failed to write PID to file {} (non-root mode, ignoring): {}",
+            pidfile_path.display(),
+            e
+        );
+        return Ok(());
     }
 
     // Step 5: Flush to ensure data is written
@@ -216,14 +213,13 @@ pub async fn write_pidfile(
             // Attempt cleanup on error
             let _ = remove_file(pidfile_path).await;
             return Err(e);
-        } else {
-            debug!(
-                "Failed to flush PID file {} (non-root mode, ignoring): {}",
-                pidfile_path.display(),
-                e
-            );
-            return Ok(());
         }
+        debug!(
+            "Failed to flush PID file {} (non-root mode, ignoring): {}",
+            pidfile_path.display(),
+            e
+        );
+        return Ok(());
     }
 
     // Step 6: Sync to disk (matching close() behavior from line 868)
@@ -237,14 +233,13 @@ pub async fn write_pidfile(
             // Attempt cleanup on error
             let _ = remove_file(pidfile_path).await;
             return Err(e);
-        } else {
-            debug!(
-                "Failed to sync PID file {} (non-root mode, ignoring): {}",
-                pidfile_path.display(),
-                e
-            );
-            return Ok(());
         }
+        debug!(
+            "Failed to sync PID file {} (non-root mode, ignoring): {}",
+            pidfile_path.display(),
+            e
+        );
+        return Ok(());
     }
 
     info!("Successfully wrote PID {} to {}", pid, pidfile_path.display());
@@ -308,6 +303,7 @@ pub async fn remove_pidfile(pidfile_path: &Path) {
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
     use tokio::fs as tokio_fs;
 
