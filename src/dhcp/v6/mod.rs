@@ -123,42 +123,32 @@
 //!
 //! Provides socket management, packet reception, DUID generation, and address allocation:
 //!
-//! - `Dhcp6Server`: Main server structure managing DHCPv6 socket and server state
-//! - `dhcp6_init()`: Server initialization, socket creation, and port 547 binding
-//! - `dhcp6_packet()`: Main packet reception entry point and dispatcher
-//! - `make_duid()`: DUID generation (DUID-LLT, DUID-LL, DUID-EN)
-//! - `address6_allocate()`: IPv6 address allocation from configured ranges
-//! - `get_client_mac()`: MAC address retrieval via ICMPv6 neighbor discovery
+//! - `Dhcpv6Server`: Main server structure managing DHCPv6 socket and server state
+//! - `Dhcpv6ServerConfig`: Server configuration structure with DUID, prefix, lifetimes, etc.
 //!
 //! ### 2. **`protocol`** - RFC 3315 Protocol Implementation (`rfc3315.c` translation)
 //!
 //! Handles DHCPv6 message parsing, validation, and response construction:
 //!
-//! - `Dhcp6Message`: DHCPv6 message structure with parsing and serialization
-//! - `dhcp6_reply()`: Main message dispatcher routing by message type
-//! - `dhcp6_maybe_relay()`: Relay agent message processing (RELAY-FORW/RELAY-REPL)
-//! - `dhcp6_no_relay()`: Direct client message processing (SOLICIT, REQUEST, etc.)
-//! - `check_ia()`: Identity Association validation and address extraction
-//! - `build_ia()`: IA response construction with allocated addresses and timers
+//! - `Dhcpv6Message`: DHCPv6 message structure with parsing and serialization methods
+//! - `Dhcpv6MessageType`: Enum of all DHCPv6 message types (SOLICIT, ADVERTISE, etc.)
 //!
 //! ### 3. **`state_machine`** - Type-Safe State Transitions
 //!
 //! Enforces DHCPv6 protocol state machine correctness at compile time:
 //!
-//! - `Dhcp6State`: Enum representing all valid DHCPv6 message states
-//! - State variants: `Solicit`, `Advertise`, `Request`, `Reply`, `Renew`, `Rebind`,
-//!   `Confirm`, `Release`, `Decline`, `InformationRequest`
+//! - `Dhcpv6State`: Enum representing all valid DHCPv6 client states
+//! - `Dhcpv6StateMachine`: State machine structure with transition logic
+//! - State variants: `Init`, `Soliciting`, `Requesting`, `Bound`, `Renewing`, `Rebinding`, `Released`
 //! - Type-safe transition validation preventing invalid state changes
 //!
 //! ### 4. **`options`** - DHCPv6 Option Parsing (TLV Format)
 //!
 //! Handles DHCPv6 option encoding/decoding with comprehensive validation:
 //!
-//! - `Dhcp6Option`: Enum covering all DHCPv6 option types
-//! - `Duid`: DUID types (DUID-LLT, DUID-EN, DUID-LL) with parsing/serialization
-//! - `ClientId`, `ServerId`: Client and server identification options
-//! - `IaNa`, `IaTa`, `IaAddr`: Identity Association options
-//! - `StatusCode`: DHCPv6 status code option for error reporting
+//! - `Dhcpv6Option`: Enum covering all DHCPv6 option types with variants for each option
+//! - `Dhcpv6OptionCode`: Enum of all DHCPv6 option codes
+//! - Option variants include: `ClientId`, `ServerId`, `IaNa`, `IaTa`, `IaAddr`, `StatusCode`, etc.
 //!
 //! ## Integration Points
 //!
@@ -218,62 +208,57 @@
 //!
 //! ### Basic DHCPv6 Server Initialization
 //!
-//! ```rust
-//! use crate::dhcp::v6::{Dhcp6Server, dhcp6_init};
-//! use crate::config::ConfigOptions;
+//! ```rust,ignore
+//! use dnsmasq::dhcp::v6::{Dhcpv6Server, Dhcpv6ServerConfig};
+//! use std::net::Ipv6Addr;
+//!
+//! // Create DHCPv6 server configuration
+//! let config = Dhcpv6ServerConfig {
+//!     server_duid: vec![0x00, 0x01, 0x00, 0x01], // DUID-LLT example
+//!     prefix: "2001:db8::".parse().unwrap(),
+//!     prefix_len: 64,
+//!     dns_servers: vec!["2001:4860:4860::8888".parse().unwrap()],
+//!     domain_list: vec!["example.com".to_string()],
+//!     preferred_lifetime: 3600,
+//!     valid_lifetime: 7200,
+//!     rapid_commit: false,
+//! };
 //!
 //! // Initialize DHCPv6 server with configuration
-//! let config = ConfigOptions::from_file("/etc/dnsmasq.conf")?;
-//! let mut server = Dhcp6Server::new(config.dhcp6_config)?;
-//!
-//! // Bind to DHCPv6 port (547) and generate server DUID
-//! server.bind("::".parse()?)?;
-//! let duid = server.make_duid()?;
+//! let server = Dhcpv6Server::new(config);
 //! ```
 //!
 //! ### Processing Incoming DHCPv6 Packets
 //!
-//! ```rust
-//! use crate::dhcp::v6::{Dhcp6Server, dhcp6_packet};
-//! use std::net::SocketAddr;
+//! ```rust,ignore
+//! use dnsmasq::dhcp::v6::{Dhcpv6Message, Dhcpv6MessageType};
 //!
-//! // Main packet processing loop (called from async event loop)
-//! async fn handle_dhcp6_packet(
-//!     server: &mut Dhcp6Server,
-//!     packet: &[u8],
-//!     src: SocketAddr
-//! ) -> Result<(), Error> {
-//!     // Dispatch packet to protocol handler
-//!     let response = server.handle_packet(packet, src).await?;
-//!     
-//!     // Send response if generated (not all messages require responses)
-//!     if let Some(reply) = response {
-//!         server.send_reply(&reply, src).await?;
-//!     }
-//!     
-//!     Ok(())
+//! // Parse incoming DHCPv6 packet
+//! let packet_data = &[1, 0x12, 0x34, 0x56]; // SOLICIT message example
+//! let message = Dhcpv6Message::parse(packet_data).expect("Failed to parse message");
+//!
+//! // Check message type
+//! if message.msg_type == Dhcpv6MessageType::Solicit as u8 {
+//!     println!("Received SOLICIT message");
+//!     // Process SOLICIT and generate ADVERTISE response
 //! }
 //! ```
 //!
-//! ### Address Allocation Example
+//! ### State Machine Usage Example
 //!
-//! ```rust
-//! use crate::dhcp::v6::Dhcp6Server;
-//! use std::net::Ipv6Addr;
+//! ```rust,ignore
+//! use dnsmasq::dhcp::v6::{Dhcpv6StateMachine, Dhcpv6MessageType};
 //!
-//! // Allocate IPv6 address from configured ranges
-//! let client_duid = parse_duid_from_packet(&packet)?;
-//! let iaid = extract_iaid_from_ia(&ia_na_option)?;
+//! // Create new state machine
+//! let mut state_machine = Dhcpv6StateMachine::new();
 //!
-//! let allocated_addr = server.allocate_address6(
-//!     &client_duid,
-//!     iaid,
-//!     &interface_addr,
-//!     preferred_lifetime,
-//!     valid_lifetime
-//! )?;
+//! // Process incoming SOLICIT message
+//! let response_type = state_machine.process_message(Dhcpv6MessageType::Solicit);
 //!
-//! println!("Allocated {} to client {}", allocated_addr, client_duid);
+//! // State machine indicates we should send ADVERTISE
+//! if let Some(Dhcpv6MessageType::Advertise) = response_type {
+//!     println!("Sending ADVERTISE response");
+//! }
 //! ```
 //!
 //! ## Compilation Feature Flags
@@ -375,18 +360,13 @@ pub mod state_machine;
 
 // Re-export key types for external use when DHCPv6 is enabled
 #[cfg(feature = "dhcp-v6")]
-pub use server::{Dhcp6Server, dhcp6_init, dhcp6_packet, make_duid, address6_allocate, get_client_mac};
+pub use server::{Dhcpv6Server, Dhcpv6ServerConfig};
 
 #[cfg(feature = "dhcp-v6")]
-pub use protocol::{Dhcp6Message, dhcp6_reply, dhcp6_maybe_relay, dhcp6_no_relay, check_ia, build_ia};
+pub use protocol::{Dhcpv6Message, Dhcpv6MessageType};
 
 #[cfg(feature = "dhcp-v6")]
-pub use state_machine::{
-    Dhcp6State, Solicit, Advertise, Request, Reply, Renew, Rebind, 
-    Confirm, Release, Decline, InformationRequest
-};
+pub use state_machine::{Dhcpv6State, Dhcpv6StateMachine};
 
 #[cfg(feature = "dhcp-v6")]
-pub use options::{
-    Dhcp6Option, Duid, ClientId, ServerId, IaNa, IaTa, IaAddr, StatusCode
-};
+pub use options::{Dhcpv6Option, Dhcpv6OptionCode};
