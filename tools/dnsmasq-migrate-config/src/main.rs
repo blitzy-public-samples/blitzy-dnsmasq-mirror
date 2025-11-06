@@ -251,7 +251,7 @@ impl ConfigContext {
     fn record_option(&mut self, option: &str, file: &str, line: usize) {
         self.options
             .entry(option.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((file.to_string(), line));
     }
 }
@@ -328,8 +328,7 @@ impl Validators {
         }
         
         // Allow wildcard domains
-        if value.starts_with('*') {
-            let rest = &value[1..];
+        if let Some(rest) = value.strip_prefix('*') {
             if !rest.is_empty() && !rest.starts_with('.') {
                 bail!("Wildcard domain must be followed by a dot: {}", value);
             }
@@ -776,7 +775,7 @@ impl<'a> ConfigParser<'a> {
             
             // Extract IP from format like /example.com/8.8.8.8
             let ip_part = if server_part.contains('/') {
-                server_part.split('/').last().unwrap_or("")
+                server_part.split('/').next_back().unwrap_or("")
             } else {
                 server_part
             };
@@ -1620,7 +1619,7 @@ impl ReportGenerator {
             "Migration: Ensure all required Cargo features are enabled when building the Rust version".to_string()
         );
         
-        if context.dhcp_ranges.len() > 0 {
+        if !context.dhcp_ranges.is_empty() {
             recommendations.push(
                 "DHCP Migration: Verify that lease file format is compatible (dnsmasq.leases)".to_string()
             );
