@@ -57,6 +57,7 @@
 //! # Example Usage
 //!
 //! ```rust,no_run
+//! use dnsmasq::network::{ArpCache, find_mac};
 //! use std::net::IpAddr;
 //! use std::sync::Arc;
 //! use tokio::sync::RwLock;
@@ -79,11 +80,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use tokio::fs::read_to_string;
+use tokio::sync::RwLock;
 use tokio::task::spawn_blocking;
 
 use crate::constants::DHCP_CHADDR_MAX;
@@ -206,15 +208,6 @@ impl MacAddr {
         }
     }
 
-    /// Convert to string representation (AA:BB:CC:DD:EE:FF).
-    ///
-    /// Equivalent to Display implementation but returns an owned String.
-    pub fn to_string(&self) -> String {
-        format!(
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
-        )
-    }
 }
 
 impl fmt::Display for MacAddr {
@@ -348,6 +341,7 @@ impl ArpCache {
     /// # Example
     ///
     /// ```rust
+    /// use dnsmasq::network::ArpCache;
     /// use std::sync::Arc;
     /// use tokio::sync::RwLock;
     ///
@@ -408,10 +402,11 @@ impl ArpCache {
         // Look up entry
         if let Some(record) = self.arps.get(&ip) {
             // Only accept positive entries unless in lazy mode
-            if record.status != ArpStatus::Empty || lazy {
-                if record.hwlen != 0 && record.hwlen <= 6 {
-                    return Ok(MacAddr::from_bytes(&record.hwaddr[..6]));
-                }
+            if (record.status != ArpStatus::Empty || lazy)
+                && record.hwlen != 0
+                && record.hwlen <= 6
+            {
+                return Ok(MacAddr::from_bytes(&record.hwaddr[..6]));
             }
         }
 
@@ -621,6 +616,7 @@ impl Default for ArpCache {
 /// # Example
 ///
 /// ```rust,no_run
+/// use dnsmasq::network::{ArpCache, find_mac};
 /// use std::net::IpAddr;
 /// use std::sync::Arc;
 /// use tokio::sync::RwLock;
@@ -645,7 +641,7 @@ pub async fn find_mac(
     cache: Arc<RwLock<ArpCache>>,
     ip: IpAddr,
 ) -> Result<Option<MacAddr>, ArpError> {
-    let mut cache = cache.write().unwrap();
+    let mut cache = cache.write().await;
     cache.find_mac(ip, false).await
 }
 

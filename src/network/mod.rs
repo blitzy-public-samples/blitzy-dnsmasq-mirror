@@ -8,12 +8,17 @@
 //! Network layer module
 //!
 //! This module provides network interface management, socket operations,
-//! and packet I/O functionality for the dnsmasq-rs daemon.
+//! packet I/O functionality, and ARP cache querying for the dnsmasq-rs daemon.
 
+pub mod arp;
 pub mod interface;
 pub mod packet;
 
 // Re-export commonly used types for convenience
+pub use arp::{
+    find_mac, AddressFamily, ArpCache, ArpError, ArpRecord, ArpStatus, MacAddr,
+};
+
 pub use interface::{
     enumerate_interfaces, index_to_name, name_to_index, watch_interfaces, InterfaceError,
     InterfaceEvent, InterfaceFlags, InterfaceRecord, is_interface_allowed,
