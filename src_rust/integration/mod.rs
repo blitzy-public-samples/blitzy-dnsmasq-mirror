@@ -86,7 +86,7 @@
 //! ```
 
 use crate::Result;
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt::{self, Debug, Formatter};
 
 //
 // ============================================================================
@@ -870,6 +870,8 @@ impl IntegrationManagerBuilder {
     /// # }
     /// ```
     pub fn build(self) -> Result<IntegrationManager> {
+        // mut is needed when any integration feature is enabled
+        #[allow(unused_mut)]
         let mut manager = IntegrationManager::new();
 
         // Initialize D-Bus if enabled

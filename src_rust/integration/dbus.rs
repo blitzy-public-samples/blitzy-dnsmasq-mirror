@@ -20,12 +20,14 @@
 //!
 //! This module replicates functionality from src/dbus.c
 
+use std::fmt;
+
 /// D-Bus control interface
 pub struct DbusInterface {}
 
 impl DbusInterface {
     /// Create new D-Bus interface
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self, DbusError> {
         Ok(Self {})
     }
 }
@@ -34,4 +36,35 @@ impl Default for DbusInterface {
     fn default() -> Self {
         Self {}
     }
+}
+
+/// D-Bus integration error type
+#[derive(Debug)]
+pub enum DbusError {
+    /// Connection failed
+    ConnectionFailed(String),
+    /// Method call failed
+    MethodCallFailed(String),
+    /// Invalid argument
+    InvalidArgument(String),
+    /// Generic error
+    Other(String),
+}
+
+impl fmt::Display for DbusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DbusError::ConnectionFailed(msg) => write!(f, "D-Bus connection failed: {}", msg),
+            DbusError::MethodCallFailed(msg) => write!(f, "D-Bus method call failed: {}", msg),
+            DbusError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
+            DbusError::Other(msg) => write!(f, "D-Bus error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for DbusError {}
+
+/// Initialize D-Bus integration
+pub fn init_dbus() -> Result<DbusInterface, DbusError> {
+    DbusInterface::new()
 }

@@ -136,7 +136,7 @@
 //! use std::time::Duration;
 //!
 //! // Use resource limits
-//! let forward_table = Vec::with_capacity(FTABSIZ);
+//! let forward_table: Vec<u8> = Vec::with_capacity(FTABSIZ);
 //!
 //! // Use timeout values
 //! let query_timeout = TIMEOUT;

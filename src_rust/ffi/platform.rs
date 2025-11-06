@@ -35,10 +35,12 @@
 //! 5. Bounds checking for all buffer operations
 
 use nix::unistd::close;
+use std::ffi::{CStr, CString};
 use std::fmt::Debug;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::mem::size_of;
 use std::os::unix::io::RawFd;
+use std::ptr;
 
 // ============================================================================
 // Linux Netlink Module
@@ -899,7 +901,8 @@ pub mod conntrack {
         ///
         /// Caller must ensure pointer is valid for the lifetime required by conntrack.
         pub unsafe fn set_attr(&mut self, attr: u32, value: *const libc::c_void) {
-            nfct_set_attr(self.entry, attr, value);
+            // SAFETY: entry is valid, value pointer validated by caller
+            unsafe { nfct_set_attr(self.entry, attr, value); }
         }
 
         /// Get 32-bit attribute
@@ -1224,7 +1227,7 @@ pub mod ubus {
         let path_cstr = path.and_then(|p| CString::new(p).ok());
         let path_ptr = path_cstr
             .as_ref()
-            .map(|c| c.as_ptr())
+            .map(|c: &CString| c.as_ptr())
             .unwrap_or(ptr::null());
 
         // SAFETY: FFI call with optional C string
@@ -1281,7 +1284,7 @@ pub mod ubus {
         let path_cstr = path.and_then(|p| CString::new(p).ok());
         let path_ptr = path_cstr
             .as_ref()
-            .map(|c| c.as_ptr())
+            .map(|c: &CString| c.as_ptr())
             .unwrap_or(ptr::null());
 
         // SAFETY: ctx is valid, path is optional C string

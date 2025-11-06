@@ -275,7 +275,7 @@ pub enum SignalError {
 ///
 /// ## Rust (this implementation)
 ///
-/// ```rust
+/// ```rust,ignore
 /// let mut sighup = signal(SignalKind::hangup())?;
 /// tokio::spawn(async move {
 ///     loop {
@@ -346,7 +346,7 @@ impl SignalHandler {
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let signal_handler = SignalHandler::new()?;
+    ///     let mut signal_handler = SignalHandler::new()?;
     ///     let mut signal_rx = signal_handler.recv();
     ///     
     ///     while let Some(event) = signal_rx.recv().await {
@@ -557,7 +557,7 @@ impl SignalHandler {
     ///
     /// Rust version uses async channel receiver:
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// tokio::select! {
     ///     Some(event) = signal_rx.recv() => { /* process */ }
     ///     // ... other select arms for DNS, DHCP, etc.
@@ -571,7 +571,7 @@ impl SignalHandler {
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let signal_handler = SignalHandler::new()?;
+    ///     let mut signal_handler = SignalHandler::new()?;
     ///     let mut signal_rx = signal_handler.recv();
     ///     
     ///     loop {

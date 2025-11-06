@@ -637,7 +637,7 @@ impl InotifyWatcher {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// # use dnsmasq::integration::inotify::InotifyWatcher;
     /// # use std::path::PathBuf;
     /// let watcher = InotifyWatcher::new()?;

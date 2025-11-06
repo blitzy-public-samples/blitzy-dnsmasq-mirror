@@ -156,13 +156,12 @@
 //!
 //! ```rust,no_run
 //! use dnsmasq::config::{parse_config_file, validate_config, default_config};
-//! use std::path::Path;
 //!
 //! // Start with defaults
 //! let mut config = default_config();
 //!
 //! // Override with config file if present
-//! if let Ok(file_config) = parse_config_file(Path::new("/etc/dnsmasq.conf")) {
+//! if let Ok(file_config) = parse_config_file("/etc/dnsmasq.conf") {
 //!     config = file_config;
 //! }
 //!
@@ -207,13 +206,9 @@
 //!             interface: None,
 //!         })
 //!         .collect(),
-//!         // ... other DNS config fields
-//!         # local_domains: vec![],
-//!         # ftab_size: 150,
-//!         # query_port: 0,
-//!         # edns_packet_max: 4096,
+//!         ..Default::default()
 //!     })
-//!     .build()?;
+//!     .build();
 //!
 //! validate_config(&config)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
