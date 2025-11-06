@@ -146,9 +146,10 @@
 //!
 //! Handles DHCPv6 option encoding/decoding with comprehensive validation:
 //!
-//! - `Dhcpv6Option`: Enum covering all DHCPv6 option types with variants for each option
-//! - `Dhcpv6OptionCode`: Enum of all DHCPv6 option codes
+//! - `Dhcp6Option`: Enum covering all DHCPv6 option types with variants for each option
+//! - Option code constants: `OPTION6_CLIENT_ID`, `OPTION6_SERVER_ID`, etc.
 //! - Option variants include: `ClientId`, `ServerId`, `IaNa`, `IaTa`, `IaAddr`, `StatusCode`, etc.
+//! - `Duid`: Enum for DHCP Unique Identifiers (DUID-LLT, DUID-EN, DUID-LL)
 //!
 //! ## Integration Points
 //!
@@ -369,4 +370,6 @@ pub use protocol::{Dhcpv6Message, Dhcpv6MessageType};
 pub use state_machine::{Dhcpv6State, Dhcpv6StateMachine};
 
 #[cfg(feature = "dhcp-v6")]
-pub use options::{Dhcpv6Option, Dhcpv6OptionCode};
+pub use options::{
+    Dhcp6Option, Dhcp6OptionError, Duid, IaAddr, IaNa, IaPd, IaPrefix, IaTa, StatusCode,
+};

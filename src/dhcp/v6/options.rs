@@ -429,7 +429,12 @@ impl fmt::Display for Duid {
                 )
             }
             Duid::LL { hw_type, ll_addr } => {
-                write!(f, "DUID-LL(hw_type={}, addr={})", hw_type, hex_string(ll_addr))
+                write!(
+                    f,
+                    "DUID-LL(hw_type={}, addr={})",
+                    hw_type,
+                    hex_string(ll_addr)
+                )
             }
         }
     }
@@ -628,7 +633,7 @@ impl IaAddr {
         }
 
         let mut cursor = Cursor::new(data);
-        
+
         // Read 16-byte IPv6 address
         let mut addr_bytes = [0u8; 16];
         cursor.read_exact(&mut addr_bytes)?;
@@ -805,7 +810,7 @@ impl IaPrefix {
         let mut cursor = Cursor::new(data);
         let preferred_lifetime = cursor.read_u32::<BigEndian>()?;
         let valid_lifetime = cursor.read_u32::<BigEndian>()?;
-        
+
         let mut prefix_length_byte = [0u8; 1];
         cursor.read_exact(&mut prefix_length_byte)?;
         let prefix_length = prefix_length_byte[0];
@@ -1121,7 +1126,7 @@ impl Dhcp6Option {
             }
             OPTION6_ORO => {
                 // ORO is list of 2-byte option codes
-                if length % 2 != 0 {
+                if !length.is_multiple_of(2) {
                     return Err(Dhcp6OptionError::InvalidLength {
                         expected: length + 1,
                         actual: length,
@@ -1203,7 +1208,7 @@ impl Dhcp6Option {
             }
             OPTION6_DNS_SERVER => {
                 // DNS servers are list of 16-byte IPv6 addresses
-                if length % 16 != 0 {
+                if !length.is_multiple_of(16) {
                     return Err(Dhcp6OptionError::InvalidLength {
                         expected: (length / 16 + 1) * 16,
                         actual: length,
@@ -1446,12 +1451,12 @@ mod tests {
         if let Duid::LLT {
             hw_type,
             time,
-            ll_addr,
+            ref ll_addr,
         } = duid
         {
             assert_eq!(hw_type, 1);
             assert_eq!(time, 12345678);
-            assert_eq!(ll_addr, vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+            assert_eq!(ll_addr, &vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         }
 
         // Test round-trip
