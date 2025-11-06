@@ -11,9 +11,19 @@
 //! and packet I/O functionality for the dnsmasq-rs daemon.
 
 pub mod interface;
+pub mod packet;
 
 // Re-export commonly used types for convenience
 pub use interface::{
     enumerate_interfaces, index_to_name, name_to_index, watch_interfaces, InterfaceError,
     InterfaceEvent, InterfaceFlags, InterfaceRecord, is_interface_allowed,
 };
+
+pub use packet::{
+    cursor_from_buffer, cursor_from_buffer_mut, EdnsConfig, PacketBuffer, PacketBufferPool,
+    PacketError, PacketReader, PacketWriter, Protocol, DNS_PACKET_SIZE, EDNS_PKTSZ,
+    MAX_DOMAIN_NAME,
+};
+
+#[cfg(feature = "dnssec")]
+pub use packet::DnssecBuffers;

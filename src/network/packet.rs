@@ -35,7 +35,9 @@
 //! ```
 //! Becomes:
 //! ```rust
-//! let buffer = PacketBuffer::new(Protocol::Dns { edns_size: config.edns_pktsz });
+//! use dnsmasq::network::packet::{PacketBuffer, Protocol};
+//! let edns_size = 1232; // Example EDNS size
+//! let buffer = PacketBuffer::new(Protocol::Dns { edns_size });
 //! // Automatically calculates: edns_size + MAX_DOMAIN_NAME + RRFIXEDSZ
 //! ```
 //!
@@ -48,6 +50,8 @@
 //! ```
 //! Becomes:
 //! ```rust
+//! #[cfg(feature = "dnssec")]
+//! use dnsmasq::network::packet::DnssecBuffers;
 //! #[cfg(feature = "dnssec")]
 //! let dnssec_buffers = DnssecBuffers::new();  // Encapsulated allocation
 //! ```
@@ -127,7 +131,7 @@
 //! use tokio::net::UdpSocket;
 //!
 //! # async fn example() -> std::io::Result<()> {
-//! let socket = UdpSocket::bind("0.0.0.0:53").await?;
+//! let mut socket = UdpSocket::bind("0.0.0.0:53").await?;
 //! let mut buffer = vec![0u8; 512];
 //!
 //! // Read packet using trait
@@ -471,6 +475,7 @@ impl PacketBuffer {
     /// use dnsmasq::network::packet::{PacketBuffer, Protocol};
     ///
     /// let mut buffer = PacketBuffer::new(Protocol::Dhcp);
+    /// buffer.resize(512);  // Ensure buffer has space
     /// let data = buffer.as_mut_slice();
     /// // Write packet data
     /// data[0] = 0x01; // BOOTREQUEST
@@ -1019,14 +1024,14 @@ mod tests {
     fn test_edns_config_new() {
         let config = EdnsConfig::new(4096);
         assert_eq!(config.max_udp_size, 4096);
-        assert_eq!(config.do_bit, false);
+        assert!(!config.do_bit);
     }
 
     #[test]
     fn test_edns_config_with_dnssec() {
         let config = EdnsConfig::with_dnssec(4096);
         assert_eq!(config.max_udp_size, 4096);
-        assert_eq!(config.do_bit, true);
+        assert!(config.do_bit);
     }
 
     #[test]
