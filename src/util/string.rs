@@ -116,6 +116,7 @@ pub enum IdnError {
 /// Validates that hostname conforms to strict hostname syntax: first label must contain
 /// only alphanumeric characters, hyphens, and underscores (hyphens/underscores not at start).
 /// This is stricter than general domain names and is used for DHCP hostnames.
+/// Validates that no empty labels exist (consecutive dots, leading/trailing dots).
 ///
 /// # Arguments
 ///
@@ -140,26 +141,39 @@ pub enum IdnError {
 ///
 /// RFC 952 (hostname syntax), RFC 1123 (allows leading digit)
 pub fn is_legal_hostname(name: &str) -> bool {
-    if name.is_empty() {
+    if name.is_empty() || name.len() > MAX_DOMAIN_NAME_LENGTH {
         return false;
     }
     
-    let mut is_first = true;
+    // Check for leading or trailing dots
+    if name.starts_with('.') || name.ends_with('.') {
+        return false;
+    }
     
-    for c in name.chars() {
-        match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' => {
-                is_first = false;
-            }
-            '-' | '_' if !is_first => {
-                // Hyphens and underscores allowed after first character
-            }
-            '.' => {
-                // Dot ends first label - if we reached here, first label is valid
-                return true;
-            }
-            _ => {
-                return false;
+    // Check each label
+    for label in name.split('.') {
+        if label.is_empty() {
+            // Empty label (consecutive dots)
+            return false;
+        }
+        
+        if label.len() > MAX_LABEL_LENGTH {
+            return false;
+        }
+        
+        // Check first label has valid hostname characters
+        let mut is_first_char = true;
+        for c in label.chars() {
+            match c {
+                'A'..='Z' | 'a'..='z' | '0'..='9' => {
+                    is_first_char = false;
+                }
+                '-' | '_' if !is_first_char => {
+                    // Hyphens and underscores allowed after first character
+                }
+                _ => {
+                    return false;
+                }
             }
         }
     }
@@ -477,7 +491,7 @@ pub fn parse_hex_string(
         input.split(sep).collect()
     } else {
         // No separator - split into 2-character chunks
-        if input.len() % 2 != 0 {
+        if !input.len().is_multiple_of(2) {
             return Err(ParseError::InvalidFormat(
                 "Hex string without separator must have even length".to_string(),
             ));
