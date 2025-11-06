@@ -780,33 +780,45 @@ pub fn verify_rsa_signature(
         });
     }
     
-    // Select verification algorithm based on hash function
-    let verification_algorithm: &dyn signature::VerificationAlgorithm = match algo {
-        DnssecAlgorithm::RsaMd5 => {
-            // MD5 is not supported by ring (deprecated)
-            return Err(DnssecError::CryptoError {
-                message: "RSAMD5 (algorithm 1) is deprecated and not supported".to_string(),
-            });
-        }
-        DnssecAlgorithm::RsaSha1 => &signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
-        DnssecAlgorithm::RsaSha256 => &signature::RSA_PKCS1_2048_8192_SHA256,
-        DnssecAlgorithm::RsaSha512 => &signature::RSA_PKCS1_2048_8192_SHA512,
-        _ => {
-            return Err(DnssecError::CryptoError {
-                message: format!("Algorithm {} is not RSA", algo),
-            });
-        }
-    };
-    
     // Create public key from components
     let public_key = signature::RsaPublicKeyComponents { n: modulus, e: exponent };
     
-    // Verify signature
-    public_key
-        .verify(verification_algorithm, data, signature)
-        .map_err(|_| DnssecError::CryptoError {
-            message: format!("RSA signature verification failed for algorithm {}", algo),
-        })
+    // Verify signature with algorithm-specific verification
+    // ring requires concrete types, not trait objects, so we match and call verify directly
+    match algo {
+        DnssecAlgorithm::RsaMd5 => {
+            // MD5 is not supported by ring (deprecated)
+            Err(DnssecError::CryptoError {
+                message: "RSAMD5 (algorithm 1) is deprecated and not supported".to_string(),
+            })
+        }
+        DnssecAlgorithm::RsaSha1 => {
+            public_key
+                .verify(&signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY, data, signature)
+                .map_err(|_| DnssecError::CryptoError {
+                    message: format!("RSA-SHA1 signature verification failed for algorithm {}", algo),
+                })
+        }
+        DnssecAlgorithm::RsaSha256 => {
+            public_key
+                .verify(&signature::RSA_PKCS1_2048_8192_SHA256, data, signature)
+                .map_err(|_| DnssecError::CryptoError {
+                    message: format!("RSA-SHA256 signature verification failed for algorithm {}", algo),
+                })
+        }
+        DnssecAlgorithm::RsaSha512 => {
+            public_key
+                .verify(&signature::RSA_PKCS1_2048_8192_SHA512, data, signature)
+                .map_err(|_| DnssecError::CryptoError {
+                    message: format!("RSA-SHA512 signature verification failed for algorithm {}", algo),
+                })
+        }
+        _ => {
+            Err(DnssecError::CryptoError {
+                message: format!("Algorithm {} is not RSA", algo),
+            })
+        }
+    }
 }
 
 #[cfg(feature = "dnssec")]

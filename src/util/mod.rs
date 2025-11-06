@@ -122,7 +122,7 @@
 //! init_logging(&log_config)?;
 //!
 //! // 2. Initialize cryptographic RNG (for DNS security)
-//! init_rng()?;
+//! init_rng();
 //!
 //! // 3. Proceed with application initialization
 //! # Ok::<(), Box<dyn std::error::Error>>(())
