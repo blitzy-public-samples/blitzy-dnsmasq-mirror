@@ -58,14 +58,14 @@ use super::{
     io_error_to_platform_error,
 };
 use async_trait::async_trait;
+use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::socket::{
-    bind, recvmsg, sendto, setsockopt, socket, sockopt::RcvBuf, AddressFamily, MsgFlags,
-    NetlinkAddr, SockFlag, SockProtocol, SockType, SockaddrLike,
+    bind, sendto, setsockopt, socket, sockopt::RcvBuf, AddressFamily, MsgFlags,
+    NetlinkAddr, SockFlag, SockProtocol, SockType,
 };
 use nix::unistd::close;
 use std::collections::HashMap;
-use std::io::{Error as IoError, ErrorKind};
-use std::mem::size_of;
+use std::io::{Error as IoError};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
@@ -76,15 +76,17 @@ use tokio::task::spawn;
 use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, trace, warn};
 
-// Import netlink message types from netlink-packet-route
-use netlink_packet_route::{
-    AddressMessage, LinkMessage, NeighbourMessage, NetlinkMessage, NetlinkPayload, Nla,
-    RtnlMessage,
-};
+// Import netlink message types from netlink-packet-route and netlink-packet-core
+use netlink_packet_route::address::{AddressHeader, AddressHeaderFlags, AddressMessage, AddressScope};
+use netlink_packet_route::link::LinkMessage;
+use netlink_packet_route::neighbour::{NeighbourFlags, NeighbourHeader, NeighbourMessage, NeighbourState};
+use netlink_packet_route::route::{RouteType, RouteScope};
+use netlink_packet_route::{AddressFamily as RtnlAddressFamily, RouteNetlinkMessage};
+use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NetlinkHeader, NLM_F_REQUEST, NLM_F_DUMP, NLM_F_ACK};
 
 // Netlink constants (not all available in libc/nix)
-const NETLINK_NO_ENOBUFS: i32 = 5;
-const SOL_NETLINK: i32 = 270;
+const _NETLINK_NO_ENOBUFS: i32 = 5;
+const _SOL_NETLINK: i32 = 270;
 
 // Netlink multicast groups (from linux/rtnetlink.h)
 const RTMGRP_IPV4_IFADDR: u32 = 0x10;    // 1 << 4
@@ -93,9 +95,9 @@ const RTMGRP_IPV6_IFADDR: u32 = 0x100;   // 1 << 8
 const RTMGRP_IPV6_ROUTE: u32 = 0x400;    // 1 << 10
 
 // NUD states for neighbor entries (from linux/neighbour.h)
-const NUD_INCOMPLETE: u16 = 0x01;
-const NUD_FAILED: u16 = 0x08;
-const NUD_NOARP: u16 = 0x40;
+const _NUD_INCOMPLETE: u16 = 0x01;
+const _NUD_FAILED: u16 = 0x08;
+const _NUD_NOARP: u16 = 0x40;
 
 /// Linux platform implementation using Netlink
 ///
@@ -251,7 +253,7 @@ impl LinuxPlatform {
     ///
     /// # Returns
     ///
-    /// Vector of `RtnlMessage` responses (e.g., NewLink, NewAddress, NewNeighbour)
+    /// Vector of `RouteNetlinkMessage` responses (e.g., NewLink, NewAddress, NewNeighbour)
     ///
     /// # Errors
     ///
@@ -261,8 +263,8 @@ impl LinuxPlatform {
     /// - Receives NLMSG_ERROR with non-zero error code
     async fn send_netlink_request(
         &self,
-        request_msg: NetlinkMessage<RtnlMessage>,
-    ) -> Result<Vec<RtnlMessage>, PlatformError> {
+        request_msg: NetlinkMessage<RouteNetlinkMessage>,
+    ) -> Result<Vec<RouteNetlinkMessage>, PlatformError> {
         // Serialize the request message to bytes
         let mut buf = vec![0u8; request_msg.buffer_len()];
         request_msg.serialize(&mut buf[..]);
@@ -276,7 +278,7 @@ impl LinuxPlatform {
         // Send request to kernel via netlink socket
         // Replaces C: sendto(daemon->netlinkfd, &req, sizeof(req), 0, ...)
         let dest_addr = NetlinkAddr::new(0, 0); // nl_pid=0 (kernel), nl_groups=0
-        sendto(sock_fd, &buf, &dest_addr, MsgFlags::empty())
+        let bytes_sent = sendto(sock_fd, &buf, &dest_addr, MsgFlags::empty())
             .map_err(|e| {
                 error!("Failed to send netlink request: {}", e);
                 io_error_to_platform_error(
@@ -285,6 +287,7 @@ impl LinuxPlatform {
                     IoError::from(e),
                 )
             })?;
+        debug!("Sent {} bytes to netlink socket (expected {})", bytes_sent, buf.len());
 
         // Receive responses in a blocking task (uses blocking I/O)
         let netlink_pid = self.netlink_pid;
@@ -303,6 +306,65 @@ impl LinuxPlatform {
         Ok(responses)
     }
 
+    /// Wait for data to be available on a non-blocking socket using poll()
+    ///
+    /// This helper function uses poll() to wait for data availability on the socket,
+    /// avoiding busy-wait loops with sleep(). Timeout is 5 seconds.
+    ///
+    /// # Arguments
+    ///
+    /// - `sock_fd`: Raw socket file descriptor
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if data is available, `Err(PlatformError)` on timeout or error
+    fn wait_for_socket_data(sock_fd: RawFd) -> Result<(), PlatformError> {
+        // SAFETY: We're borrowing the fd temporarily for poll(), and the caller guarantees it's valid
+        let borrowed_fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(sock_fd) };
+        let mut poll_fds = [PollFd::new(borrowed_fd, PollFlags::POLLIN)];
+        
+        match poll(&mut poll_fds, 5000u16) { // 5 second timeout (in milliseconds)
+            Ok(n) if n > 0 => {
+                // Check if socket is readable
+                if let Some(revents) = poll_fds[0].revents() {
+                    if revents.contains(PollFlags::POLLIN) {
+                        return Ok(());
+                    }
+                    if revents.contains(PollFlags::POLLERR) {
+                        return Err(PlatformError::new(
+                            PlatformErrorKind::EnumerationFailed,
+                            "Socket error during poll()",
+                        ));
+                    }
+                }
+                Err(PlatformError::new(
+                    PlatformErrorKind::EnumerationFailed,
+                    "poll() returned but socket not readable",
+                ))
+            }
+            Ok(_) => {
+                // Timeout
+                Err(PlatformError::new(
+                    PlatformErrorKind::EnumerationFailed,
+                    "Timeout waiting for netlink response",
+                ))
+            }
+            Err(nix::errno::Errno::EINTR) => {
+                // Interrupted, retry
+                trace!("poll() interrupted (EINTR), retrying");
+                Self::wait_for_socket_data(sock_fd)
+            }
+            Err(e) => {
+                error!("poll() failed: {}", e);
+                Err(io_error_to_platform_error(
+                    PlatformErrorKind::EnumerationFailed,
+                    "poll() failed",
+                    IoError::from(e),
+                ))
+            }
+        }
+    }
+
     /// Receive netlink responses (blocking I/O, called from spawn_blocking)
     ///
     /// Reads all netlink responses until NLMSG_DONE, handling automatic buffer expansion
@@ -316,19 +378,21 @@ impl LinuxPlatform {
     ///
     /// # Returns
     ///
-    /// Vector of `RtnlMessage` responses
+    /// Vector of `RouteNetlinkMessage` responses
     ///
     /// # Errors
     ///
     /// Returns `PlatformError` if receive fails or buffer expansion fails
     fn receive_netlink_responses(
         sock_fd: RawFd,
-        netlink_pid: u32,
-    ) -> Result<Vec<RtnlMessage>, PlatformError> {
+        _netlink_pid: u32,
+    ) -> Result<Vec<RouteNetlinkMessage>, PlatformError> {
+        debug!("Starting to receive netlink responses from fd={}", sock_fd);
         let mut responses = Vec::new();
         let mut buf = vec![0u8; 8192]; // Initial buffer size (C uses iov.iov_len = 100, but we start larger)
 
         loop {
+            trace!("Receive loop iteration, responses so far: {}", responses.len());
             // Prepare iovec for recvmsg()
             let mut iov = [std::io::IoSliceMut::new(&mut buf)];
             
@@ -378,55 +442,62 @@ impl LinuxPlatform {
 
                             // Parse netlink messages from buffer
                             // Replaces C: for (h = (struct nlmsghdr *)iov.iov_base; NLMSG_OK(h, len); h = NLMSG_NEXT(h, len))
+                            // NOTE: A single recvmsg() can return MULTIPLE netlink messages in the buffer
                             let received_bytes = msg_real.bytes;
-                            let parse_result = netlink_packet_core::NetlinkBuffer::new(&buf[..received_bytes]);
+                            let mut offset = 0;
                             
-                            match parse_result {
-                                Ok(nl_buf) => {
-                                    // Parse the netlink message header
-                                    match NetlinkMessage::<RtnlMessage>::deserialize(&buf[..received_bytes]) {
-                                        Ok(nl_msg) => {
-                                            // Filter messages by PID (only accept our PID or 0)
-                                            // Replaces C: if (h->nlmsg_pid != netlink_pid || h->nlmsg_type == NLMSG_ERROR)
-                                            // Note: multicast messages have nlmsg_pid=0, we handle those in monitor_changes()
-                                            
-                                            match nl_msg.payload {
-                                                NetlinkPayload::Done => {
-                                                    // NLMSG_DONE - end of dump
-                                                    debug!("Received NLMSG_DONE, enumeration complete");
-                                                    return Ok(responses);
+                            // Iterate through all messages in the buffer
+                            while offset < received_bytes {
+                                let remaining = &buf[offset..received_bytes];
+                                
+                                // Try to parse one netlink message
+                                match NetlinkMessage::<RouteNetlinkMessage>::deserialize(remaining) {
+                                    Ok(nl_msg) => {
+                                        let msg_len = nl_msg.header.length as usize;
+                                        
+                                        // Filter messages by PID (only accept our PID or 0)
+                                        // Replaces C: if (h->nlmsg_pid != netlink_pid || h->nlmsg_type == NLMSG_ERROR)
+                                        // Note: multicast messages have nlmsg_pid=0, we handle those in monitor_changes()
+                                        
+                                        match nl_msg.payload {
+                                            NetlinkPayload::Done(_) => {
+                                                // NLMSG_DONE - end of dump
+                                                debug!("Received NLMSG_DONE, enumeration complete");
+                                                return Ok(responses);
+                                            }
+                                            NetlinkPayload::Error(err) => {
+                                                // NLMSG_ERROR
+                                                if let Some(code) = err.code {
+                                                    error!("Netlink error: code={}", code);
+                                                    return Err(PlatformError::new(
+                                                        PlatformErrorKind::EnumerationFailed,
+                                                        format!("Netlink returned error: {}", code),
+                                                    ));
                                                 }
-                                                NetlinkPayload::Error(err) => {
-                                                    // NLMSG_ERROR
-                                                    if err.code != 0 {
-                                                        error!("Netlink error: code={}", err.code);
-                                                        return Err(PlatformError::new(
-                                                            PlatformErrorKind::EnumerationFailed,
-                                                            format!("Netlink returned error: {}", err.code),
-                                                        ));
-                                                    }
-                                                    // Error code 0 is ACK, continue
-                                                }
-                                                NetlinkPayload::InnerMessage(rtnl_msg) => {
-                                                    // Valid RTNL message (NewLink, NewAddress, NewNeighbour, etc.)
-                                                    trace!("Received netlink message: {:?}", rtnl_msg);
-                                                    responses.push(rtnl_msg);
-                                                }
-                                                _ => {
-                                                    // Other message types (ignore)
-                                                    debug!("Ignoring unexpected netlink payload type");
-                                                }
+                                                // Error code None (0) is ACK, log and continue
+                                                trace!("Received ACK (NLMSG_ERROR with code=0)");
+                                            }
+                                            NetlinkPayload::InnerMessage(rtnl_msg) => {
+                                                // Valid RTNL message (NewLink, NewAddress, NewNeighbour, etc.)
+                                                trace!("Received netlink message: {:?}", rtnl_msg);
+                                                responses.push(rtnl_msg);
+                                            }
+                                            _ => {
+                                                // Other message types (ignore)
+                                                debug!("Ignoring unexpected netlink payload type");
                                             }
                                         }
-                                        Err(e) => {
-                                            warn!("Failed to deserialize netlink message: {}", e);
-                                            continue;
-                                        }
+                                        
+                                        // Move to next message (NLMSG_NEXT in C)
+                                        // Netlink messages are aligned to 4-byte boundaries
+                                        let aligned_len = (msg_len + 3) & !3;
+                                        offset += aligned_len;
                                     }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to parse netlink buffer: {:?}", e);
-                                    continue;
+                                    Err(e) => {
+                                        warn!("Failed to deserialize netlink message at offset {}: {}", offset, e);
+                                        // Can't continue parsing this buffer, move to next recvmsg
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -444,6 +515,14 @@ impl LinuxPlatform {
                             // Retry on EINTR
                             if e == nix::errno::Errno::EINTR {
                                 debug!("Netlink receive interrupted (EINTR), retrying");
+                                continue;
+                            }
+                            
+                            // Handle EAGAIN/EWOULDBLOCK for non-blocking sockets
+                            // Use poll() to wait for data availability
+                            if e == nix::errno::Errno::EAGAIN || e == nix::errno::Errno::EWOULDBLOCK {
+                                trace!("Netlink receive would block (EAGAIN/EWOULDBLOCK), waiting for data with poll()");
+                                Self::wait_for_socket_data(sock_fd)?;
                                 continue;
                             }
 
@@ -467,6 +546,14 @@ impl LinuxPlatform {
                             PlatformErrorKind::EnumerationFailed,
                             "Kernel netlink buffer overflow",
                         ));
+                    }
+                    
+                    // Handle EAGAIN/EWOULDBLOCK for non-blocking sockets
+                    // Since we use SOCK_NONBLOCK, we need to wait for data using poll()
+                    if e == nix::errno::Errno::EAGAIN || e == nix::errno::Errno::EWOULDBLOCK {
+                        trace!("Netlink socket would block (EAGAIN/EWOULDBLOCK), waiting for data with poll()");
+                        Self::wait_for_socket_data(sock_fd)?;
+                        continue;
                     }
 
                     error!("Failed to peek netlink message: {}", e);
@@ -540,13 +627,15 @@ impl Platform for LinuxPlatform {
 
         // Step 1: Enumerate interfaces via RTM_GETLINK
         // Build RTM_GETLINK request (replaces C struct construction at lines 414-435)
+        // C code sets: NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST | NLM_F_ACK
+        // NLM_F_DUMP = NLM_F_ROOT | NLM_F_MATCH, so we need NLM_F_REQUEST | NLM_F_DUMP | NLM_F_ACK
         let link_request = {
             let mut msg = NetlinkMessage::new(
                 NetlinkHeader::default(),
-                NetlinkPayload::InnerMessage(RtnlMessage::GetLink(LinkMessage::default())),
+                NetlinkPayload::InnerMessage(RouteNetlinkMessage::GetLink(LinkMessage::default())),
             );
-            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP;
-            msg.header.sequence = 1;
+            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP | NLM_F_ACK;
+            msg.header.sequence_number = 1;
             msg.finalize();
             msg
         };
@@ -556,7 +645,7 @@ impl Platform for LinuxPlatform {
         // Build map of interface metadata: index -> (name, flags)
         let mut interface_map: HashMap<u32, (String, u32)> = HashMap::new();
         for rtnl_msg in link_responses {
-            if let RtnlMessage::NewLink(link_msg) = rtnl_msg {
+            if let RouteNetlinkMessage::NewLink(link_msg) = rtnl_msg {
                 let if_index = link_msg.header.index;
                 let if_flags = link_msg.header.flags;
                 
@@ -575,28 +664,31 @@ impl Platform for LinuxPlatform {
                     .unwrap_or_else(|| format!("if{}", if_index));
 
                 trace!("Found interface: {} (index={}, flags=0x{:x})", if_name, if_index, if_flags);
-                interface_map.insert(if_index, (if_name, if_flags));
+                // Store flags as u32 (LinkFlags.bits())
+                interface_map.insert(if_index, (if_name, if_flags.bits()));
             }
         }
 
         // Step 2: Enumerate IPv4 addresses via RTM_GETADDR (AF_INET)
         // Replaces C: iface_enumerate(AF_INET, ...) at lines 405-503
         let addr4_request = {
+            // Create AddressMessage (non-exhaustive, use Default)
+            let mut addr_msg = AddressMessage::default();
+            addr_msg.header = AddressHeader {
+                family: RtnlAddressFamily::Inet,
+                prefix_len: 0,
+                flags: AddressHeaderFlags::empty(),
+                scope: AddressScope::Universe,
+                index: 0,
+            };
+            addr_msg.attributes = vec![];
+            
             let mut msg = NetlinkMessage::new(
                 NetlinkHeader::default(),
-                NetlinkPayload::InnerMessage(RtnlMessage::GetAddress(AddressMessage {
-                    header: netlink_packet_route::AddressHeader {
-                        family: AF_INET as u8,
-                        prefix_len: 0,
-                        flags: 0,
-                        scope: 0,
-                        index: 0,
-                    },
-                    attributes: vec![],
-                })),
+                NetlinkPayload::InnerMessage(RouteNetlinkMessage::GetAddress(addr_msg)),
             );
-            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP;
-            msg.header.sequence = 2;
+            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP | NLM_F_ACK;
+            msg.header.sequence_number = 2;
             msg.finalize();
             msg
         };
@@ -606,7 +698,7 @@ impl Platform for LinuxPlatform {
         let mut interfaces = Vec::new();
 
         for rtnl_msg in addr4_responses {
-            if let RtnlMessage::NewAddress(addr_msg) = rtnl_msg {
+            if let RouteNetlinkMessage::NewAddress(addr_msg) = rtnl_msg {
                 let if_index = addr_msg.header.index;
                 let prefix_len = addr_msg.header.prefix_len;
 
@@ -617,11 +709,11 @@ impl Platform for LinuxPlatform {
                     .iter()
                     .find_map(|nla| {
                         match nla {
-                            netlink_packet_route::address::AddressAttribute::Local(bytes) if bytes.len() == 4 => {
-                                Some(IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])))
+                            netlink_packet_route::address::AddressAttribute::Local(addr) if addr.is_ipv4() => {
+                                Some(*addr)
                             }
-                            netlink_packet_route::address::AddressAttribute::Address(bytes) if bytes.len() == 4 => {
-                                Some(IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])))
+                            netlink_packet_route::address::AddressAttribute::Address(addr) if addr.is_ipv4() => {
+                                Some(*addr)
                             }
                             _ => None,
                         }
@@ -657,21 +749,23 @@ impl Platform for LinuxPlatform {
         // Step 3: Enumerate IPv6 addresses via RTM_GETADDR (AF_INET6)
         // Replaces C: iface_enumerate(AF_INET6, ...) at lines 504-546
         let addr6_request = {
+            // Create AddressMessage (non-exhaustive, use Default)
+            let mut addr_msg = AddressMessage::default();
+            addr_msg.header = AddressHeader {
+                family: RtnlAddressFamily::Inet6,
+                prefix_len: 0,
+                flags: AddressHeaderFlags::empty(),
+                scope: AddressScope::Universe,
+                index: 0,
+            };
+            addr_msg.attributes = vec![];
+            
             let mut msg = NetlinkMessage::new(
                 NetlinkHeader::default(),
-                NetlinkPayload::InnerMessage(RtnlMessage::GetAddress(AddressMessage {
-                    header: netlink_packet_route::AddressHeader {
-                        family: AF_INET6 as u8,
-                        prefix_len: 0,
-                        flags: 0,
-                        scope: 0,
-                        index: 0,
-                    },
-                    attributes: vec![],
-                })),
+                NetlinkPayload::InnerMessage(RouteNetlinkMessage::GetAddress(addr_msg)),
             );
-            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP;
-            msg.header.sequence = 3;
+            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP | NLM_F_ACK;
+            msg.header.sequence_number = 3;
             msg.finalize();
             msg
         };
@@ -679,7 +773,7 @@ impl Platform for LinuxPlatform {
         let addr6_responses = self.send_netlink_request(addr6_request).await?;
 
         for rtnl_msg in addr6_responses {
-            if let RtnlMessage::NewAddress(addr_msg) = rtnl_msg {
+            if let RouteNetlinkMessage::NewAddress(addr_msg) = rtnl_msg {
                 let if_index = addr_msg.header.index;
                 let prefix_len = addr_msg.header.prefix_len;
 
@@ -690,15 +784,11 @@ impl Platform for LinuxPlatform {
                     .iter()
                     .find_map(|nla| {
                         match nla {
-                            netlink_packet_route::address::AddressAttribute::Local(bytes) if bytes.len() == 16 => {
-                                let mut octets = [0u8; 16];
-                                octets.copy_from_slice(bytes);
-                                Some(IpAddr::V6(Ipv6Addr::from(octets)))
+                            netlink_packet_route::address::AddressAttribute::Local(addr) if addr.is_ipv6() => {
+                                Some(*addr)
                             }
-                            netlink_packet_route::address::AddressAttribute::Address(bytes) if bytes.len() == 16 => {
-                                let mut octets = [0u8; 16];
-                                octets.copy_from_slice(bytes);
-                                Some(IpAddr::V6(Ipv6Addr::from(octets)))
+                            netlink_packet_route::address::AddressAttribute::Address(addr) if addr.is_ipv6() => {
+                                Some(*addr)
                             }
                             _ => None,
                         }
@@ -937,21 +1027,23 @@ impl Platform for LinuxPlatform {
         // Build RTM_GETNEIGH request
         // Replaces C: req.nlh.nlmsg_type = RTM_GETNEIGH; req.g.rtgen_family = AF_UNSPEC
         let neigh_request = {
+            // Create NeighbourMessage (non-exhaustive, use Default)
+            let mut neigh_msg = NeighbourMessage::default();
+            neigh_msg.header = NeighbourHeader {
+                family: RtnlAddressFamily::Unspec,
+                ifindex: 0,
+                state: NeighbourState::None,
+                flags: NeighbourFlags::empty(),
+                kind: RouteType::Unspec,
+            };
+            neigh_msg.attributes = vec![];
+            
             let mut msg = NetlinkMessage::new(
                 NetlinkHeader::default(),
-                NetlinkPayload::InnerMessage(RtnlMessage::GetNeighbour(NeighbourMessage {
-                    header: netlink_packet_route::NeighbourHeader {
-                        family: 0, // AF_UNSPEC
-                        ifindex: 0,
-                        state: 0,
-                        flags: 0,
-                        ntype: 0,
-                    },
-                    attributes: vec![],
-                })),
+                NetlinkPayload::InnerMessage(RouteNetlinkMessage::GetNeighbour(neigh_msg)),
             );
-            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP;
-            msg.header.sequence = 4;
+            msg.header.flags = NLM_F_REQUEST | NLM_F_DUMP | NLM_F_ACK;
+            msg.header.sequence_number = 4;
             msg.finalize();
             msg
         };
@@ -968,31 +1060,34 @@ impl Platform for LinuxPlatform {
         let mut arp_entries = Vec::new();
 
         for rtnl_msg in neigh_responses {
-            if let RtnlMessage::NewNeighbour(neigh_msg) = rtnl_msg {
+            if let RouteNetlinkMessage::NewNeighbour(neigh_msg) = rtnl_msg {
                 let family = neigh_msg.header.family;
                 let if_index = neigh_msg.header.ifindex;
                 let state = neigh_msg.header.state;
 
                 // Filter out incomplete, failed, and no-ARP entries
                 // Replaces C: if (!(neigh->ndm_state & (NUD_NOARP | NUD_INCOMPLETE | NUD_FAILED)) && inaddr && mac)
-                if (state & NUD_INCOMPLETE) != 0 || (state & NUD_FAILED) != 0 || (state & NUD_NOARP) != 0 {
+                if state == NeighbourState::Incomplete 
+                    || state == NeighbourState::Failed 
+                    || state == NeighbourState::Noarp {
                     continue;
                 }
 
                 // Extract IP address from NDA_DST attribute
+                // NeighbourAttribute::Destination contains NeighbourAddress enum
                 let ip_addr = neigh_msg
                     .attributes
                     .iter()
                     .find_map(|nla| {
-                        if let netlink_packet_route::neighbour::NeighbourAttribute::Destination(bytes) = nla {
-                            if family == AF_INET as u8 && bytes.len() == 4 {
-                                Some(IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])))
-                            } else if family == AF_INET6 as u8 && bytes.len() == 16 {
-                                let mut octets = [0u8; 16];
-                                octets.copy_from_slice(bytes);
-                                Some(IpAddr::V6(Ipv6Addr::from(octets)))
-                            } else {
-                                None
+                        if let netlink_packet_route::neighbour::NeighbourAttribute::Destination(addr) = nla {
+                            match addr {
+                                netlink_packet_route::neighbour::NeighbourAddress::Inet(ipv4) => {
+                                    Some(IpAddr::V4(*ipv4))
+                                }
+                                netlink_packet_route::neighbour::NeighbourAddress::Inet6(ipv6) => {
+                                    Some(IpAddr::V6(*ipv6))
+                                }
+                                _ => None,
                             }
                         } else {
                             None
@@ -1021,10 +1116,12 @@ impl Platform for LinuxPlatform {
                     trace!("Found ARP entry: {} -> {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                            addr, hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
                     
+                    // Convert AddressFamily to i32 (via u8)
+                    let family_u8: u8 = family.into();
                     arp_entries.push(ArpEntry {
                         addr,
                         hwaddr,
-                        family: family as i32,
+                        family: family_u8 as i32,
                         if_index,
                         hwaddr_len: 6,
                     });
@@ -1062,8 +1159,6 @@ impl LinuxPlatform {
     ) {
         let mut buf = vec![0u8; 8192];
         let mut event_state: u32 = 0; // Deduplication flags (replaces C's enum async_states)
-        const STATE_NEWADDR: u32 = 1 << 0;
-        const STATE_NEWROUTE: u32 = 1 << 1;
 
         loop {
             // Wait for socket to become readable
@@ -1097,7 +1192,7 @@ impl LinuxPlatform {
                         let received_bytes = msg.bytes;
                         
                         // Parse netlink messages
-                        if let Ok(nl_msg) = NetlinkMessage::<RtnlMessage>::deserialize(&buf[..received_bytes]) {
+                        if let Ok(nl_msg) = NetlinkMessage::<RouteNetlinkMessage>::deserialize(&buf[..received_bytes]) {
                             match nl_msg.payload {
                                 NetlinkPayload::InnerMessage(rtnl_msg) => {
                                     // Classify and send events
@@ -1109,8 +1204,8 @@ impl LinuxPlatform {
                                     ).await;
                                 }
                                 NetlinkPayload::Error(err) => {
-                                    if err.code != 0 {
-                                        error!("Netlink multicast error: code={}", err.code);
+                                    if let Some(code) = err.code {
+                                        error!("Netlink multicast error: code={}", code);
                                     }
                                 }
                                 _ => {}
@@ -1154,7 +1249,7 @@ impl LinuxPlatform {
     /// - `tx`: Channel sender for events
     /// - `event_state`: Deduplication state flags
     async fn classify_and_send_event(
-        rtnl_msg: RtnlMessage,
+        rtnl_msg: RouteNetlinkMessage,
         tx: &Sender<NetworkChange>,
         event_state: &mut u32,
     ) {
@@ -1163,7 +1258,7 @@ impl LinuxPlatform {
 
         match rtnl_msg {
             // RTM_NEWLINK: Interface added
-            RtnlMessage::NewLink(link_msg) => {
+            RouteNetlinkMessage::NewLink(link_msg) => {
                 let if_index = link_msg.header.index;
                 let if_name = link_msg
                     .attributes
@@ -1185,7 +1280,7 @@ impl LinuxPlatform {
             }
 
             // RTM_DELLINK: Interface removed
-            RtnlMessage::DelLink(link_msg) => {
+            RouteNetlinkMessage::DelLink(link_msg) => {
                 let if_index = link_msg.header.index;
                 let if_name = link_msg
                     .attributes
@@ -1207,7 +1302,7 @@ impl LinuxPlatform {
             }
 
             // RTM_NEWADDR or RTM_DELADDR: Address added/removed
-            RtnlMessage::NewAddress(addr_msg) | RtnlMessage::DelAddress(addr_msg) => {
+            RouteNetlinkMessage::NewAddress(ref addr_msg) | RouteNetlinkMessage::DelAddress(ref addr_msg) => {
                 // Deduplicate: only send one NEWADDR event per batch
                 // Replaces C: if ((state & STATE_NEWADDR)==0) at line 822
                 if (*event_state & STATE_NEWADDR) != 0 {
@@ -1216,7 +1311,7 @@ impl LinuxPlatform {
 
                 let if_index = addr_msg.header.index;
                 let prefix_len = addr_msg.header.prefix_len;
-                let is_add = matches!(rtnl_msg, RtnlMessage::NewAddress(_));
+                let is_add = matches!(rtnl_msg, RouteNetlinkMessage::NewAddress(_));
 
                 // Extract IP address
                 let ip_addr = addr_msg
@@ -1224,27 +1319,11 @@ impl LinuxPlatform {
                     .iter()
                     .find_map(|nla| {
                         match nla {
-                            netlink_packet_route::address::AddressAttribute::Local(bytes) => {
-                                if bytes.len() == 4 {
-                                    Some(IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])))
-                                } else if bytes.len() == 16 {
-                                    let mut octets = [0u8; 16];
-                                    octets.copy_from_slice(bytes);
-                                    Some(IpAddr::V6(Ipv6Addr::from(octets)))
-                                } else {
-                                    None
-                                }
+                            netlink_packet_route::address::AddressAttribute::Local(addr) => {
+                                Some(*addr)
                             }
-                            netlink_packet_route::address::AddressAttribute::Address(bytes) => {
-                                if bytes.len() == 4 {
-                                    Some(IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])))
-                                } else if bytes.len() == 16 {
-                                    let mut octets = [0u8; 16];
-                                    octets.copy_from_slice(bytes);
-                                    Some(IpAddr::V6(Ipv6Addr::from(octets)))
-                                } else {
-                                    None
-                                }
+                            netlink_packet_route::address::AddressAttribute::Address(addr) => {
+                                Some(*addr)
                             }
                             _ => None,
                         }
@@ -1270,7 +1349,7 @@ impl LinuxPlatform {
             }
 
             // RTM_NEWROUTE: Routing table changed
-            RtnlMessage::NewRoute(route_msg) => {
+            RouteNetlinkMessage::NewRoute(route_msg) => {
                 // Deduplicate: only send one NEWROUTE event per batch
                 // Replaces C: if ((state & STATE_NEWROUTE)==0) at line 804
                 if (*event_state & STATE_NEWROUTE) != 0 {
@@ -1283,13 +1362,12 @@ impl LinuxPlatform {
                 let rtm_scope = route_msg.header.scope;
                 let rtm_table = route_msg.header.table;
 
-                const RTN_UNICAST: u8 = 1;
-                const RT_SCOPE_LINK: u8 = 253;
+                // Routing table constants (table field is u8)
                 const RT_TABLE_MAIN: u8 = 254;
                 const RT_TABLE_LOCAL: u8 = 255;
 
-                if rtm_type == RTN_UNICAST
-                    && rtm_scope == RT_SCOPE_LINK
+                if rtm_type == RouteType::Unicast
+                    && rtm_scope == RouteScope::Link
                     && (rtm_table == RT_TABLE_MAIN || rtm_table == RT_TABLE_LOCAL)
                 {
                     debug!("Route changed (unicast link-scope)");
@@ -1315,9 +1393,6 @@ impl Drop for LinuxPlatform {
         debug!("LinuxPlatform dropped, netlink socket closed automatically");
     }
 }
-
-// Helper import for NetlinkHeader (used in message construction)
-use netlink_packet_core::{NetlinkHeader, NLM_F_REQUEST, NLM_F_DUMP};
 
 #[cfg(test)]
 mod tests {
