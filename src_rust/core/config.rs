@@ -65,6 +65,70 @@
 //! - `ETHERSFILE`: System ethers file path
 //! - `DEFLEASE`: Default lease file path (runtime configurable)
 //!
+//! # Feature Flags
+//!
+//! Rust uses Cargo features for conditional compilation, replacing C's `HAVE_*` macros.
+//! Features are defined in Cargo.toml and control which code is compiled.
+//!
+//! ## Default Features (Enabled by Default)
+//!
+//! These features match the C implementation's default build configuration:
+//!
+//! - `dhcp`: DHCPv4 server (HAVE_DHCP)
+//! - `dhcp6`: DHCPv6 server (HAVE_DHCP6, implies dhcp)
+//! - `tftp`: TFTP server (HAVE_TFTP)
+//! - `script`: External script execution (HAVE_SCRIPT)
+//! - `auth`: Authoritative DNS server (HAVE_AUTH)
+//! - `dnssec`: DNSSEC validation (HAVE_DNSSEC)
+//!
+//! ## Optional Features (Disabled by Default)
+//!
+//! These features require external dependencies or are platform-specific:
+//!
+//! - `dbus`: D-Bus control interface (HAVE_DBUS)
+//! - `ubus`: OpenWrt ubus integration (HAVE_UBUS)
+//! - `idn`: Internationalized Domain Names (HAVE_LIBIDN2)
+//! - `lua`: Lua scripting (HAVE_LUASCRIPT, implies script)
+//! - `conntrack`: Linux connection tracking (HAVE_CONNTRACK)
+//! - `ipset`: Linux ipset integration (HAVE_IPSET)
+//! - `nftset`: nftables integration (HAVE_NFTSET)
+//! - `loop-detect`: DNS loop detection (HAVE_LOOP)
+//! - `dump`: PCAP packet dumping (HAVE_DUMPFILE)
+//! - `inotify`: Linux inotify file watching (HAVE_INOTIFY)
+//! - `prometheus-metrics`: Prometheus metrics export
+//!
+//! ## Platform Features (Auto-Detected)
+//!
+//! These are automatically enabled based on target platform:
+//!
+//! - `linux`: Linux-specific code (HAVE_LINUX_NETWORK)
+//! - `bsd`: BSD-specific code (HAVE_BSD_NETWORK)
+//! - `macos`: macOS-specific code
+//! - `solaris`: Solaris-specific code (HAVE_SOLARIS_NETWORK)
+//!
+//! ## Using Features
+//!
+//! Enable/disable features when building:
+//!
+//! ```bash
+//! # Build with default features
+//! cargo build --release
+//!
+//! # Build with minimal features (no defaults)
+//! cargo build --release --no-default-features
+//!
+//! # Build with specific features
+//! cargo build --release --no-default-features --features "dhcp,dhcp6"
+//!
+//! # Build with all features
+//! cargo build --release --all-features
+//! ```
+//!
+//! ## Checking Feature Status at Runtime
+//!
+//! Use the `compile_options()` function to get a string listing enabled features,
+//! matching the C implementation's compile_opts behavior.
+//!
 //! # Examples
 //!
 //! ```rust
@@ -80,6 +144,10 @@
 //!
 //! // Use file paths
 //! let hosts_path = HOSTSFILE;
+//!
+//! // Check compile-time features
+//! let features = dnsmasq::core::config::compile_options();
+//! println!("Compiled with: {}", features);
 //! ```
 
 use std::time::Duration;
@@ -504,6 +572,402 @@ pub const DEFLEASE: u32 = 3600;
 /// RFC 3315 Section 22.4 defines lease time encoding.
 pub const DEFLEASE6: u32 = 3600 * 24;
 
+// =============================================================================
+// Platform-Specific Default File Paths
+// =============================================================================
+
+/// Platform-specific default path for DHCP lease database file
+///
+/// The DHCP lease file stores active lease information persistently across
+/// dnsmasq restarts. File format is line-oriented text containing expiry time,
+/// MAC address, IP address, hostname, and client-id.
+///
+/// # Platform-Specific Paths
+///
+/// - **Linux**: `/var/lib/misc/dnsmasq.leases` (follows FHS for variable state)
+/// - **FreeBSD/OpenBSD/DragonFly/NetBSD**: `/var/db/dnsmasq.leases` (BSD convention for databases)
+/// - **Solaris/illumos**: `/var/cache/dnsmasq.leases` (Solaris filesystem hierarchy)
+/// - **Android**: `/data/misc/dhcp/dnsmasq.leases` (Android writeable storage)
+///
+/// # File Operations
+///
+/// File is atomically rewritten when leases change (unless HAVE_BROKEN_RTC
+/// reduces write frequency on embedded systems with no RTC).
+///
+/// # Runtime Override
+///
+/// Can be overridden with `--dhcp-leasefile=<path>` option.
+///
+/// # Feature Gate
+///
+/// Only used when `dhcp` feature is enabled.
+#[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "dragonfly", target_os = "netbsd"))]
+pub const LEASEFILE: &str = "/var/db/dnsmasq.leases";
+
+/// Platform-specific default path for DHCP lease database file (Solaris/illumos)
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+pub const LEASEFILE: &str = "/var/cache/dnsmasq.leases";
+
+/// Platform-specific default path for DHCP lease database file (Android)
+#[cfg(target_os = "android")]
+pub const LEASEFILE: &str = "/data/misc/dhcp/dnsmasq.leases";
+
+/// Platform-specific default path for DHCP lease database file (Linux and others)
+#[cfg(not(any(
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "solaris",
+    target_os = "illumos",
+    target_os = "android"
+)))]
+pub const LEASEFILE: &str = "/var/lib/misc/dnsmasq.leases";
+
+/// Platform-specific default path for main configuration file
+///
+/// Path to the main dnsmasq configuration file read at startup. Contains
+/// runtime options (one per line or as key=value pairs) equivalent to
+/// command-line arguments.
+///
+/// # Platform-Specific Paths
+///
+/// - **FreeBSD**: `/usr/local/etc/dnsmasq.conf` (ports convention for third-party configs)
+/// - **Other Unix-like**: `/etc/dnsmasq.conf` (standard system configuration directory)
+///
+/// # Configuration
+///
+/// Multiple configuration files can be included with `--conf-dir` option.
+///
+/// # Runtime Override
+///
+/// Can be overridden with `-C` or `--conf-file=<path>` option.
+#[cfg(target_os = "freebsd")]
+pub const CONFFILE: &str = "/usr/local/etc/dnsmasq.conf";
+
+/// Platform-specific default path for main configuration file (non-FreeBSD)
+#[cfg(not(target_os = "freebsd"))]
+pub const CONFFILE: &str = "/etc/dnsmasq.conf";
+
+/// Platform-specific default path for upstream DNS server configuration
+///
+/// Path to resolv.conf file containing upstream DNS server addresses
+/// (nameserver lines). Dnsmasq reads this file to determine which upstream
+/// servers to forward queries to.
+///
+/// # Platform-Specific Paths
+///
+/// - **uClinux embedded**: `/etc/config/resolv.conf` (embedded filesystem convention)
+/// - **Standard Unix-like**: `/etc/resolv.conf` (standard resolver configuration)
+///
+/// # Dynamic Updates
+///
+/// File is monitored for changes (via inotify on Linux or polling on other
+/// platforms) to automatically update upstream servers when network
+/// configuration changes.
+///
+/// # Runtime Override
+///
+/// Can be overridden with `-r` or `--resolv-file=<path>` option.
+#[cfg(target_env = "uclibc")]
+pub const RESOLVFILE: &str = "/etc/config/resolv.conf";
+
+/// Platform-specific default path for upstream DNS server configuration (standard)
+#[cfg(not(target_env = "uclibc"))]
+pub const RESOLVFILE: &str = "/etc/resolv.conf";
+
+/// Platform-specific default path for PID file
+///
+/// Path to PID (process ID) file written after daemon initialization.
+/// Contains dnsmasq's process ID as ASCII decimal number, used by init
+/// scripts and system administrators to send signals.
+///
+/// # Platform-Specific Paths
+///
+/// - **Android**: `/data/dnsmasq.pid` (Android lacks `/var/run`, uses `/data`)
+/// - **Standard Unix-like**: `/var/run/dnsmasq.pid` (standard run-time variable data)
+///
+/// # File Management
+///
+/// File is created after privilege dropping and deleted on clean shutdown.
+///
+/// # Runtime Override
+///
+/// Can be overridden with `-x` or `--pid-file=<path>` option, or disabled
+/// with `--no-pid-file` option.
+#[cfg(target_os = "android")]
+pub const RUNFILE: &str = "/data/dnsmasq.pid";
+
+/// Platform-specific default path for PID file (non-Android)
+#[cfg(not(target_os = "android"))]
+pub const RUNFILE: &str = "/var/run/dnsmasq.pid";
+
+/// Default unprivileged user for privilege dropping (Unix-like systems)
+///
+/// After binding privileged ports (53 for DNS, 67 for DHCP) and performing
+/// other privileged initialization, dnsmasq drops privileges to this user
+/// for security hardening.
+///
+/// # Platform-Specific Values
+///
+/// - **Darwin (macOS)**: `nobody` (macOS convention)
+/// - **Other Unix-like**: `dnsmasq` (dedicated service user)
+///
+/// # Security
+///
+/// Running as unprivileged user limits damage from potential vulnerabilities.
+///
+/// # Runtime Override
+///
+/// Can be overridden with `-u` or `--user=<username>` option.
+///
+/// # Platform Note
+///
+/// Not applicable on Windows (no Unix privilege model).
+#[cfg(target_os = "macos")]
+pub const CHUSER: &str = "nobody";
+
+/// Default unprivileged user for privilege dropping (non-macOS)
+#[cfg(not(target_os = "macos"))]
+pub const CHUSER: &str = "dnsmasq";
+
+/// Default unprivileged group for privilege dropping (Unix-like systems)
+///
+/// Companion to CHUSER; dnsmasq drops group privileges to this group after
+/// initialization. Often set to match CHUSER or a dedicated service group.
+///
+/// # Platform-Specific Values
+///
+/// - **Darwin (macOS)**: `nobody` (macOS convention)
+/// - **Other Unix-like**: `dnsmasq` (dedicated service group)
+///
+/// # Security
+///
+/// Group-based file permissions allow controlled access to configuration,
+/// lease files, and log files.
+///
+/// # Runtime Override
+///
+/// Can be overridden with `-g` or `--group=<groupname>` option.
+#[cfg(target_os = "macos")]
+pub const CHGRP: &str = "nobody";
+
+/// Default unprivileged group for privilege dropping (non-macOS)
+#[cfg(not(target_os = "macos"))]
+pub const CHGRP: &str = "dnsmasq";
+
+// =============================================================================
+// Compile-Time Feature Detection and Reporting
+// =============================================================================
+
+/// Returns a string describing which features were enabled at compile time
+///
+/// This function provides runtime introspection of compile-time feature flags,
+/// matching the C implementation's `compile_opts` static string. The returned
+/// string lists all enabled features and platform capabilities, useful for
+/// version reporting, logging, and debugging.
+///
+/// # Return Value
+///
+/// A space-separated string of feature names. Each feature is either present
+/// (enabled) or prefixed with "no-" (disabled). Examples:
+///
+/// - `"IPv6 GNU-getopt DHCP DHCPv6 TFTP DNSSEC auth loop-detect"`
+/// - `"IPv6 no-DBus DHCP no-DHCPv6 no-TFTP"`
+///
+/// # Feature Categories
+///
+/// - **Platform**: IPv6, GNU-getopt, Linux/BSD/Solaris network backend
+/// - **Core Protocols**: DHCP, DHCPv6, TFTP
+/// - **Security**: DNSSEC, cryptohash, auth
+/// - **Integration**: DBus, UBus, conntrack, ipset, nftset
+/// - **Advanced**: scripts, Lua, loop-detect, inotify, dumpfile
+///
+/// # Usage
+///
+/// ```rust
+/// use dnsmasq::core::config::compile_options;
+///
+/// let opts = compile_options();
+/// println!("dnsmasq compiled with: {}", opts);
+/// // Output: "IPv6 GNU-getopt DHCP DHCPv6 TFTP DNSSEC auth"
+/// ```
+///
+/// # Equivalent C Code
+///
+/// Replaces C's static `compile_opts` string from config.h (lines 1827-1918).
+///
+/// # Note
+///
+/// IPv6 is always enabled in Rust (unlike C which can be built without IPv6).
+/// GNU-style long options are always supported via clap crate.
+pub fn compile_options() -> String {
+    let mut opts = Vec::new();
+
+    // IPv6 is always enabled in Rust (no build configuration to disable it)
+    opts.push("IPv6");
+
+    // GNU getopt is always available (via clap crate)
+    opts.push("GNU-getopt");
+
+    // Platform network backend
+    #[cfg(target_os = "linux")]
+    opts.push("Linux-network");
+
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
+        target_os = "macos"
+    ))]
+    opts.push("BSD-network");
+
+    #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+    opts.push("Solaris-network");
+
+    // D-Bus integration
+    #[cfg(feature = "dbus")]
+    opts.push("DBus");
+    #[cfg(not(feature = "dbus"))]
+    opts.push("no-DBus");
+
+    // OpenWrt ubus integration
+    #[cfg(feature = "ubus")]
+    opts.push("UBus");
+    #[cfg(not(feature = "ubus"))]
+    opts.push("no-UBus");
+
+    // Internationalization
+    // Note: In Rust, we don't use gettext-style i18n by default
+    // Instead, we use structured logging and English messages
+    opts.push("no-i18n");
+
+    // IDN support
+    #[cfg(feature = "idn")]
+    opts.push("IDN2");
+    #[cfg(not(feature = "idn"))]
+    opts.push("no-IDN");
+
+    // DHCP support
+    #[cfg(feature = "dhcp")]
+    {
+        opts.push("DHCP");
+
+        // DHCPv6 support (requires DHCP)
+        #[cfg(feature = "dhcp6")]
+        opts.push("DHCPv6");
+        #[cfg(not(feature = "dhcp6"))]
+        opts.push("no-DHCPv6");
+    }
+    #[cfg(not(feature = "dhcp"))]
+    {
+        opts.push("no-DHCP");
+        opts.push("no-DHCPv6");
+    }
+
+    // Script support
+    #[cfg(feature = "script")]
+    {
+        opts.push("scripts");
+
+        // Lua scripting (requires script)
+        #[cfg(feature = "lua")]
+        opts.push("Lua");
+        #[cfg(not(feature = "lua"))]
+        opts.push("no-Lua");
+    }
+    #[cfg(not(feature = "script"))]
+    {
+        opts.push("no-scripts");
+        opts.push("no-Lua");
+    }
+
+    // TFTP support
+    #[cfg(feature = "tftp")]
+    opts.push("TFTP");
+    #[cfg(not(feature = "tftp"))]
+    opts.push("no-TFTP");
+
+    // Connection tracking
+    #[cfg(feature = "conntrack")]
+    opts.push("conntrack");
+    #[cfg(not(feature = "conntrack"))]
+    opts.push("no-conntrack");
+
+    // ipset integration
+    #[cfg(feature = "ipset")]
+    opts.push("ipset");
+    #[cfg(not(feature = "ipset"))]
+    opts.push("no-ipset");
+
+    // nftables integration
+    #[cfg(feature = "nftset")]
+    opts.push("nftset");
+    #[cfg(not(feature = "nftset"))]
+    opts.push("no-nftset");
+
+    // Authoritative DNS
+    #[cfg(feature = "auth")]
+    opts.push("auth");
+    #[cfg(not(feature = "auth"))]
+    opts.push("no-auth");
+
+    // Cryptographic hash support (for DNSSEC or auth-zone signing)
+    // In Rust, we always have crypto support via ring/rustls when DNSSEC enabled
+    #[cfg(feature = "dnssec")]
+    opts.push("cryptohash");
+    #[cfg(not(feature = "dnssec"))]
+    opts.push("no-cryptohash");
+
+    // DNSSEC validation
+    #[cfg(feature = "dnssec")]
+    opts.push("DNSSEC");
+    #[cfg(not(feature = "dnssec"))]
+    opts.push("no-DNSSEC");
+
+    // DNS loop detection
+    #[cfg(feature = "loop-detect")]
+    opts.push("loop-detect");
+    #[cfg(not(feature = "loop-detect"))]
+    opts.push("no-loop-detect");
+
+    // inotify file watching (Linux only)
+    #[cfg(feature = "inotify")]
+    opts.push("inotify");
+    #[cfg(not(feature = "inotify"))]
+    opts.push("no-inotify");
+
+    // Packet dump support
+    #[cfg(feature = "dump")]
+    opts.push("dumpfile");
+    #[cfg(not(feature = "dump"))]
+    opts.push("no-dumpfile");
+
+    opts.join(" ")
+}
+
+/// Returns the software version string
+///
+/// Convenience function to get the version string programmatically, matching
+/// the C implementation's VERSION macro usage.
+///
+/// # Return Value
+///
+/// The version string constant (e.g., "2.90.0-rust").
+///
+/// # Usage
+///
+/// ```rust
+/// use dnsmasq::core::config::version;
+///
+/// println!("dnsmasq version {}", version());
+/// // Output: "dnsmasq version 2.90.0-rust"
+/// ```
+pub fn version() -> &'static str {
+    VERSION
+}
+
 /// Maximum simultaneous TFTP file transfers (default: 50)
 ///
 /// Limits concurrent TFTP transfers to prevent resource exhaustion. Each TFTP
@@ -656,5 +1120,249 @@ mod tests {
         // Verify TTL constraints
         assert_eq!(TTL_FLOOR_LIMIT, 3600);
         assert!(DNSSEC_MIN_TTL.as_secs() < TTL_FLOOR_LIMIT as u64);
+    }
+
+    #[test]
+    fn test_platform_specific_paths() {
+        // Verify platform-specific paths are defined
+        assert!(!LEASEFILE.is_empty());
+        assert!(!CONFFILE.is_empty());
+        assert!(!RESOLVFILE.is_empty());
+        assert!(!RUNFILE.is_empty());
+
+        // Verify paths are absolute
+        assert!(LEASEFILE.starts_with('/'));
+        assert!(CONFFILE.starts_with('/'));
+        assert!(RESOLVFILE.starts_with('/'));
+        assert!(RUNFILE.starts_with('/'));
+
+        // Platform-specific assertions
+        #[cfg(target_os = "freebsd")]
+        {
+            assert_eq!(LEASEFILE, "/var/db/dnsmasq.leases");
+            assert_eq!(CONFFILE, "/usr/local/etc/dnsmasq.conf");
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(LEASEFILE, "/var/lib/misc/dnsmasq.leases");
+            assert_eq!(CONFFILE, "/etc/dnsmasq.conf");
+            assert_eq!(RUNFILE, "/var/run/dnsmasq.pid");
+        }
+
+        #[cfg(target_os = "android")]
+        {
+            assert_eq!(LEASEFILE, "/data/misc/dhcp/dnsmasq.leases");
+            assert_eq!(RUNFILE, "/data/dnsmasq.pid");
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(CONFFILE, "/etc/dnsmasq.conf");
+        }
+    }
+
+    #[test]
+    fn test_privilege_dropping_constants() {
+        // Verify user/group constants are defined
+        assert!(!CHUSER.is_empty());
+        assert!(!CHGRP.is_empty());
+
+        // Platform-specific assertions
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(CHUSER, "nobody");
+            assert_eq!(CHGRP, "nobody");
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(CHUSER, "dnsmasq");
+            assert_eq!(CHGRP, "dnsmasq");
+        }
+    }
+
+    #[test]
+    fn test_compile_options_function() {
+        // Test compile_options() returns non-empty string
+        let opts = compile_options();
+        assert!(!opts.is_empty());
+
+        // IPv6 and GNU-getopt should always be present
+        assert!(opts.contains("IPv6"));
+        assert!(opts.contains("GNU-getopt"));
+
+        // Platform-specific network backend should be present
+        #[cfg(target_os = "linux")]
+        assert!(opts.contains("Linux-network"));
+
+        #[cfg(any(
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly",
+            target_os = "macos"
+        ))]
+        assert!(opts.contains("BSD-network"));
+
+        #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+        assert!(opts.contains("Solaris-network"));
+
+        // Check default features (should be enabled unless explicitly disabled)
+        #[cfg(feature = "dhcp")]
+        assert!(opts.contains("DHCP"));
+        #[cfg(not(feature = "dhcp"))]
+        assert!(opts.contains("no-DHCP"));
+
+        #[cfg(feature = "dhcp6")]
+        assert!(opts.contains("DHCPv6"));
+        #[cfg(not(feature = "dhcp6"))]
+        assert!(opts.contains("no-DHCPv6"));
+
+        #[cfg(feature = "tftp")]
+        assert!(opts.contains("TFTP"));
+        #[cfg(not(feature = "tftp"))]
+        assert!(opts.contains("no-TFTP"));
+
+        #[cfg(feature = "dnssec")]
+        {
+            assert!(opts.contains("DNSSEC"));
+            assert!(opts.contains("cryptohash"));
+        }
+        #[cfg(not(feature = "dnssec"))]
+        {
+            assert!(opts.contains("no-DNSSEC"));
+            assert!(opts.contains("no-cryptohash"));
+        }
+
+        #[cfg(feature = "auth")]
+        assert!(opts.contains("auth"));
+        #[cfg(not(feature = "auth"))]
+        assert!(opts.contains("no-auth"));
+
+        // Optional features
+        #[cfg(feature = "dbus")]
+        assert!(opts.contains("DBus"));
+        #[cfg(not(feature = "dbus"))]
+        assert!(opts.contains("no-DBus"));
+
+        #[cfg(feature = "lua")]
+        assert!(opts.contains("Lua"));
+        #[cfg(not(feature = "lua"))]
+        assert!(opts.contains("no-Lua"));
+    }
+
+    #[test]
+    fn test_version_function() {
+        // Test version() returns the VERSION constant
+        assert_eq!(version(), VERSION);
+        assert!(!version().is_empty());
+        assert!(version().contains("2.90"));
+    }
+
+    #[test]
+    fn test_compile_options_format() {
+        // Verify compile_options() format is space-separated
+        let opts = compile_options();
+        let parts: Vec<&str> = opts.split_whitespace().collect();
+
+        // Should have multiple components
+        assert!(parts.len() > 5);
+
+        // Should not have empty parts
+        for part in &parts {
+            assert!(!part.is_empty());
+        }
+
+        // Should not have leading/trailing whitespace
+        assert_eq!(opts.trim(), opts);
+    }
+
+    #[test]
+    fn test_all_constants_positive() {
+        // Verify all numeric constants are positive
+        assert!(FTABSIZ > 0);
+        assert!(MAX_PROCS > 0);
+        assert!(TCP_MAX_QUERIES > 0);
+        assert!(TCP_BACKLOG > 0);
+        assert!(EDNS_PKTSZ > 0);
+        assert!(SAFE_PKTSZ > 0);
+        assert!(KEYBLOCK_LEN > 0);
+        assert!(DNSSEC_WORK > 0);
+        assert!(FORWARD_TEST > 0);
+        assert!(SERVERS_LOGGED > 0);
+        assert!(LOCALS_LOGGED > 0);
+        assert!(CACHESIZ > 0);
+        assert!(TTL_FLOOR_LIMIT > 0);
+        assert!(MAXLEASES > 0);
+        assert!(DHCP_PACKET_MAX > 0);
+        assert!(SMALLDNAME > 0);
+        assert!(CNAME_CHAIN > 0);
+        assert!(DEFLEASE > 0);
+        assert!(DEFLEASE6 > 0);
+        assert!(TFTP_MAX_CONNECTIONS > 0);
+    }
+
+    #[test]
+    fn test_all_durations_nonzero() {
+        // Verify all Duration constants are non-zero
+        assert!(CHILD_LIFETIME.as_secs() > 0);
+        assert!(TIMEOUT.as_secs() > 0);
+        assert!(FORWARD_TIME.as_secs() > 0);
+        assert!(UDP_TEST_TIME.as_secs() > 0);
+        assert!(LEASE_RETRY.as_secs() > 0);
+        assert!(PING_WAIT.as_secs() > 0);
+        assert!(PING_CACHE_TIME.as_secs() > 0);
+        assert!(DECLINE_BACKOFF.as_secs() > 0);
+        assert!(DNSSEC_MIN_TTL.as_secs() > 0);
+        assert!(AUTH_TTL.as_secs() > 0);
+        assert!(SOA_REFRESH.as_secs() > 0);
+        assert!(SOA_RETRY.as_secs() > 0);
+        assert!(SOA_EXPIRY.as_secs() > 0);
+    }
+
+    #[test]
+    fn test_packet_size_sanity() {
+        // EDNS0 packet size should be larger than safe packet size
+        assert!(EDNS_PKTSZ > SAFE_PKTSZ);
+
+        // Safe packet size should fit in IPv6 minimum MTU with headers
+        // IPv6 min MTU is 1280, minus 40 IPv6 header, minus 8 UDP header = 1232
+        assert_eq!(SAFE_PKTSZ, 1232);
+
+        // EDNS0 size should be reasonable (4096 is RFC 6891 recommendation)
+        assert_eq!(EDNS_PKTSZ, 4096);
+
+        // DHCP packet max should be much larger than typical packets
+        assert!(DHCP_PACKET_MAX > 1500);
+    }
+
+    #[test]
+    fn test_dhcp_timing_relationships() {
+        // DHCPv6 leases should be longer than DHCPv4 leases
+        assert!(DEFLEASE6 > DEFLEASE);
+
+        // Ping wait should be reasonable (not too long to delay DHCP)
+        assert!(PING_WAIT.as_secs() < 10);
+
+        // Ping cache time should be longer than ping wait
+        assert!(PING_CACHE_TIME.as_secs() > PING_WAIT.as_secs());
+
+        // Decline backoff should be significant
+        assert!(DECLINE_BACKOFF.as_secs() >= 600); // At least 10 minutes
+    }
+
+    #[test]
+    fn test_cname_chain_reasonable() {
+        // CNAME chain should allow some chaining but prevent loops
+        assert!(CNAME_CHAIN >= 5); // Allow reasonable multi-level CNAMEs
+        assert!(CNAME_CHAIN <= 20); // But not infinite
+    }
+
+    #[test]
+    fn test_dnssec_work_prevents_dos() {
+        // DNSSEC work limit should prevent DoS but allow legitimate validation
+        assert!(DNSSEC_WORK >= 20); // Allow complex validation chains
+        assert!(DNSSEC_WORK <= 100); // But prevent excessive work
     }
 }
