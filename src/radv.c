@@ -53,7 +53,7 @@
  * 
  * COMPILE-TIME OPTIONS:
  * - HAVE_DHCP6: Required - entire file conditionally compiled only when DHCPv6 support enabled
- * - HAVE_LINUX_NETWORK: Linux-specific MTU retrieval from /proc/sys/net/ipv6/conf/*/mtu
+ * - HAVE_LINUX_NETWORK: Linux-specific MTU retrieval from /proc/sys/net/ipv6/conf/* /mtu
  * - HAVE_DUMPFILE: Optional packet dumping for debugging
  * - IPV6_TCLASS, IPTOS_CLASS_CS6: Traffic class for router-to-router communication priority
  * 
@@ -504,7 +504,7 @@ void icmp6_packet(time_t now)
  * - May free CONTEXT_OLD contexts that have exceeded valid lifetime
  * - Logs RTR-ADVERT messages per prefix unless OPT_QUIET_RA set
  * - Calls option_filter() which modifies DHOPT_TAGOK flags
- * - May read /proc/sys/net/ipv6/conf/*/mtu on Linux for MTU option
+ * - May read /proc/sys/net/ipv6/conf/* /mtu on Linux for MTU option
  * 
  * THREAD SAFETY:
  * Not thread-safe. Must be called only from main event loop thread.
