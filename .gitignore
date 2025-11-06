@@ -15,6 +15,7 @@ debian/build/
 
 # Rust build artifacts
 /target/
-Cargo.lock
+# Note: Cargo.lock is committed for binary crates (ensures reproducible builds)
+# For library crates, Cargo.lock would be ignored, but dnsmasq is a binary
 **/*.rs.bk
 *.pdb
