@@ -162,7 +162,7 @@ pub use lease::{Lease, LeaseDatabase};
 pub use lease_store::LeaseStore;
 
 // Re-export packet construction utilities
-pub use outpacket::OutPacket;
+pub use outpacket::{OutPacketBuilder, PacketBuildError};
 
 // Re-export common utilities
 pub use common::find_config;
