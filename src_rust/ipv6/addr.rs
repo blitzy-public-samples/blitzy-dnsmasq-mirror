@@ -34,12 +34,12 @@
 //!
 //! # RFCs Implemented
 //!
-//! - **RFC 4193**: Unique Local IPv6 Unicast Addresses (ULA, fd00::/8)
-//! - **RFC 4291**: IPv6 Addressing Architecture (link-local fe80::/10)
+//! - **RFC 4193**: Unique Local IPv6 Unicast Addresses (ULA, `fd00::/8`)
+//! - **RFC 4291**: IPv6 Addressing Architecture (link-local `fe80::/10`)
 //!
 //! # Usage in dnsmasq
 //!
-//! ## DHCPv6 Address Validation (`dhcp::v6`)
+//! ## `DHCPv6` Address Validation (`dhcp::v6`)
 //!
 //! ```rust,ignore
 //! use crate::ipv6::addr::Ipv6AddrExt;
@@ -85,9 +85,9 @@
 //!
 //! # Performance
 //!
-//! - **is_ula()**: Single byte comparison, O(1)
-//! - **is_ula_zero()**: 16 byte comparisons (optimized by compiler), O(1)
-//! - **is_link_local_zero()**: 16 byte comparisons (optimized by compiler), O(1)
+//! - **`is_ula()`**: Single byte comparison, O(1)
+//! - **`is_ula_zero()`**: 16 byte comparisons (optimized by compiler), O(1)
+//! - **`is_link_local_zero()`**: 16 byte comparisons (optimized by compiler), O(1)
 //!
 //! All methods are inlined and typically compile to the same assembly as the C macros.
 
@@ -176,7 +176,7 @@ pub trait Ipv6AddrExt {
     ///
     /// # Usage
     ///
-    /// This is used in DHCPv6 configuration validation to detect when `fd00::` appears as
+    /// This is used in `DHCPv6` configuration validation to detect when `fd00::` appears as
     /// a placeholder or default prefix value, distinguishing it from actual host addresses
     /// within the ULA range.
     ///
@@ -291,6 +291,7 @@ impl Ipv6AddrExt for Ipv6Addr {
 /// assert!(is_ula(&addr));
 /// ```
 #[inline]
+#[must_use]
 pub fn is_ula(addr: &Ipv6Addr) -> bool {
     addr.is_ula()
 }
@@ -309,6 +310,7 @@ pub fn is_ula(addr: &Ipv6Addr) -> bool {
 /// assert!(is_ula_zero(&addr));
 /// ```
 #[inline]
+#[must_use]
 pub fn is_ula_zero(addr: &Ipv6Addr) -> bool {
     addr.is_ula_zero()
 }
@@ -327,6 +329,7 @@ pub fn is_ula_zero(addr: &Ipv6Addr) -> bool {
 /// assert!(is_link_local_zero(&addr));
 /// ```
 #[inline]
+#[must_use]
 pub fn is_link_local_zero(addr: &Ipv6Addr) -> bool {
     addr.is_link_local_zero()
 }
