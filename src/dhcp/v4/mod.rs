@@ -34,7 +34,7 @@ pub mod server;
 pub mod state_machine;
 
 // Re-export key types for external use
-pub use options::Dhcpv4Option;
+pub use options::DhcpOption;
 pub use protocol::{Dhcpv4Message, Dhcpv4MessageType};
 pub use server::Dhcpv4Server;
 pub use state_machine::{Dhcpv4State, Dhcpv4StateMachine};
