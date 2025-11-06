@@ -445,7 +445,7 @@ impl ListenerManager {
     /// # use std::net::SocketAddr;
     /// # async fn example(manager: &ListenerManager, addr: SocketAddr) {
     /// if let Some(listener) = manager.find_listener(&addr).await {
-    ///     println!("Found listener on {}", listener.addr);
+    ///     println!("Found listener socket: {:?}", listener.local_addr());
     /// }
     /// # }
     /// ```
@@ -1061,16 +1061,17 @@ pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
     #[cfg(unix)]
     {
         use nix::sys::socket::{socket, AddressFamily, SockFlag, SockType, SockProtocol};
+        use std::os::fd::IntoRawFd;
         
         let fd = socket(
             AddressFamily::Inet6,
             SockType::Raw,
             SockFlag::empty(),
-            SockProtocol::Icmpv6,
+            SockProtocol::IcmpV6,
         )
         .map_err(|e| SocketError::CreationFailed(std::io::Error::from_raw_os_error(e as i32)))?;
         
-        Ok(fd)
+        Ok(fd.into_raw_fd())
     }
     
     #[cfg(not(unix))]

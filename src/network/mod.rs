@@ -13,10 +13,18 @@
 pub mod arp;
 pub mod interface;
 pub mod packet;
+pub mod socket;
 
 // Re-export commonly used types for convenience
 pub use arp::{
     find_mac, AddressFamily, ArpCache, ArpError, ArpRecord, ArpStatus, MacAddr,
+};
+
+pub use socket::{
+    bind_local, bind_to_interface, bind_wildcard, create_bound_listeners, create_dhcp_socket,
+    create_icmpv6_socket, create_random_source_socket, create_tcp_listener, extract_packet_info,
+    ListenerManager, PacketInfo, Protocol as SocketProtocol,
+    RandomSocketPool, SocketError, SocketListener, TcpSocketListener,
 };
 
 pub use interface::{
