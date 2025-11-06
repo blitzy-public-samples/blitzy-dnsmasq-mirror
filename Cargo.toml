@@ -198,6 +198,16 @@ rustls = { version = "0.23", optional = true }
 # - Features: derive (derive macros for auto-implementation)
 serde = { version = "1.0", features = ["derive"] }
 
+# serde_json: JSON serialization/deserialization
+# - Usage: JSON logging format in logging/structured.rs
+# - Provides: json! macro, to_writer, Value types
+serde_json = "1.0"
+
+# chrono: Date and time handling
+# - Usage: Timestamp formatting in logging/structured.rs
+# - Provides: DateTime, Local, Utc, formatting capabilities
+chrono = { version = "0.4", features = ["serde"] }
+
 # toml: TOML parser for alternative configuration format
 # - Optional: Allows modern TOML config alongside legacy dnsmasq.conf
 # - Usage: Optional alternative to traditional config parser
