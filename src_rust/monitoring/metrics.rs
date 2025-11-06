@@ -79,16 +79,12 @@
 //! - `prometheus` crate: <https://docs.rs/prometheus/>
 
 use crate::monitoring::types::MetricId;
-use prometheus::{
-    core::{Atomic, GenericCounter},
-    register_int_counter, register_int_counter_vec, Encoder, IntCounter, IntCounterVec, Registry,
-    TextEncoder,
-};
+use prometheus::{Encoder, IntCounter, Registry, TextEncoder};
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt::{self, Debug, Display};
 use std::result::Result as StdResult;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::RwLock;
 use tracing::{debug, error, trace, warn};
 
 /// Type alias for Results from metrics operations
@@ -637,7 +633,9 @@ impl MetricsCollector {
         let mut buffer = Vec::new();
         encoder.encode(&metric_families, &mut buffer).map_err(|e| {
             error!("Failed to encode metrics: {}", e);
-            MetricsError::EncodingFailed { source: e }
+            MetricsError::EncodingFailed {
+                source: std::io::Error::new(std::io::ErrorKind::Other, e)
+            }
         })?;
 
         let prometheus_text = String::from_utf8(buffer).map_err(|e| {
@@ -688,7 +686,7 @@ impl MetricsCollector {
             }
         })?;
 
-        for (metric_id, counter) in counters.iter() {
+        for (metric_id, _counter) in counters.iter() {
             // Prometheus counters don't have a reset() method by design
             // We'd need to re-register counters, which is complex
             // For now, document that reset requires recreation
