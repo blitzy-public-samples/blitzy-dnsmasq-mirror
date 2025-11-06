@@ -90,15 +90,13 @@
 
 use std::fmt::{self, Debug, Display};
 use std::io::Error as IoError;
-use std::option::Option;
 use std::result::Result;
 use std::sync::Arc;
 
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
-use nix::sys::signal::Signal;
 use nix::unistd::getpid;
 
 use tracing::{debug, error, info, warn};
@@ -202,7 +200,9 @@ pub enum SignalError {
     /// underlying `std::io::Error` with signal type context.
     #[error("Failed to register signal handler for {signal_type}: {source}")]
     SignalRegistrationFailed {
+        /// Type of signal that failed to register (e.g., "SIGHUP", "SIGTERM")
         signal_type: &'static str,
+        /// Underlying I/O error from signal registration
         #[source]
         source: IoError,
     },
@@ -227,7 +227,10 @@ pub enum SignalError {
     /// Occurs when signal number is invalid for platform or signal is not
     /// supported by tokio (e.g., SIGKILL, SIGSTOP which cannot be caught).
     #[error("Invalid or unsupported signal: {signal_name}")]
-    InvalidSignal { signal_name: String },
+    InvalidSignal {
+        /// Name of the invalid signal (e.g., "SIGKILL", "SIGSTOP")
+        signal_name: String
+    },
 
     /// Generic I/O error during signal handling operations
     ///
