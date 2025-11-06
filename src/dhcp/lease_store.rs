@@ -105,7 +105,7 @@ use tracing::warn;
 
 use crate::constants::LEASE_RETRY_INTERVAL_SECS;
 use crate::types::addresses::AllAddr;
-use crate::types::errors::DnsmasqError;
+use crate::types::errors::{DhcpError, DnsmasqError};
 use crate::util::time::monotonic_time;
 
 /// Lease entry representing a single DHCP lease (DHCPv4 or DHCPv6).
@@ -248,14 +248,22 @@ impl LeaseDatabase {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DnsmasqError> {
         let path = path.as_ref();
         let file = File::open(path).map_err(|e| {
-            DnsmasqError::Io(e)
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: format!("Failed to open lease file: {}", path.display()),
+                source: Some(e),
+            })
         })?;
         
         let reader = BufReader::new(file);
         let mut database = LeaseDatabase::new();
 
         for (line_num, line_result) in reader.lines().enumerate() {
-            let line = line_result.map_err(|e| DnsmasqError::Io(e))?;
+            let line = line_result.map_err(|e| {
+                DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                    message: "Failed to read line from lease file".to_string(),
+                    source: Some(e),
+                })
+            })?;
             
             // Skip empty lines and comments
             let trimmed = line.trim();
@@ -314,32 +322,77 @@ impl LeaseDatabase {
         })?;
 
         // Create temporary file in the same directory
-        let mut temp_file = NamedTempFile::new_in(dir).map_err(|e| DnsmasqError::Io(e))?;
+        let mut temp_file = NamedTempFile::new_in(dir).map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: "Failed to create temporary lease file".to_string(),
+                source: Some(e),
+            })
+        })?;
 
         // Write DUID first if present (DHCPv6)
         if let Some(ref duid) = self.duid {
-            write!(temp_file, "duid ")?;
+            write!(temp_file, "duid ").map_err(|e| {
+                DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                    message: "Failed to write DUID to lease file".to_string(),
+                    source: Some(e),
+                })
+            })?;
             for (i, byte) in duid.duid_bytes.iter().enumerate() {
                 if i > 0 {
-                    write!(temp_file, ":")?;
+                    write!(temp_file, ":").map_err(|e| {
+                        DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                            message: "Failed to write DUID separator to lease file".to_string(),
+                            source: Some(e),
+                        })
+                    })?;
                 }
-                write!(temp_file, "{:02x}", byte)?;
+                write!(temp_file, "{:02x}", byte).map_err(|e| {
+                    DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                        message: "Failed to write DUID byte to lease file".to_string(),
+                        source: Some(e),
+                    })
+                })?;
             }
-            writeln!(temp_file)?;
+            writeln!(temp_file).map_err(|e| {
+                DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                    message: "Failed to write DUID newline to lease file".to_string(),
+                    source: Some(e),
+                })
+            })?;
         }
 
         // Write all leases
         for lease in &self.leases {
             let formatted = LeaseStore::format_lease_line(lease);
-            writeln!(temp_file, "{}", formatted)?;
+            writeln!(temp_file, "{}", formatted).map_err(|e| {
+                DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                    message: "Failed to write lease to file".to_string(),
+                    source: Some(e),
+                })
+            })?;
         }
 
         // Ensure data is written to disk
-        temp_file.flush().map_err(|e| DnsmasqError::Io(e))?;
-        temp_file.as_file().sync_all().map_err(|e| DnsmasqError::Io(e))?;
+        temp_file.flush().map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: "Failed to flush lease file".to_string(),
+                source: Some(e),
+            })
+        })?;
+        temp_file.as_file().sync_all().map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: "Failed to sync lease file to disk".to_string(),
+                source: Some(e),
+            })
+        })?;
 
         // Atomically rename temporary file to target file
-        temp_file.persist(path).map_err(|e| DnsmasqError::Io(e.error))?;
+        temp_file.persist(path).map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: format!("Failed to persist lease file to: {}", path.display()),
+                source: Some(e.error),
+            })
+        })?;
 
         Ok(())
     }
@@ -352,7 +405,7 @@ impl Default for LeaseDatabase {
 }
 
 /// Result of parsing a single line from the lease file.
-enum ParsedLine {
+pub enum ParsedLine {
     /// A lease entry (DHCPv4 or DHCPv6).
     Lease(LeaseEntry),
     
@@ -399,16 +452,18 @@ impl LeaseStore {
         let parts: Vec<&str> = line.split_whitespace().collect();
         
         if parts.is_empty() {
-            return Err(DnsmasqError::Parse(crate::types::errors::ParseError {
+            return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
                 message: "Empty line".to_string(),
+                source: None,
             }));
         }
 
         // Check if this is a DUID line
         if parts[0] == "duid" {
             if parts.len() < 2 {
-                return Err(DnsmasqError::Parse(crate::types::errors::ParseError {
+                return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
                     message: "DUID line missing hex data".to_string(),
+                    source: None,
                 }));
             }
             
@@ -418,25 +473,25 @@ impl LeaseStore {
 
         // Parse lease line (requires at least 5 fields)
         if parts.len() < 5 {
-            return Err(DnsmasqError::Parse(crate::types::errors::ParseError {
+            return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
                 message: format!("Lease line has only {} fields, expected at least 5", parts.len()),
+                source: None,
             }));
         }
 
         // Parse expiry timestamp or duration
         let expiry: u64 = parts[0].parse().map_err(|_| {
-            DnsmasqError::Parse(crate::types::errors::ParseError {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
                 message: format!("Invalid expiry value: {}", parts[0]),
+                source: None,
             })
         })?;
 
-        // Parse hardware address (may have hardware type prefix)
-        let hardware_address = parse_hardware_address(parts[1])?;
-
-        // Parse IP address to determine if this is v4 or v6
+        // Parse IP address first to determine if this is v4 or v6
         let address = IpAddr::from_str(parts[2]).map_err(|_| {
-            DnsmasqError::Parse(crate::types::errors::ParseError {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
                 message: format!("Invalid IP address: {}", parts[2]),
+                source: None,
             })
         })?;
 
@@ -454,9 +509,11 @@ impl LeaseStore {
             Some(parse_hex_with_colons(parts[4])?)
         };
 
-        // For DHCPv6, check if hardware_address field is actually IAID
-        let (iaid, is_temporary_address) = if address.is_ipv6() {
-            // In DHCPv6 format, the second field is [T]<iaid> not hardware address
+        // Parse second field differently based on IP version
+        // For DHCPv4: parts[1] is hardware address (MAC)
+        // For DHCPv6: parts[1] is [T]<iaid>
+        let (hardware_address, iaid, is_temporary_address) = if address.is_ipv6() {
+            // DHCPv6 format: second field is [T]<iaid>
             let iaid_str = parts[1];
             let (is_ta, iaid_num_str) = if iaid_str.starts_with('T') {
                 (true, &iaid_str[1..])
@@ -465,14 +522,17 @@ impl LeaseStore {
             };
             
             let iaid_value = iaid_num_str.parse::<u32>().map_err(|_| {
-                DnsmasqError::Parse(crate::types::errors::ParseError {
+                DnsmasqError::Dhcp(DhcpError::DatabaseError {
                     message: format!("Invalid IAID value: {}", iaid_num_str),
+                    source: None,
                 })
             })?;
             
-            (Some(iaid_value), is_ta)
+            (vec![], Some(iaid_value), is_ta)
         } else {
-            (None, false)
+            // DHCPv4 format: second field is hardware address
+            let hw_addr = parse_hardware_address(parts[1])?;
+            (hw_addr, None, false)
         };
 
         Ok(ParsedLine::Lease(LeaseEntry {
@@ -590,13 +650,23 @@ impl LeaseStore {
     /// Returns error if file cannot be read or contains malformed data.
     pub async fn read_leases<P: AsRef<Path>>(path: P) -> Result<LeaseDatabase, DnsmasqError> {
         let path = path.as_ref();
-        let file = tokio::fs::File::open(path).await.map_err(|e| DnsmasqError::Io(e))?;
+        let file = tokio::fs::File::open(path).await.map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: format!("Failed to open lease file: {}", path.display()),
+                source: Some(e),
+            })
+        })?;
         let reader = tokio::io::BufReader::new(file);
         let mut lines = reader.lines();
         let mut database = LeaseDatabase::new();
 
         let mut line_num = 0;
-        while let Some(line) = lines.next_line().await.map_err(|e| DnsmasqError::Io(e))? {
+        while let Some(line) = lines.next_line().await.map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: "Failed to read line from lease file".to_string(),
+                source: Some(e),
+            })
+        })? {
             line_num += 1;
             
             // Skip empty lines and comments
@@ -853,8 +923,9 @@ fn parse_hex_with_colons(s: &str) -> Result<Vec<u8>, DnsmasqError> {
 
     for part in parts {
         let byte = u8::from_str_radix(part, 16).map_err(|_| {
-            DnsmasqError::Parse(crate::types::errors::ParseError {
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
                 message: format!("Invalid hex byte: {}", part),
+                source: None,
             })
         })?;
         bytes.push(byte);

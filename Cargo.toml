@@ -128,6 +128,9 @@ tokio-stream = "0.1"
 # Random number generation for DNS IDs and port randomization
 rand = "0.8"
 
+# Atomic file operations for lease database persistence
+tempfile = "3.12"
+
 # Feature-gated dependencies (optional)
 # DNSSEC cryptography - replaces nettle + hogweed + gmp
 ring = { version = "0.17", optional = true }
