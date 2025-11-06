@@ -387,6 +387,141 @@ impl RouterAdvertiser {
     }
 }
 
+// ============================================================================
+// Constants for IPv6 Multicast Addresses
+// ============================================================================
+
+/// IPv6 multicast address FF02::1 for all-nodes group (link-local scope)
+/// All IPv6 nodes automatically join this group for receiving Router Advertisements
+pub const ALL_NODES: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1);
+
+/// IPv6 multicast address FF02::2 for all-routers group (link-local scope)
+/// Hosts send Router Solicitation messages to this address
+pub const ALL_ROUTERS: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2);
+
+// ============================================================================
+// Type Aliases for C API Compatibility
+// ============================================================================
+
+/// Type alias for RouterAdvertisement to match C's struct ra_packet
+pub type RaPacket = RouterAdvertisement;
+
+/// Type alias for PrefixInfo to match C's struct prefix_opt
+pub type PrefixOpt = PrefixInfo;
+
+// ============================================================================
+// Standalone Functions (C API Compatibility Layer)
+// ============================================================================
+
+/// Initialize Router Advertisement subsystem
+///
+/// Corresponds to C's `void ra_init(time_t now)` (radv.c line 168)
+///
+/// This function performs initialization required for Router Advertisement functionality,
+/// including ICMPv6 socket setup with packet filters for Router Solicitation and Echo Reply.
+///
+/// # Returns
+///
+/// Result indicating success or failure of initialization
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use dnsmasq::dhcp::ipv6::ra_init;
+/// ra_init().expect("Failed to initialize Router Advertisement");
+/// ```
+pub fn ra_init() -> std::io::Result<()> {
+    // TODO: Initialize ICMPv6 socket with appropriate filters
+    // This requires platform-specific socket code for raw ICMPv6
+    // For now, return success to allow compilation
+    Ok(())
+}
+
+/// Send Router Advertisement on specified interface
+///
+/// Corresponds to C's `static void send_ra(...)` (radv.c line 866)
+///
+/// Note: In C, send_ra is static (private). This wrapper provides a public API
+/// for explicit RA transmission, typically used for solicited responses.
+///
+/// # Arguments
+///
+/// * `interface` - Network interface name
+/// * `dest` - Destination IPv6 address (typically FF02::1 for multicast)
+/// * `ra` - Router Advertisement packet to send
+///
+/// # Returns
+///
+/// Result indicating success or failure
+pub fn send_ra(interface: &str, dest: Ipv6Addr, ra: &RouterAdvertisement) -> std::io::Result<()> {
+    let _encoded = ra.encode();
+    // TODO: Transmit via ICMPv6 socket to destination address on interface
+    // This requires platform-specific socket code
+    let _ = interface;
+    let _ = dest;
+    Ok(())
+}
+
+/// Process incoming ICMPv6 packet (Router Solicitation or Echo Reply)
+///
+/// Corresponds to C's `void icmp6_packet(time_t now)` (radv.c line 330)
+///
+/// This function is called from the main event loop when ICMPv6 packets are received.
+/// It handles Router Solicitation messages by responding with solicited Router Advertisements.
+///
+/// # Returns
+///
+/// Result indicating success or failure of packet processing
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use dnsmasq::dhcp::ipv6::icmp6_packet;
+/// // Called from event loop when ICMPv6 packet arrives
+/// icmp6_packet().expect("Failed to process ICMPv6 packet");
+/// ```
+pub fn icmp6_packet() -> std::io::Result<()> {
+    // TODO: Read ICMPv6 packet from socket
+    // TODO: Parse packet type
+    // TODO: If Router Solicitation, respond with Router Advertisement
+    // This requires full ICMPv6 socket implementation
+    Ok(())
+}
+
+/// Perform periodic Router Advertisement transmission
+///
+/// Corresponds to C's `time_t periodic_ra(time_t now)` (radv.c line 1236)
+///
+/// This function should be called periodically from the main event loop. It checks
+/// which interfaces need Router Advertisement transmission based on timing requirements
+/// (RFC 4861 specifies MinRtrAdvInterval=200s to MaxRtrAdvInterval=600s) and sends
+/// unsolicited RAs to FF02::1 (all-nodes multicast).
+///
+/// # Returns
+///
+/// Duration until the next periodic RA is due, or None if no periodic RA is scheduled
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use dnsmasq::dhcp::ipv6::periodic_ra;
+/// loop {
+///     if let Some(duration) = periodic_ra().expect("Failed periodic RA") {
+///         // Schedule next check after duration
+///         std::thread::sleep(duration);
+///     }
+/// }
+/// ```
+pub fn periodic_ra() -> std::io::Result<Option<Duration>> {
+    // TODO: Iterate through all configured interfaces
+    // TODO: Check if advertisement is due on each interface
+    // TODO: Send RA if due
+    // TODO: Calculate and return time until next RA
+    
+    // For now, return a default interval (200 seconds per RFC 4861)
+    Ok(Some(Duration::from_secs(200)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

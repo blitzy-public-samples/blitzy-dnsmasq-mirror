@@ -465,3 +465,105 @@ mod tests {
         assert_eq!(manager.addresses[0].state, SlaacState::Duplicate);
     }
 }
+
+// ==============================================================================
+// C-API Compatibility Layer
+// ==============================================================================
+// The following functions provide a C-compatible functional API for SLAAC
+// operations, matching the interface from the original slaac.c implementation.
+// These wrap the Rust-idiomatic SlaacManager struct defined above.
+
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Global SLAAC manager instance for C-style API compatibility
+static SLAAC_MANAGER: OnceLock<Arc<Mutex<SlaacManager>>> = OnceLock::new();
+
+/// Get or initialize the global SLAAC manager
+fn get_slaac_manager() -> &'static Arc<Mutex<SlaacManager>> {
+    SLAAC_MANAGER.get_or_init(|| Arc::new(Mutex::new(SlaacManager::new())))
+}
+
+/// Add SLAAC addresses for an interface based on Router Advertisement prefix
+///
+/// This function generates and adds SLAAC addresses based on received RA prefixes.
+/// Matches the signature from slaac.c in the original C implementation.
+///
+/// # Arguments
+/// * `iface` - Network interface name
+/// * `prefix` - IPv6 prefix from Router Advertisement
+/// * `prefix_len` - Prefix length in bits
+/// * `mac_addr` - MAC address for EUI-64 generation
+///
+/// # Returns
+/// * `true` if address was successfully added
+/// * `false` if address generation or addition failed
+pub fn slaac_add_addrs(
+    _iface: &str,
+    prefix: Ipv6Addr,
+    prefix_len: u8,
+    mac_addr: &[u8],
+) -> bool {
+    let mut manager = get_slaac_manager().lock().unwrap();
+    
+    // TODO: Implement full SLAAC address addition logic
+    // This should:
+    // 1. Generate EUI-64 based IID from MAC address
+    // 2. Combine with RA prefix to form complete IPv6 address
+    // 3. Perform Duplicate Address Detection (DAD) via ICMPv6 NS
+    // 4. Add address to interface if DAD succeeds
+    // 5. Track address lifecycle (tentative -> validating -> confirmed)
+    
+    manager.generate_address(prefix, prefix_len, mac_addr).is_some()
+}
+
+/// Handle received ICMPv6 Echo Reply for Duplicate Address Detection
+///
+/// Processes ICMPv6 Echo Reply messages to detect duplicate addresses during
+/// SLAAC address validation. Matches the signature from slaac.c.
+///
+/// # Arguments
+/// * `addr` - IPv6 address that received echo reply
+/// * `ping_id` - ICMPv6 echo identifier to match our probes
+///
+/// # Returns
+/// * `true` if this was our probe (indicates duplicate address)
+/// * `false` if probe ID doesn't match (not our probe)
+pub fn slaac_ping_reply(addr: Ipv6Addr, ping_id: u16) -> bool {
+    let mut manager = get_slaac_manager().lock().unwrap();
+    
+    // TODO: Implement full ping reply handling
+    // This should:
+    // 1. Find the tentative address matching `addr`
+    // 2. Check if ping_id matches our probe ID
+    // 3. If match, mark address as duplicate (DAD failed)
+    // 4. Trigger address regeneration or report conflict
+    // 5. Update address state appropriately
+    
+    manager.handle_ping_reply(addr, ping_id)
+}
+
+/// Periodic SLAAC maintenance timer handler
+///
+/// Called periodically to maintain SLAAC addresses, handle timeouts,
+/// and perform necessary state transitions. Matches the signature from slaac.c.
+///
+/// This function handles:
+/// - Sending DAD probes for tentative addresses
+/// - Timing out unconfirmed addresses
+/// - Cleaning up expired addresses
+/// - Refreshing address lifetimes
+pub fn periodic_slaac() {
+    let mut manager = get_slaac_manager().lock().unwrap();
+    
+    // TODO: Implement periodic SLAAC maintenance
+    // This should:
+    // 1. Iterate through all tracked addresses
+    // 2. Send ICMPv6 Neighbor Solicitation for tentative addresses
+    // 3. Mark addresses as confirmed after timeout with no duplicate
+    // 4. Remove expired or failed addresses
+    // 5. Update address preferred/valid lifetimes
+    // 6. Handle address deprecation and regeneration
+    
+    let _awaiting_dad = manager.periodic_dad();
+    // TODO: Log or handle the number of addresses awaiting DAD
+}
