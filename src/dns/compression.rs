@@ -72,6 +72,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::fmt;
 use thiserror::Error;
 
 use crate::constants::MAX_DOMAIN_NAME;
@@ -203,27 +204,17 @@ pub struct CompressedName {
     pub compressed: bool,
 }
 
-impl CompressedName {
-    /// Constructs a domain name string by joining labels with dots
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use dnsmasq::dns::compression::CompressedName;
-    /// let name = CompressedName {
-    ///     labels: vec!["example".to_string(), "com".to_string()],
-    ///     compressed: false,
-    /// };
-    /// assert_eq!(name.to_string(), "example.com");
-    /// ```
-    pub fn to_string(&self) -> String {
+impl fmt::Display for CompressedName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.labels.is_empty() {
-            ".".to_string() // Root domain
+            write!(f, ".") // Root domain
         } else {
-            self.labels.join(".")
+            write!(f, "{}", self.labels.join("."))
         }
     }
+}
 
+impl CompressedName {
     /// Compares this name case-insensitively with another string
     ///
     /// DNS names are case-insensitive per RFC 1035 Section 2.3.3.
