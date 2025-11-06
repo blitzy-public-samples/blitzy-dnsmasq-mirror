@@ -451,6 +451,7 @@ impl Default for PfrAddr {
 ///
 /// Represents a pf table with name and flags. Used in DIOCRADDTABLES ioctl.
 #[repr(C)]
+#[derive(Copy, Clone)]
 #[cfg(all(
     feature = "ipset",
     any(
