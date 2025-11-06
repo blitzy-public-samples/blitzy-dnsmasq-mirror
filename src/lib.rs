@@ -32,5 +32,8 @@ pub mod dhcp;
 #[cfg(feature = "tftp")]
 pub mod tftp;
 
+// Network interface enumeration and management
+pub mod network;
+
 // Platform-specific implementations
 pub mod platform;
