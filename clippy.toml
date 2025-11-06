@@ -1,25 +1,218 @@
+# Clippy Configuration for dnsmasq Rust Implementation
+# =======================================================
+# This configuration enforces code quality, memory safety, and idiomatic Rust
+# patterns for the C-to-Rust refactoring of dnsmasq network services daemon.
+#
+# Per Section 0.7.9: "Clippy for linting (deny warnings in CI)"
+# Per Section 0.7.2: "Zero unsafe blocks in core logic (FFI exceptions allowed)"
+
+# =============================================================================
+# Minimum Supported Rust Version
+# =============================================================================
+# Pin to Rust 1.91.0 stable as specified in rust-toolchain.toml
 msrv = "1.91.0"
 
-# Warn on all clippy lints by default
+# =============================================================================
+# Cognitive Complexity Limits
+# =============================================================================
+# Set reasonable threshold for function complexity to maintain readability
+# and ease of testing. Protocol parsing functions may approach this limit.
+cognitive-complexity-threshold = 25
+
+# Type complexity threshold for complex nested types (DNS/DHCP structures)
+type-complexity-threshold = 250
+
+# =============================================================================
+# Documentation Requirements
+# =============================================================================
+# Require documentation for all public items
+# This ensures the Rust API is well-documented for future maintainers
+missing-docs-in-crate-items = false  # Enforced via #![warn(missing_docs)] in code
+
+# =============================================================================
+# Import and Use Statement Configuration
+# =============================================================================
+# Warn on wildcard imports to maintain explicit dependencies
 warn-on-all-wildcard-imports = true
 
-# Cognitive complexity threshold
-cognitive-complexity-threshold = 30
-
-# Documentation
-missing-docs-in-crate-items = true
-
-# Allow certain patterns
+# Allow mixed format args for compatibility with different formatting styles
 allow-mixed-uninlined-format-args = true
 
-# Safety and correctness (these should be in lib.rs or main.rs as #![deny(...)])
-# We document them here for reference:
-# - clippy::all
-# - clippy::correctness
-# - clippy::suspicious
-# - clippy::complexity
-# - clippy::mem_forget
-# - clippy::missing_safety_doc
-# - clippy::undocumented_unsafe_blocks
-# - clippy::integer_arithmetic (in protocol parsing)
-# - clippy::indexing_slicing (prevent panics on malformed packets)
+# =============================================================================
+# Error Handling Configuration
+# =============================================================================
+# Encourage explicit error handling throughout the codebase
+# All network protocol parsing must return Result types
+
+# =============================================================================
+# Performance Tuning
+# =============================================================================
+# Too many arguments threshold - protocol functions may have many parameters
+too-many-arguments-threshold = 8
+
+# Too many lines threshold for functions - protocol handlers may be long
+too-many-lines-threshold = 150
+
+# =============================================================================
+# Vector Capacity Configuration
+# =============================================================================
+# Allow reasonable vector initialization without explicit capacity
+vec-box-size-threshold = 4096  # Packet buffer sizes
+
+# =============================================================================
+# String Literal Configuration
+# =============================================================================
+# Maximum number of single char patterns in string matching
+single-char-binding-names-threshold = 4
+
+# =============================================================================
+# Enum Variant Configuration
+# =============================================================================
+# Threshold for enum variant size warnings (DNS/DHCP message types)
+enum-variant-size-threshold = 200
+
+# =============================================================================
+# Literal Representation
+# =============================================================================
+# Allow both decimal and hex literals for network protocol constants
+# (DNS/DHCP/TFTP opcodes are often documented in hex)
+literal-representation-threshold = 4096
+
+# =============================================================================
+# Array Size Configuration
+# =============================================================================
+# DNS/DHCP packets can have large arrays of options
+array-size-threshold = 512000
+
+# =============================================================================
+# Lint Enforcement Policy
+# =============================================================================
+# NOTE: Lint levels (deny/warn/allow) cannot be configured in clippy.toml.
+# They must be set in source code via attributes or command-line arguments.
+# 
+# The following lint groups MUST be enforced in src/lib.rs and src/main.rs:
+#
+# CRITICAL SAFETY LINTS (deny - prevent memory unsafety):
+# --------------------------------------------------------
+# #![deny(clippy::all)]                          - All default Clippy lints
+# #![deny(clippy::correctness)]                  - Correctness issues (potential bugs)
+# #![deny(clippy::suspicious)]                   - Suspicious patterns
+# #![deny(clippy::complexity)]                   - Unnecessary complexity
+# #![deny(clippy::mem_forget)]                   - Prevent memory leaks
+# #![deny(clippy::missing_safety_doc)]           - Require safety docs for unsafe
+# #![deny(clippy::undocumented_unsafe_blocks)]   - All unsafe must be documented
+#
+# NETWORK SECURITY LINTS (deny - prevent protocol vulnerabilities):
+# ------------------------------------------------------------------
+# #![deny(clippy::integer_arithmetic)]           - Prevent overflows in parsing
+# #![deny(clippy::indexing_slicing)]             - Prevent panics on malformed packets
+# #![deny(clippy::unwrap_used)]                  - Force explicit error handling
+# #![deny(clippy::expect_used)]                  - Force explicit error handling
+# #![deny(clippy::panic)]                        - No panics in production code
+# #![deny(clippy::unimplemented)]                - No placeholder implementations
+# #![deny(clippy::todo)]                         - No TODO markers in production
+#
+# CODE QUALITY LINTS (warn - encourage best practices):
+# ------------------------------------------------------
+# #![warn(clippy::perf)]                         - Performance improvements
+# #![warn(clippy::style)]                        - Style improvements
+# #![warn(clippy::cargo)]                        - Cargo.toml issues
+# #![warn(clippy::pedantic)]                     - Extra pedantic checks
+# #![warn(clippy::nursery)]                      - Experimental lints
+# #![warn(missing_docs)]                         - Document all public items
+# #![warn(missing_debug_implementations)]        - Debug trait for types
+#
+# ALLOWED LINTS (allow - acceptable for dnsmasq patterns):
+# ---------------------------------------------------------
+# #![allow(clippy::module_name_repetitions)]     - Acceptable for clarity
+# #![allow(clippy::missing_errors_doc)]          - Errors documented separately
+# #![allow(clippy::missing_panics_doc)]          - Panics prevented by deny lints
+# #![allow(clippy::must_use_candidate)]          - Not always applicable
+# #![allow(clippy::return_self_not_must_use)]    - Builder patterns acceptable
+# #![allow(clippy::similar_names)]               - Protocol fields may be similar
+# #![allow(clippy::too_many_lines)]              - Protocol handlers may be long
+# #![allow(clippy::cast_possible_truncation)]    - Explicitly handled in protocol code
+# #![allow(clippy::cast_possible_wrap)]          - Explicitly handled in protocol code
+# #![allow(clippy::cast_sign_loss)]              - Explicitly handled in protocol code
+#
+# PLATFORM-SPECIFIC FFI EXCEPTIONS:
+# ----------------------------------
+# Platform-specific modules (src/platform/**/*.rs) may use unsafe blocks for:
+# - Linux netlink socket operations
+# - BSD BPF interface
+# - Unix system calls (privilege dropping, signal handling)
+# 
+# All unsafe blocks MUST include SAFETY comments explaining invariants:
+#   // SAFETY: This is safe because:
+#   // 1. [Specific invariant 1]
+#   // 2. [Specific invariant 2]
+#   unsafe { /* FFI call */ }
+#
+# =============================================================================
+# CI Enforcement
+# =============================================================================
+# In CI pipelines (.github/workflows/rust-ci.yml), run:
+#   cargo clippy --all-targets --all-features -- -D warnings
+#
+# This treats all warnings as errors, ensuring code quality gates are met.
+#
+# =============================================================================
+# Memory Safety Rationale
+# =============================================================================
+# Per Section 0.7.2 "Memory Safety Translation Strategy":
+#
+# The C implementation of dnsmasq has potential memory safety vulnerabilities:
+# - Buffer overflows in packet parsing (rfc1035.c, rfc2131.c)
+# - Use-after-free in cache management (cache.c)
+# - Double-free in lease cleanup (lease.c)
+# - Null pointer dereferences in configuration parsing (option.c)
+#
+# The Rust refactoring eliminates these vulnerabilities through:
+# 1. Compile-time bounds checking (no indexing_slicing without checks)
+# 2. Ownership and borrowing (no use-after-free or double-free)
+# 3. Option types (no null pointer dereferences)
+# 4. Result types (no unchecked error conditions)
+#
+# This Clippy configuration enforces patterns that maintain these guarantees.
+#
+# =============================================================================
+# Network Protocol Security
+# =============================================================================
+# Per Section 0.7.3 "Protocol Behavior Preservation":
+#
+# DNS, DHCP, and TFTP protocol implementations must:
+# - Validate all input before processing (no unwrap on parsing)
+# - Handle malformed packets gracefully (no panics)
+# - Prevent integer overflows in size calculations
+# - Avoid buffer overruns in packet construction
+#
+# Denied lints (integer_arithmetic, indexing_slicing, unwrap_used) enforce
+# safe protocol handling patterns throughout the codebase.
+#
+# =============================================================================
+# Testing Requirements
+# =============================================================================
+# Per Section 0.7.4 "Testing and Validation Requirements":
+#
+# - Unit test coverage target: >80% (measured by cargo-tarpaulin)
+# - Property-based testing: DNS/DHCP packet correctness (proptest)
+# - Integration testing: All C test suites must pass
+# - Mock testing: External dependencies (mockall)
+#
+# Clippy helps ensure testable code through:
+# - Encouraging Result types (testable error paths)
+# - Preventing hidden panics (explicit error handling)
+# - Enforcing trait implementations (Debug for assertions)
+#
+# =============================================================================
+# Configuration Validation
+# =============================================================================
+# To validate this configuration:
+#   cargo clippy --version                    # Verify Clippy version
+#   cargo clippy -- -W clippy::all            # Run with all warnings
+#   cargo clippy --all-targets --all-features # Check all feature combinations
+#
+# Expected: Zero warnings in core logic (src/dns, src/dhcp, src/tftp)
+# Allowed: Warnings in platform FFI (src/platform) with documented safety
+#
+# =============================================================================
