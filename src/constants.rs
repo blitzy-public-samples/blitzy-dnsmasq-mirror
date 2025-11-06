@@ -277,8 +277,8 @@ pub const DHCP_PACKET_MAX: usize = 65535;
 /// **Runtime Override**: Yes, via `--dhcp-range` option's lease time parameter
 ///
 /// **C Reference**: `config.h` lines 617, 625
-pub const DEFLEASE: u32 = 3600; // 1 hour for DHCPv4
-pub const DEFLEASE6: u32 = 14400; // 4 hours for DHCPv6
+pub const DEFLEASE: LeaseTime = 3600; // 1 hour for DHCPv4
+pub const DEFLEASE6: LeaseTime = 14400; // 4 hours for DHCPv6
 
 /// Interval in seconds between lease database retry attempts (C: LEASE_RETRY)
 ///
@@ -589,11 +589,7 @@ pub const DEFAULT_LEASE_FILE: &str = "/var/lib/misc/dnsmasq.leases";
 #[cfg(target_os = "android")]
 pub const DEFAULT_LEASE_FILE: &str = "/data/misc/dhcp/dnsmasq.leases";
 
-#[cfg(any(
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly"
-))]
+#[cfg(any(target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))]
 pub const DEFAULT_LEASE_FILE: &str = "/var/db/dnsmasq.leases";
 
 #[cfg(target_os = "freebsd")]
@@ -624,11 +620,7 @@ pub const DEFAULT_CONFIG_FILE: &str = "/etc/dnsmasq.conf";
 #[cfg(target_os = "freebsd")]
 pub const DEFAULT_CONFIG_FILE: &str = "/usr/local/etc/dnsmasq.conf";
 
-#[cfg(any(
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly"
-))]
+#[cfg(any(target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))]
 pub const DEFAULT_CONFIG_FILE: &str = "/etc/dnsmasq.conf";
 
 #[cfg(target_os = "macos")]
@@ -825,22 +817,22 @@ pub type LeaseTime = u64;
 pub enum ExitCode {
     /// Successful termination (normal shutdown via SIGTERM)
     Success = 0,
-    
+
     /// Configuration file error (parse failure, invalid options)
     BadConfig = 1,
-    
+
     /// Network initialization failure (cannot bind ports, invalid interface)
     BadNet = 2,
-    
+
     /// File operation error (cannot read/write lease file, hosts file)
     FileError = 3,
-    
+
     /// Memory allocation failure (out of memory)
     NoMemory = 4,
-    
+
     /// Initialization error (privilege drop failure, PID file error)
     InitError = 5,
-    
+
     /// Miscellaneous error (catchall for other failures)
     Misc = 6,
 }
@@ -850,7 +842,7 @@ impl ExitCode {
     pub const fn as_i32(self) -> i32 {
         self as i32
     }
-    
+
     /// Check if exit code indicates success
     pub const fn is_success(self) -> bool {
         matches!(self, ExitCode::Success)

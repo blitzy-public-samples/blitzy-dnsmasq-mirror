@@ -1,8 +1,9 @@
 //! dnsmasq-rs: Rust implementation of dnsmasq
-//! 
-//! This is a minimal placeholder that will be replaced by the full implementation.
+//!
+//! Memory-safe Rust implementation of dnsmasq network services daemon providing
+//! DNS, DHCP, TFTP, and router advertisement services.
 
 #![allow(unused)]
 
-// Placeholder - actual implementation will be provided by implementation agents
-pub fn placeholder() {}
+// Core constants module - fully implemented
+pub mod constants;
