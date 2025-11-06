@@ -1,0 +1,25 @@
+msrv = "1.91.0"
+
+# Warn on all clippy lints by default
+warn-on-all-wildcard-imports = true
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Documentation
+missing-docs-in-crate-items = true
+
+# Allow certain patterns
+allow-mixed-uninlined-format-args = true
+
+# Safety and correctness (these should be in lib.rs or main.rs as #![deny(...)])
+# We document them here for reference:
+# - clippy::all
+# - clippy::correctness
+# - clippy::suspicious
+# - clippy::complexity
+# - clippy::mem_forget
+# - clippy::missing_safety_doc
+# - clippy::undocumented_unsafe_blocks
+# - clippy::integer_arithmetic (in protocol parsing)
+# - clippy::indexing_slicing (prevent panics on malformed packets)

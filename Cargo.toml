@@ -1,0 +1,135 @@
+[package]
+name = "dnsmasq-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91.0"
+authors = ["Simon Kelley <simon@thekelleys.org.uk>", "Rust implementation contributors"]
+license = "GPL-2.0-or-later"
+description = "Memory-safe Rust implementation of dnsmasq network services daemon"
+homepage = "http://www.thekelleys.org.uk/dnsmasq/"
+repository = "https://github.com/yourusername/dnsmasq"
+keywords = ["dns", "dhcp", "tftp", "networking", "server"]
+categories = ["network-programming", "command-line-utilities"]
+
+[features]
+default = ["dhcp", "dns", "tftp"]
+
+# Major subsystem features (map C's HAVE_* macros)
+dhcp = ["dhcp-v4", "dhcp-v6"]
+dhcp-v4 = []
+dhcp-v6 = []
+dns = ["dns-cache", "dns-forward"]
+dns-cache = []
+dns-forward = []
+tftp = []
+dnssec = ["dep:ring", "dns"]
+auth-dns = ["dns"]
+
+# IPv6 features
+ipv6 = ["dhcp-v6", "radv", "slaac"]
+radv = ["ipv6"]
+slaac = ["ipv6"]
+
+# Platform integration features
+dbus = ["dep:zbus"]
+ubus = []
+inotify = []
+netlink = []
+bpf = []
+conntrack = []  # Note: nfnetlink crate not available - requires custom FFI
+ipset = []
+nftables = []  # Note: nftables crate version needs verification
+
+# Build and runtime options
+scripts = []
+lua = ["dep:mlua"]
+idn = ["dep:idna"]
+loop-detect = []
+broken-rtc = []
+
+# Testing and development
+test-utils = []
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# CLI and configuration
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Logging and error handling
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Network and protocol parsing
+bytes = "1.7"
+byteorder = "1.5"
+nom = "7.1"
+socket2 = "0.5"
+
+# Unix system calls
+libc = "0.2"
+nix = { version = "0.29", features = ["user", "signal", "socket", "net"] }
+
+# Feature-gated dependencies
+ring = { version = "0.17", optional = true }
+zbus = { version = "4.4", optional = true }
+# Note: nfnetlink crate not available on crates.io - will need custom FFI or alternative
+# nfnetlink = { version = "0.5", optional = true }
+# Note: nftables crate version 0.4 may not exist - will need version verification
+# nftables = { version = "0.4", optional = true }
+mlua = { version = "0.10", optional = true, features = ["lua54"] }
+idna = { version = "1.0", optional = true }
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+netlink-sys = "0.8"
+netlink-packet-core = "0.7"
+inotify = "0.10"
+
+[target.'cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
+kqueue = "1.0"
+
+[dev-dependencies]
+proptest = "1.5"
+mockall = "0.13"
+criterion = "0.5"
+tempfile = "3.12"
+test-case = "3.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# Binary and library targets will be auto-discovered once src/ directory exists
+# [[bin]]
+# name = "dnsmasq-rs"
+# path = "src/main.rs"
+
+# [lib]
+# name = "dnsmasq"
+# path = "src/lib.rs"
+
+# Benchmark configuration (will be enabled once benches/ directory exists)
+# [[bench]]
+# name = "dns_cache"
+# harness = false
+
+# [[bench]]
+# name = "dhcp_allocation"
+# harness = false
+
+# [[bench]]
+# name = "packet_parsing"
+# harness = false

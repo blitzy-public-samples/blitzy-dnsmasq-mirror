@@ -12,3 +12,14 @@ debian/substvars
 debian/utils-substvars
 debian/trees/
 debian/build/
+
+# Rust build artifacts
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Rust coverage reports
+cobertura.xml
+tarpaulin-report.html
+coverage/
