@@ -37,3 +37,6 @@ pub mod network;
 
 // Platform-specific implementations
 pub mod platform;
+
+// Utility functions and helpers
+pub mod util;
