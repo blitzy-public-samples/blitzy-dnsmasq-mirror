@@ -17,7 +17,7 @@ use thiserror::Error;
 use tracing::{info, warn, error};
 
 /// Daemon configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DaemonConfig {
     /// Whether to fork to background
     pub daemonize: bool,
@@ -27,16 +27,6 @@ pub struct DaemonConfig {
     
     /// PID file path
     pub pid_file: Option<PathBuf>,
-}
-
-impl Default for DaemonConfig {
-    fn default() -> Self {
-        Self {
-            daemonize: false,
-            debug: false,
-            pid_file: None,
-        }
-    }
 }
 
 /// Privilege configuration for dropping root
