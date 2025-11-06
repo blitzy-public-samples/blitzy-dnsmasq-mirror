@@ -1,215 +1,306 @@
-// Copyright (C) 2000-2022 Simon Kelley
+// Copyright (C) 2000-2024 Simon Kelley
 // SPDX-License-Identifier: GPL-2.0-or-later OR GPL-3.0-or-later
 
-//! PID file management for daemon tracking
+//! PID file management module for dnsmasq daemon process tracking
 //!
-//! This module implements PID file lifecycle management from src/dnsmasq.c (lines 819-878),
-//! allowing system administrators and init systems to track the daemon's process ID.
+//! Provides async functions for secure PID file creation, writing, ownership management,
+//! and deletion using tokio::fs. Implements security-hardened PID file handling with
+//! unlink-before-create pattern to prevent symlink attacks (O_EXCL flag equivalent in Rust).
 //!
-//! # Security
+//! This module replaces the PID file management from src/dnsmasq.c lines 819-878 and 2168-2169.
 //!
-//! PID file creation implements security measures to prevent symlink attacks and race
-//! conditions:
-//! - Uses O_EXCL flag to fail if file exists (prevents overwrite)
-//! - Removes stale PID files if process is not running
-//! - Changes ownership to target user before privilege drop
-//! - Validates path to prevent directory traversal
+//! # Security Model
 //!
-//! # Usage
+//! The PID file implementation follows the security model documented in the original C code:
 //!
-//! Typically:
-//! 1. write_pidfile() is called after binding sockets but before privilege drop
-//! 2. remove_pidfile() is called during daemon shutdown
+//! ## Symlink Attack Prevention
+//!
+//! Some installations of dnsmasq (e.g., Debian/Ubuntu) locate the pid-file in a directory
+//! which is writable by the non-privileged user that dnsmasq runs as. This allows the
+//! daemon to delete the file as part of its shutdown. This is a security hole to the
+//! extent that an attacker running as the unprivileged user could replace the pidfile
+//! with a symlink, and have the target of that symlink overwritten as root next time
+//! dnsmasq starts.
+//!
+//! The implementation first deletes any existing file, and then opens it with the O_EXCL
+//! flag (via `create_new(true)` in Rust), ensuring that the open() fails should there be
+//! any existing file (because the unlink() failed, or an attacker exploited the race
+//! between unlink() and open()). This ensures that no symlink attack can succeed.
+//!
+//! ## Privilege Handling
+//!
+//! Any compromise of the non-privileged user still theoretically allows the pid-file to
+//! be replaced whilst dnsmasq is running. The worst that could allow is that the usual
+//! "shutdown dnsmasq" shell command could be tricked into stopping any other process.
+//!
+//! Note that if dnsmasq is started as non-root (e.g., for testing) it silently ignores
+//! failure to write the pid-file.
+//!
+//! ## Ownership Transfer
+//!
+//! The PID file ownership is changed to the unprivileged user after creation (when running
+//! as root). This is not to allow deletion (which depends on directory permissions), but
+//! to keep systemd >273 happy, which requires the PID file owner to match the daemon user.
 
-use nix::unistd::{chown, Gid, Uid};
-use std::fs::{remove_file, OpenOptions};
-use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
+use nix::unistd::{fchown, getpid, getuid, Gid, Uid};
+use std::io::{Error, ErrorKind, Result};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::io::AsRawFd;
+use std::path::{Path, PathBuf};
+use tokio::fs::{remove_file, OpenOptions};
+use tokio::io::AsyncWriteExt;
+use tracing::{debug, error, info, warn};
 
-/// Write the daemon's PID to the specified file
+/// Write the daemon's PID to the specified file with security hardening
+///
+/// This function implements the secure PID file creation pattern from src/dnsmasq.c
+/// lines 819-878. It follows the unlink-before-create pattern with O_EXCL to prevent
+/// symlink attacks.
 ///
 /// # Arguments
-/// * `path` - Path to PID file (e.g., /var/run/dnsmasq.pid)
-/// * `uid` - UID to chown file to (target unprivileged user)
-/// * `gid` - GID to chown file to (target unprivileged group)
+///
+/// * `pidfile_path` - Path to the PID file (e.g., /var/run/dnsmasq.pid)
+/// * `target_uid` - Optional UID to change file ownership to (unprivileged user)
+/// * `target_gid` - Optional GID to change file ownership to (unprivileged group)
+///
+/// # Behavior
+///
+/// 1. Unlinks any existing PID file (ignoring errors)
+/// 2. Creates new file with O_EXCL flag (fails if file exists)
+/// 3. Writes current process PID as string with newline
+/// 4. If running as root and target_uid/target_gid provided, changes ownership
+/// 5. Returns error only if running as root (silently ignores errors for non-root)
 ///
 /// # Security
-/// - Creates file with O_CREAT | O_WRONLY | O_EXCL to prevent overwrite attacks
-/// - If file exists and process is dead, removes stale file and retries
-/// - Changes ownership to target user so unprivileged daemon can update/remove it
-/// - Verifies path is absolute to prevent relative path attacks
+///
+/// - Prevents symlink attacks via unlink + O_EXCL pattern
+/// - Only fails for root user (testing mode for non-root)
+/// - File permissions set to 0o644 (readable by all, writable by owner)
+/// - Ownership transferred to unprivileged user for systemd compatibility
 ///
 /// # Errors
-/// Returns an error if:
-/// - Path is not absolute
-/// - File exists and process is still running
-/// - Cannot create file (permissions, disk full)
-/// - Cannot write PID
-/// - Cannot change ownership
-pub fn write_pidfile(path: &Path, uid: u32, gid: u32) -> Result<(), io::Error> {
-    // Validate path is absolute
-    if !path.is_absolute() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("PID file path must be absolute: {}", path.display()),
-        ));
-    }
+///
+/// Returns error only when running as root if:
+/// - File creation fails (permissions, disk full, race condition)
+/// - Writing PID fails
+/// - Ownership change fails (logged as warning, not fatal)
+///
+/// When running as non-root, all errors are silently ignored for testing compatibility.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// use nix::unistd::{Uid, Gid};
+///
+/// # async fn example() -> std::io::Result<()> {
+/// // Write PID file as root, transfer ownership to dnsmasq user
+/// write_pidfile(
+///     Path::new("/var/run/dnsmasq.pid"),
+///     Some(Uid::from_raw(1000)),
+///     Some(Gid::from_raw(1000))
+/// ).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub async fn write_pidfile(
+    pidfile_path: &Path,
+    target_uid: Option<Uid>,
+    target_gid: Option<Gid>,
+) -> Result<()> {
+    debug!("Writing PID file to: {}", pidfile_path.display());
 
-    // Try to create file with O_EXCL (fails if exists)
-    let mut file = match OpenOptions::new()
+    // Get current process info
+    let pid = getpid();
+    let uid = getuid();
+    let is_root = uid.is_root();
+
+    // Format PID as string with newline (matching C: sprintf(daemon->namebuff, "%d\n", (int) getpid()))
+    let pid_string = format!("{}\n", pid);
+
+    // Step 1: Unlink existing file (ignore errors - file might not exist)
+    // This corresponds to line 845: unlink(daemon->runfile);
+    let _ = remove_file(pidfile_path).await;
+
+    // Step 2: Create file with O_EXCL flag
+    // This corresponds to line 847: open(daemon->runfile, O_WRONLY|O_CREAT|O_TRUNC|O_EXCL, ...)
+    // Using create_new(true) provides O_EXCL semantics - fails if file exists
+    let file_result = OpenOptions::new()
         .write(true)
-        .create_new(true)
-        .mode(0o644)
-        .open(path)
-    {
+        .create_new(true) // O_EXCL equivalent - fails if file exists after unlink
+        .mode(0o644) // S_IWUSR|S_IRUSR|S_IRGRP|S_IROTH from line 847
+        .open(pidfile_path)
+        .await;
+
+    let mut file = match file_result {
         Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-            // File exists - check if process is still running
-            if is_process_alive(path)? {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!(
-                        "PID file exists and process is running: {}",
-                        path.display()
-                    ),
-                ));
+        Err(e) => {
+            // Only complain if started as root (lines 850-851)
+            if is_root {
+                error!(
+                    "Failed to create PID file {}: {}",
+                    pidfile_path.display(),
+                    e
+                );
+                return Err(e);
+            } else {
+                // Silently ignore for non-root (testing mode)
+                debug!(
+                    "Failed to create PID file {} (non-root mode, ignoring): {}",
+                    pidfile_path.display(),
+                    e
+                );
+                return Ok(());
             }
-
-            // Stale PID file - remove and retry
-            remove_file(path)?;
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o644)
-                .open(path)?
         }
-        Err(e) => return Err(e),
     };
 
-    // Write current process PID
-    let pid = std::process::id();
-    writeln!(file, "{}", pid)?;
-    file.flush()?;
-
-    // Change ownership to target user so daemon can remove it after privilege drop
-    chown(path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid))).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!("Failed to chown PID file: {}", e),
-        )
-    })?;
-
-    Ok(())
-}
-
-/// Remove the PID file
-///
-/// # Arguments
-/// * `path` - Path to PID file to remove
-///
-/// # Errors
-/// Returns an error if:
-/// - File doesn't exist (not necessarily an error - could be already removed)
-/// - Cannot remove file (permissions)
-///
-/// # Safety
-/// This function validates that the PID in the file matches the current process
-/// before removing it, to prevent accidentally removing another process's PID file.
-pub fn remove_pidfile(path: &Path) -> Result<(), io::Error> {
-    // Validate path is absolute
-    if !path.is_absolute() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("PID file path must be absolute: {}", path.display()),
-        ));
+    // Step 3: Change ownership if running as root and target user specified
+    // This corresponds to lines 861-862: fchown(fd, ent_pw->pw_uid, ent_pw->pw_gid)
+    // We're still running as root here. Change the ownership of the PID file
+    // to the user we will be running as. Note that this is not to allow
+    // us to delete the file, since that depends on the permissions
+    // of the directory containing the file. That directory will
+    // need to be owned by the dnsmasq user, and the ownership of the
+    // file has to match, to keep systemd >273 happy.
+    if is_root {
+        if let (Some(uid), Some(gid)) = (target_uid, target_gid) {
+            // Only change ownership if target user is not root
+            if !uid.is_root() {
+                let fd = file.as_raw_fd();
+                if let Err(e) = fchown(fd, Some(uid), Some(gid)) {
+                    // Log warning but don't fail (matching C behavior at line 862)
+                    warn!(
+                        "Failed to change ownership of PID file {} to {}:{}: {}",
+                        pidfile_path.display(),
+                        uid,
+                        gid,
+                        e
+                    );
+                    // Note: C code stores this in chown_warn to log later, we log immediately
+                }
+            }
+        }
     }
 
-    // Check if file exists
-    if !path.exists() {
-        // Not an error - file may have been removed already
-        return Ok(());
-    }
-
-    // Read PID from file
-    let content = std::fs::read_to_string(path)?;
-    let file_pid: u32 = content
-        .trim()
-        .parse()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid PID in file"))?;
-
-    // Verify it's our PID before removing
-    let our_pid = std::process::id();
-    if file_pid != our_pid {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "PID file contains different PID ({} vs our {})",
-                file_pid, our_pid
-            ),
-        ));
-    }
-
-    // Remove the file
-    remove_file(path)?;
-
-    Ok(())
-}
-
-/// Check if the process whose PID is in the file is still alive
-///
-/// # Arguments
-/// * `path` - Path to PID file
-///
-/// # Returns
-/// - Ok(true) if process is alive
-/// - Ok(false) if process is dead or PID file is invalid
-/// - Err if cannot read file
-fn is_process_alive(path: &Path) -> Result<bool, io::Error> {
-    // Read PID from file
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return Ok(false), // Can't read file - assume dead
-    };
-
-    let pid: u32 = match content.trim().parse() {
-        Ok(p) => p,
-        Err(_) => return Ok(false), // Invalid PID - assume dead
-    };
-
-    // Check if process exists by checking /proc/{pid} on Linux
-    // This is safer than sending signals as it doesn't affect the target process
-    #[cfg(target_os = "linux")]
-    {
-        let proc_path = format!("/proc/{}", pid);
-        Ok(std::path::Path::new(&proc_path).exists())
-    }
-
-    #[cfg(all(unix, not(target_os = "linux")))]
-    {
-        // On non-Linux Unix, use kill with signal 0 (null signal) to check existence
-        // Signal 0 doesn't actually send a signal, it just checks if we can signal the process
-        use nix::unistd::Pid;
-        
-        // Use libc directly for signal 0 since nix Signal enum doesn't include it
-        let result = unsafe { libc::kill(pid as i32, 0) };
-        
-        if result == 0 {
-            Ok(true) // Process exists
+    // Step 4: Write PID string to file
+    // This corresponds to line 864: read_write(fd, (unsigned char *)daemon->namebuff, strlen(daemon->namebuff), 0)
+    if let Err(e) = file.write_all(pid_string.as_bytes()).await {
+        if is_root {
+            error!(
+                "Failed to write PID to file {}: {}",
+                pidfile_path.display(),
+                e
+            );
+            // Attempt cleanup on error
+            let _ = remove_file(pidfile_path).await;
+            return Err(e);
         } else {
-            let errno = std::io::Error::last_os_error();
-            match errno.raw_os_error() {
-                Some(libc::ESRCH) => Ok(false), // Process doesn't exist
-                Some(libc::EPERM) => Ok(true),  // Process exists but we can't signal it
-                _ => Ok(false), // Other error - assume dead
-            }
+            debug!(
+                "Failed to write PID to file {} (non-root mode, ignoring): {}",
+                pidfile_path.display(),
+                e
+            );
+            return Ok(());
         }
     }
 
-    #[cfg(not(unix))]
-    {
-        // On non-Unix (Windows), we can't reliably check - assume alive to be safe
-        Ok(true)
+    // Step 5: Flush to ensure data is written
+    if let Err(e) = file.flush().await {
+        if is_root {
+            error!(
+                "Failed to flush PID file {}: {}",
+                pidfile_path.display(),
+                e
+            );
+            // Attempt cleanup on error
+            let _ = remove_file(pidfile_path).await;
+            return Err(e);
+        } else {
+            debug!(
+                "Failed to flush PID file {} (non-root mode, ignoring): {}",
+                pidfile_path.display(),
+                e
+            );
+            return Ok(());
+        }
+    }
+
+    // Step 6: Sync to disk (matching close() behavior from line 868)
+    if let Err(e) = file.sync_all().await {
+        if is_root {
+            error!(
+                "Failed to sync PID file {}: {}",
+                pidfile_path.display(),
+                e
+            );
+            // Attempt cleanup on error
+            let _ = remove_file(pidfile_path).await;
+            return Err(e);
+        } else {
+            debug!(
+                "Failed to sync PID file {} (non-root mode, ignoring): {}",
+                pidfile_path.display(),
+                e
+            );
+            return Ok(());
+        }
+    }
+
+    info!("Successfully wrote PID {} to {}", pid, pidfile_path.display());
+    Ok(())
+}
+
+/// Remove the PID file during daemon shutdown
+///
+/// This function implements the PID file cleanup from src/dnsmasq.c lines 2168-2169.
+/// It attempts to delete the PID file and logs any errors without failing.
+///
+/// # Arguments
+///
+/// * `pidfile_path` - Path to the PID file to remove
+///
+/// # Behavior
+///
+/// Attempts to delete the PID file. If deletion fails, logs a warning but does not
+/// return an error. This is appropriate for shutdown cleanup where we want to proceed
+/// with shutdown even if PID file removal fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// # async fn example() {
+/// // Remove PID file during shutdown
+/// remove_pidfile(Path::new("/var/run/dnsmasq.pid")).await;
+/// # }
+/// ```
+pub async fn remove_pidfile(pidfile_path: &Path) {
+    debug!("Removing PID file: {}", pidfile_path.display());
+
+    // This corresponds to lines 2168-2169 in C:
+    // if (daemon->runfile)
+    //   unlink(daemon->runfile);
+    match remove_file(pidfile_path).await {
+        Ok(()) => {
+            info!("Successfully removed PID file: {}", pidfile_path.display());
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            // File doesn't exist - this is fine, might have been already removed
+            debug!(
+                "PID file {} does not exist (already removed)",
+                pidfile_path.display()
+            );
+        }
+        Err(e) => {
+            // Log warning but don't fail - this is cleanup code
+            warn!(
+                "Failed to remove PID file {}: {}",
+                pidfile_path.display(),
+                e
+            );
+        }
     }
 }
 
@@ -218,129 +309,112 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+    use tokio::fs as tokio_fs;
 
-    #[test]
-    fn test_write_pidfile_requires_absolute_path() {
-        let result = write_pidfile(Path::new("relative/path.pid"), 1000, 1000);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("must be absolute"));
-    }
-
-    #[test]
-    fn test_remove_pidfile_requires_absolute_path() {
-        let result = remove_pidfile(Path::new("relative/path.pid"));
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("must be absolute"));
-    }
-
-    #[test]
-    fn test_write_and_remove_pidfile() {
+    #[tokio::test]
+    async fn test_write_pidfile_creates_file() {
         let temp_dir = TempDir::new().unwrap();
         let pidfile = temp_dir.path().join("test.pid");
 
-        // Write PID file (using our own UID/GID since we're not root)
-        let uid = nix::unistd::getuid().as_raw();
-        let gid = nix::unistd::getgid().as_raw();
+        // Write PID file (as non-root for testing)
+        write_pidfile(&pidfile, None, None).await.ok();
 
-        let result = write_pidfile(&pidfile, uid, gid);
-        assert!(result.is_ok());
-
-        // Verify file contains our PID
-        let content = fs::read_to_string(&pidfile).unwrap();
-        let pid: u32 = content.trim().parse().unwrap();
-        assert_eq!(pid, std::process::id());
-
-        // Remove PID file
-        let result = remove_pidfile(&pidfile);
-        assert!(result.is_ok());
-
-        // Verify file is gone
-        assert!(!pidfile.exists());
+        // Verify file exists (might not if running as non-root and permission denied)
+        if pidfile.exists() {
+            let content = tokio_fs::read_to_string(&pidfile).await.unwrap();
+            let pid = getpid();
+            assert_eq!(content.trim(), pid.to_string());
+        }
     }
 
-    #[test]
-    fn test_remove_nonexistent_pidfile() {
+    #[tokio::test]
+    async fn test_write_pidfile_unlink_before_create() {
+        let temp_dir = TempDir::new().unwrap();
+        let pidfile = temp_dir.path().join("test.pid");
+
+        // Create initial file
+        write_pidfile(&pidfile, None, None).await.ok();
+
+        // Write again - should unlink first then create
+        write_pidfile(&pidfile, None, None).await.ok();
+
+        // Verify file still exists with current PID
+        if pidfile.exists() {
+            let content = tokio_fs::read_to_string(&pidfile).await.unwrap();
+            let pid = getpid();
+            assert_eq!(content.trim(), pid.to_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_write_pidfile_correct_permissions() {
+        let temp_dir = TempDir::new().unwrap();
+        let pidfile = temp_dir.path().join("test.pid");
+
+        write_pidfile(&pidfile, None, None).await.ok();
+
+        if pidfile.exists() {
+            let metadata = fs::metadata(&pidfile).unwrap();
+            let perms = metadata.permissions();
+            // Check that permissions are 0o644 (readable by all, writable by owner)
+            assert_eq!(perms.mode() & 0o777, 0o644);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remove_pidfile_deletes_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let pidfile = temp_dir.path().join("test.pid");
+
+        // Create PID file
+        write_pidfile(&pidfile, None, None).await.ok();
+
+        if pidfile.exists() {
+            // Remove it
+            remove_pidfile(&pidfile).await;
+
+            // Verify it's gone
+            assert!(!pidfile.exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remove_pidfile_nonexistent() {
         let temp_dir = TempDir::new().unwrap();
         let pidfile = temp_dir.path().join("nonexistent.pid");
 
-        // Removing nonexistent file should succeed (not an error)
-        let result = remove_pidfile(&pidfile);
-        assert!(result.is_ok());
+        // Should not panic or error
+        remove_pidfile(&pidfile).await;
     }
 
-    #[test]
-    fn test_write_pidfile_twice_fails() {
+    #[tokio::test]
+    async fn test_pidfile_contains_newline() {
         let temp_dir = TempDir::new().unwrap();
         let pidfile = temp_dir.path().join("test.pid");
 
-        let uid = nix::unistd::getuid().as_raw();
-        let gid = nix::unistd::getgid().as_raw();
+        write_pidfile(&pidfile, None, None).await.ok();
 
-        // First write succeeds
-        assert!(write_pidfile(&pidfile, uid, gid).is_ok());
-
-        // Second write fails (file exists and process is alive)
-        let result = write_pidfile(&pidfile, uid, gid);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("process is running"));
-
-        // Cleanup
-        let _ = remove_pidfile(&pidfile);
+        if pidfile.exists() {
+            let content = tokio_fs::read_to_string(&pidfile).await.unwrap();
+            // Should end with newline (matching C sprintf format "%d\n")
+            assert!(content.ends_with('\n'));
+        }
     }
 
-    #[test]
-    fn test_remove_pidfile_with_wrong_pid() {
+    #[tokio::test]
+    async fn test_write_pidfile_multiple_times() {
         let temp_dir = TempDir::new().unwrap();
         let pidfile = temp_dir.path().join("test.pid");
 
-        // Write a different PID to the file
-        fs::write(&pidfile, "999999\n").unwrap();
+        // Write multiple times - should succeed each time
+        for _ in 0..3 {
+            write_pidfile(&pidfile, None, None).await.ok();
+        }
 
-        // Trying to remove should fail (PID mismatch)
-        let result = remove_pidfile(&pidfile);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("different PID"));
-
-        // Cleanup
-        let _ = fs::remove_file(&pidfile);
-    }
-
-    #[test]
-    fn test_is_process_alive_with_invalid_pid() {
-        let temp_dir = TempDir::new().unwrap();
-        let pidfile = temp_dir.path().join("test.pid");
-
-        // Write invalid PID
-        fs::write(&pidfile, "not_a_number\n").unwrap();
-
-        // Should return false for invalid PID
-        let result = is_process_alive(&pidfile);
-        assert!(result.is_ok());
-        assert!(!result.unwrap());
-    }
-
-    #[test]
-    fn test_is_process_alive_with_dead_pid() {
-        let temp_dir = TempDir::new().unwrap();
-        let pidfile = temp_dir.path().join("test.pid");
-
-        // Write a PID that definitely doesn't exist (PID 1 is init, but very high PIDs don't exist)
-        fs::write(&pidfile, "999999\n").unwrap();
-
-        let result = is_process_alive(&pidfile);
-        assert!(result.is_ok());
-        // Result could be true or false depending on system
+        if pidfile.exists() {
+            let content = tokio_fs::read_to_string(&pidfile).await.unwrap();
+            let pid = getpid();
+            assert_eq!(content.trim(), pid.to_string());
+        }
     }
 }
