@@ -101,9 +101,9 @@ pub struct LeaseFlags {
     pub hostname_from_client: bool,
 }
 
-impl LeaseFlags {
+impl Default for LeaseFlags {
     /// Create default lease flags
-    pub fn default() -> Self {
+    fn default() -> Self {
         Self {
             is_static: false,
             hostname_from_client: false,
