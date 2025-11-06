@@ -1,0 +1,88 @@
+; Reverse DNS zone file for 192.0.2.0/24 (TEST-NET-1)
+; Zone: 2.0.192.in-addr.arpa
+; RFC 1035 compliant format for IPv4 reverse lookups
+; Used for testing PTR record resolution in dnsmasq Rust implementation
+
+$ORIGIN 2.0.192.in-addr.arpa.
+$TTL 3600
+
+; SOA Record - Start of Authority
+@       IN      SOA     ns1.example.com. hostmaster.example.com. (
+                        2024010101      ; Serial (YYYYMMDDNN format)
+                        3600            ; Refresh (1 hour)
+                        1800            ; Retry (30 minutes)
+                        604800          ; Expire (1 week)
+                        86400           ; Minimum TTL (1 day)
+                        )
+
+; NS Records - Nameservers for this zone
+@       IN      NS      ns1.example.com.
+@       IN      NS      ns2.example.com.
+
+; PTR Records - IP to hostname mappings
+; Format: last-octet IN PTR hostname.domain.
+; These map 192.0.2.x to hostnames
+
+; Network infrastructure
+1       IN      PTR     gateway.example.com.
+2       IN      PTR     router.example.com.
+10      IN      PTR     ns1.example.com.
+11      IN      PTR     ns2.example.com.
+
+; Server infrastructure
+20      IN      PTR     webserver.example.com.
+21      IN      PTR     mailserver.example.com.
+22      IN      PTR     ftpserver.example.com.
+23      IN      PTR     dbserver.example.com.
+
+; DHCP range - typical dynamic allocations
+100     IN      PTR     dhcp-100.example.com.
+101     IN      PTR     dhcp-101.example.com.
+102     IN      PTR     dhcp-102.example.com.
+150     IN      PTR     dhcp-150.example.com.
+151     IN      PTR     dhcp-151.example.com.
+
+; Workstations
+200     IN      PTR     workstation-01.example.com.
+201     IN      PTR     workstation-02.example.com.
+202     IN      PTR     workstation-03.example.com.
+
+; Special test cases for edge condition testing
+; Single character hostname
+5       IN      PTR     a.example.com.
+
+; Maximum length subdomain testing (63 characters is max per label)
+50      IN      PTR     very-long-hostname-for-testing-maximum-label-length-limits.example.com.
+
+; Multiple subdomain levels
+60      IN      PTR     host.subnet.department.division.example.com.
+
+; Hyphenated hostnames
+70      IN      PTR     test-server-01.example.com.
+71      IN      PTR     backup-dns-server.example.com.
+
+; Numeric hostnames (valid but unusual)
+80      IN      PTR     server123.example.com.
+81      IN      PTR     host-192-0-2-81.example.com.
+
+; Case sensitivity test (DNS is case-insensitive but preserves case)
+90      IN      PTR     TestHost.example.com.
+91      IN      PTR     UPPERCASE.EXAMPLE.COM.
+
+; Boundary conditions
+254     IN      PTR     lasthost.example.com.
+
+; IPv4 addresses that commonly appear in documentation
+; 192.0.2.1 is often used as example gateway
+; 192.0.2.53 is example DNS server (port 53 reference)
+53      IN      PTR     dns-primary.example.com.
+
+; Additional infrastructure for comprehensive testing
+30      IN      PTR     proxy.example.com.
+31      IN      PTR     firewall.example.com.
+32      IN      PTR     loadbalancer.example.com.
+
+; Localhost-style testing (not 127.0.0.1, but similar concept in this subnet)
+127     IN      PTR     localhost-test.example.com.
+
+; End of zone file
