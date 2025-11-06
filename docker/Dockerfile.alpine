@@ -1,0 +1,237 @@
+# Multi-Stage Dockerfile for dnsmasq Rust Implementation on Alpine Linux
+# 
+# This Dockerfile builds the memory-safe Rust implementation of dnsmasq
+# targeting Alpine Linux for minimal container size and security.
+#
+# Supported Alpine Versions: 3.19.9, 3.20.8, 3.21.5, 3.22.2
+# Rust Version: 1.91.0 (per Agent Action Plan section 0.11.14)
+#
+# Build Instructions:
+# ------------------
+# Default build (Alpine 3.22.2):
+#   docker build -f docker/Dockerfile.alpine -t dnsmasq-rust:latest .
+#
+# Build with specific Alpine version:
+#   docker build --build-arg ALPINE_VERSION=3.20.8 -f docker/Dockerfile.alpine -t dnsmasq-rust:alpine3.20 .
+#   docker build --build-arg ALPINE_VERSION=3.19.9 -f docker/Dockerfile.alpine -t dnsmasq-rust:alpine3.19 .
+#   docker build --build-arg ALPINE_VERSION=3.21.5 -f docker/Dockerfile.alpine -t dnsmasq-rust:alpine3.21 .
+#
+# Run Container:
+# -------------
+# DNS only (default):
+#   docker run -d -p 53:53/udp -p 53:53/tcp --name dnsmasq dnsmasq-rust:latest
+#
+# With DHCP enabled:
+#   docker run -d -p 53:53/udp -p 53:53/tcp -p 67:67/udp --cap-add=NET_ADMIN --name dnsmasq dnsmasq-rust:latest
+#
+# With custom configuration:
+#   docker run -d -p 53:53/udp -p 53:53/tcp -v /path/to/dnsmasq.conf:/etc/dnsmasq.conf:ro --name dnsmasq dnsmasq-rust:latest
+#
+# Expected Image Size: <50MB (per Agent Action Plan section 0.6.3)
+
+# =============================================================================
+# Build Arguments
+# =============================================================================
+
+# Alpine Linux version - default to latest specified version
+# Supported: 3.19.9, 3.20.8, 3.21.5, 3.22.2 (per section 0.2.1)
+ARG ALPINE_VERSION=3.22.2
+
+# Rust version - pinned to 1.91.0 (per section 0.11.14)
+ARG RUST_VERSION=1.91.0
+
+# =============================================================================
+# Stage 1: Builder - Compile Rust Binary with Static Linking
+# =============================================================================
+
+FROM alpine:${ALPINE_VERSION} AS builder
+
+# Re-declare ARG after FROM to make it available in this stage
+ARG RUST_VERSION
+
+# Set build-time labels
+LABEL stage=builder
+LABEL rust.version=${RUST_VERSION}
+
+# Set working directory for build
+WORKDIR /build
+
+# Install build dependencies
+# - build-base: gcc, g++, make, libc-dev
+# - musl-dev: musl C library for static linking
+# - pkgconfig: for detecting optional libraries
+# - curl: for rustup installation
+# - Optional libraries for features:
+#   * nettle-dev: DNSSEC cryptographic support
+#   * dbus-dev: D-Bus integration
+#   * linux-headers: Linux-specific features (netlink, inotify)
+RUN apk add --no-cache \
+    build-base \
+    musl-dev \
+    pkgconfig \
+    curl \
+    nettle-dev \
+    dbus-dev \
+    linux-headers \
+    ca-certificates
+
+# Install Rust toolchain via rustup
+# - Install rustup-init
+# - Install Rust 1.91.0 stable
+# - Add musl target for static linking
+# - Install cargo-audit for security scanning
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
+    -y \
+    --default-toolchain ${RUST_VERSION} \
+    --profile minimal \
+    --component rustfmt,clippy,rust-src \
+    && rustup target add x86_64-unknown-linux-musl \
+    && cargo install cargo-audit --locked \
+    && rustc --version \
+    && cargo --version
+
+# Copy dependency manifests first for layer caching optimization
+# This allows Docker to cache dependencies if source code changes
+COPY Cargo.toml Cargo.lock ./
+COPY rust-toolchain.toml ./
+
+# Create dummy src_rust directory to build dependencies
+# This technique caches dependencies separately from source code
+RUN mkdir -p src_rust && \
+    echo "fn main() {}" > src_rust/main.rs && \
+    echo "// dummy" > src_rust/lib.rs
+
+# Build dependencies only (will be cached)
+RUN cargo build --release --target x86_64-unknown-linux-musl || true
+
+# Remove dummy source files
+RUN rm -rf src_rust
+
+# Copy actual source code
+COPY src_rust/ ./src_rust/
+COPY build.rs ./
+
+# Copy trust anchors for DNSSEC
+COPY trust-anchors.conf ./
+
+# Build the actual project with optimizations
+# - --release: Maximum optimizations
+# - --target x86_64-unknown-linux-musl: Static linking with musl
+# - Features: Default features from Cargo.toml (dhcp, dhcp6, tftp, script, auth, dnssec)
+RUN cargo build --release --target x86_64-unknown-linux-musl
+
+# Run tests to verify build correctness
+# This catches any issues before creating the final image
+RUN cargo test --release --target x86_64-unknown-linux-musl --no-fail-fast
+
+# Strip debug symbols to minimize binary size
+# This significantly reduces the final binary size
+RUN strip target/x86_64-unknown-linux-musl/release/dnsmasq
+
+# Verify the binary is statically linked (should show "not a dynamic executable")
+RUN ldd target/x86_64-unknown-linux-musl/release/dnsmasq 2>&1 | grep -q "not a dynamic executable" || \
+    (echo "ERROR: Binary is not statically linked!" && exit 1)
+
+# Display binary size for verification
+RUN ls -lh target/x86_64-unknown-linux-musl/release/dnsmasq
+
+# =============================================================================
+# Stage 2: Runtime - Minimal Production Image
+# =============================================================================
+
+FROM alpine:${ALPINE_VERSION}
+
+# Re-declare ARG after FROM
+ARG ALPINE_VERSION
+ARG RUST_VERSION
+
+# OCI metadata labels (per section 0.8.15 specification)
+LABEL org.opencontainers.image.title="dnsmasq-rust" \
+      org.opencontainers.image.description="Memory-safe Rust implementation of dnsmasq DNS/DHCP/TFTP server" \
+      org.opencontainers.image.version="2.90.0-rust" \
+      org.opencontainers.image.licenses="GPL-2.0-or-later OR GPL-3.0-or-later" \
+      org.opencontainers.image.authors="Simon Kelley <simon@thekelleys.org.uk>" \
+      org.opencontainers.image.url="http://thekelleys.org.uk/dnsmasq" \
+      org.opencontainers.image.source="http://thekelleys.org.uk/gitweb/?p=dnsmasq.git" \
+      org.opencontainers.image.vendor="Blitzy Platform" \
+      org.opencontainers.image.base.name="alpine:${ALPINE_VERSION}" \
+      rust.version="${RUST_VERSION}" \
+      alpine.version="${ALPINE_VERSION}"
+
+# Install minimal runtime dependencies
+# - ca-certificates: For DNSSEC root trust anchors
+# - tzdata: For accurate logging timestamps
+# Note: No libgcc needed for statically linked musl binary
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata
+
+# Create dnsmasq user and group with fixed UID/GID
+# UID/GID 453 is traditionally used for dnsmasq
+# - -S: System user/group
+# - -D: Don't assign a password
+# - -H: Don't create home directory
+# - -h: Home directory path (for reference only)
+# - -s /sbin/nologin: No login shell (security)
+RUN addgroup -g 453 -S dnsmasq && \
+    adduser -u 453 -S -D -H -h /var/lib/dnsmasq -s /sbin/nologin -G dnsmasq dnsmasq
+
+# Create necessary runtime directories
+# - /etc/dnsmasq.d: Additional configuration files
+# - /var/lib/dnsmasq: Lease files and persistent data
+# - /var/run/dnsmasq: PID file (if used)
+# - /usr/share/dnsmasq: Trust anchors and data files
+RUN mkdir -p \
+    /etc/dnsmasq.d \
+    /var/lib/dnsmasq \
+    /var/run/dnsmasq \
+    /usr/share/dnsmasq
+
+# Copy statically linked binary from builder stage
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/dnsmasq /usr/local/bin/dnsmasq
+
+# Copy configuration files
+COPY docker/dnsmasq.conf /etc/dnsmasq.conf
+COPY docker/entrypoint.sh /entrypoint.sh
+COPY trust-anchors.conf /usr/share/dnsmasq/trust-anchors.conf
+
+# Set executable permissions
+RUN chmod +x /entrypoint.sh /usr/local/bin/dnsmasq
+
+# Set ownership of data directories to dnsmasq user
+RUN chown -R dnsmasq:dnsmasq \
+    /var/lib/dnsmasq \
+    /var/run/dnsmasq
+
+# Expose standard ports
+# DNS: 53/tcp and 53/udp
+# DHCP: 67/udp (server), 68/udp (client - for DHCP relay)
+# Note: TFTP (69/udp) not exposed by default - add if needed
+EXPOSE 53/tcp 53/udp 67/udp 68/udp
+
+# Define volumes for persistent data
+# - /etc/dnsmasq.d: Mount custom configuration fragments
+# - /var/lib/dnsmasq: Persist DHCP leases across container restarts
+VOLUME ["/etc/dnsmasq.d", "/var/lib/dnsmasq"]
+
+# Health check: Validate configuration is parseable
+# Runs every 30 seconds to ensure dnsmasq is operational
+# --test flag: Syntax check without starting server
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/dnsmasq", "--test"] || exit 1
+
+# Switch to non-root user for security (per section 0.8.15)
+# dnsmasq will run with reduced privileges
+USER dnsmasq
+
+# Set entrypoint to our initialization script
+# This script handles environment variables, configuration validation, and signal forwarding
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command is empty - allows passing arguments to dnsmasq via docker run
+# Example: docker run dnsmasq-rust:latest --log-queries --cache-size=1000
+CMD []
