@@ -15,7 +15,7 @@
 //!
 //! - **DNS cache operations**: Insertions and LRU evictions
 //! - **DNS query statistics**: Forwarding, authoritative answers, local answers
-//! - **DHCP message counts**: All DHCPv4 message types (DISCOVER, OFFER, REQUEST, ACK, etc.)
+//! - **DHCP message counts**: All `DHCPv4` message types (`DISCOVER`, `OFFER`, `REQUEST`, `ACK`, etc.)
 //! - **Legacy protocol support**: BOOTP and PXE boot requests
 //! - **Lease management**: IPv4/IPv6 lease allocations and pruning
 //!
@@ -24,7 +24,7 @@
 //! This module is designed for zero-cost abstraction compared to the C implementation:
 //! - Enum variants compile to integer discriminants matching C enum values
 //! - `Copy` trait enables efficient pass-by-value semantics
-//! - `Hash` trait allows use as HashMap keys in metrics collectors
+//! - `Hash` trait allows use as `HashMap` keys in metrics collectors
 //! - Match exhaustiveness checking prevents missing metric cases at compile time
 //!
 //! # Usage
@@ -74,9 +74,9 @@
 /// - Query routing: forwarded, authoritative, and local answers
 ///
 /// ## DHCP Message Metrics (10 variants)
-/// - All DHCPv4 message types per RFC 2131
+/// - All `DHCPv4` message types per `RFC 2131`
 /// - Covers full DORA (Discover-Offer-Request-Ack) cycle
-/// - Includes error cases (DECLINE, NAK)
+/// - Includes error cases (`DECLINE`, `NAK`)
 ///
 /// ## Legacy Protocol Metrics (2 variants)
 /// - BOOTP: Legacy DHCP predecessor support
@@ -86,7 +86,7 @@
 /// - NOANSWER: Queries returning NXDOMAIN or NODATA
 ///
 /// ## Lease Management Metrics (4 variants)
-/// - Separate tracking for DHCPv4 and DHCPv6
+/// - Separate tracking for `DHCPv4` and `DHCPv6`
 /// - Allocation: New leases created
 /// - Pruning: Expired leases removed
 ///
@@ -98,17 +98,17 @@
 ///
 /// # Derive Traits
 ///
-/// - `Debug`: Human-readable debug output (e.g., "DnsQueriesForwarded")
+/// - `Debug`: Human-readable debug output (e.g., `DnsQueriesForwarded`)
 /// - `Clone`: Explicit cloning (typically not needed due to `Copy`)
 /// - `Copy`: Cheap bitwise copying for pass-by-value
 /// - `PartialEq`/`Eq`: Equality comparison for testing and deduplication
-/// - `Hash`: HashMap key usage in metrics collectors
+/// - `Hash`: `HashMap` key usage in metrics collectors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetricId {
     /// DNS cache insertions counter
     ///
     /// Tracks successful additions of resource records to the DNS cache.
-    /// Incremented when cache_insert() successfully stores a new RR in the
+    /// Incremented when `cache_insert()` successfully stores a new `RR` in the
     /// hash table or updates an existing entry with fresh data.
     ///
     /// **Incremented by**: `dns::cache::Cache::insert()`
@@ -271,40 +271,40 @@ pub enum MetricId {
     /// **C source**: `forward.c`
     Noanswer,
 
-    /// DHCPv4 leases allocated counter
+    /// `DHCPv4` leases allocated counter
     ///
     /// Tracks successful IPv4 address allocations from configured address
-    /// pools. Incremented when new DHCPv4 lease is created or existing
+    /// pools. Incremented when new `DHCPv4` lease is created or existing
     /// lease is reused after expiry.
     ///
     /// **Incremented by**: `dhcp::lease::LeaseManager::allocate_v4()`
     /// **C source**: `lease.c`
     LeasesAllocated4,
 
-    /// DHCPv4 leases pruned counter
+    /// `DHCPv4` leases pruned counter
     ///
-    /// Tracks removal of expired or released DHCPv4 leases from the lease
+    /// Tracks removal of expired or released `DHCPv4` leases from the lease
     /// database. Incremented during periodic lease cleanup operations.
     ///
     /// **Incremented by**: `dhcp::lease::LeaseManager::prune_expired_v4()`
     /// **C source**: `lease.c`
     LeasesPruned4,
 
-    /// DHCPv6 leases allocated counter
+    /// `DHCPv6` leases allocated counter
     ///
     /// Tracks successful IPv6 address or prefix allocations from configured
-    /// ranges. Incremented when new DHCPv6 lease is created for:
-    /// - IA_NA: Non-temporary addresses
-    /// - IA_TA: Temporary addresses
-    /// - IA_PD: Prefix delegation
+    /// ranges. Incremented when new `DHCPv6` lease is created for:
+    /// - `IA_NA`: Non-temporary addresses
+    /// - `IA_TA`: Temporary addresses
+    /// - `IA_PD`: Prefix delegation
     ///
     /// **Incremented by**: `dhcp::lease::LeaseManager::allocate_v6()`
     /// **C source**: `lease.c`
     LeasesAllocated6,
 
-    /// DHCPv6 leases pruned counter
+    /// `DHCPv6` leases pruned counter
     ///
-    /// Tracks removal of expired or released DHCPv6 leases from the lease
+    /// Tracks removal of expired or released `DHCPv6` leases from the lease
     /// database. Incremented during periodic lease cleanup operations.
     ///
     /// **Incremented by**: `dhcp::lease::LeaseManager::prune_expired_v6()`
@@ -334,6 +334,7 @@ impl MetricId {
     ///
     /// Static string slice containing the enum variant name. The returned
     /// string has `'static` lifetime and requires no allocation.
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             MetricId::DnsCacheInserted => "DnsCacheInserted",
@@ -400,6 +401,7 @@ impl MetricId {
     ///
     /// Equivalent to C function: `const char* get_metric_name(int metric_id)`
     /// defined in `src/metrics.h` and implemented in `src/metrics.c`.
+    #[must_use]
     pub fn to_prometheus_name(&self) -> &'static str {
         match self {
             MetricId::DnsCacheInserted => "dns_cache_inserted_total",
@@ -478,6 +480,7 @@ impl MetricId {
     ///
     /// Zero-cost abstraction: returns a reference to a static array, no
     /// runtime allocation or computation required.
+    #[must_use]
     pub fn all() -> &'static [MetricId] {
         &[
             MetricId::DnsCacheInserted,
