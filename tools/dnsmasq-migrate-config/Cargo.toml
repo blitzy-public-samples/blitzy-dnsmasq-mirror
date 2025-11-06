@@ -1,0 +1,60 @@
+[package]
+name = "dnsmasq-migrate-config"
+version = "0.1.0"
+edition = "2021"
+authors = ["dnsmasq-rs contributors"]
+description = "Configuration migration and validation tool for dnsmasq - validates existing dnsmasq.conf files for compatibility with the Rust implementation"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/dnsmasq/dnsmasq"
+keywords = ["dnsmasq", "dns", "dhcp", "config", "validation"]
+categories = ["command-line-utilities", "config"]
+
+[[bin]]
+name = "dnsmasq-migrate-config"
+path = "src/main.rs"
+
+[dependencies]
+# Command-line argument parsing
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Serialization and configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# File I/O and path handling
+walkdir = "2.5"
+
+# Regular expressions for option value validation
+regex = "1.10"
+
+# Colored terminal output for user-friendly reports
+termcolor = "1.4"
+
+# String manipulation utilities
+indexmap = { version = "2.5", features = ["serde"] }
+
+# IP address parsing and validation
+ipnetwork = "0.20"
+
+# Time duration parsing for dnsmasq time intervals (e.g., "1h", "30m")
+humantime = "2.1"
+
+# Logging for verbose output
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# Testing framework
+tempfile = "3.12"
+assert_cmd = "2.0"
+predicates = "3.1"
+
+# Property-based testing for configuration validation
+proptest = "1.5"
+
+# Test fixtures and snapshot testing
+insta = "1.39"
