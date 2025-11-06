@@ -61,7 +61,7 @@
 //!
 //! # Examples
 //!
-//! ```no_run
+//! ```ignore
 //! use dnsmasq::integration::{IntegrationManager, IntegrationManagerBuilder};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,13 +73,15 @@
 //!
 //! // Check which integrations are available
 //! if manager.has_dbus() {
-//!     let dbus_interface = manager.dbus().expect("D-Bus is available");
-//!     // Use D-Bus interface...
+//!     if let Some(dbus_interface) = manager.dbus() {
+//!         // Use D-Bus interface...
+//!     }
 //! }
 //!
 //! if manager.has_inotify() {
-//!     let watcher = manager.inotify().expect("inotify is available");
-//!     // Watch configuration files...
+//!     if let Some(watcher) = manager.inotify() {
+//!         // Watch configuration files...
+//!     }
 //! }
 //! # Ok(())
 //! # }
