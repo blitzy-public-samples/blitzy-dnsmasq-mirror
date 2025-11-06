@@ -31,7 +31,7 @@
 //!
 //! ```rust,no_run
 //! use std::net::IpAddr;
-//! use ipset::{IpsetManager, add_to_ipset};
+//! use dnsmasq::platform::linux::ipset::{IpsetManager, add_to_ipset};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Initialize ipset manager with kernel version detection
@@ -59,7 +59,7 @@ use byteorder::{ByteOrder, NetworkEndian};
 use nix::sys::socket::{self, AddressFamily, SockProtocol, SockType, SockFlag};
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd, OwnedFd, IntoRawFd};
 use thiserror::Error;
 use tracing::info;
 
@@ -187,6 +187,7 @@ struct NetlinkMsgHdr {
 ///
 /// ```rust,no_run
 /// # use std::net::IpAddr;
+/// # use dnsmasq::platform::linux::ipset::IpsetManager;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let manager = IpsetManager::new()?;
 /// let addr: IpAddr = "192.0.2.1".parse()?;
@@ -209,21 +210,22 @@ struct IpsetSocket {
 impl IpsetSocket {
     /// Create new socket with modern Netlink protocol
     fn new_modern() -> Result<Self, IpsetError> {
-        let fd = socket::socket(
+        let owned_fd = socket::socket(
             AddressFamily::Netlink,
             SockType::Raw,
             SockFlag::empty(),
-            Some(SockProtocol::NetlinkNetfilter),
+            Some(SockProtocol::NetlinkNetFilter),
         )
         .map_err(|e| IpsetError::SocketError(std::io::Error::from_raw_os_error(e as i32)))?;
 
+        // Convert OwnedFd to RawFd
+        let fd = owned_fd.into_raw_fd();
+
         // Bind to Netlink with kernel
-        let addr = libc::sockaddr_nl {
-            nl_family: libc::AF_NETLINK as u16,
-            nl_pad: 0,
-            nl_pid: 0,
-            nl_groups: 0,
-        };
+        let mut addr: libc::sockaddr_nl = unsafe { mem::zeroed() };
+        addr.nl_family = libc::AF_NETLINK as u16;
+        addr.nl_pid = 0;
+        addr.nl_groups = 0;
 
         unsafe {
             if libc::bind(
@@ -244,13 +246,16 @@ impl IpsetSocket {
 
     /// Create new socket with legacy raw socket protocol
     fn new_legacy() -> Result<Self, IpsetError> {
-        let fd = socket::socket(
+        let owned_fd = socket::socket(
             AddressFamily::Inet,
             SockType::Raw,
             SockFlag::empty(),
             Some(SockProtocol::Raw),
         )
         .map_err(|e| IpsetError::SocketError(std::io::Error::from_raw_os_error(e as i32)))?;
+
+        // Convert OwnedFd to RawFd
+        let fd = owned_fd.into_raw_fd();
 
         info!("Initialized ipset with legacy raw socket protocol (IPv4 only)");
         Ok(Self { fd })
@@ -287,7 +292,7 @@ impl IpsetManager {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use ipset::IpsetManager;
+    /// # use dnsmasq::platform::linux::ipset::IpsetManager;
     /// let manager = IpsetManager::new()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -376,7 +381,7 @@ impl IpsetManager {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use ipset::IpsetManager;
+    /// # use dnsmasq::platform::linux::ipset::IpsetManager;
     /// # use std::net::IpAddr;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = IpsetManager::new()?;
@@ -405,7 +410,7 @@ impl IpsetManager {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # use ipset::IpsetManager;
+    /// # use dnsmasq::platform::linux::ipset::IpsetManager;
     /// # use std::net::IpAddr;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = IpsetManager::new()?;
@@ -639,12 +644,10 @@ impl IpsetManager {
 
     /// Send Netlink message to kernel with retry on EINTR
     async fn send_netlink_message(&self, buffer: &[u8]) -> Result<(), IpsetError> {
-        let addr = libc::sockaddr_nl {
-            nl_family: libc::AF_NETLINK as u16,
-            nl_pad: 0,
-            nl_pid: 0,
-            nl_groups: 0,
-        };
+        let mut addr: libc::sockaddr_nl = unsafe { mem::zeroed() };
+        addr.nl_family = libc::AF_NETLINK as u16;
+        addr.nl_pid = 0;
+        addr.nl_groups = 0;
 
         loop {
             unsafe {
@@ -735,6 +738,7 @@ impl IpsetManager {
 ///
 /// ```rust,no_run
 /// # use std::net::IpAddr;
+/// # use dnsmasq::platform::linux::ipset::add_to_ipset;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let addr: IpAddr = "192.0.2.100".parse()?;
 /// add_to_ipset("dynamic_blocklist", addr, false).await?;

@@ -185,7 +185,7 @@ impl NftablesManager {
     /// # Arguments
     ///
     /// * `setname` - Set identifier in format "table#family#set", optionally
-    ///               prefixed with "4 " (IPv4 only) or "6 " (IPv6 only)
+    ///   prefixed with "4 " (IPv4 only) or "6 " (IPv6 only)
     /// * `addr` - IP address to add to the set
     ///
     /// # Errors
@@ -216,7 +216,7 @@ impl NftablesManager {
     /// # Arguments
     ///
     /// * `setname` - Set identifier in format "table#family#set", optionally
-    ///               prefixed with "4 " (IPv4 only) or "6 " (IPv6 only)
+    ///   prefixed with "4 " (IPv4 only) or "6 " (IPv6 only)
     /// * `addr` - IP address to remove from the set
     ///
     /// # Errors
@@ -352,10 +352,10 @@ fn parse_setname_and_filter(setname: &str) -> Result<(String, Option<AddressFami
     }
 
     // Check for address family prefix
-    let (parsed_name, filter) = if trimmed.starts_with("4 ") {
-        (trimmed[2..].trim().to_string(), Some(AddressFamilyFilter::IPv4Only))
-    } else if trimmed.starts_with("6 ") {
-        (trimmed[2..].trim().to_string(), Some(AddressFamilyFilter::IPv6Only))
+    let (parsed_name, filter) = if let Some(stripped) = trimmed.strip_prefix("4 ") {
+        (stripped.trim().to_string(), Some(AddressFamilyFilter::IPv4Only))
+    } else if let Some(stripped) = trimmed.strip_prefix("6 ") {
+        (stripped.trim().to_string(), Some(AddressFamilyFilter::IPv6Only))
     } else {
         (trimmed.to_string(), None)
     };
@@ -381,7 +381,7 @@ fn parse_setname_and_filter(setname: &str) -> Result<(String, Option<AddressFami
 /// # Arguments
 ///
 /// * `setname` - Set identifier in format "table#family#set", optionally
-///               prefixed with "4 " or "6 " for address family filtering
+///   prefixed with "4 " or "6 " for address family filtering
 /// * `addr` - IP address to add or remove
 /// * `remove` - If true, remove the address; if false, add it
 ///
