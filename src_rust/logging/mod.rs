@@ -3,8 +3,10 @@
 //! This module provides structured logging capabilities for dnsmasq,
 //! supporting both JSON and plain text formats for operational flexibility.
 
+pub mod logger;
 pub mod structured;
 
+pub use logger::{init_logging, LogDestination, LogError, LogLevel, Logger};
 pub use structured::{JsonFormatter, LogFormat, PlainTextFormatter};
 
 /// Initialize logging subsystem

@@ -70,26 +70,26 @@
 //! }
 //! ```
 
-use crate::logging::structured::{JsonFormatter, LogFormat, PlainTextFormatter};
-use nix::sys::socket::{connect, socket, AddressFamily, SockType, UnixAddr};
-use nix::sys::stat::fstat;
-use nix::unistd::{fchown, getpid};
+use crate::logging::structured::LogFormat;
+use libc;
+use nix::sys::socket::{socket, AddressFamily, SockType, UnixAddr};
+use nix::unistd::getpid;
 use std::collections::VecDeque;
 use std::fmt;
-use std::fmt::Write as FmtWrite;
-use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult, Write as IoWrite};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixDatagram;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info, trace, warn, Event, Level, Metadata};
+use tracing::Level;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter, Layer, Registry};
+use tracing_subscriber::{fmt as trace_fmt, EnvFilter, Registry};
 
 /// Maximum log message size per RFC 3164 Section 4.1
 const MAX_MESSAGE: usize = 1024;
@@ -380,8 +380,8 @@ impl Logger {
                 *conn_good = true;
                 Ok(())
             }
-            Err(e) if e.kind() == ErrorKind::ProtocolError => {
-                // Fall back to SOCK_STREAM
+            Err(e) if e.raw_os_error() == Some(libc::EPROTONOSUPPORT) => {
+                // Fall back to SOCK_STREAM when protocol not supported
                 match self.try_connect_syslog(SockType::Stream).await {
                     Ok(socket) => {
                         let mut sock_guard = self.syslog_socket.lock().await;
@@ -417,11 +417,11 @@ impl Logger {
         .map_err(|e| IoError::new(ErrorKind::Other, e))?;
 
         // Convert to tokio UnixDatagram
-        let std_socket = unsafe { std::os::unix::net::UnixDatagram::from_raw_fd(fd) };
+        let std_socket = unsafe { std::os::unix::net::UnixDatagram::from_raw_fd(fd.as_raw_fd()) };
         let socket = UnixDatagram::from_std(std_socket)?;
 
         // Connect to syslog
-        let addr = UnixAddr::new(SYSLOG_PATH)
+        let _addr = UnixAddr::new(SYSLOG_PATH)
             .map_err(|e| IoError::new(ErrorKind::InvalidInput, e))?;
         
         // Note: UnixDatagram doesn't have connect method in the same way as raw socket
@@ -628,7 +628,7 @@ impl Logger {
     /// # Arguments
     ///
     /// * `level` - New minimum log level
-    pub async fn set_level(&self, level: LogLevel) {
+    pub async fn set_level(&self, _level: LogLevel) {
         // Note: This is a simplified implementation. In a full implementation,
         // we would update the tracing subscriber's filter dynamically.
         // For now, we only update the Logger's internal level.
@@ -697,16 +697,20 @@ pub async fn init_logging(
         .unwrap_or_else(|_| EnvFilter::new(log_level.to_tracing_level().to_string()));
 
     let format = LogFormat::from_env();
-    let subscriber = match format {
-        LogFormat::Json => Registry::default()
-            .with(filter)
-            .with(fmt::layer().json()),
-        LogFormat::PlainText => Registry::default()
-            .with(filter)
-            .with(fmt::layer().compact()),
-    };
-
-    subscriber.init();
+    match format {
+        LogFormat::Json => {
+            Registry::default()
+                .with(filter)
+                .with(trace_fmt::layer().json())
+                .init();
+        }
+        LogFormat::PlainText => {
+            Registry::default()
+                .with(filter)
+                .with(trace_fmt::layer().compact())
+                .init();
+        }
+    }
 
     Ok(logger_arc)
 }
@@ -820,21 +824,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_queue_full_handling() {
+        // Use a file destination that doesn't exist to prevent writes from succeeding
+        // This will cause messages to remain in queue
         let logger = Logger::new(
-            LogDestination::Stderr,
+            LogDestination::File(PathBuf::from("/nonexistent/path/that/will/fail")),
             LogLevel::Debug,
             2, // Very small queue
             libc::LOG_DAEMON,
         );
 
-        // Fill queue
+        // Fill queue - these messages will stay in queue because writes will fail
         logger.log_message(LogLevel::Info, "", "message 1").await;
         logger.log_message(LogLevel::Info, "", "message 2").await;
         
-        // This should be dropped
+        // Queue should now be full, verify it
+        {
+            let queue = logger.message_queue.lock().await;
+            assert_eq!(queue.len(), 2, "Queue should be full with 2 messages");
+        }
+        
+        // This should be dropped due to full queue
         logger.log_message(LogLevel::Info, "", "message 3").await;
         
+        // Verify the message was dropped and lost counter incremented
         let lost = logger.entries_lost.lock().await;
-        assert_eq!(*lost, 1);
+        assert_eq!(*lost, 1, "One message should have been dropped due to full queue");
     }
 }
