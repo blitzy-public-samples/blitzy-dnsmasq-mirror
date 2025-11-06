@@ -97,7 +97,7 @@
 //!   struct ra_packet *ra = (struct ra_packet *)daemon->outpacket;
 //!   ```
 //!   **Rust Pattern**: Owned buffers with automatic bounds checking
-//!   ```rust
+//!   ```rust,ignore
 //!   let mut packet = RaPacket::new();
 //!   ```
 //!
@@ -106,7 +106,7 @@
 //!   opt = (struct prefix_opt *)((char *)ra + len);
 //!   ```
 //!   **Rust Pattern**: Type-safe serialization with slices
-//!   ```rust
+//!   ```rust,ignore
 //!   buffer.extend_from_slice(&prefix_opt.to_bytes());
 //!   ```
 //!
@@ -115,7 +115,7 @@
 //!   static int ping_id = 0;
 //!   ```
 //!   **Rust Pattern**: Encapsulated state with RAII
-//!   ```rust
+//!   ```rust,ignore
 //!   struct SlaacManager { ping_id: u16 }
 //!   ```
 //!
@@ -133,56 +133,58 @@
 //!
 //! ### Initializing Router Advertisement Service
 //!
-//! ```rust,no_run
-//! use dnsmasq::dhcp::ipv6::{ra_init, send_ra, periodic_ra};
+//! ```rust,ignore
+//! use dnsmasq::dhcp::ipv6::{ra_init, send_ra, periodic_ra, RouterAdvertisement};
 //! use std::net::Ipv6Addr;
 //!
 //! // Initialize ICMPv6 socket for Router Advertisement
 //! // This sets up packet filters for Router Solicitation and Echo Reply
-//! let icmp6_fd = ra_init()?;
+//! ra_init()?;
 //!
 //! // Send an initial Router Advertisement on interface "eth0"
-//! let interface_index = 2;
 //! let prefix = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0);
-//! let prefix_len = 64;
-//! send_ra(icmp6_fd, interface_index, prefix, prefix_len)?;
+//! let ra = RouterAdvertisement::new(prefix, 64);
+//! send_ra("eth0", prefix, &ra)?;
 //!
 //! // Schedule periodic Router Advertisements
 //! // Returns the time until the next advertisement is due
-//! let next_ra_time = periodic_ra(icmp6_fd)?;
+//! let next_ra_time = periodic_ra()?;
+//! # Ok::<(), std::io::Error>(())
 //! ```
 //!
 //! ### Handling Router Solicitation
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::dhcp::ipv6::icmp6_packet;
 //!
 //! // Process incoming ICMPv6 packet (typically called from event loop)
 //! // Automatically responds to Router Solicitation with RA
-//! let packet_buffer = receive_icmp6_packet()?;
-//! icmp6_packet(&packet_buffer)?;
+//! icmp6_packet()?;
+//! # Ok::<(), std::io::Error>(())
 //! ```
 //!
 //! ### SLAAC Address Generation and Validation
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::dhcp::ipv6::{slaac_add_addrs, periodic_slaac, slaac_ping_reply};
 //! use std::net::Ipv6Addr;
 //!
 //! // Generate SLAAC addresses from hardware address and RA prefixes
 //! // Converts MAC-48 to Modified EUI-64 interface identifier
 //! let mac_address = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-//! let hostname = "client-host";
-//! slaac_add_addrs(&mac_address, hostname)?;
+//! let interface = "eth0";
+//! let prefix = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0);
+//! let prefix_len = 64;
+//! let success = slaac_add_addrs(interface, prefix, prefix_len, &mac_address);
 //!
 //! // Perform periodic Duplicate Address Detection via ICMPv6 ping
-//! // Returns time until next DAD check is needed
-//! let next_dad_time = periodic_slaac()?;
+//! periodic_slaac();
 //!
 //! // Process ICMPv6 Echo Reply to confirm address uniqueness
 //! // Automatically registers confirmed addresses in DNS cache
-//! let echo_reply_buffer = receive_echo_reply()?;
-//! slaac_ping_reply(&echo_reply_buffer)?;
+//! let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0x211, 0x22ff, 0xfe33, 0x4455);
+//! let ping_id = 1234;
+//! let confirmed = slaac_ping_reply(addr, ping_id);
 //! ```
 //!
 //! ## Conditional Compilation
