@@ -302,7 +302,9 @@ mod tests {
         // Verify DnssecResult type alias works correctly
         let success: DnssecResult<bool> = Ok(true);
         assert!(success.is_ok());
-        assert_eq!(success.unwrap(), true);
+        if let Ok(value) = success {
+            assert!(value);
+        }
 
         let failure: DnssecResult<bool> = Err(DnssecError::ChainOfTrustBroken {
             zone: "example.com".to_string(),
@@ -313,8 +315,8 @@ mod tests {
     #[test]
     fn test_validation_chain_length_constant() {
         // Verify constant is within reasonable bounds
-        assert!(MAX_VALIDATION_CHAIN_LENGTH > 0);
-        assert!(MAX_VALIDATION_CHAIN_LENGTH <= 100);
+        // MAX_VALIDATION_CHAIN_LENGTH is defined as 20, which is within expected range
+        assert_eq!(MAX_VALIDATION_CHAIN_LENGTH, 20);
     }
 
     #[test]
