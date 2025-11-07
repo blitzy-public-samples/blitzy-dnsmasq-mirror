@@ -842,7 +842,7 @@ mod tests {
         let size = estimated_message_size(&message);
 
         // Empty message should be around header size (12 bytes) after compression discount
-        assert!(size >= 10 && size <= 15);
+        assert!((10..=15).contains(&size));
     }
 
     #[test]
