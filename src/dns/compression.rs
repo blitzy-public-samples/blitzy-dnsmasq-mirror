@@ -412,7 +412,9 @@ pub fn extract_name(
 
             // Update total name length (include period separator)
             total_length += label_length + 1;
-            if total_length >= MAX_DOMAIN_NAME {
+            // RFC 1035 Section 2.3.4: Maximum name length in wire format is 255 bytes
+            // This is the wire format limit, not the presentation format limit (MAXDNAME = 1025)
+            if total_length >= 255 {
                 return Err(CompressionError::NameTooLong {
                     length: total_length,
                 });
