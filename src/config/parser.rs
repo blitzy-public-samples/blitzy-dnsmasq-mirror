@@ -1673,7 +1673,7 @@ mod tests {
         let config_str = "server=8.8.8.8\\\n#comment after continuation\nserver=8.8.4.4";
         let builder = parse_config_string(config_str).expect("Parse failed");
         
-        assert!(builder.servers.len() >= 1);
+        assert!(!builder.servers.is_empty());
     }
 
     #[test]
