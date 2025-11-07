@@ -383,11 +383,10 @@ impl IaAddr {
         buffer.extend_from_slice(&self.address.octets());
 
         // Write preferred lifetime (4 bytes, big-endian)
-        let preferred_secs = if self.preferred_lifetime.as_secs() >= u64::from(Self::INFINITE_LIFETIME) {
-            Self::INFINITE_LIFETIME
-        } else {
-            self.preferred_lifetime.as_secs() as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)]
+        let preferred_secs = self.preferred_lifetime.as_secs()
+            .min(u64::from(Self::INFINITE_LIFETIME)) as u32;
         buffer.write_u32::<BigEndian>(preferred_secs).map_err(|e| {
             IaError::ParseError {
                 message: format!("Failed to write preferred lifetime: {e}"),
@@ -395,11 +394,10 @@ impl IaAddr {
         })?;
 
         // Write valid lifetime (4 bytes, big-endian)
-        let valid_secs = if self.valid_lifetime.as_secs() >= u64::from(Self::INFINITE_LIFETIME) {
-            Self::INFINITE_LIFETIME
-        } else {
-            self.valid_lifetime.as_secs() as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)]
+        let valid_secs = self.valid_lifetime.as_secs()
+            .min(u64::from(Self::INFINITE_LIFETIME)) as u32;
         buffer.write_u32::<BigEndian>(valid_secs).map_err(|e| {
             IaError::ParseError {
                 message: format!("Failed to write valid lifetime: {e}"),
@@ -586,11 +584,10 @@ impl IaPrefix {
         let mut buffer = Vec::with_capacity(25);
 
         // Write preferred lifetime (4 bytes, big-endian)
-        let preferred_secs = if self.preferred_lifetime.as_secs() >= u64::from(Self::INFINITE_LIFETIME) {
-            Self::INFINITE_LIFETIME
-        } else {
-            self.preferred_lifetime.as_secs() as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+        let preferred_secs = self.preferred_lifetime.as_secs()
+            .min(u64::from(Self::INFINITE_LIFETIME)) as u32;
         buffer.write_u32::<BigEndian>(preferred_secs).map_err(|e| {
             IaError::ParseError {
                 message: format!("Failed to write preferred lifetime: {e}"),
@@ -598,11 +595,10 @@ impl IaPrefix {
         })?;
 
         // Write valid lifetime (4 bytes, big-endian)
-        let valid_secs = if self.valid_lifetime.as_secs() >= u64::from(Self::INFINITE_LIFETIME) {
-            Self::INFINITE_LIFETIME
-        } else {
-            self.valid_lifetime.as_secs() as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+        let valid_secs = self.valid_lifetime.as_secs()
+            .min(u64::from(Self::INFINITE_LIFETIME)) as u32;
         buffer.write_u32::<BigEndian>(valid_secs).map_err(|e| {
             IaError::ParseError {
                 message: format!("Failed to write valid lifetime: {e}"),
@@ -650,7 +646,7 @@ impl IaPrefix {
 /// ## Example
 ///
 /// ```ignore
-/// let mut builder = IaBuilder::new(IdentityAssociation::IaNa, 0x12345678);
+/// let mut builder = IaBuilder::new(IdentityAssociation::IaNa, 0x1234_5678);
 /// builder.add_address(addr1, Duration::from_secs(3600), Duration::from_secs(7200))?;
 /// builder.add_address(addr2, Duration::from_secs(3600), Duration::from_secs(7200))?;
 /// builder.calculate_t1_t2(Duration::from_secs(3600), true)?;
@@ -669,6 +665,8 @@ pub struct IaBuilder {
     min_lifetime: Option<Duration>,
     /// Whether IA option header has been started
     started: bool,
+    /// Position where IA option started (for finish_option call)
+    ia_start_position: Option<usize>,
 }
 
 impl IaBuilder {
@@ -695,6 +693,7 @@ impl IaBuilder {
             t1_t2_position: None,
             min_lifetime: None,
             started: false,
+            ia_start_position: None,
         }
     }
 
@@ -711,11 +710,17 @@ impl IaBuilder {
             return Ok(());
         }
 
+        // Save the position before starting the option
+        let start_pos = self.builder.current_position();
+        
         // Start IA option (IA_NA, IA_TA, or IA_PD)
         self.builder.start_option(self.ia_type.option_code())
             .map_err(|e| IaError::BufferTooSmall {
                 message: format!("Failed to start IA option: {e}"),
             })?;
+        
+        // Save the start position for later finish_option call
+        self.ia_start_position = Some(start_pos);
 
         // Write IAID (4 bytes)
         self.builder.write_u32(self.iaid)
@@ -810,22 +815,20 @@ impl IaBuilder {
             })?;
 
         // Write preferred lifetime (4 bytes)
-        let preferred_secs = if preferred_lifetime.as_secs() >= u64::from(IaAddr::INFINITE_LIFETIME) {
-            IaAddr::INFINITE_LIFETIME
-        } else {
-            preferred_lifetime.as_secs() as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+        let preferred_secs = preferred_lifetime.as_secs()
+            .min(u64::from(IaAddr::INFINITE_LIFETIME)) as u32;
         self.builder.write_u32(preferred_secs)
             .map_err(|e| IaError::BufferTooSmall {
                 message: format!("Failed to write preferred lifetime: {e}"),
             })?;
 
         // Write valid lifetime (4 bytes)
-        let valid_secs_u32 = if valid_secs >= u64::from(IaAddr::INFINITE_LIFETIME) {
-            IaAddr::INFINITE_LIFETIME
-        } else {
-            valid_secs as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+        let valid_secs_u32 = valid_secs
+            .min(u64::from(IaAddr::INFINITE_LIFETIME)) as u32;
         self.builder.write_u32(valid_secs_u32)
             .map_err(|e| IaError::BufferTooSmall {
                 message: format!("Failed to write valid lifetime: {e}"),
@@ -911,22 +914,20 @@ impl IaBuilder {
             })?;
 
         // Write preferred lifetime (4 bytes)
-        let preferred_secs = if preferred_lifetime.as_secs() >= u64::from(IaPrefix::INFINITE_LIFETIME) {
-            IaPrefix::INFINITE_LIFETIME
-        } else {
-            preferred_lifetime.as_secs() as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+        let preferred_secs = preferred_lifetime.as_secs()
+            .min(u64::from(IaPrefix::INFINITE_LIFETIME)) as u32;
         self.builder.write_u32(preferred_secs)
             .map_err(|e| IaError::BufferTooSmall {
                 message: format!("Failed to write preferred lifetime: {e}"),
             })?;
 
         // Write valid lifetime (4 bytes)
-        let valid_secs_u32 = if valid_secs >= u64::from(IaPrefix::INFINITE_LIFETIME) {
-            IaPrefix::INFINITE_LIFETIME
-        } else {
-            valid_secs as u32
-        };
+        // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+        #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+        let valid_secs_u32 = valid_secs
+            .min(u64::from(IaPrefix::INFINITE_LIFETIME)) as u32;
         self.builder.write_u32(valid_secs_u32)
             .map_err(|e| IaError::BufferTooSmall {
                 message: format!("Failed to write valid lifetime: {e}"),
@@ -992,22 +993,20 @@ impl IaBuilder {
             self.builder.restore_position(position);
 
             // Write T1 (4 bytes)
-            let t1_secs = if t1.as_secs() >= u64::from(IaAddr::INFINITE_LIFETIME) {
-                IaAddr::INFINITE_LIFETIME
-            } else {
-                t1.as_secs() as u32
-            };
+            // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+            #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+            let t1_secs = t1.as_secs()
+                .min(u64::from(IaAddr::INFINITE_LIFETIME)) as u32;
             self.builder.write_u32(t1_secs)
                 .map_err(|e| IaError::BufferTooSmall {
                     message: format!("Failed to write T1: {e}"),
                 })?;
 
             // Write T2 (4 bytes)
-            let t2_secs = if t2.as_secs() >= u64::from(IaAddr::INFINITE_LIFETIME) {
-                IaAddr::INFINITE_LIFETIME
-            } else {
-                t2.as_secs() as u32
-            };
+            // Clamp to INFINITE_LIFETIME (u32::MAX) if value exceeds it
+            #[allow(clippy::cast_possible_truncation)] // Safe: clamped to u32::MAX via min()
+            let t2_secs = t2.as_secs()
+                .min(u64::from(IaAddr::INFINITE_LIFETIME)) as u32;
             self.builder.write_u32(t2_secs)
                 .map_err(|e| IaError::BufferTooSmall {
                     message: format!("Failed to write T2: {e}"),
@@ -1111,10 +1110,13 @@ impl IaBuilder {
             });
         }
 
-        // Finish the IA option
-        // Note: We need to track the IA start position
-        // Since we don't have it explicitly, we'll need to handle this differently
-        // The builder's option_stack should have it
+        // Finish the IA option before building
+        if let Some(start_pos) = self.ia_start_position {
+            self.builder.finish_option(start_pos)
+                .map_err(|e| IaError::BufferTooSmall {
+                    message: format!("Failed to finish IA option: {e}"),
+                })?;
+        }
         
         // Get the completed buffer
         self.builder.build()
@@ -1452,7 +1454,7 @@ pub fn check_ia(opt_data: &[u8]) -> Result<(IdentityAssociation, u32), IaError> 
 /// # Example
 ///
 /// ```ignore
-/// let mut builder = build_ia(IdentityAssociation::IaNa, 0x12345678);
+/// let mut builder = build_ia(IdentityAssociation::IaNa, 0x1234_5678);
 /// ```
 #[must_use]
 pub fn build_ia(ia_type: IdentityAssociation, iaid: u32) -> IaBuilder {
@@ -1530,7 +1532,7 @@ mod tests {
 
     #[test]
     fn test_ia_builder_basic() {
-        let mut builder = IaBuilder::new(IdentityAssociation::IaNa, 0x12345678);
+        let mut builder = IaBuilder::new(IdentityAssociation::IaNa, 0x1234_5678);
         
         let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
         builder.add_address(addr, Duration::from_secs(3600), Duration::from_secs(7200)).unwrap();
