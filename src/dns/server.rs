@@ -1429,7 +1429,7 @@ mod tests {
     fn test_socket_config_default() {
         let config = SocketConfig::default();
         assert_eq!(config.port, 53);
-        assert_eq!(config.reuse_port, false);
+        assert!(!config.reuse_port);
         assert!(config.bind_addresses.is_empty());
     }
 
