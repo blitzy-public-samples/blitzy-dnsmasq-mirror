@@ -45,34 +45,25 @@
 //! - RFC 5936 - DNS Zone Transfer Protocol (AXFR) for secondary servers
 //! - RFC 2317 - Classless IN-ADDR.ARPA delegation for reverse zones
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime};
+use std::net::{IpAddr, SocketAddr};
+use std::time::SystemTime;
 
 use bytes::BytesMut;
-use ipnetwork::{Ipv4Network, Ipv6Network, IpNetwork};
-use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::timeout;
-use tracing::{debug, info, warn, error, trace};
+use ipnetwork::{Ipv4Network, Ipv6Network};
+use tracing::{debug, info, warn, trace};
 
 use crate::dns::protocol::{
-    T_PTR, T_SOA, T_NS, T_A, T_AAAA, T_CNAME, T_MX, T_SRV, T_TXT, T_NAPTR, T_AXFR,
-    C_IN, NOERROR, NXDOMAIN, REFUSED, MAXDNAME, HB3_AA, HB3_TC, HB3_QR, HB4_RA, HB4_AD, QUERY,
+    T_PTR, T_SOA, T_NS, T_A, T_AAAA, T_AXFR,
+    C_IN, NOERROR, NXDOMAIN, REFUSED, HB3_AA, HB3_TC, HB3_QR, HB4_RA, HB4_AD, QUERY,
 };
 use crate::dns::parser::{extract_name, skip_questions, in_arpa_name_2_addr};
-use crate::dns::serializer::{add_resource_record, setup_reply, read_u16, write_u16};
-use crate::dns::cache::{Cache, check_for_local_domain};
-use crate::dns::cache_types::{
-    CacheFlags, CacheRecord, F_IPV4, F_IPV6, F_DHCP, F_HOSTS, F_FORWARD, F_REVERSE,
-    F_NXDOMAIN, F_CONFIG,
-};
+use crate::dns::serializer::read_u16;
+use crate::dns::cache::Cache;
+use crate::dns::cache_types::{F_IPV4, F_IPV6};
 use crate::dns::domain::hostname_isequal;
-use crate::utils::general::{is_same_net, is_same_net6};
-use crate::logging::logger::log_query;
-use crate::config::types::{
-    AuthZone, DaemonOptions, Config, InterfaceName, AddrList, OPT_DHCP_FQDN,
-};
+// TODO: Implement log_query function
+// use crate::logging::logger::log_query;
+use crate::config::types::{AuthZone, Config, AddrList};
 
 // ============================================================================
 // Error Types
@@ -83,22 +74,27 @@ use crate::config::types::{
 pub enum AuthError {
     /// Invalid query packet format
     InvalidQuery {
+        /// Description of why the query is invalid
         reason: String,
     },
     
     /// Packet construction would exceed buffer limit
     BufferOverflow {
+        /// Size that was attempted to write
         attempted: usize,
+        /// Size available in buffer
         available: usize,
     },
     
     /// AXFR request from unauthorized peer
     UnauthorizedAxfr {
+        /// Address of the peer attempting AXFR
         peer_addr: String,
     },
     
     /// Domain name too long
     NameTooLong {
+        /// Length of the domain name
         length: usize,
     },
     
@@ -212,10 +208,7 @@ fn find_subnet<'a>(zone: &'a AuthZone, addr: &IpAddr) -> Option<&'a AddrList> {
 ///
 /// `true` if address is excluded, `false` otherwise
 fn find_exclude(zone: &AuthZone, addr: &IpAddr) -> bool {
-    zone.exclude
-        .as_ref()
-        .map(|exclusions| find_addrlist(exclusions, addr).is_some())
-        .unwrap_or(false)
+    find_addrlist(&zone.exclude, addr).is_some()
 }
 
 /// Apply subnet filtering to determine if address is authorized for zone
@@ -350,23 +343,32 @@ pub fn answer_auth(
     packet: &[u8],
     limit: usize,
     qlen: usize,
-    now: SystemTime,
+    _now: SystemTime,  // TODO: Use for time-based record validation
     peer_addr: &SocketAddr,
     local_query: bool,
-    do_bit: bool,
-    have_pseudoheader: bool,
+    _do_bit: bool,  // TODO: Use for DNSSEC response handling
+    _have_pseudoheader: bool,  // TODO: Use for EDNS handling
     config: &Config,
-    cache: &Cache,
+    _cache: &Cache,  // TODO: Use for DHCP/hosts record lookup
 ) -> Result<usize, AuthError> {
-    // Validate header has enough bytes (minimum 12 bytes for DNS header)
-    if header.len() < 12 || qlen < 12 {
+    // Validate packet has enough bytes (minimum 12 bytes for DNS header)
+    if packet.len() < 12 || qlen < 12 {
         return Err(AuthError::InvalidQuery {
             reason: "Packet too short".to_string(),
         });
     }
 
+    // Copy the DNS header from query packet to response header
+    // This preserves transaction ID and other header fields
+    if header.len() >= 12 {
+        header[..12].copy_from_slice(&packet[..12]);
+    }
+
     // Check question count (must be at least 1)
-    let qdcount = read_u16(&header[4..6]);
+    let qdcount = read_u16(&packet[4..6]).map_err(|e| AuthError::InvalidQuery {
+        reason: format!("Cannot read qdcount: {:?}", e),
+        })?;
+    
     if qdcount == 0 {
         return Err(AuthError::InvalidQuery {
             reason: "Zero questions".to_string(),
@@ -374,7 +376,7 @@ pub fn answer_auth(
     }
 
     // Check opcode (must be QUERY)
-    let opcode = (header[2] >> 3) & 0x0F;
+    let opcode = (packet[2] >> 3) & 0x0F;
     if opcode != QUERY {
         return Err(AuthError::InvalidQuery {
             reason: format!("Invalid opcode: {}", opcode),
@@ -382,26 +384,28 @@ pub fn answer_auth(
     }
 
     // Determine end of question section (we put answers there)
-    let ansp = match skip_questions(packet) {
-        Ok(pos) => pos,
-        Err(e) => {
-            return Err(AuthError::InvalidQuery {
-                reason: format!("Cannot skip questions: {:?}", e),
-            });
+    // skip_questions expects: packet (full packet), input (position after header), and qdcount
+    let question_start = &packet[12..]; // Skip DNS header (12 bytes)
+    let ansp_slice = skip_questions(packet, question_start, qdcount).map_err(|e| {
+        AuthError::InvalidQuery {
+            reason: format!("Cannot skip questions: {:?}", e),
         }
-    };
+    })?;
+    
+    // Calculate offset of ansp from start of packet
+    let ansp = packet.len() - ansp_slice.len();
 
-    let mut answer_buffer = BytesMut::with_capacity(limit - ansp);
-    let mut anscount = 0;
-    let mut authcount = 0;
-    let mut trunc = false;
+    let answer_buffer = BytesMut::with_capacity(limit - ansp);
+    let mut anscount: u16 = 0;
+    let mut authcount: u16 = 0;
+    let trunc = false;  // TODO: Implement truncation logic
     let mut auth = !local_query;
     let mut nxdomain = true;
     let mut out_of_zone = false;
     let mut soa = false;
     let mut ns = false;
-    let mut axfr = false;
-    let mut axfroffset = 0;
+    let axfr = false;  // TODO: AXFR implementation in progress
+    let mut _axfroffset = 0;  // TODO: Used for AXFR implementation
     let mut zone: Option<&AuthZone> = None;
     let mut subnet: Option<&AddrList> = None;
 
@@ -410,8 +414,7 @@ pub fn answer_auth(
     
     for _q in 0..qdcount {
         // Extract question name
-        let mut name = String::with_capacity(MAXDNAME);
-        let (next_p, extracted_name) = match extract_name(packet, &packet[p..]) {
+        let (next_p, name) = match extract_name(packet, &packet[p..]) {
             Ok((remaining, name_str)) => {
                 // Calculate new position
                 let bytes_consumed = packet[p..].len() - remaining.len();
@@ -423,7 +426,6 @@ pub fn answer_auth(
                 });
             }
         };
-        name = extracted_name;
         p = next_p;
 
         // Extract qtype and qclass
@@ -433,8 +435,12 @@ pub fn answer_auth(
             });
         }
         
-        let qtype = read_u16(&packet[p..p+2]);
-        let qclass = read_u16(&packet[p+2..p+4]);
+        let qtype = read_u16(&packet[p..p+2]).map_err(|e| AuthError::InvalidQuery {
+            reason: format!("Cannot read qtype: {:?}", e),
+        })?;
+        let qclass = read_u16(&packet[p+2..p+4]).map_err(|e| AuthError::InvalidQuery {
+            reason: format!("Cannot read qclass: {:?}", e),
+        })?;
         p += 4;
 
         // Only process IN class queries
@@ -450,15 +456,12 @@ pub fn answer_auth(
         if (qtype == T_PTR || qtype == T_SOA || qtype == T_NS) && !local_query {
             if let Ok(addr) = in_arpa_name_2_addr(&name) {
                 // Find zone that matches this reverse address
-                zone = config.auth_config.as_ref()
-                    .and_then(|auth| {
-                        auth.zones.iter().find(|z| {
-                            find_subnet(z, &addr).map(|s| {
-                                subnet = Some(s);
-                                true
-                            }).unwrap_or(false)
-                        })
-                    });
+                zone = config.auth.auth_zones.iter().find(|z| {
+                    find_subnet(z, &addr).map(|s| {
+                        subnet = Some(s);
+                        true
+                    }).unwrap_or(false)
+                });
 
                 if zone.is_none() {
                     out_of_zone = true;
@@ -476,36 +479,17 @@ pub fn answer_auth(
 
                 // Handle PTR record lookups
                 if qtype == T_PTR {
-                    let mut found = false;
-
-                    // Check interface names for PTR records
-                    if let Some(int_names) = config.network_config.interface_names.as_ref() {
-                        for intr in int_names {
-                            if let Some(addr_list) = &intr.addr {
-                                for addr_entry in addr_list {
-                                    if addr == addr_entry.addr {
-                                        if let Some(z) = zone {
-                                            if local_query || in_zone(z, &intr.name).0 {
-                                                found = true;
-                                                log_query(
-                                                    match addr {
-                                                        IpAddr::V4(_) => F_REVERSE | F_CONFIG | F_IPV4,
-                                                        IpAddr::V6(_) => F_REVERSE | F_CONFIG | F_IPV6,
-                                                    },
-                                                    &intr.name,
-                                                    &addr,
-                                                    None,
-                                                    0,
-                                                );
-                                                // Add PTR record
-                                                anscount += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // TODO: Implement PTR record handling with interface names
+                    // This requires proper interface_name structure with address lists
+                    // For now, we'll handle PTR records from cache only
+                    let found = false;
+                    
+                    // Commented out until interface_name structure is properly implemented
+                    // if let Some(int_names) = &config.network.interfaces {
+                    //     for intr in int_names {
+                    //         // TODO: Check interface addresses
+                    //     }
+                    // }
 
                     // Check cache for DHCP/hosts PTR records
                     // This integrates DHCP-assigned hostnames into authoritative responses
@@ -521,10 +505,7 @@ pub fn answer_auth(
         // Handle forward queries (A, AAAA, CNAME, MX, SRV, TXT, NAPTR, SOA, NS)
         if zone.is_none() {
             // Find zone that matches the query name
-            zone = config.auth_config.as_ref()
-                .and_then(|auth| {
-                    auth.zones.iter().find(|z| in_zone(z, &name).0)
-                });
+            zone = config.auth.auth_zones.iter().find(|z| in_zone(z, &name).0);
 
             if zone.is_none() {
                 out_of_zone = true;
@@ -544,32 +525,26 @@ pub fn answer_auth(
                     info!("SOA query for zone {}", z.domain);
                 } else if qtype == T_AXFR {
                     // Handle AXFR (zone transfer) request
-                    // Check authorization
-                    let peer_authorized = config.auth_config.as_ref()
-                        .and_then(|auth| {
-                            auth.authorized_peers.as_ref().map(|peers| {
-                                peers.iter().any(|p| p == &peer_addr.ip())
-                            })
-                        })
-                        .unwrap_or(false);
+                    
+                    // TODO: Implement AXFR authorization checking
+                    // The C code checks daemon->auth_peers (list of authorized IPs)
+                    // and daemon->secondary_forward_server (secondary servers config)
+                    // These fields need to be added to AuthConfig:
+                    //   - authorized_peers: Option<Vec<IpAddr>>
+                    //   - secondary_servers: Option<Vec<SocketAddr>>
+                    // For now, we'll reject all AXFR requests
+                    warn!("AXFR request from {} - authorization not yet implemented", peer_addr);
+                    return Err(AuthError::UnauthorizedAxfr {
+                        peer_addr: peer_addr.to_string(),
+                    });
 
-                    if !peer_authorized && !config.auth_config.as_ref()
-                        .and_then(|auth| auth.secondary_servers.as_ref())
-                        .map(|s| !s.is_empty())
-                        .unwrap_or(false)
-                    {
-                        warn!("Unauthorized AXFR request from {}", peer_addr);
-                        return Err(AuthError::UnauthorizedAxfr {
-                            peer_addr: peer_addr.to_string(),
-                        });
-                    }
-
-                    auth = true;
-                    soa = true;
-                    ns = true;
-                    axfr = true;
-                    axfroffset = ansp;
-                    info!("AXFR request authorized for zone {} from {}", z.domain, peer_addr);
+                    // When authorization is implemented, uncomment:
+                    // auth = true;
+                    // soa = true;
+                    // ns = true;
+                    // axfr = true;
+                    // axfroffset = ansp;
+                    // info!("AXFR request authorized for zone {} from {}", z.domain, peer_addr);
                 } else if qtype == T_NS {
                     auth = true;
                     ns = true;
@@ -581,41 +556,12 @@ pub fn answer_auth(
 
         // Handle A and AAAA queries
         if qtype == T_A || qtype == T_AAAA {
-            let flag = if qtype == T_A { F_IPV4 } else { F_IPV6 };
+            let _flag = if qtype == T_A { F_IPV4 } else { F_IPV6 };  // TODO: Use for cache lookup
             
-            // Check interface names for matching records
-            if let Some(int_names) = config.network_config.interface_names.as_ref() {
-                for intr in int_names {
-                    if hostname_isequal(&name, &intr.name) {
-                        if let Some(addr_list) = &intr.addr {
-                            for addr_entry in addr_list {
-                                let addr_matches = match (qtype, addr_entry.addr) {
-                                    (T_A, IpAddr::V4(_)) => true,
-                                    (T_AAAA, IpAddr::V6(_)) => true,
-                                    _ => false,
-                                };
-
-                                if addr_matches {
-                                    if let Some(z) = zone {
-                                        if local_query || filter_zone(z, &addr_entry.addr) {
-                                            nxdomain = false;
-                                            log_query(
-                                                F_FORWARD | F_CONFIG | flag,
-                                                &name,
-                                                &addr_entry.addr,
-                                                None,
-                                                0,
-                                            );
-                                            anscount += 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            // TODO: Check interface names for matching records
+            // This requires proper interface_name structure with address lists
+            // Commented out until properly implemented
+            
             // Check cache for DHCP/hosts A/AAAA records
             // Cache lookup would happen here in full implementation
         }
@@ -627,7 +573,7 @@ pub fn answer_auth(
     // Add authority section (SOA and NS records)
     if auth {
         if let Some(z) = zone {
-            let auth_config = config.auth_config.as_ref().unwrap();
+            let auth_config = &config.auth;
 
             // Add SOA record
             if (anscount == 0 && !ns) || soa {
@@ -640,7 +586,8 @@ pub fn answer_auth(
 
             // Add NS records
             if anscount != 0 || ns {
-                if let Some(auth_server) = &auth_config.auth_server {
+                if let Some(_auth_server) = &auth_config.auth_server {
+                    // TODO: Actually add NS record using auth_server
                     if ns {
                         anscount += 1;
                     } else {
@@ -648,15 +595,16 @@ pub fn answer_auth(
                     }
                 }
 
-                if let Some(secondaries) = &auth_config.secondary_servers {
-                    for _secondary in secondaries {
-                        if ns {
-                            anscount += 1;
-                        } else {
-                            authcount += 1;
-                        }
-                    }
-                }
+                // TODO: Add secondary server NS records when implemented
+                // if let Some(secondaries) = &auth_config.secondary_servers {
+                //     for _secondary in secondaries {
+                //         if ns {
+                //             anscount += 1;
+                //         } else {
+                //             authcount += 1;
+                //         }
+                //     }
+                // }
             }
 
             // Handle AXFR zone transfer
@@ -698,18 +646,18 @@ pub fn answer_auth(
     } else if out_of_zone && !local_query {
         header[3] = (header[3] & 0xF0) | REFUSED;
         // Clear answer and authority counts for REFUSED
-        write_u16(&mut header[6..8], 0); // ancount
-        write_u16(&mut header[8..10], 0); // nscount
-        write_u16(&mut header[10..12], 0); // arcount
+        header[6..8].copy_from_slice(&0u16.to_be_bytes()); // ancount
+        header[8..10].copy_from_slice(&0u16.to_be_bytes()); // nscount
+        header[10..12].copy_from_slice(&0u16.to_be_bytes()); // arcount
         return Ok(ansp);
     } else {
         header[3] = (header[3] & 0xF0) | NOERROR;
     }
 
     // Write answer counts
-    write_u16(&mut header[6..8], anscount);
-    write_u16(&mut header[8..10], authcount);
-    write_u16(&mut header[10..12], 0); // arcount
+    header[6..8].copy_from_slice(&anscount.to_be_bytes());
+    header[8..10].copy_from_slice(&authcount.to_be_bytes());
+    header[10..12].copy_from_slice(&0u16.to_be_bytes()); // arcount
 
     // Calculate final packet size
     let response_size = ansp + answer_buffer.len();
