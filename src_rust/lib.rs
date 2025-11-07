@@ -522,33 +522,42 @@ pub const USER_AGENT: &str = concat!("dnsmasq/", env!("CARGO_PKG_VERSION"), " (R
 
 /// Initialize the dnsmasq library
 ///
-/// This function must be called before using any other library functionality.
-/// It initializes the logging subsystem and performs any necessary global setup.
+/// This function performs minimal library initialization. Note that logging must be
+/// initialized separately using `logging::init_logging()` with appropriate configuration.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - Logging initialization fails
-/// - Required system resources are unavailable
+/// Returns an error if required system resources are unavailable.
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use dnsmasq::Result;
+/// use dnsmasq::logging::{init_logging, LogDestination, LogLevel};
 ///
-/// fn main() -> Result<()> {
+/// #[tokio::main]
+/// async fn main() -> Result<()> {
+///     // Initialize library
 ///     dnsmasq::init()?;
+///     
+///     // Initialize logging separately with configuration
+///     let _logger = init_logging(
+///         LogDestination::Syslog,
+///         None,
+///         LogLevel::Info,
+///         100,
+///         libc::LOG_DAEMON,
+///     ).await.map_err(|e| dnsmasq::Error::Config {
+///         message: format!("Failed to initialize logging: {e}"),
+///     })?;
+///     
 ///     // Use library functions
 ///     Ok(())
 /// }
 /// ```
 pub fn init() -> Result<()> {
-    // Initialize logging with default configuration
-    logging::init()
-        .map_err(|e| Error::Config {
-            message: format!("Failed to initialize logging: {e}"),
-        })?;
-
+    // Minimal initialization - logging must be initialized separately
+    // using logging::init_logging() with appropriate configuration parameters
     Ok(())
 }
 
