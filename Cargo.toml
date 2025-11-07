@@ -201,6 +201,12 @@ lru = "0.12"
 # - serde feature: Enables Serialize/Deserialize for bitflags types
 bitflags = { version = "2.6", features = ["serde"] }
 
+# data-encoding: Base32/Base64 encoding for DNSSEC NSEC3 hash decoding
+# - Replaces: Manual base32_decode() character lookup table in dnssec.c
+# - Usage: NSEC3 next hash decoding per RFC 5155
+# - Memory-safe: Bounds checking on decoding operations
+data-encoding = "2.6"
+
 # byteorder: Safe network byte order conversion
 # - Replaces: Manual htonl()/htons() conversions in C
 # - Prevents: Byte order bugs at compile time
@@ -235,11 +241,18 @@ ring = { version = "0.17", optional = true }
 # - Optional: Only compiled when 'dnssec' feature enabled
 rustls = { version = "0.23", optional = true }
 
-# sha2: SHA-256 hashing for DNS question verification
+# sha2: SHA-256 and SHA-384 hashing for DNS question verification and DNSSEC
 # - Replaces: Nettle/standalone SHA-256 in hash-questions.c
 # - Memory-safe: No unsafe code in hash operations
-# - Usage: DNS question section hashing for cache poisoning prevention
+# - Usage: DNS question section hashing for cache poisoning prevention, DNSSEC DS digest computation
 sha2 = "0.10"
+
+# sha1: SHA-1 hashing for DNSSEC DS digest computation
+# - Replaces: Nettle SHA-1 in dnssec.c
+# - Memory-safe: No unsafe code in hash operations
+# - Usage: DNSSEC DS record digest validation (RFC 4034)
+# - Note: SHA-1 still required for legacy DS records, though SHA-256 is recommended
+sha1 = "0.10"
 
 # -----------------------------------------------------------------------------
 # Configuration & Serialization (Section 0.11.5)

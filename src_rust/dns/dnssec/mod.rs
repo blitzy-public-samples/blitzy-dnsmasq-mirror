@@ -9,6 +9,9 @@ pub mod crypto;
 /// Trust anchor management for DNSSEC chain of trust establishment
 pub mod trust_anchor;
 
+/// DNSSEC validation state machine per RFCs 4033-4035
+pub mod validator;
+
 /// Configuration for DNSSEC validation
 #[derive(Debug, Clone)]
 #[derive(Default)]
