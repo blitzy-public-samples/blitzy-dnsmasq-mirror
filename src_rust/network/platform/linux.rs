@@ -11,7 +11,7 @@
 //! - Pointer arithmetic for netlink message traversal (replaced with safe iterator)
 //! - Buffer overflow risks from manual rtattr parsing (replaced with bounds-checked access)
 //! - Use-after-free from manual memory lifecycle (replaced with Rust ownership)
-//! - File descriptor leaks (replaced with RAII via OwnedFd Drop trait)
+//! - File descriptor leaks (replaced with RAII via `OwnedFd` Drop trait)
 //!
 //! # Implementation Details
 //!
@@ -37,12 +37,12 @@
 //! # Protocol Overview
 //!
 //! Netlink RTNETLINK provides kernel-userspace IPC for network configuration:
-//! - **RTM_GETLINK**: Enumerate network interfaces (name, index, flags, type)
-//! - **RTM_GETADDR**: Enumerate IP addresses assigned to interfaces
-//! - **RTM_GETNEIGH**: Enumerate neighbor table (ARP cache)
-//! - **RTM_NEWLINK/RTM_DELLINK**: Multicast notifications for interface add/remove
-//! - **RTM_NEWADDR/RTM_DELADDR**: Multicast notifications for address changes
-//! - **RTM_NEWROUTE**: Multicast notifications for routing table changes
+//! - **`RTM_GETLINK`**: Enumerate network interfaces (name, index, flags, type)
+//! - **`RTM_GETADDR`**: Enumerate IP addresses assigned to interfaces
+//! - **`RTM_GETNEIGH`**: Enumerate neighbor table (ARP cache)
+//! - **`RTM_NEWLINK/RTM_DELLINK`**: Multicast notifications for interface add/remove
+//! - **`RTM_NEWADDR/RTM_DELADDR`**: Multicast notifications for address changes
+//! - **`RTM_NEWROUTE`**: Multicast notifications for routing table changes
 //!
 //! # Error Handling
 //!
@@ -51,7 +51,7 @@
 //! - **EPERM (1)**: Permission denied for multicast subscription, falls back to polling
 //! - **EINTR (4)**: Interrupted system call, retried automatically
 //! - **ENOMEM (12)**: Out of memory during buffer expansion
-//! - **EAGAIN/EWOULDBLOCK (11)**: Non-blocking socket would block (expected with MSG_DONTWAIT)
+//! - **EAGAIN/EWOULDBLOCK (11)**: Non-blocking socket would block (expected with `MSG_DONTWAIT`)
 
 use super::{
     ArpEntry, InterfaceInfo, NetworkChange, Platform, PlatformError, PlatformErrorKind,
@@ -106,8 +106,8 @@ const _NUD_NOARP: u16 = 0x40;
 ///
 /// # Thread Safety
 ///
-/// This struct is Send + Sync safe. The netlink socket is wrapped in Arc<RwLock<>>
-/// for shared access across async tasks. Tokio's AsyncFd handles the async I/O
+/// This struct is Send + Sync safe. The netlink socket is wrapped in Arc<`RwLock`<>>
+/// for shared access across async tasks. Tokio's `AsyncFd` handles the async I/O
 /// integration safely.
 #[derive(Debug)]
 pub struct LinuxPlatform {
@@ -115,8 +115,8 @@ pub struct LinuxPlatform {
     /// Wrapped in Arc for shared ownership across monitoring tasks
     netlink_fd: Arc<RwLock<OwnedFd>>,
     
-    /// Netlink PID assigned by kernel during bind()
-    /// Used to filter messages: only process messages with nlmsg_pid == 0 (kernel origin)
+    /// Netlink PID assigned by kernel during `bind()`
+    /// Used to filter messages: only process messages with `nlmsg_pid` == 0 (kernel origin)
     netlink_pid: u32,
 }
 
@@ -240,12 +240,12 @@ impl LinuxPlatform {
 
     /// Send a netlink request and receive responses
     ///
-    /// Generic helper method for sending RTM_GET* dump requests and collecting responses.
+    /// Generic helper method for sending `RTM_GET`* dump requests and collecting responses.
     /// Handles automatic buffer resizing, message filtering, and ENOBUFS retry logic.
     ///
     /// # Type Parameters
     ///
-    /// - `T`: Netlink request message type (e.g., RTM_GETLINK, RTM_GETADDR, RTM_GETNEIGH)
+    /// - `T`: Netlink request message type (e.g., `RTM_GETLINK`, `RTM_GETADDR`, `RTM_GETNEIGH`)
     ///
     /// # Arguments
     ///
@@ -253,14 +253,14 @@ impl LinuxPlatform {
     ///
     /// # Returns
     ///
-    /// Vector of `RouteNetlinkMessage` responses (e.g., NewLink, NewAddress, NewNeighbour)
+    /// Vector of `RouteNetlinkMessage` responses (e.g., `NewLink`, `NewAddress`, `NewNeighbour`)
     ///
     /// # Errors
     ///
     /// Returns `PlatformError` if:
     /// - Cannot send request (socket error, permission denied)
     /// - Cannot receive responses (ENOBUFS, ENOMEM, socket closed)
-    /// - Receives NLMSG_ERROR with non-zero error code
+    /// - Receives `NLMSG_ERROR` with non-zero error code
     async fn send_netlink_request(
         &self,
         request_msg: NetlinkMessage<RouteNetlinkMessage>,
@@ -299,17 +299,17 @@ impl LinuxPlatform {
             error!("Tokio task join error: {}", e);
             PlatformError::new(
                 PlatformErrorKind::EnumerationFailed,
-                format!("Failed to join netlink receive task: {}", e),
+                format!("Failed to join netlink receive task: {e}"),
             )
         })??;
 
         Ok(responses)
     }
 
-    /// Wait for data to be available on a non-blocking socket using poll()
+    /// Wait for data to be available on a non-blocking socket using `poll()`
     ///
-    /// This helper function uses poll() to wait for data availability on the socket,
-    /// avoiding busy-wait loops with sleep(). Timeout is 5 seconds.
+    /// This helper function uses `poll()` to wait for data availability on the socket,
+    /// avoiding busy-wait loops with `sleep()`. Timeout is 5 seconds.
     ///
     /// # Arguments
     ///
@@ -365,9 +365,9 @@ impl LinuxPlatform {
         }
     }
 
-    /// Receive netlink responses (blocking I/O, called from spawn_blocking)
+    /// Receive netlink responses (blocking I/O, called from `spawn_blocking`)
     ///
-    /// Reads all netlink responses until NLMSG_DONE, handling automatic buffer expansion
+    /// Reads all netlink responses until `NLMSG_DONE`, handling automatic buffer expansion
     /// and message filtering. This is the Rust equivalent of C's `netlink_recv()` and
     /// the message processing loop in `iface_enumerate()`.
     ///
@@ -471,7 +471,7 @@ impl LinuxPlatform {
                                                     error!("Netlink error: code={}", code);
                                                     return Err(PlatformError::new(
                                                         PlatformErrorKind::EnumerationFailed,
-                                                        format!("Netlink returned error: {}", code),
+                                                        format!("Netlink returned error: {code}"),
                                                     ));
                                                 }
                                                 // Error code None (0) is ACK, log and continue
@@ -570,7 +570,7 @@ impl LinuxPlatform {
 
 #[async_trait]
 impl Platform for LinuxPlatform {
-    /// Enumerate network interfaces using netlink RTM_GETLINK and RTM_GETADDR
+    /// Enumerate network interfaces using netlink `RTM_GETLINK` and `RTM_GETADDR`
     ///
     /// Performs a complete dump of network interfaces and their assigned IP addresses.
     /// This method replaces C's `iface_enumerate(AF_INET)` and `iface_enumerate(AF_INET6)`
@@ -588,12 +588,12 @@ impl Platform for LinuxPlatform {
     ///
     /// # Message Format
     ///
-    /// **RTM_GETLINK request**: Enumerate interfaces
+    /// **`RTM_GETLINK` request**: Enumerate interfaces
     /// - `nlmsg_type`: `RTM_GETLINK`
     /// - `nlmsg_flags`: `NLM_F_REQUEST | NLM_F_DUMP`
     /// - `rtgen_family`: `AF_UNSPEC` (all interface types)
     ///
-    /// **RTM_GETADDR request**: Enumerate IP addresses
+    /// **`RTM_GETADDR` request**: Enumerate IP addresses
     /// - `nlmsg_type`: `RTM_GETADDR`
     /// - `nlmsg_flags`: `NLM_F_REQUEST | NLM_F_DUMP`
     /// - `rtgen_family`: `AF_INET` or `AF_INET6`
@@ -603,7 +603,7 @@ impl Platform for LinuxPlatform {
     /// Returns `PlatformError::EnumerationFailed` if:
     /// - Cannot send netlink request (permission denied, socket error)
     /// - Cannot receive responses (ENOBUFS buffer overflow, ENOMEM)
-    /// - Netlink returns NLMSG_ERROR with non-zero error code
+    /// - Netlink returns `NLMSG_ERROR` with non-zero error code
     /// - Message parsing fails due to malformed kernel response
     ///
     /// # Example
@@ -661,7 +661,7 @@ impl Platform for LinuxPlatform {
                             None
                         }
                     })
-                    .unwrap_or_else(|| format!("if{}", if_index));
+                    .unwrap_or_else(|| format!("if{if_index}"));
 
                 trace!("Found interface: {} (index={}, flags=0x{:x})", if_name, if_index, if_flags);
                 // Store flags as u32 (LinkFlags.bits())
@@ -723,7 +723,7 @@ impl Platform for LinuxPlatform {
                     // Calculate netmask from prefix length
                     // Replaces C: netmask.s_addr = htonl(~(in_addr_t)0 << (32 - ifa->ifa_prefixlen))
                     let netmask_bits = if prefix_len > 0 {
-                        !0u32 << (32 - prefix_len as u32)
+                        !0u32 << (32 - u32::from(prefix_len))
                     } else {
                         0u32
                     };
@@ -797,7 +797,7 @@ impl Platform for LinuxPlatform {
                 if let Some(addr) = ip_addr {
                     // Calculate IPv6 netmask from prefix length
                     let netmask = if prefix_len > 0 && prefix_len <= 128 {
-                        let mask_bits = (!0u128) << (128 - prefix_len as u32);
+                        let mask_bits = (!0u128) << (128 - u32::from(prefix_len));
                         IpAddr::V6(Ipv6Addr::from(mask_bits.to_be_bytes()))
                     } else {
                         IpAddr::V6(Ipv6Addr::from(0u128))
@@ -856,7 +856,7 @@ impl Platform for LinuxPlatform {
     /// - Only `RT_SCOPE_LINK` (link-local scope)
     /// - Only main or local routing tables
     ///
-    /// This filtering supports dial-on-demand (DoD) scenarios where DNS queries trigger
+    /// This filtering supports dial-on-demand (`DoD`) scenarios where DNS queries trigger
     /// PPP connection establishment and need retry when route becomes available.
     ///
     /// # Channel Buffer
@@ -870,7 +870,7 @@ impl Platform for LinuxPlatform {
     /// Returns `PlatformError::MonitoringFailed` if:
     /// - Cannot create monitoring socket
     /// - Cannot subscribe to multicast groups (permission denied)
-    /// - Cannot register socket with tokio AsyncFd
+    /// - Cannot register socket with tokio `AsyncFd`
     ///
     /// # Cancellation Safety
     ///
@@ -967,7 +967,7 @@ impl Platform for LinuxPlatform {
         Ok(rx)
     }
 
-    /// Enumerate ARP cache using netlink RTM_GETNEIGH
+    /// Enumerate ARP cache using netlink `RTM_GETNEIGH`
     ///
     /// Retrieves the kernel's neighbor table (ARP cache for IPv4, NDP cache for IPv6).
     /// This method replaces C's `iface_enumerate(AF_UNSPEC, ...)` (src/netlink.c lines 549-574).
@@ -979,7 +979,7 @@ impl Platform for LinuxPlatform {
     ///    - `NDA_DST`: Neighbor IP address (IPv4 or IPv6)
     ///    - `NDA_LLADDR`: Link-layer (MAC) address
     ///    - `ndm_state`: Neighbor state flags (NUD_*)
-    ///    - `ndm_family`: Address family (AF_INET or AF_INET6)
+    ///    - `ndm_family`: Address family (`AF_INET` or `AF_INET6`)
     ///    - `ndm_ifindex`: Interface index
     /// 3. Filters out incomplete, failed, and no-ARP entries
     /// 4. Returns vector of `ArpEntry` structs
@@ -1053,7 +1053,7 @@ impl Platform for LinuxPlatform {
                 // Map enumeration error to ARP-specific error
                 PlatformError::new(
                     PlatformErrorKind::ArpAccessFailed,
-                    format!("Failed to enumerate ARP cache: {}", e),
+                    format!("Failed to enumerate ARP cache: {e}"),
                 )
             })?;
 
@@ -1121,7 +1121,7 @@ impl Platform for LinuxPlatform {
                     arp_entries.push(ArpEntry {
                         addr,
                         hwaddr,
-                        family: family_u8 as i32,
+                        family: i32::from(family_u8),
                         if_index,
                         hwaddr_len: 6,
                     });
@@ -1270,7 +1270,7 @@ impl LinuxPlatform {
                             None
                         }
                     })
-                    .unwrap_or_else(|| format!("if{}", if_index));
+                    .unwrap_or_else(|| format!("if{if_index}"));
 
                 debug!("Interface added: {} [{}]", if_name, if_index);
                 let _ = tx.send(NetworkChange::InterfaceAdded {
@@ -1292,7 +1292,7 @@ impl LinuxPlatform {
                             None
                         }
                     })
-                    .unwrap_or_else(|| format!("if{}", if_index));
+                    .unwrap_or_else(|| format!("if{if_index}"));
 
                 debug!("Interface removed: {} [{}]", if_name, if_index);
                 let _ = tx.send(NetworkChange::InterfaceRemoved {

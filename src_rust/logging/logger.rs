@@ -4,7 +4,7 @@
 //! Core logging implementation using tracing crate, refactored from src/log.c
 //!
 //! This module provides async-safe non-blocking logging with message queueing,
-//! replacing C's manual queue management with VecDeque for memory safety. Supports
+//! replacing C's manual queue management with `VecDeque` for memory safety. Supports
 //! multiple logging destinations: syslog via UNIX domain socket, file-based logging
 //! with rotation, and stderr output for debugging.
 //!
@@ -22,13 +22,13 @@
 //!
 //! # Architecture
 //!
-//! The logger maintains a message queue (VecDeque<LogEntry>) that buffers log events
+//! The logger maintains a message queue (`VecDeque`<LogEntry>) that buffers log events
 //! when the destination is not immediately writable. The queue has a maximum depth
-//! (max_logs) to prevent unbounded memory growth. When the queue exceeds 8 entries,
+//! (`max_logs`) to prevent unbounded memory growth. When the queue exceeds 8 entries,
 //! exponential backpressure delays are applied (2^(depth-1) milliseconds) to slow
 //! down log generation without blocking.
 //!
-//! Logging destinations are abstracted via the LogDestination enum:
+//! Logging destinations are abstracted via the `LogDestination` enum:
 //! - Syslog: UNIX domain socket (/dev/log) with RFC 3164 wire protocol
 //! - File: Regular file with append mode and rotation support
 //! - Stderr: Standard error for debugging and testing
@@ -36,10 +36,10 @@
 //! # Memory Safety Improvements over C
 //!
 //! - **Eliminates manual memory management**: C's malloc/free for log entries
-//!   replaced with VecDeque which automatically manages memory
+//!   replaced with `VecDeque` which automatically manages memory
 //! - **Prevents buffer overflows**: Rust's bounds-checked slices prevent
 //!   out-of-bounds writes in message formatting
-//! - **Type-safe error handling**: Result<T, LogError> replaces errno checks
+//! - **Type-safe error handling**: Result<T, `LogError`> replaces errno checks
 //! - **No use-after-free**: Ownership system prevents accessing freed log entries
 //! - **No memory leaks**: Drop trait ensures cleanup on panic or early return
 //!
@@ -116,7 +116,7 @@ pub enum LogDestination {
 
 /// Log severity levels matching syslog priorities
 ///
-/// Maps to libc syslog priority values (LOG_EMERG through LOG_DEBUG) for
+/// Maps to libc syslog priority values (`LOG_EMERG` through `LOG_DEBUG`) for
 /// RFC 3164 compliance. Higher severity levels (lower numeric values) are
 /// more critical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -141,7 +141,8 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    /// Convert to tracing::Level
+    /// Convert to `tracing::Level`
+    #[must_use] 
     pub fn to_tracing_level(&self) -> Level {
         match self {
             LogLevel::Emergency | LogLevel::Alert | LogLevel::Critical => Level::ERROR,
@@ -153,6 +154,7 @@ impl LogLevel {
     }
 
     /// Convert from syslog priority integer
+    #[must_use] 
     pub fn from_priority(priority: i32) -> Self {
         match priority {
             0 => LogLevel::Emergency,
@@ -167,6 +169,7 @@ impl LogLevel {
     }
 
     /// Convert to syslog priority integer
+    #[must_use] 
     pub fn to_priority(&self) -> i32 {
         *self as i32
     }
@@ -194,10 +197,10 @@ pub enum LogError {
 impl fmt::Display for LogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LogError::IoError(e) => write!(f, "I/O error: {}", e),
-            LogError::InvalidPath(p) => write!(f, "Invalid path: {}", p),
-            LogError::PermissionDenied(p) => write!(f, "Permission denied: {}", p),
-            LogError::ConnectionFailed(s) => write!(f, "Connection failed: {}", s),
+            LogError::IoError(e) => write!(f, "I/O error: {e}"),
+            LogError::InvalidPath(p) => write!(f, "Invalid path: {p}"),
+            LogError::PermissionDenied(p) => write!(f, "Permission denied: {p}"),
+            LogError::ConnectionFailed(s) => write!(f, "Connection failed: {s}"),
             LogError::QueueFull => write!(f, "Log queue full, message dropped"),
         }
     }
@@ -214,13 +217,13 @@ impl From<IoError> for LogError {
 /// Queued log message entry
 ///
 /// Represents a single log message in the asynchronous queue. Replaces C's manual
-/// struct log_entry with automatic memory management via Vec<u8> for payload.
+/// struct `log_entry` with automatic memory management via Vec<u8> for payload.
 ///
 /// # Memory Safety
 ///
 /// - **offset**: Write position for partial write resumption (no manual pointer arithmetic)
 /// - **length**: Total message length (bounds-checked via Vec capacity)
-/// - **pid**: Process ID for fork detection (automatic via getpid())
+/// - **pid**: Process ID for fork detection (automatic via `getpid()`)
 /// - **payload**: Formatted message buffer (Vec<u8> prevents buffer overflows)
 #[derive(Debug, Clone)]
 pub struct LogEntry {
@@ -254,13 +257,13 @@ impl LogEntry {
             // Format as ctime-style: "Jan  1 12:34:56 " (matching C's ctime(&time_now) + 4)
             use chrono::{DateTime, Local, Utc};
             let dt: DateTime<Local> = DateTime::from_timestamp(secs, 0)
-                .unwrap_or_else(|| Utc::now().into())
+                .unwrap_or_else(|| Utc::now())
                 .into();
             let _ = write!(payload, "{} ", dt.format("%b %e %H:%M:%S"));
         }
 
         // Add process name and PID
-        let _ = write!(payload, "dnsmasq{}[{}]: {}", tag, pid, message);
+        let _ = write!(payload, "dnsmasq{tag}[{pid}]: {message}");
 
         let length = payload.len().min(MAX_MESSAGE);
         payload.truncate(length);
@@ -281,9 +284,9 @@ impl LogEntry {
 ///
 /// # Async Safety
 ///
-/// All I/O operations use tokio async primitives (UnixDatagram, File, AsyncWriteExt)
-/// to prevent blocking the event loop. The message queue (VecDeque) is protected by
-/// a tokio::Mutex for safe concurrent access across async tasks.
+/// All I/O operations use tokio async primitives (`UnixDatagram`, File, `AsyncWriteExt`)
+/// to prevent blocking the event loop. The message queue (`VecDeque`) is protected by
+/// a `tokio::Mutex` for safe concurrent access across async tasks.
 pub struct Logger {
     /// Current logging destination
     destination: LogDestination,
@@ -293,7 +296,7 @@ pub struct Logger {
     log_level: LogLevel,
     /// Maximum queue depth (0 = unlimited)
     max_logs: usize,
-    /// Syslog facility code (e.g., LOG_DAEMON)
+    /// Syslog facility code (e.g., `LOG_DAEMON`)
     facility: i32,
     /// Syslog socket (if destination is Syslog)
     syslog_socket: Arc<Mutex<Option<UnixDatagram>>>,
@@ -303,7 +306,7 @@ pub struct Logger {
     connection_good: Arc<Mutex<bool>>,
     /// Count of entries lost due to queue full
     entries_lost: Arc<Mutex<usize>>,
-    /// Socket type for syslog (SOCK_DGRAM or SOCK_STREAM)
+    /// Socket type for syslog (`SOCK_DGRAM` or `SOCK_STREAM`)
     connection_type: Arc<Mutex<SockType>>,
 }
 
@@ -318,7 +321,7 @@ impl Logger {
     /// * `destination` - Where to write log messages (Syslog, File, Stderr)
     /// * `log_level` - Minimum severity level to log (messages below this are filtered)
     /// * `max_logs` - Maximum queue depth (0 = unlimited, not recommended)
-    /// * `facility` - Syslog facility code (e.g., libc::LOG_DAEMON)
+    /// * `facility` - Syslog facility code (e.g., `libc::LOG_DAEMON`)
     ///
     /// # Returns
     ///
@@ -354,7 +357,7 @@ impl Logger {
     ///
     /// # Returns
     ///
-    /// Ok(()) on success, LogError on failure
+    /// Ok(()) on success, `LogError` on failure
     pub async fn reopen(&self) -> Result<(), LogError> {
         match &self.destination {
             LogDestination::Syslog => self.open_syslog().await,
@@ -365,8 +368,8 @@ impl Logger {
 
     /// Open syslog UNIX domain socket
     ///
-    /// Attempts to connect to /dev/log with SOCK_DGRAM first, falling back to
-    /// SOCK_STREAM if EPROTOTYPE error occurs (some systems require SOCK_STREAM).
+    /// Attempts to connect to /dev/log with `SOCK_DGRAM` first, falling back to
+    /// `SOCK_STREAM` if EPROTOTYPE error occurs (some systems require `SOCK_STREAM`).
     /// Sets non-blocking mode for async operation.
     async fn open_syslog(&self) -> Result<(), LogError> {
         // Try SOCK_DGRAM first (most common)
@@ -393,14 +396,12 @@ impl Logger {
                         Ok(())
                     }
                     Err(e) => Err(LogError::ConnectionFailed(format!(
-                        "Failed to connect to syslog: {}",
-                        e
+                        "Failed to connect to syslog: {e}"
                     ))),
                 }
             }
             Err(e) => Err(LogError::ConnectionFailed(format!(
-                "Failed to connect to syslog: {}",
-                e
+                "Failed to connect to syslog: {e}"
             ))),
         }
     }
@@ -414,7 +415,7 @@ impl Logger {
             nix::sys::socket::SockFlag::SOCK_NONBLOCK,
             None,
         )
-        .map_err(|e| IoError::new(ErrorKind::Other, e))?;
+        .map_err(|e| IoError::other(e))?;
 
         // Convert to tokio UnixDatagram
         let std_socket = unsafe { std::os::unix::net::UnixDatagram::from_raw_fd(fd.as_raw_fd()) };
@@ -466,11 +467,11 @@ impl Logger {
     ///
     /// # Behavior
     ///
-    /// - Filters messages below configured log_level
+    /// - Filters messages below configured `log_level`
     /// - Adds message to queue if queue not full
     /// - Attempts immediate write to destination
     /// - Applies exponential backpressure delay if queue depth > 8
-    /// - Drops message and increments entries_lost if queue full
+    /// - Drops message and increments `entries_lost` if queue full
     pub async fn log_message(&self, level: LogLevel, tag: &str, message: &str) {
         // Filter by log level
         if level > self.log_level {
@@ -532,29 +533,26 @@ impl Logger {
                 LogDestination::Stderr => self.write_to_stderr(&entry).await,
             };
 
-            match result {
-                Ok(bytes_written) => {
-                    entry.offset += bytes_written;
-                    if entry.offset < entry.length {
-                        // Partial write, re-queue for next iteration
-                        queue.push_front(entry);
-                        break; // Try again later
-                    }
-                    // Message fully written, continue to next
-                }
-                Err(_) => {
-                    // Write failed, re-queue and mark connection bad
+            if let Ok(bytes_written) = result {
+                entry.offset += bytes_written;
+                if entry.offset < entry.length {
+                    // Partial write, re-queue for next iteration
                     queue.push_front(entry);
-                    let mut conn_good = self.connection_good.lock().await;
-                    *conn_good = false;
-                    drop(conn_good);
-                    
-                    // Attempt reconnection for syslog
-                    if matches!(&self.destination, LogDestination::Syslog) {
-                        let _ = self.open_syslog().await;
-                    }
-                    break;
+                    break; // Try again later
                 }
+                // Message fully written, continue to next
+            } else {
+                // Write failed, re-queue and mark connection bad
+                queue.push_front(entry);
+                let mut conn_good = self.connection_good.lock().await;
+                *conn_good = false;
+                drop(conn_good);
+                
+                // Attempt reconnection for syslog
+                if matches!(&self.destination, LogDestination::Syslog) {
+                    let _ = self.open_syslog().await;
+                }
+                break;
             }
         }
     }
@@ -592,7 +590,7 @@ impl Logger {
 
     /// Flush all queued log messages
     ///
-    /// Repeatedly calls write_logs() until queue is empty or connection is lost.
+    /// Repeatedly calls `write_logs()` until queue is empty or connection is lost.
     /// Used during shutdown to ensure all messages are written before exit.
     /// Implements 1ms delays between write attempts.
     pub async fn flush_logs(&self) {
@@ -638,7 +636,7 @@ impl Logger {
 /// Initialize logging subsystem
 ///
 /// Creates and initializes logger with specified configuration. Opens log destination
-/// and sets up tracing subscriber integration. Replaces C's log_start() function.
+/// and sets up tracing subscriber integration. Replaces C's `log_start()` function.
 ///
 /// # Arguments
 ///
@@ -646,11 +644,11 @@ impl Logger {
 /// * `log_file` - Optional log file path (required if destination is File)
 /// * `log_level` - Minimum severity level to log
 /// * `max_logs` - Maximum queue depth (0 uses default)
-/// * `facility` - Syslog facility code (e.g., libc::LOG_DAEMON)
+/// * `facility` - Syslog facility code (e.g., `libc::LOG_DAEMON`)
 ///
 /// # Returns
 ///
-/// Result<Arc<Logger>, LogError> - Shared logger instance or error
+/// Result<Arc<Logger>, `LogError`> - Shared logger instance or error
 ///
 /// # Example
 ///
@@ -718,7 +716,7 @@ pub async fn init_logging(
 /// Send startup event to parent process
 ///
 /// Used during daemon initialization to report startup events (errors, status)
-/// to the parent process via a pipe. Replaces C's send_event() function.
+/// to the parent process via a pipe. Replaces C's `send_event()` function.
 ///
 /// # Arguments
 ///
@@ -740,7 +738,7 @@ pub fn send_event(fd: i32, event: i32, errno_val: i32, message: &str) {
     if fd >= 0 {
         unsafe {
             let mut file = std::fs::File::from_raw_fd(fd);
-            let _ = writeln!(file, "event={} errno={} message={}", event, errno_val, message);
+            let _ = writeln!(file, "event={event} errno={errno_val} message={message}");
             // Don't close fd - parent owns it
             std::mem::forget(file);
         }
@@ -751,7 +749,7 @@ pub fn send_event(fd: i32, event: i32, errno_val: i32, message: &str) {
 ///
 /// Convenience function that flushes the global logger instance. In practice,
 /// callers should maintain a reference to their Logger instance and call
-/// its flush_logs() method directly.
+/// its `flush_logs()` method directly.
 pub async fn flush_logs(logger: &Logger) {
     logger.flush_logs().await;
 }
@@ -759,7 +757,7 @@ pub async fn flush_logs(logger: &Logger) {
 /// Log a DNS query for debugging and analysis
 ///
 /// Special logging function for DNS queries that formats query information
-/// (client IP, query type, domain) for analysis. Replaces C's log_query() function.
+/// (client IP, query type, domain) for analysis. Replaces C's `log_query()` function.
 ///
 /// # Arguments
 ///
@@ -768,7 +766,7 @@ pub async fn flush_logs(logger: &Logger) {
 /// * `query_type` - DNS query type (A, AAAA, MX, etc.)
 /// * `domain` - Queried domain name
 pub async fn log_query(logger: &Logger, client_ip: &str, query_type: &str, domain: &str) {
-    let message = format!("query[{}] {} from {}", query_type, domain, client_ip);
+    let message = format!("query[{query_type}] {domain} from {client_ip}");
     logger.log_message(LogLevel::Info, "", &message).await;
 }
 

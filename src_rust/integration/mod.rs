@@ -358,6 +358,7 @@ impl IntegrationManager {
 
     /// Always returns false when D-Bus feature is disabled
     #[cfg(not(feature = "dbus"))]
+    #[must_use] 
     pub fn has_dbus(&self) -> bool {
         false
     }
@@ -376,6 +377,7 @@ impl IntegrationManager {
 
     /// Always returns false when ubus feature is disabled
     #[cfg(not(feature = "ubus"))]
+    #[must_use] 
     pub fn has_ubus(&self) -> bool {
         false
     }
@@ -394,6 +396,7 @@ impl IntegrationManager {
 
     /// Always returns false when conntrack feature is disabled or not on Linux
     #[cfg(not(all(feature = "conntrack", target_os = "linux")))]
+    #[must_use] 
     pub fn has_conntrack(&self) -> bool {
         false
     }
@@ -412,6 +415,7 @@ impl IntegrationManager {
 
     /// Always returns false when ipset feature is disabled or not on Linux
     #[cfg(not(all(feature = "ipset", target_os = "linux")))]
+    #[must_use] 
     pub fn has_ipset(&self) -> bool {
         false
     }
@@ -430,6 +434,7 @@ impl IntegrationManager {
 
     /// Always returns false when nftset feature is disabled or not on Linux
     #[cfg(not(all(feature = "nftset", target_os = "linux")))]
+    #[must_use] 
     pub fn has_nftset(&self) -> bool {
         false
     }
@@ -480,6 +485,7 @@ impl IntegrationManager {
 
     /// Always returns false when inotify feature is disabled or not on Linux
     #[cfg(not(all(feature = "inotify", target_os = "linux")))]
+    #[must_use] 
     pub fn has_inotify(&self) -> bool {
         false
     }
@@ -720,6 +726,7 @@ impl IntegrationManagerBuilder {
 
     /// No-op when dbus feature is disabled
     #[cfg(not(feature = "dbus"))]
+    #[must_use] 
     pub fn with_dbus(self, _enable: bool) -> Self {
         self
     }
@@ -742,6 +749,7 @@ impl IntegrationManagerBuilder {
 
     /// No-op when ubus feature is disabled
     #[cfg(not(feature = "ubus"))]
+    #[must_use] 
     pub fn with_ubus(self, _enable: bool) -> Self {
         self
     }
@@ -764,6 +772,7 @@ impl IntegrationManagerBuilder {
 
     /// No-op when conntrack feature is disabled or not on Linux
     #[cfg(not(all(feature = "conntrack", target_os = "linux")))]
+    #[must_use] 
     pub fn with_conntrack(self, _enable: bool) -> Self {
         self
     }
@@ -786,6 +795,7 @@ impl IntegrationManagerBuilder {
 
     /// No-op when ipset feature is disabled or not on Linux
     #[cfg(not(all(feature = "ipset", target_os = "linux")))]
+    #[must_use] 
     pub fn with_ipset(self, _enable: bool) -> Self {
         self
     }
@@ -808,6 +818,7 @@ impl IntegrationManagerBuilder {
 
     /// No-op when nftset feature is disabled or not on Linux
     #[cfg(not(all(feature = "nftset", target_os = "linux")))]
+    #[must_use] 
     pub fn with_nftset(self, _enable: bool) -> Self {
         self
     }
@@ -866,6 +877,7 @@ impl IntegrationManagerBuilder {
 
     /// No-op when inotify feature is disabled or not on Linux
     #[cfg(not(all(feature = "inotify", target_os = "linux")))]
+    #[must_use] 
     pub fn with_inotify(self, _enable: bool) -> Self {
         self
     }
