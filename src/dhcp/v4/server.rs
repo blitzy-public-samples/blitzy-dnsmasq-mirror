@@ -12,7 +12,7 @@
 
 use super::protocol::{Dhcpv4Message, Dhcpv4MessageType};
 use super::state_machine::Dhcpv4StateMachine;
-use crate::dhcp::lease::{Lease, LeaseFlags, LeaseV4};
+use crate::dhcp::lease::{Lease, LeaseV4};
 use std::net::Ipv4Addr;
 
 /// DHCPv4 server configuration

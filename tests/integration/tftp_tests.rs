@@ -1092,7 +1092,7 @@ proptest! {
         prop_assert_eq!(opcode, Some(TftpOpcode::RRQ));
         
         // Verify packet is well-formed (at minimum has opcode + filename + mode)
-        prop_assert!(packet.len() >= 2 + filename.len() + 1 + 5 + 1); // 2 (opcode) + filename\0 + octet\0
+        prop_assert!(packet.len() > 2 + filename.len() + 1 + 5); // 2 (opcode) + filename\0 + octet\0
     }
 }
 
@@ -1109,7 +1109,7 @@ proptest! {
         // This property test is a bit complex due to async nature
         // We validate the logic without actual file I/O
         
-        let is_valid = blocksize >= 8 && blocksize <= 65464;
+        let is_valid = (8..=65464).contains(&blocksize);
         
         // The Transfer::new() function validates blocksize
         // Valid blocksizes should not return InvalidBlockSize error
@@ -1117,7 +1117,7 @@ proptest! {
         
         // We can't easily test async code in proptest without tokio runtime
         // So we just verify the range logic matches expectations
-        prop_assert!(is_valid == (blocksize >= 8 && blocksize <= 65464));
+        prop_assert!(is_valid == (8..=65464).contains(&blocksize));
     }
 }
 
@@ -1883,6 +1883,6 @@ proptest! {
 fn test_coverage_summary() {
     // This test serves as documentation of test coverage
     // It always passes but documents the test suite structure
-    assert!(true, "Test coverage documented in comments above");
+    // Test coverage documented in function comment above
 }
 

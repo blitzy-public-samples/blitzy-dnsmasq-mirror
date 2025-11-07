@@ -1052,7 +1052,7 @@ pub fn lease6_find(
 /// ```
 pub fn lease_prune(
     database: &LeaseDatabase,
-    dns_cache: Option<&mut DnsCache>,
+    mut dns_cache: Option<&mut DnsCache>,
 ) -> usize {
     let now = monotonic_time();
     let mut count = 0;
@@ -1149,7 +1149,7 @@ pub fn lease_prune(
 pub fn lease_update_from_configs(
     database: &LeaseDatabase,
     daemon: &DaemonState,
-    dns_cache: Option<&mut DnsCache>,
+    mut dns_cache: Option<&mut DnsCache>,
 ) -> usize {
     let mut count = 0;
 
@@ -1161,7 +1161,7 @@ pub fn lease_update_from_configs(
             let config = find_config(
                 daemon,
                 lease.client_id.as_deref().map(|cid| {
-                    crate::dhcp::common::ClientId::from_bytes(cid.to_vec())
+                    crate::dhcp::common::ClientId::new(cid.to_vec())
                 }).as_ref(),
                 Some(&lease.hwaddr),
                 lease.hostname.as_deref(),
@@ -1207,7 +1207,7 @@ pub fn lease_update_from_configs(
             // For DHCPv6, use DUID as client ID
             let config = find_config(
                 daemon,
-                Some(&crate::dhcp::common::ClientId::from_bytes(lease.duid.clone())),
+                Some(&crate::dhcp::common::ClientId::new(lease.duid.clone())),
                 None,
                 lease.hostname.as_deref(),
             );
@@ -1319,9 +1319,11 @@ pub fn lease_update_file<P: AsRef<std::path::Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::time::init_time_source;
 
     #[test]
     fn test_lease_state_transitions() {
+        init_time_source();
         let mut lease = Lease::new(
             Ipv4Addr::new(192, 168, 1, 100),
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
@@ -1344,6 +1346,7 @@ mod tests {
 
     #[test]
     fn test_lease_database_new() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         assert_eq!(db.max_leases, 100);
         assert_eq!(db.len(), 0);
@@ -1353,6 +1356,7 @@ mod tests {
 
     #[test]
     fn test_lease4_allocate() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         let addr = Ipv4Addr::new(192, 168, 1, 100);
         let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
@@ -1368,6 +1372,7 @@ mod tests {
 
     #[test]
     fn test_lease4_allocate_duplicate() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         let addr = Ipv4Addr::new(192, 168, 1, 100);
         let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
@@ -1381,6 +1386,7 @@ mod tests {
 
     #[test]
     fn test_lease6_allocate() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
         let duid = vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78];
@@ -1395,6 +1401,7 @@ mod tests {
 
     #[test]
     fn test_lease_find_by_client() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         let addr = Ipv4Addr::new(192, 168, 1, 100);
         let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
@@ -1413,6 +1420,7 @@ mod tests {
 
     #[test]
     fn test_lease_find_by_addr() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         let addr = Ipv4Addr::new(192, 168, 1, 100);
         let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
@@ -1428,6 +1436,7 @@ mod tests {
 
     #[test]
     fn test_lease6_find() {
+        init_time_source();
         let db = LeaseDatabase::new(100);
         let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
         let duid = vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78];
@@ -1445,6 +1454,8 @@ mod tests {
 
     #[test]
     fn test_lease_prune() {
+        init_time_source();
+        std::thread::sleep(std::time::Duration::from_secs(1));
         let db = LeaseDatabase::new(100);
         let addr = Ipv4Addr::new(192, 168, 1, 100);
         let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
@@ -1457,7 +1468,7 @@ mod tests {
         {
             let mut leases = db.v4_by_ip.write().unwrap();
             if let Some(lease) = leases.get_mut(&addr) {
-                lease.expires = monotonic_time() - 1; // Set to past
+                lease.expires = 0; // Set to past (epoch)
             }
         }
 
@@ -1469,12 +1480,14 @@ mod tests {
 
     #[test]
     fn test_lease_is_expired() {
+        init_time_source();
+        std::thread::sleep(std::time::Duration::from_secs(1));
         let lease = Lease::V4(LeaseV4 {
             addr: Ipv4Addr::new(192, 168, 1, 100),
             hwaddr: vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             client_id: None,
             hostname: None,
-            expires: monotonic_time() - 1, // Already expired
+            expires: 0, // Already expired (epoch)
             state: LeaseState::Unchanged,
         });
 
@@ -1483,6 +1496,7 @@ mod tests {
 
     #[test]
     fn test_lease_set_hostname() {
+        init_time_source();
         let mut lease = Lease::new(
             Ipv4Addr::new(192, 168, 1, 100),
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
@@ -1501,6 +1515,7 @@ mod tests {
 
     #[test]
     fn test_lease_set_expires() {
+        init_time_source();
         let mut lease = Lease::new(
             Ipv4Addr::new(192, 168, 1, 100),
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],

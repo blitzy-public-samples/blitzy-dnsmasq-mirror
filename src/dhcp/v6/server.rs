@@ -12,7 +12,7 @@
 
 use super::protocol::{Dhcpv6Message, Dhcpv6MessageType};
 use super::state_machine::Dhcpv6StateMachine;
-use crate::dhcp::lease::{Lease, LeaseFlags, LeaseType, LeaseV6};
+use crate::dhcp::lease::{Lease, LeaseType, LeaseV6};
 use std::net::Ipv6Addr;
 
 /// DHCPv6 server configuration
