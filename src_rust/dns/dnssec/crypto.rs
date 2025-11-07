@@ -84,12 +84,11 @@ use crate::dns::blockdata::BlockData;
 use crate::dns::dnssec::types::DnssecAlgorithm;
 use ring::signature::{
     self, RsaPublicKeyComponents, UnparsedPublicKey, 
-    ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1,
     ED25519, VerificationAlgorithm,
 };
 use std::error::Error as StdError;
 use std::fmt;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, trace, warn};
 
 // ============================================================================
 // Error Types
@@ -291,19 +290,14 @@ fn rsa_verify(
     }
 
     // Parse exponent length
-    let mut offset = 0;
-    let exp_len = if key_bytes[0] == 0 {
-        if key_len < 3 {
-            return Err(CryptoError::RsaKeyFormatError {
-                reason: "Insufficient bytes for extended exponent length".to_string(),
-            });
-        }
+    // Note: We've already verified key_len >= 3, so accessing key_bytes[0..3] is safe
+    let (offset, exp_len) = if key_bytes[0] == 0 {
+        // Extended exponent length format: first byte is 0, next 2 bytes are big-endian length
         let len = u16::from_be_bytes([key_bytes[1], key_bytes[2]]) as usize;
-        offset = 3;
-        len
+        (3, len)
     } else {
-        offset = 1;
-        key_bytes[0] as usize
+        // Normal format: first byte is exponent length
+        (1, key_bytes[0] as usize)
     };
 
     // Validate exponent doesn't exceed key data
@@ -453,9 +447,9 @@ fn ecdsa_verify(
     let key_bytes = key_data.to_bytes();
 
     // Determine expected lengths based on algorithm
-    let (expected_key_len, expected_sig_len, verification_algorithm): (usize, usize, &dyn VerificationAlgorithm) = match algo {
-        DnssecAlgorithm::EcdsaP256Sha256 => (64, 64, &ECDSA_P256_SHA256_ASN1),
-        DnssecAlgorithm::EcdsaP384Sha384 => (96, 96, &ECDSA_P384_SHA384_ASN1),
+    let (expected_key_len, expected_sig_len): (usize, usize) = match algo {
+        DnssecAlgorithm::EcdsaP256Sha256 => (64, 64),
+        DnssecAlgorithm::EcdsaP384Sha384 => (96, 96),
         _ => {
             return Err(CryptoError::UnsupportedAlgorithm {
                 algo: algo.to_u8(),

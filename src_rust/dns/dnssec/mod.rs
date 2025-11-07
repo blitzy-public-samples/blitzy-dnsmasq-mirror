@@ -3,6 +3,9 @@
 /// DNSSEC type definitions (keys, signatures, validation status)
 pub mod types;
 
+/// Cryptographic operations for DNSSEC validation
+pub mod crypto;
+
 /// Configuration for DNSSEC validation
 #[derive(Debug, Clone)]
 #[derive(Default)]
