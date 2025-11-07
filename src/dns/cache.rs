@@ -658,7 +658,7 @@ impl DnsCache {
     /// Replaces C's CNAME following logic in forward.c (lines 450-520)
     pub fn resolve_cname_chain(&mut self, name: &str) -> Result<Vec<ResourceRecord>, CacheError> {
         let mut current_name = name.to_lowercase();
-        let mut visited = Vec::new();
+        let mut visited: Vec<String> = Vec::new();
         let mut hops = 0;
         
         loop {
