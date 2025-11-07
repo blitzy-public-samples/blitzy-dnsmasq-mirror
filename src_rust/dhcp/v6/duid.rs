@@ -173,7 +173,7 @@ use std::cmp::PartialEq;
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
 use std::io;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, trace, warn};
 
 /// DUID type discriminator per RFC 3315 Section 9
@@ -958,7 +958,6 @@ fn calculate_duid_timestamp() -> Result<u32, DuidError> {
 async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
     use nix::ifaddrs::getifaddrs;
     use nix::net::if_::InterfaceFlags;
-    use nix::sys::socket::SockaddrLike;
 
     trace!("Enumerating network interfaces for DUID generation");
 
@@ -972,8 +971,8 @@ async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
         })?;
 
         for ifaddr in ifaddrs {
-            let iface_name = ifaddr.interface_name();
-            let flags = ifaddr.flags();
+            let iface_name = &ifaddr.interface_name;
+            let flags = ifaddr.flags;
 
             // Skip loopback interfaces
             if flags.contains(InterfaceFlags::IFF_LOOPBACK) {
@@ -988,27 +987,28 @@ async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
                 #[cfg(target_os = "linux")]
                 {
                     if let Some(ll_addr) = addr.as_link_addr() {
-                        let mac_bytes = ll_addr.addr();
-                        if !mac_bytes.is_empty() {
-                            // Hardware type from arphrd constants
-                            // For Ethernet (most common): ARPHRD_ETHER = 1
-                            let hw_type = 1u16; // Assume Ethernet for Linux
+                        if let Some(mac_bytes) = ll_addr.addr() {
+                            if !mac_bytes.is_empty() {
+                                // Hardware type from arphrd constants
+                                // For Ethernet (most common): ARPHRD_ETHER = 1
+                                let hw_type = 1u16; // Assume Ethernet for Linux
 
-                            // Filter hardware types >= 256 (tunnels, virtual interfaces)
-                            if hw_type < 256 {
-                                debug!(
-                                    "Selected interface {} with hw_type={} mac_len={}",
-                                    iface_name,
-                                    hw_type,
-                                    mac_bytes.len()
-                                );
-                                return Ok((hw_type, mac_bytes.to_vec()));
-                            } else {
-                                trace!(
-                                    "Skipping interface {} with hw_type={} >= 256",
-                                    iface_name,
-                                    hw_type
-                                );
+                                // Filter hardware types >= 256 (tunnels, virtual interfaces)
+                                if hw_type < 256 {
+                                    debug!(
+                                        "Selected interface {} with hw_type={} mac_len={}",
+                                        iface_name,
+                                        hw_type,
+                                        mac_bytes.len()
+                                    );
+                                    return Ok((hw_type, mac_bytes.to_vec()));
+                                } else {
+                                    trace!(
+                                        "Skipping interface {} with hw_type={} >= 256",
+                                        iface_name,
+                                        hw_type
+                                    );
+                                }
                             }
                         }
                     }
@@ -1022,20 +1022,21 @@ async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
                         // For simplicity, assume Ethernet (type 1) for BSD
                         let hw_type = 1u16;
 
-                        let mac_bytes = ll_addr.addr();
-                        if !mac_bytes.is_empty() && hw_type < 256 {
-                            debug!(
-                                "Selected BSD interface {} with hw_type={} mac_len={}",
-                                iface_name,
-                                hw_type,
-                                mac_bytes.len()
-                            );
-                            return Ok((hw_type, mac_bytes.to_vec()));
-                        } else {
-                            trace!(
-                                "Skipping BSD interface {} (empty MAC or hw_type >= 256)",
-                                iface_name
-                            );
+                        if let Some(mac_bytes) = ll_addr.addr() {
+                            if !mac_bytes.is_empty() && hw_type < 256 {
+                                debug!(
+                                    "Selected BSD interface {} with hw_type={} mac_len={}",
+                                    iface_name,
+                                    hw_type,
+                                    mac_bytes.len()
+                                );
+                                return Ok((hw_type, mac_bytes.to_vec()));
+                            } else {
+                                trace!(
+                                    "Skipping BSD interface {} (empty MAC or hw_type >= 256)",
+                                    iface_name
+                                );
+                            }
                         }
                     }
                 }

@@ -3,6 +3,7 @@
 pub mod protocol;
 pub mod options;
 pub mod ia;
+pub mod duid;
 
 /// `DHCPv6` server
 pub struct DhcpV6Server {}
