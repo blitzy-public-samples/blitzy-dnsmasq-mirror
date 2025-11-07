@@ -13,9 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! ICMPv6 Router Advertisement Option Builders
+//! `ICMPv6` Router Advertisement Option Builders
 //!
-//! This module provides safe builder-pattern implementations for constructing ICMPv6 Router
+//! This module provides safe builder-pattern implementations for constructing `ICMPv6` Router
 //! Advertisement options as defined in RFC 4861 (Neighbor Discovery), RFC 8106 (DNS Configuration),
 //! and RFC 6275 (Mobile IPv6).
 //!
@@ -34,7 +34,7 @@
 //! - **Buffer Overflow**: No compile-time bounds checking on packet buffer writes
 //! - **Option Length Calculation Errors**: Manual length field calculations can be incorrect
 //! - **Network Byte Order Bugs**: Manual `htonl()` calls can be forgotten or misapplied
-//! - **State Corruption**: Global buffer shared across subsystems (DHCPv4, DHCPv6, RA)
+//! - **State Corruption**: Global buffer shared across subsystems (`DHCPv4`, `DHCPv6`, `RA`)
 //!
 //! This Rust implementation eliminates these risks by:
 //!
@@ -63,7 +63,6 @@
 //! - RFC 8106: IPv6 Router Advertisement Options for DNS Configuration
 //! - RFC 6275 Section 7.3: Advertisement Interval Option
 
-use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::net::Ipv6Addr;
 use std::time::Duration;
@@ -76,12 +75,12 @@ use super::protocol::ICMP6_OPT_ADV_INTERVAL;
 ///
 /// Advertises IPv6 address prefixes that can be used for on-link determination and/or
 /// stateless address autoconfiguration (SLAAC) per RFC 4862. This option enables hosts
-/// to automatically configure IPv6 addresses without DHCPv6.
+/// to automatically configure IPv6 addresses without `DHCPv6`.
 ///
 /// # Builder Pattern
 ///
 /// Uses the builder pattern to construct prefix options with validation before serialization.
-/// Required fields (prefix, prefix_len) must be set, while optional fields (flags, lifetimes)
+/// Required fields (`prefix`, `prefix_len`) must be set, while optional fields (flags, lifetimes)
 /// have sensible defaults.
 ///
 /// # Wire Format (RFC 4861 Section 4.6.2)
@@ -137,15 +136,15 @@ pub struct PrefixOption {
 }
 
 impl PrefixOption {
-    /// Create a new PrefixOption builder with default values
+    /// Create a new `PrefixOption` builder with default values
     ///
     /// Defaults:
-    /// - autonomous: false (SLAAC disabled)
-    /// - on_link: true (prefix is on-link)
-    /// - valid_lifetime: 2592000 seconds (30 days)
-    /// - preferred_lifetime: 604800 seconds (7 days)
+    /// - `autonomous`: false (SLAAC disabled)
+    /// - `on_link`: true (prefix is on-link)
+    /// - `valid_lifetime`: 2592000 seconds (30 days)
+    /// - `preferred_lifetime`: 604800 seconds (7 days)
     ///
-    /// The prefix and prefix_len fields must be set via builder methods before calling build().
+    /// The `prefix` and `prefix_len` fields must be set via builder methods before calling `build()`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -164,7 +163,7 @@ impl PrefixOption {
     ///
     /// # Arguments
     ///
-    /// * `prefix` - IPv6 prefix address (e.g., 2001:db8:: for a /64 prefix)
+    /// * `prefix` - IPv6 prefix address (e.g., `2001:db8::` for a /64 prefix)
     #[must_use]
     pub fn prefix(mut self, prefix: Ipv6Addr) -> Self {
         self.prefix = Some(prefix);
@@ -187,11 +186,11 @@ impl PrefixOption {
     /// Set the Autonomous address-configuration flag (A-bit)
     ///
     /// When true (0x40), hosts can use this prefix for SLAAC to automatically generate
-    /// IPv6 addresses per RFC 4862. When false, addresses must be obtained via DHCPv6.
+    /// IPv6 addresses per RFC 4862. When false, addresses must be obtained via `DHCPv6`.
     ///
     /// # Arguments
     ///
-    /// * `autonomous` - true to enable SLAAC, false to require DHCPv6
+    /// * `autonomous` - true to enable SLAAC, false to require `DHCPv6`
     #[must_use]
     pub fn autonomous(mut self, autonomous: bool) -> Self {
         self.autonomous = autonomous;
@@ -214,12 +213,12 @@ impl PrefixOption {
 
     /// Set the valid lifetime for addresses configured from this prefix
     ///
-    /// Indicates how long addresses remain valid for communication. Must be >= preferred_lifetime.
-    /// A value of u32::MAX (0xFFFFFFFF) indicates infinite lifetime.
+    /// Indicates how long addresses remain valid for communication. Must be >= `preferred_lifetime`.
+    /// A value of `u32::MAX` (0xFFFFFFFF) indicates infinite lifetime.
     ///
     /// # Arguments
     ///
-    /// * `lifetime` - Duration for valid lifetime (max ~136 years for u32::MAX seconds)
+    /// * `lifetime` - Duration for valid lifetime (max ~136 years for `u32::MAX` seconds)
     #[must_use]
     pub fn valid_lifetime(mut self, lifetime: Duration) -> Self {
         self.valid_lifetime = lifetime;
@@ -229,7 +228,7 @@ impl PrefixOption {
     /// Set the preferred lifetime for addresses configured from this prefix
     ///
     /// Indicates how long addresses remain preferred for new connections. After expiry,
-    /// addresses become deprecated but still valid. Must be <= valid_lifetime.
+    /// addresses become deprecated but still valid. Must be <= `valid_lifetime`.
     ///
     /// # Arguments
     ///
@@ -252,16 +251,16 @@ impl PrefixOption {
     /// # Errors
     ///
     /// Returns error if:
-    /// - prefix is not set
-    /// - prefix_len is not set or > 128
-    /// - preferred_lifetime > valid_lifetime
-    /// - lifetime values exceed u32::MAX seconds
+    /// - `prefix` is not set
+    /// - `prefix_len` is not set or > 128
+    /// - `preferred_lifetime` > `valid_lifetime`
+    /// - lifetime values exceed `u32::MAX` seconds
     ///
     /// # Wire Format Details
     ///
-    /// - Type: 3 (ICMP6_OPT_PREFIX)
+    /// - Type: 3 (`ICMP6_OPT_PREFIX`)
     /// - Length: 4 (32 bytes total)
-    /// - Flags: L-bit (0x80) if on_link, A-bit (0x40) if autonomous
+    /// - Flags: L-bit (0x80) if `on_link`, A-bit (0x40) if `autonomous`
     /// - All multi-byte fields in network byte order (big-endian)
     pub fn build(self) -> io::Result<Vec<u8>> {
         // Validate required fields
@@ -277,21 +276,23 @@ impl PrefixOption {
         if prefix_len > 128 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("prefix_len {} exceeds maximum 128", prefix_len),
+                format!("prefix_len {prefix_len} exceeds maximum 128"),
             ));
         }
 
         // Convert durations to seconds (clamping to u32::MAX)
-        let valid_secs = self.valid_lifetime.as_secs().min(u32::MAX as u64) as u32;
-        let preferred_secs = self.preferred_lifetime.as_secs().min(u32::MAX as u64) as u32;
+        // Safe cast: value is already clamped to u32::MAX
+        #[allow(clippy::cast_possible_truncation)]
+        let valid_secs = self.valid_lifetime.as_secs().min(u64::from(u32::MAX)) as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let preferred_secs = self.preferred_lifetime.as_secs().min(u64::from(u32::MAX)) as u32;
 
         // Validate lifetime relationship
         if preferred_secs > valid_secs {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "preferred_lifetime ({}) must not exceed valid_lifetime ({})",
-                    preferred_secs, valid_secs
+                    "preferred_lifetime ({preferred_secs}) must not exceed valid_lifetime ({valid_secs})"
                 ),
             ));
         }
@@ -333,8 +334,8 @@ impl Default for PrefixOption {
 /// Recursive DNS Server option (Type 25) per RFC 8106
 ///
 /// Advertises IPv6 addresses of DNS recursive resolvers in Router Advertisement messages.
-/// Enables stateless DNS configuration without DHCPv6, allowing hosts to discover DNS servers
-/// through RA alone.
+/// Enables stateless DNS configuration without `DHCPv6`, allowing hosts to discover DNS servers
+/// through `RA` alone.
 ///
 /// # Builder Pattern
 ///
@@ -380,7 +381,7 @@ pub struct RdnssOption {
 }
 
 impl RdnssOption {
-    /// Create a new RdnssOption builder with default values
+    /// Create a new `RdnssOption` builder with default values
     ///
     /// Default lifetime: 3600 seconds (1 hour)
     #[must_use]
@@ -408,7 +409,7 @@ impl RdnssOption {
     /// Set the lifetime for DNS server addresses
     ///
     /// Indicates how long the DNS server addresses remain valid. Hosts should stop using
-    /// DNS servers after their lifetime expires. A value of u32::MAX indicates infinite lifetime.
+    /// DNS servers after their lifetime expires. A value of `u32::MAX` indicates infinite lifetime.
     ///
     /// # Arguments
     ///
@@ -432,10 +433,10 @@ impl RdnssOption {
     ///
     /// # Wire Format Details
     ///
-    /// - Type: 25 (ICMP6_OPT_RDNSS)
-    /// - Length: 1 + (num_servers * 2), in units of 8 bytes
+    /// - Type: 25 (`ICMP6_OPT_RDNSS`)
+    /// - Length: 1 + (`num_servers` * 2), in units of 8 bytes
     /// - Reserved: 0x0000
-    /// - Lifetime: u32 in network byte order
+    /// - Lifetime: `u32` in network byte order
     /// - Addresses: 16 bytes per server in network byte order
     pub fn build(self) -> io::Result<Vec<u8>> {
         if self.servers.is_empty() {
@@ -445,7 +446,9 @@ impl RdnssOption {
             ));
         }
 
-        let lifetime_secs = self.lifetime.as_secs().min(u32::MAX as u64) as u32;
+        // Safe cast: value is already clamped to u32::MAX
+        #[allow(clippy::cast_possible_truncation)]
+        let lifetime_secs = self.lifetime.as_secs().min(u64::from(u32::MAX)) as u32;
         
         // Calculate length: 1 (header + lifetime) + 2 per address (16 bytes each)
         let len = 1 + (self.servers.len() * 2);
@@ -454,13 +457,15 @@ impl RdnssOption {
         if len > 255 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("too many DNS servers: length {} exceeds maximum 255", len),
+                format!("too many DNS servers: length {len} exceeds maximum 255"),
             ));
         }
 
         let mut buf = Vec::with_capacity(len * 8);
         
         buf.write_u8(25)?; // Type = ICMP6_OPT_RDNSS
+        // Safe cast: len is already validated to be <= 255
+        #[allow(clippy::cast_possible_truncation)]
         buf.write_u8(len as u8)?;
         buf.write_u16::<BigEndian>(0)?; // Reserved
         buf.write_u32::<BigEndian>(lifetime_secs)?;
@@ -488,7 +493,7 @@ impl Default for RdnssOption {
 /// DNS Search List option (Type 31) per RFC 8106
 ///
 /// Advertises DNS search domain suffixes in Router Advertisement messages. Enables stateless
-/// DNS search list configuration without DHCPv6, allowing hosts to automatically append
+/// DNS search list configuration without `DHCPv6`, allowing hosts to automatically append
 /// domain suffixes for unqualified hostname lookups.
 ///
 /// # Builder Pattern
@@ -532,7 +537,7 @@ pub struct DnsslOption {
 }
 
 impl DnsslOption {
-    /// Create a new DnsslOption builder with default values
+    /// Create a new `DnsslOption` builder with default values
     ///
     /// Default lifetime: 3600 seconds (1 hour)
     #[must_use]
@@ -559,7 +564,7 @@ impl DnsslOption {
 
     /// Set the lifetime for DNS search domain list
     ///
-    /// Indicates how long the search domain list remains valid. A value of u32::MAX
+    /// Indicates how long the search domain list remains valid. A value of `u32::MAX`
     /// indicates infinite lifetime.
     ///
     /// # Arguments
@@ -595,7 +600,9 @@ impl DnsslOption {
             ));
         }
 
-        let lifetime_secs = self.lifetime.as_secs().min(u32::MAX as u64) as u32;
+        // Safe cast: value is already clamped to u32::MAX
+        #[allow(clippy::cast_possible_truncation)]
+        let lifetime_secs = self.lifetime.as_secs().min(u64::from(u32::MAX)) as u32;
 
         // Encode domains in DNS wire format
         let mut domain_bytes = Vec::new();
@@ -611,13 +618,15 @@ impl DnsslOption {
         if len_units > 255 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("domain list too long: length {} exceeds maximum 255", len_units),
+                format!("domain list too long: length {len_units} exceeds maximum 255"),
             ));
         }
 
         let mut buf = Vec::with_capacity(padded_len);
         
         buf.write_u8(31)?; // Type = ICMP6_OPT_DNSSL
+        // Safe cast: len_units is already validated to be <= 255
+        #[allow(clippy::cast_possible_truncation)]
         buf.write_u8(len_units as u8)?;
         buf.write_u16::<BigEndian>(0)?; // Reserved
         buf.write_u32::<BigEndian>(lifetime_secs)?;
@@ -675,7 +684,7 @@ pub struct MtuOption {
 }
 
 impl MtuOption {
-    /// Create a new MtuOption builder
+    /// Create a new `MtuOption` builder
     #[must_use]
     pub fn new() -> Self {
         Self { mtu_value: None }
@@ -718,7 +727,7 @@ impl MtuOption {
         if mtu < 1280 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("MTU {} is less than IPv6 minimum 1280", mtu),
+                format!("MTU {mtu} is less than IPv6 minimum 1280"),
             ));
         }
 
@@ -775,7 +784,7 @@ pub struct AdvIntervalOption {
 }
 
 impl AdvIntervalOption {
-    /// Create a new AdvIntervalOption builder
+    /// Create a new `AdvIntervalOption` builder
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -786,8 +795,8 @@ impl AdvIntervalOption {
     /// Set the advertisement interval
     ///
     /// Indicates the maximum time between unsolicited multicast RAs. Per RFC 4861,
-    /// typical values are between 200 seconds (MinRtrAdvInterval) and 600 seconds
-    /// (MaxRtrAdvInterval).
+    /// typical values are between 200 seconds (`MinRtrAdvInterval`) and 600 seconds
+    /// (`MaxRtrAdvInterval`).
     ///
     /// # Arguments
     ///
@@ -811,17 +820,19 @@ impl AdvIntervalOption {
     ///
     /// # Wire Format Details
     ///
-    /// - Type: 7 (ICMP6_OPT_ADV_INTERVAL)
+    /// - Type: 7 (`ICMP6_OPT_ADV_INTERVAL`)
     /// - Length: 1 (8 bytes)
     /// - Reserved: 0x0000
-    /// - Interval: u32 in milliseconds, network byte order
+    /// - Interval: `u32` in milliseconds, network byte order
     pub fn build(self) -> io::Result<Vec<u8>> {
         let interval = self.interval_value.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "interval value is required")
         })?;
 
         // Convert to milliseconds, clamping to u32::MAX
-        let interval_ms = interval.as_millis().min(u32::MAX as u128) as u32;
+        // Safe cast: value is already clamped to u32::MAX
+        #[allow(clippy::cast_possible_truncation)]
+        let interval_ms = interval.as_millis().min(u128::from(u32::MAX)) as u32;
 
         let mut buf = Vec::with_capacity(8);
         
@@ -884,10 +895,12 @@ fn encode_dns_name(buf: &mut Vec<u8>, domain: &str) -> io::Result<()> {
         if label_bytes.len() > 63 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("label '{}' exceeds maximum length of 63 bytes", label),
+                format!("label '{label}' exceeds maximum length of 63 bytes"),
             ));
         }
 
+        // Safe cast: length is already validated to be <= 63
+        #[allow(clippy::cast_possible_truncation)]
         buf.write_u8(label_bytes.len() as u8)?;
         buf.write_all(label_bytes)?;
     }

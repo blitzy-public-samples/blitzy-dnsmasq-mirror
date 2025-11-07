@@ -101,5 +101,5 @@ pub use protocol::{
 pub use server::{RadVServer, RadVServerBuilder};
 
 pub use options::{
-    SourceLinkLayerOption, MtuOption, RdnssOption, DnsslOption, RouteInfoOption,
+    MtuOption, RdnssOption, DnsslOption, AdvIntervalOption,
 };

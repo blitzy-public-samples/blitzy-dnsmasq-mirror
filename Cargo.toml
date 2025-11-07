@@ -183,6 +183,12 @@ lru = "0.12"
 # - serde feature: Enables Serialize/Deserialize for bitflags types
 bitflags = { version = "2.6", features = ["serde"] }
 
+# byteorder: Safe network byte order conversion
+# - Replaces: Manual htonl()/htons() conversions in C
+# - Prevents: Byte order bugs at compile time
+# - Usage: Serializing protocol structures (DNS, DHCP, ICMPv6)
+byteorder = "1.5"
+
 # rand: Cryptographically secure random number generation
 # - Replaces: SURF (Secure Universal Random Function) RNG in util.c
 # - Provides: ChaCha8Rng for thread-safe cryptographic randomness
