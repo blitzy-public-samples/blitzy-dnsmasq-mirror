@@ -324,7 +324,7 @@ pub fn find_config<'a>(
     // Access static hosts from daemon configuration
     let dhcp_config = daemon.get_config().dhcp.as_ref()?;
     let configs = &dhcp_config.static_hosts;
-    
+
     // First pass: Try to match by client ID (highest priority)
     if let Some(cid) = client_id {
         for static_host in configs {
@@ -388,12 +388,12 @@ pub fn is_config_in_context(
 ) -> bool {
     // Get contexts using public API
     let contexts = daemon.get_dhcp_contexts();
-    
+
     // If no contexts, default to true (matches C behavior when context is NULL)
     if contexts.is_empty() {
         return true;
     }
-    
+
     // Extract IP address from AllAddr enum
     let config_ip = match addr {
         AllAddr::Ipv4(ipv4) => std::net::IpAddr::V4(*ipv4),
@@ -406,7 +406,7 @@ pub fn is_config_in_context(
     // the static host's configured IP which should be in a valid range
     // This is simplified from C's is_same_net() check since we don't have
     // direct access to context range_start/range_end fields
-    
+
     // For now, if we have contexts and a valid IP, accept it
     // TODO: This needs to be enhanced when DhcpContext provides public accessors
     // for range_start and range_end to properly implement is_same_net() logic
@@ -426,16 +426,16 @@ pub fn is_config_in_context(
 /// Set of all network ID tags from contexts
 fn collect_context_netids(daemon: &DaemonState) -> HashSet<DhcpNetId> {
     let mut netids = HashSet::new();
-    
+
     // Get contexts using public API
     let contexts = daemon.get_dhcp_contexts();
-    
+
     // In the actual C code, contexts have associated netids
     // For now, we use an empty set as the actual tag collection
     // would depend on the full DhcpContext implementation which has private fields
     // TODO: When DhcpContext provides public accessors for interface and tags,
     // implement proper tag collection here
-    
+
     netids
 }
 
@@ -457,12 +457,10 @@ fn is_config_in_context_internal(
 /// Helper to extract tags from a single DHCP context.
 /// Note: DhcpContext fields are private, so this returns an empty set for now
 fn collect_context_tags(_context: &crate::types::daemon_state::DhcpContext) -> HashSet<DhcpNetId> {
-    let tags = HashSet::new();
-    
     // TODO: When DhcpContext provides public accessors for interface and tags,
     // implement proper tag collection here
-    
-    tags
+
+    HashSet::new()
 }
 
 // =============================================================================
@@ -506,10 +504,7 @@ fn collect_context_tags(_context: &crate::types::daemon_state::DhcpContext) -> H
 ///
 /// assert!(match_netid(&required, &available));
 /// ```
-pub fn match_netid(
-    required: &HashSet<DhcpNetId>,
-    available: &HashSet<DhcpNetId>,
-) -> bool {
+pub fn match_netid(required: &HashSet<DhcpNetId>, available: &HashSet<DhcpNetId>) -> bool {
     // If no tags are required, match succeeds
     if required.is_empty() {
         return true;
@@ -711,24 +706,17 @@ pub fn match_bytes(pattern: &[u8], data: &[u8]) -> bool {
 ///     Ok(())
 /// }
 /// ```
-pub async fn recv_dhcp_packet(
-    socket: &UdpSocket,
-) -> Result<(Vec<u8>, SocketAddr), DnsmasqError> {
+pub async fn recv_dhcp_packet(socket: &UdpSocket) -> Result<(Vec<u8>, SocketAddr), DnsmasqError> {
     // Allocate buffer for packet (typical DHCP packet is 300-600 bytes)
     // Use 1500 bytes to accommodate maximum Ethernet MTU
     let mut buf = vec![0u8; 1500];
 
     // Receive packet from socket (async I/O via Tokio)
     // Per schema: members_accessed includes recv_from() from UdpSocket
-    let (len, source) = socket
-        .recv_from(&mut buf)
-        .await
-        .map_err(|e| {
-            warn!("Failed to receive DHCP packet: {}", e);
-            DnsmasqError::Network(crate::types::errors::NetworkError::ReceiveFailed {
-                source: e,
-            })
-        })?;
+    let (len, source) = socket.recv_from(&mut buf).await.map_err(|e| {
+        warn!("Failed to receive DHCP packet: {}", e);
+        DnsmasqError::Network(crate::types::errors::NetworkError::ReceiveFailed { source: e })
+    })?;
 
     // Truncate buffer to actual packet length
     buf.truncate(len);
@@ -795,22 +783,19 @@ pub async fn recv_dhcp_packet(
 /// let updated = dhcp_update_configs(&mut daemon, &cache);
 /// println!("Updated {} DHCP configurations from hosts file", updated);
 /// ```
-pub fn dhcp_update_configs(
-    daemon: &mut DaemonState,
-    _cache: &DnsCache,
-) -> usize {
+pub fn dhcp_update_configs(daemon: &mut DaemonState, _cache: &DnsCache) -> usize {
     // Note: In the C version, this function updates dhcp_config structures
     // with addresses looked up from the hosts file cache.
     // In Rust, Config is immutable once constructed (no mutable accessor),
     // so this function cannot modify static_hosts configuration.
-    // 
+    //
     // TODO: If runtime modification of static hosts is needed, DaemonState
     // should provide a method to update DHCP configuration or store mutable
     // state separately from immutable configuration.
-    
+
     // For now, we access the config to verify it exists but cannot modify it
     let _config = daemon.get_config();
-    
+
     // Return 0 since we cannot update immutable configuration
     0
 }
@@ -934,11 +919,7 @@ pub fn extract_client_id(
 /// ```
 fn strip_hostname(hostname: &str) -> String {
     // Find first dot and take everything before it
-    hostname
-        .split('.')
-        .next()
-        .unwrap_or(hostname)
-        .to_string()
+    hostname.split('.').next().unwrap_or(hostname).to_string()
 }
 
 /// Case-insensitive hostname comparison
@@ -1152,7 +1133,7 @@ mod tests {
 
         let result = extract_client_id(&packet, &options);
         assert!(result.is_ok());
-        
+
         let client_id = result.unwrap();
         assert_eq!(client_id.len(), 7);
         assert_eq!(client_id.as_bytes()[0], 0x01);
@@ -1166,7 +1147,7 @@ mod tests {
 
         let result = extract_client_id(&packet, &options);
         assert!(result.is_ok());
-        
+
         let client_id = result.unwrap();
         assert_eq!(client_id.len(), 8);
     }
