@@ -1128,10 +1128,9 @@ mod tests {
     fn test_random_u16_in_range() {
         init_rng();
         
+        // u16 is always in range 0..=65535, so just verify it doesn't panic
         for _ in 0..100 {
-            let value = random_u16();
-            assert!(value >= DNS_ID_MIN);
-            assert!(value <= DNS_ID_MAX);
+            let _value = random_u16();
         }
     }
     
@@ -1165,10 +1164,9 @@ mod tests {
     fn test_generate_dns_id() {
         init_rng();
         
+        // u16 is always in range 0..=65535, so just verify it doesn't panic
         for _ in 0..100 {
-            let id = generate_dns_id();
-            assert!(id >= DNS_ID_MIN);
-            assert!(id <= DNS_ID_MAX);
+            let _id = generate_dns_id();
         }
     }
     
@@ -1179,7 +1177,7 @@ mod tests {
         for _ in 0..100 {
             let port = random_port();
             assert!(port >= PORT_RANDOM_MIN, "Port {} below minimum {}", port, PORT_RANDOM_MIN);
-            assert!(port <= PORT_RANDOM_MAX, "Port {} above maximum {}", port, PORT_RANDOM_MAX);
+            // PORT_RANDOM_MAX is u16::MAX, so no need to check upper bound
             assert!(port >= 1024, "Port {} is privileged (<1024)", port);
         }
     }
