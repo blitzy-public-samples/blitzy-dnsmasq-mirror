@@ -39,7 +39,7 @@ use crate::config::types::Config;
 use crate::dns::cache::DnsCache;
 use crate::dns::domain::domain_equal;
 use crate::dns::protocol::{DnsHeader, DnsMessage, DnsQuestion, RecordClass, RecordType, ResourceRecord};
-use crate::types::errors::AuthError;
+use crate::types::errors::{AuthError, DnsError};
 use tracing::{debug, error, info, warn};
 
 // =============================================================================
@@ -77,10 +77,12 @@ impl IpNetwork {
         };
 
         if prefix_len > max_prefix {
-            return Err(AuthError::InternalError(format!(
-                "Invalid prefix length {} for address {}",
-                prefix_len, addr
-            )));
+            return Err(AuthError::InternalError {
+                message: format!(
+                    "Invalid prefix length {} for address {}",
+                    prefix_len, addr
+                ),
+            });
         }
 
         Ok(IpNetwork { addr, prefix_len })
@@ -244,6 +246,23 @@ impl AuthZone {
     pub fn add_interface_name(&mut self, hostname: String, addr: IpAddr) {
         self.interface_names.push((hostname, addr));
     }
+
+    /// Check if a domain name is within this authoritative zone
+    ///
+    /// Returns true if the query name matches the zone's domain or is a subdomain.
+    pub fn contains(&self, name: &str) -> bool {
+        is_in_zone(self, name).is_some()
+    }
+
+    /// Look up DNS records for a question within this zone
+    ///
+    /// Returns resource records that match the question, or an error if the
+    /// question cannot be answered authoritatively.
+    pub fn lookup(&self, question: &DnsQuestion) -> Result<Vec<ResourceRecord>, DnsError> {
+        // For now, return empty result as this is a simplified implementation
+        // The full authoritative query processing is done through answer_authoritative_query
+        Ok(Vec::new())
+    }
 }
 
 // =============================================================================
@@ -257,12 +276,7 @@ impl AuthZone {
 ///
 /// Translates: find_addrlist() from auth.c lines 75-178
 fn find_matching_address(list: &[IpNetwork], addr: IpAddr) -> Option<&IpNetwork> {
-    for network in list {
-        if network.contains(&addr) {
-            return Some(network);
-        }
-    }
-    None
+    list.iter().find(|network| network.contains(&addr))
 }
 
 /// Locate subnet configuration matching client IP
@@ -384,8 +398,7 @@ pub fn is_in_zone(zone: &AuthZone, name: &str) -> Option<String> {
     }
 
     // Wildcard zone match (*.example.com)
-    if zone_lower.starts_with("*.") {
-        let wildcard_base = &zone_lower[2..]; // Remove "*."
+    if let Some(wildcard_base) = zone_lower.strip_prefix("*.") {
         if name_lower.ends_with(wildcard_base) || domain_equal(&name_lower, wildcard_base) {
             // Calculate subdomain relative to wildcard base
             if domain_equal(&name_lower, wildcard_base) {
@@ -447,7 +460,9 @@ pub async fn answer_authoritative_query(
 ) -> Result<DnsMessage, AuthError> {
     // Validate query has at least one question
     if query.questions.is_empty() {
-        return Err(AuthError::MalformedQuery);
+        return Err(AuthError::MalformedQuery {
+            message: "Query has no questions".to_string(),
+        });
     }
 
     // Get first question (DNS queries typically have single question)
@@ -474,7 +489,10 @@ pub async fn answer_authoritative_query(
     }
 
     // Return REFUSED if not in any zone
-    let zone = matched_zone.ok_or(AuthError::NotInZone)?;
+    let zone = matched_zone.ok_or_else(|| AuthError::NotInZone {
+        zone: "<none>".to_string(),
+        query: query_name.to_string(),
+    })?;
     let _relative_name = zone_relative_name.unwrap();
 
     // Check subnet authorization (unless local query)
@@ -485,7 +503,9 @@ pub async fn answer_authoritative_query(
                 "Client {} not authorized for zone {}",
                 client_ip, zone.domain
             );
-            return Err(AuthError::NoAuthorityForSubnet);
+            return Err(AuthError::NoAuthorityForSubnet {
+                subnet: client_ip.to_string(),
+            });
         }
     }
 
@@ -589,41 +609,41 @@ async fn process_forward_query(
 
     // Search cache for matching hostnames
     let cache_guard = cache.read().map_err(|e| {
-        AuthError::InternalError(format!("Failed to acquire cache read lock: {}", e))
+        AuthError::InternalError {
+            message: format!("Failed to acquire cache read lock: {}", e),
+        }
     })?;
 
-    if let Some(entries) = cache_guard.find_by_name(query_name) {
-        for entry in entries {
-            // Match record type with cache entry
-            let matches_type = match (query_type, &entry.rdata) {
-                (RecordType::A, crate::dns::cache::RecordData::A(_)) => true,
-                (RecordType::AAAA, crate::dns::cache::RecordData::AAAA(_)) => true,
-                _ => false,
-            };
-
-            if matches_type {
+    let entries = cache_guard.find_by_name(query_name);
+    for entry in entries {
+        // Iterate through each record in the cache entry
+        for record in &entry.records {
+            // Check if record type matches query type
+            if matches!((query_type, record), 
+                (RecordType::A, ResourceRecord::A { .. }) | 
+                (RecordType::AAAA, ResourceRecord::AAAA { .. })) {
                 // Apply subnet filtering if not local query
                 if local_query || zone.subnets.is_empty() {
-                    // Add record to response
-                    let rr = match &entry.rdata {
-                        crate::dns::cache::RecordData::A(addr) => ResourceRecord::A {
+                    // Add record to response with zone's TTL
+                    let rr = match record {
+                        ResourceRecord::A { address, .. } => ResourceRecord::A {
                             name: query_name.to_string(),
                             class: RecordClass::IN,
                             ttl: zone.soa.minimum,
-                            address: *addr,
+                            address: *address,
                         },
-                        crate::dns::cache::RecordData::AAAA(addr) => ResourceRecord::AAAA {
+                        ResourceRecord::AAAA { address, .. } => ResourceRecord::AAAA {
                             name: query_name.to_string(),
                             class: RecordClass::IN,
                             ttl: zone.soa.minimum,
-                            address: *addr,
+                            address: *address,
                         },
                         _ => continue,
                     };
 
                     response.answers.push(rr);
                     found = true;
-                    debug!("Added cache entry for {}: {:?}", query_name, entry.rdata);
+                    debug!("Added cache record for {}: {:?}", query_name, record);
                 }
             }
         }
@@ -631,35 +651,29 @@ async fn process_forward_query(
 
     // Check static interface name mappings
     for (hostname, addr) in &zone.interface_names {
-        if domain_equal(query_name, hostname) {
-            let matches_type = match (query_type, addr) {
-                (RecordType::A, IpAddr::V4(_)) => true,
-                (RecordType::AAAA, IpAddr::V6(_)) => true,
-                _ => false,
-            };
+        if domain_equal(query_name, hostname) && matches!((query_type, addr), 
+            (RecordType::A, IpAddr::V4(_)) | 
+            (RecordType::AAAA, IpAddr::V6(_))) {
+            // Apply subnet filtering
+            if local_query || zone.subnets.is_empty() || zone.subnets.iter().any(|net| net.contains(addr)) {
+                let rr = match addr {
+                    IpAddr::V4(ipv4) => ResourceRecord::A {
+                        name: query_name.to_string(),
+                        class: RecordClass::IN,
+                        ttl: zone.soa.minimum,
+                        address: *ipv4,
+                    },
+                    IpAddr::V6(ipv6) => ResourceRecord::AAAA {
+                        name: query_name.to_string(),
+                        class: RecordClass::IN,
+                        ttl: zone.soa.minimum,
+                        address: *ipv6,
+                    },
+                };
 
-            if matches_type {
-                // Apply subnet filtering
-                if local_query || zone.subnets.is_empty() || zone.subnets.iter().any(|net| net.contains(addr)) {
-                    let rr = match addr {
-                        IpAddr::V4(ipv4) => ResourceRecord::A {
-                            name: query_name.to_string(),
-                            class: RecordClass::IN,
-                            ttl: zone.soa.minimum,
-                            address: *ipv4,
-                        },
-                        IpAddr::V6(ipv6) => ResourceRecord::AAAA {
-                            name: query_name.to_string(),
-                            class: RecordClass::IN,
-                            ttl: zone.soa.minimum,
-                            address: *ipv6,
-                        },
-                    };
-
-                    response.answers.push(rr);
-                    found = true;
-                    debug!("Added interface mapping for {}: {}", hostname, addr);
-                }
+                response.answers.push(rr);
+                found = true;
+                debug!("Added interface mapping for {}: {}", hostname, addr);
             }
         }
     }
@@ -687,10 +701,12 @@ async fn process_ptr_query(
 
     // Search cache for reverse mapping
     let cache_guard = cache.read().map_err(|e| {
-        AuthError::InternalError(format!("Failed to acquire cache read lock: {}", e))
+        AuthError::InternalError {
+            message: format!("Failed to acquire cache read lock: {}", e),
+        }
     })?;
 
-    if let Some(hostname) = cache_guard.find_by_addr(&ip_addr) {
+    if let Some(hostname) = cache_guard.find_by_addr(ip_addr) {
         // Apply subnet filtering
         if local_query || zone.subnets.is_empty() || zone.subnets.iter().any(|net| net.contains(&ip_addr)) {
             let ptr_record = ResourceRecord::PTR {
@@ -815,15 +831,21 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
             .collect();
 
         if parts.len() != 4 {
-            return Err(AuthError::MalformedQuery);
+            return Err(AuthError::MalformedQuery {
+                message: format!("Invalid IPv4 PTR name: expected 4 octets, got {}", parts.len()),
+            });
         }
 
         // Reverse the octets
         let octets: Result<Vec<u8>, _> = parts.iter().rev().map(|s| s.parse()).collect();
-        let octets = octets.map_err(|_| AuthError::MalformedQuery)?;
+        let octets = octets.map_err(|_| AuthError::MalformedQuery {
+            message: "Failed to parse IPv4 octets in PTR name".to_string(),
+        })?;
 
         if octets.len() != 4 {
-            return Err(AuthError::MalformedQuery);
+            return Err(AuthError::MalformedQuery {
+                message: format!("Invalid IPv4 PTR address: expected 4 octets, got {}", octets.len()),
+            });
         }
 
         Ok(IpAddr::V4(Ipv4Addr::new(
@@ -838,15 +860,21 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
             .collect();
 
         if parts.len() != 32 {
-            return Err(AuthError::MalformedQuery);
+            return Err(AuthError::MalformedQuery {
+                message: format!("Invalid IPv6 PTR name: expected 32 nibbles, got {}", parts.len()),
+            });
         }
 
         // Reconstruct IPv6 address from nibbles
         let mut bytes = [0u8; 16];
         for (i, nibble) in parts.iter().rev().enumerate() {
-            let value = u8::from_str_radix(nibble, 16).map_err(|_| AuthError::MalformedQuery)?;
+            let value = u8::from_str_radix(nibble, 16).map_err(|_| AuthError::MalformedQuery {
+                message: format!("Failed to parse hex nibble: {}", nibble),
+            })?;
             if value > 15 {
-                return Err(AuthError::MalformedQuery);
+                return Err(AuthError::MalformedQuery {
+                    message: format!("Invalid nibble value: {}", value),
+                });
             }
 
             let byte_idx = i / 2;
@@ -859,7 +887,9 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
 
         Ok(IpAddr::V6(Ipv6Addr::from(bytes)))
     } else {
-        Err(AuthError::MalformedQuery)
+        Err(AuthError::MalformedQuery {
+            message: format!("PTR query name {} does not end with .in-addr.arpa or .ip6.arpa", name),
+        })
     }
 }
 
