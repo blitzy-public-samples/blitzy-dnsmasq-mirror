@@ -49,7 +49,7 @@
 //! cargo bench --bench dns_cache -- --output-format bencher
 //! ```
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dnsmasq::dns::cache::{CacheKey, CacheSource, DnsCache};
 use dnsmasq::dns::domain::domain_equal;
 use dnsmasq::dns::protocol::{RecordClass, RecordType, ResourceRecord};
@@ -66,9 +66,9 @@ fn generate_test_domains(count: usize) -> Vec<String> {
         .map(|i| {
             // Create varied domain names: short, medium, long
             match i % 3 {
-                0 => format!("test{}.com", i),                              // Short
-                1 => format!("subdomain{}.example.org", i),                 // Medium
-                _ => format!("long.subdomain{}.very-long-domain.net", i),  // Long
+                0 => format!("test{}.com", i),                            // Short
+                1 => format!("subdomain{}.example.org", i),               // Medium
+                _ => format!("long.subdomain{}.very-long-domain.net", i), // Long
             }
         })
         .collect()
@@ -123,11 +123,7 @@ fn populate_cache_with_a_records(cache: &mut DnsCache, domains: &[String], addrs
 }
 
 /// Populate cache with test AAAA records
-fn populate_cache_with_aaaa_records(
-    cache: &mut DnsCache,
-    domains: &[String],
-    addrs: &[Ipv6Addr],
-) {
+fn populate_cache_with_aaaa_records(cache: &mut DnsCache, domains: &[String], addrs: &[Ipv6Addr]) {
     for (domain, addr) in domains.iter().zip(addrs.iter()) {
         let key = CacheKey::new(domain.clone(), RecordType::AAAA, RecordClass::IN);
         let record = ResourceRecord::AAAA {
@@ -556,20 +552,24 @@ fn benchmark_cname_resolution(c: &mut Criterion) {
     let mut group = c.benchmark_group("cname/chain_resolution");
 
     for depth in [1, 3, 5, 10].iter() {
-        group.bench_with_input(BenchmarkId::from_parameter(depth), depth, |b, &chain_depth| {
-            b.iter_batched(
-                || {
-                    let mut cache = DnsCache::new(1000);
-                    let start_name = setup_cname_chain(&mut cache, chain_depth);
-                    (cache, start_name)
-                },
-                |(mut cache, start_name)| {
-                    let result = cache.resolve_cname_chain(&start_name);
-                    black_box(result)
-                },
-                criterion::BatchSize::SmallInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(depth),
+            depth,
+            |b, &chain_depth| {
+                b.iter_batched(
+                    || {
+                        let mut cache = DnsCache::new(1000);
+                        let start_name = setup_cname_chain(&mut cache, chain_depth);
+                        (cache, start_name)
+                    },
+                    |(mut cache, start_name)| {
+                        let result = cache.resolve_cname_chain(&start_name);
+                        black_box(result)
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
+            },
+        );
     }
 
     group.finish();
@@ -583,7 +583,11 @@ fn benchmark_cname_loop_detection(c: &mut Criterion) {
                 let mut cache = DnsCache::new(100);
 
                 // Create a CNAME loop: alias1 -> alias2 -> alias3 -> alias1
-                let names = ["alias1.example.com", "alias2.example.com", "alias3.example.com"];
+                let names = [
+                    "alias1.example.com",
+                    "alias2.example.com",
+                    "alias3.example.com",
+                ];
 
                 for (i, name) in names.iter().enumerate() {
                     let target = names[(i + 1) % names.len()];
@@ -745,7 +749,11 @@ fn benchmark_hit_rate_calculation(c: &mut Criterion) {
         // Generate mixed hit/miss pattern
         for i in 0..1000 {
             let key = if i % 2 == 0 {
-                CacheKey::new(domains[i % domains.len()].clone(), RecordType::A, RecordClass::IN)
+                CacheKey::new(
+                    domains[i % domains.len()].clone(),
+                    RecordType::A,
+                    RecordClass::IN,
+                )
             } else {
                 CacheKey::new(format!("miss{}.com", i), RecordType::A, RecordClass::IN)
             };
@@ -830,8 +838,10 @@ fn benchmark_domain_comparison(c: &mut Criterion) {
     let test_cases = [
         ("example.com", "EXAMPLE.COM"),
         ("subdomain.example.org", "SubDomain.EXAMPLE.ORG"),
-        ("very.long.subdomain.with.many.labels.example.net", 
-         "VERY.LONG.SUBDOMAIN.WITH.MANY.LABELS.EXAMPLE.NET"),
+        (
+            "very.long.subdomain.with.many.labels.example.net",
+            "VERY.LONG.SUBDOMAIN.WITH.MANY.LABELS.EXAMPLE.NET",
+        ),
     ];
 
     for (i, (a, b)) in test_cases.iter().enumerate() {
@@ -990,15 +1000,9 @@ criterion_group!(
     benchmark_dhcp_host_remove,
 );
 
-criterion_group!(
-    domain_benches,
-    benchmark_domain_comparison,
-);
+criterion_group!(domain_benches, benchmark_domain_comparison,);
 
-criterion_group!(
-    mixed_records_benches,
-    benchmark_mixed_record_types,
-);
+criterion_group!(mixed_records_benches, benchmark_mixed_record_types,);
 
 criterion_main!(
     cache_lookup_benches,

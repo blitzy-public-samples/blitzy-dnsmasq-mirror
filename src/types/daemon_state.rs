@@ -433,7 +433,7 @@ impl DaemonState {
     /// Replaces C's daemon initialization in dnsmasq.c main() function
     pub fn new(config: Config) -> Self {
         let cache_size = config.dns.cache_size;
-        
+
         Self {
             config,
             dns: DnsState {
@@ -1048,9 +1048,9 @@ impl DaemonStateBuilder {
         })?;
 
         // Get DNS cache or create default from config
-        let dns_cache = self.dns_cache.unwrap_or_else(|| {
-            DnsCache::new(config.dns.cache_size)
-        });
+        let dns_cache = self
+            .dns_cache
+            .unwrap_or_else(|| DnsCache::new(config.dns.cache_size));
 
         // Get upstream servers or use empty list
         let upstream_servers = self.forward_servers.unwrap_or_default();

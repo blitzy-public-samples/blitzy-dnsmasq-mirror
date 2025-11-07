@@ -48,16 +48,16 @@
 
 use std::cmp::Ordering;
 use std::path::Path;
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
-use tokio::time::{sleep, timeout};
-use tracing::{debug, info, warn, error, trace};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+use tokio::time::{sleep, timeout};
+use tracing::{debug, error, info, trace, warn};
 
+use crate::constants::MAX_DOMAIN_NAME;
+use crate::dns::blockdata::BlockData;
 use crate::dns::dnssec::crypto::nsec3_hash_algorithm_name;
 use crate::dns::protocol::RecordClass;
 use crate::types::errors::DnssecError;
-use crate::constants::MAX_DOMAIN_NAME;
-use crate::dns::blockdata::BlockData;
 
 /// DNS name escape character for representing dots and NULs within labels
 const NAME_ESCAPE: char = '\x01';
@@ -219,13 +219,13 @@ pub struct DsRecord {
 /// ```
 fn name_to_wire_format(name: &str) -> Vec<u8> {
     let mut result = Vec::with_capacity(name.len() + 2);
-    
+
     let labels: Vec<&str> = name.split('.').filter(|s| !s.is_empty()).collect();
-    
+
     for label in labels {
         let mut label_bytes = Vec::new();
         let mut chars = label.chars();
-        
+
         while let Some(ch) = chars.next() {
             if ch == NAME_ESCAPE {
                 // Handle escaped character
@@ -243,13 +243,13 @@ fn name_to_wire_format(name: &str) -> Vec<u8> {
                 label_bytes.push(byte);
             }
         }
-        
+
         if !label_bytes.is_empty() && label_bytes.len() <= 63 {
             result.push(label_bytes.len() as u8);
             result.extend_from_slice(&label_bytes);
         }
     }
-    
+
     result.push(0); // Terminating zero-length label
     result
 }
@@ -274,25 +274,25 @@ fn name_to_wire_format(name: &str) -> Vec<u8> {
 fn name_from_wire_format(wire: &[u8]) -> Result<String, DnssecError> {
     let mut result = String::new();
     let mut pos = 0;
-    
+
     while pos < wire.len() {
         let len = wire[pos] as usize;
         pos += 1;
-        
+
         if len == 0 {
             break;
         }
-        
+
         if pos + len > wire.len() {
             return Err(DnssecError::MalformedRecord {
                 record_type: "DNS name".to_string(),
             });
         }
-        
+
         if !result.is_empty() {
             result.push('.');
         }
-        
+
         for &byte in &wire[pos..pos + len] {
             if byte == 0 || byte == b'.' || byte == NAME_ESCAPE as u8 {
                 result.push(NAME_ESCAPE);
@@ -301,10 +301,10 @@ fn name_from_wire_format(wire: &[u8]) -> Result<String, DnssecError> {
                 result.push(byte as char);
             }
         }
-        
+
         pos += len;
     }
-    
+
     Ok(result)
 }
 
@@ -333,9 +333,9 @@ fn count_domain_labels(name: &str) -> usize {
     if name.is_empty() {
         return 0;
     }
-    
+
     let dots = name.chars().filter(|&c| c == '.').count();
-    
+
     // Don't count empty first label
     if name.starts_with('.') {
         dots
@@ -388,11 +388,11 @@ fn compare_serial_numbers(s1: u32, s2: u32) -> Ordering {
 fn compare_hostnames(a: &str, b: &str) -> Ordering {
     let a_labels: Vec<&str> = a.split('.').filter(|s| !s.is_empty()).collect();
     let b_labels: Vec<&str> = b.split('.').filter(|s| !s.is_empty()).collect();
-    
+
     // Compare labels from right to left (TLD first)
     let mut a_iter = a_labels.iter().rev();
     let mut b_iter = b_labels.iter().rev();
-    
+
     loop {
         match (a_iter.next(), b_iter.next()) {
             (Some(a_label), Some(b_label)) => {
@@ -423,29 +423,25 @@ fn compare_hostnames(a: &str, b: &str) -> Ordering {
 /// # Returns
 ///
 /// true if signature is temporally valid, false otherwise
-fn is_within_validity_period(
-    inception: u32,
-    expiration: u32,
-    now: SystemTime,
-) -> bool {
+fn is_within_validity_period(inception: u32, expiration: u32, now: SystemTime) -> bool {
     let now_secs = match now.duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs() as u32,
         Err(_) => return false,
     };
-    
+
     // Allow 5 minute clock skew
     let skew = 300u32;
-    
+
     // Check inception (with skew allowance)
     if compare_serial_numbers(now_secs + skew, inception) == Ordering::Less {
         return false;
     }
-    
+
     // Check expiration (with skew allowance)
     if compare_serial_numbers(now_secs, expiration + skew) == Ordering::Greater {
         return false;
     }
-    
+
     true
 }
 
@@ -468,18 +464,19 @@ fn is_within_validity_period(
 /// Returns `DnssecError::TimestampFileError` if file operations fail
 pub fn setup_timestamp(timestamp_file: &Path) -> Result<SystemTime, DnssecError> {
     match std::fs::metadata(timestamp_file) {
-        Ok(metadata) => {
-            match metadata.modified() {
-                Ok(modified) => {
-                    info!("Using timestamp from file: {:?}", timestamp_file);
-                    Ok(modified)
-                }
-                Err(e) => {
-                    warn!("Failed to read timestamp file mtime, using system time: {}", e);
-                    Ok(SystemTime::now())
-                }
+        Ok(metadata) => match metadata.modified() {
+            Ok(modified) => {
+                info!("Using timestamp from file: {:?}", timestamp_file);
+                Ok(modified)
             }
-        }
+            Err(e) => {
+                warn!(
+                    "Failed to read timestamp file mtime, using system time: {}",
+                    e
+                );
+                Ok(SystemTime::now())
+            }
+        },
         Err(e) => {
             info!("Timestamp file not found, using system time: {}", e);
             Ok(SystemTime::now())
@@ -514,7 +511,7 @@ pub fn compute_key_tag(algorithm: u8, flags: u16, key_data: &[u8]) -> u16 {
     rdata.push(3); // Protocol is always 3
     rdata.push(algorithm);
     rdata.extend_from_slice(key_data);
-    
+
     // Special case for algorithm 1 (RSA/MD5, deprecated)
     if algorithm == 1 {
         if rdata.len() >= 4 {
@@ -522,26 +519,26 @@ pub fn compute_key_tag(algorithm: u8, flags: u16, key_data: &[u8]) -> u16 {
         }
         return 0;
     }
-    
+
     // Sum all 16-bit words in RDATA
     let mut sum: u32 = 0;
     let mut i = 0;
-    
+
     while i + 1 < rdata.len() {
         let word = u16::from_be_bytes([rdata[i], rdata[i + 1]]);
         sum += word as u32;
         i += 2;
     }
-    
+
     // Add last byte if odd length
     if i < rdata.len() {
         sum += (rdata[i] as u32) << 8;
     }
-    
+
     // Add carries
     sum = (sum & 0xFFFF) + (sum >> 16);
     sum = (sum & 0xFFFF) + (sum >> 16);
-    
+
     sum as u16
 }
 
@@ -563,33 +560,33 @@ pub fn compute_key_tag(algorithm: u8, flags: u16, key_data: &[u8]) -> u16 {
 /// Returns `DnssecError::InvalidBase32Encoding` for invalid encoding
 fn decode_base32(input: &str) -> Result<Vec<u8>, DnssecError> {
     const BASE32_ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUV";
-    
+
     let input = input.to_uppercase();
     let input_bytes = input.as_bytes();
-    
+
     // Remove padding
     let input_len = input_bytes.iter().take_while(|&&b| b != b'=').count();
-    
+
     let mut output = Vec::new();
     let mut buffer: u64 = 0;
     let mut bits_in_buffer = 0;
-    
+
     for &byte in &input_bytes[..input_len] {
         let value = BASE32_ALPHABET
             .iter()
             .position(|&c| c == byte)
             .ok_or(DnssecError::InvalidBase32Encoding)? as u64;
-        
+
         buffer = (buffer << 5) | value;
         bits_in_buffer += 5;
-        
+
         if bits_in_buffer >= 8 {
             bits_in_buffer -= 8;
             output.push((buffer >> bits_in_buffer) as u8);
             buffer &= (1 << bits_in_buffer) - 1;
         }
     }
-    
+
     Ok(output)
 }
 
@@ -623,17 +620,17 @@ fn compute_nsec3_hash(
             message: format!("Unsupported NSEC3 hash algorithm: {}", hash_algo),
         });
     }
-    
-    use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY};
-    
+
+    use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
+
     // Convert name to wire format
     let wire_name = name_to_wire_format(name);
-    
+
     // Initial hash: H(name || salt)
     let mut input = wire_name.clone();
     input.extend_from_slice(salt);
     let mut hash = digest(&SHA1_FOR_LEGACY_USE_ONLY, &input).as_ref().to_vec();
-    
+
     // Additional iterations: H(hash || salt)
     for _ in 0..iterations {
         input.clear();
@@ -641,7 +638,7 @@ fn compute_nsec3_hash(
         input.extend_from_slice(salt);
         hash = digest(&SHA1_FOR_LEGACY_USE_ONLY, &input).as_ref().to_vec();
     }
-    
+
     Ok(hash)
 }
 
@@ -659,9 +656,9 @@ fn compute_nsec3_hash(
 /// EDE info code (0 = no error, 6 = DNSSEC Bogus, 10 = DNSSEC Indeterminate)
 pub fn validation_status_to_ede(status: DnssecStatus) -> u16 {
     match status {
-        DnssecStatus::Secure | DnssecStatus::Insecure => 0,  // No error
-        DnssecStatus::Bogus => 6,  // DNSSEC Bogus
-        DnssecStatus::Indeterminate => 10,  // DNSSEC Indeterminate
+        DnssecStatus::Secure | DnssecStatus::Insecure => 0, // No error
+        DnssecStatus::Bogus => 6,                           // DNSSEC Bogus
+        DnssecStatus::Indeterminate => 10,                  // DNSSEC Indeterminate
     }
 }
 
@@ -690,12 +687,12 @@ pub fn generate_dnssec_query(
     // Placeholder: In practice, this would construct a complete DNS query message
     // with the DO (DNSSEC OK) bit set in EDNS0 OPT record.
     // The actual implementation would use the dns::protocol module's message builder.
-    
+
     debug!(
         "Generating DNSSEC query for {} type {} class {:?}",
         query_name, record_type, query_class
     );
-    
+
     // Return empty vec as placeholder - real implementation would build proper query
     Vec::new()
 }
@@ -724,32 +721,32 @@ pub async fn validate_by_ds(
     ds_records: &[DsRecord],
     zone_name: &str,
 ) -> Result<Vec<u16>, DnssecError> {
-    debug!("Validating DNSKEY RRset against DS records for zone: {}", zone_name);
-    
+    debug!(
+        "Validating DNSKEY RRset against DS records for zone: {}",
+        zone_name
+    );
+
     let mut validated_keys = Vec::new();
-    
+
     for ds in ds_records {
         // Find matching DNSKEY
-        let matching_dnskey = dnskey_rrset
-            .iter()
-            .find(|dnskey| {
-                let key_tag = compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key);
-                key_tag == ds.key_tag && dnskey.algorithm == ds.algorithm
-            });
-        
+        let matching_dnskey = dnskey_rrset.iter().find(|dnskey| {
+            let key_tag = compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key);
+            key_tag == ds.key_tag && dnskey.algorithm == ds.algorithm
+        });
+
         if let Some(dnskey) = matching_dnskey {
             // Compute DS digest from DNSKEY
-            let computed_digest = compute_ds_digest(
-                zone_name,
-                dnskey,
-                ds.digest_type,
-            )?;
-            
+            let computed_digest = compute_ds_digest(zone_name, dnskey, ds.digest_type)?;
+
             // Compare with DS record digest
             if computed_digest == ds.digest {
                 let key_tag = compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key);
                 validated_keys.push(key_tag);
-                debug!("Validated DNSKEY with key tag {} for zone {}", key_tag, zone_name);
+                debug!(
+                    "Validated DNSKEY with key tag {} for zone {}",
+                    key_tag, zone_name
+                );
             } else {
                 warn!(
                     "DS digest mismatch for key tag {} in zone {}",
@@ -757,10 +754,13 @@ pub async fn validate_by_ds(
                 );
             }
         } else {
-            warn!("No matching DNSKEY found for DS key tag {} in zone {}", ds.key_tag, zone_name);
+            warn!(
+                "No matching DNSKEY found for DS key tag {} in zone {}",
+                ds.key_tag, zone_name
+            );
         }
     }
-    
+
     if validated_keys.is_empty() {
         Err(DnssecError::ChainOfTrustBroken {
             zone: zone_name.to_string(),
@@ -792,15 +792,15 @@ fn compute_ds_digest(
     dnskey: &DnskeyRecord,
     digest_type: u8,
 ) -> Result<Vec<u8>, DnssecError> {
-    use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY, SHA256, SHA384};
-    
+    use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, SHA256, SHA384, digest};
+
     // Build input: owner name (wire format) || DNSKEY RDATA
     let mut input = name_to_wire_format(zone_name);
     input.extend_from_slice(&dnskey.flags.to_be_bytes());
     input.push(dnskey.protocol);
     input.push(dnskey.algorithm);
     input.extend_from_slice(&dnskey.public_key);
-    
+
     // Compute digest based on type
     let digest_result = match digest_type {
         1 => digest(&SHA1_FOR_LEGACY_USE_ONLY, &input),
@@ -812,7 +812,7 @@ fn compute_ds_digest(
             });
         }
     };
-    
+
     Ok(digest_result.as_ref().to_vec())
 }
 
@@ -840,21 +840,19 @@ pub async fn validate_ds(
     zone_name: &str,
 ) -> Result<bool, DnssecError> {
     debug!("Validating DS records for zone: {}", zone_name);
-    
+
     // Verify that at least one DS record matches a valid DNSKEY in child zone
     for ds in ds_rrset {
         // Find matching DNSKEY
-        let matching_dnskey = child_dnskey_rrset
-            .iter()
-            .find(|dnskey| {
-                let key_tag = compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key);
-                key_tag == ds.key_tag && dnskey.algorithm == ds.algorithm
-            });
-        
+        let matching_dnskey = child_dnskey_rrset.iter().find(|dnskey| {
+            let key_tag = compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key);
+            key_tag == ds.key_tag && dnskey.algorithm == ds.algorithm
+        });
+
         if let Some(dnskey) = matching_dnskey {
             // Compute DS digest and compare
             let computed_digest = compute_ds_digest(zone_name, dnskey, ds.digest_type)?;
-            
+
             if computed_digest == ds.digest {
                 // Check if DNSKEY has SEP bit set (Secure Entry Point)
                 if (dnskey.flags & 0x0001) != 0 {
@@ -864,7 +862,7 @@ pub async fn validate_ds(
             }
         }
     }
-    
+
     warn!("No valid DS records found for zone {}", zone_name);
     Ok(false)
 }
@@ -898,14 +896,14 @@ pub struct ResourceRecord {
 fn canonicalize_rdata(rr: &ResourceRecord) -> Vec<u8> {
     // Type-specific RDATA processing
     match rr.rr_type {
-        1 => rr.rdata.clone(),  // A record - just IP address
+        1 => rr.rdata.clone(), // A record - just IP address
         2 | 5 | 12 | 15 | 39 => {
             // NS, CNAME, PTR, MX, DNAME - contain domain names
             // For simplicity, we assume rdata is already in wire format
             // In a full implementation, we would parse and re-canonicalize
             rr.rdata.clone()
         }
-        28 => rr.rdata.clone(),  // AAAA record - just IPv6 address
+        28 => rr.rdata.clone(), // AAAA record - just IPv6 address
         _ => rr.rdata.clone(),  // Other types - preserve as-is
     }
 }
@@ -955,7 +953,8 @@ async fn verify_rrset_signature(
 ) -> Result<bool, DnssecError> {
     // Check timestamp validity
     if !is_within_validity_period(rrsig.inception, rrsig.expiration, now) {
-        let now_secs = now.duration_since(UNIX_EPOCH)
+        let now_secs = now
+            .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_secs() as u32;
         let status = if now_secs < rrsig.inception {
@@ -970,14 +969,14 @@ async fn verify_rrset_signature(
             expiration: rrsig.expiration,
         });
     }
-    
+
     // Sort RRset into canonical order
     let mut rrset_sorted = rrset.to_vec();
     sort_rrset_canonical(&mut rrset_sorted);
-    
+
     // Build signature verification data per RFC 4034 Section 3.1.8.1
     let mut sig_data = Vec::new();
-    
+
     // Add RRSIG RDATA (without signature field)
     sig_data.extend_from_slice(&rrsig.type_covered.to_be_bytes());
     sig_data.push(rrsig.algorithm);
@@ -987,37 +986,32 @@ async fn verify_rrset_signature(
     sig_data.extend_from_slice(&rrsig.inception.to_be_bytes());
     sig_data.extend_from_slice(&rrsig.key_tag.to_be_bytes());
     sig_data.extend_from_slice(&name_to_wire_format(&rrsig.signer_name));
-    
+
     // Add canonical RRset data
     for rr in &rrset_sorted {
         // Owner name in canonical form
         sig_data.extend_from_slice(&name_to_wire_format(&rr.name));
-        
+
         // Type, Class, TTL (using original TTL from RRSIG)
         sig_data.extend_from_slice(&rr.rr_type.to_be_bytes());
         sig_data.extend_from_slice(&rr.class.to_be_bytes());
         sig_data.extend_from_slice(&rrsig.original_ttl.to_be_bytes());
-        
+
         // RDATA length and data
         let rdata = canonicalize_rdata(rr);
         sig_data.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
         sig_data.extend_from_slice(&rdata);
     }
-    
+
     // Verify signature using crypto module
-    let verified = verify_signature(
-        &sig_data,
-        &rrsig.signature,
-        dnskey,
-        rrsig.algorithm,
-    )?;
-    
+    let verified = verify_signature(&sig_data, &rrsig.signature, dnskey, rrsig.algorithm)?;
+
     if verified {
         debug!("RRSIG signature verified successfully");
     } else {
         warn!("RRSIG signature verification failed");
     }
-    
+
     Ok(verified)
 }
 
@@ -1047,7 +1041,7 @@ fn verify_signature(
     algorithm: u8,
 ) -> Result<bool, DnssecError> {
     use ring::signature;
-    
+
     match algorithm {
         8 => {
             // RSA/SHA-256
@@ -1055,7 +1049,7 @@ fn verify_signature(
                 &signature::RSA_PKCS1_2048_8192_SHA256,
                 &dnskey.public_key,
             );
-            
+
             match public_key.verify(data, signature) {
                 Ok(_) => Ok(true),
                 Err(_) => Ok(false),
@@ -1067,7 +1061,7 @@ fn verify_signature(
                 &signature::RSA_PKCS1_2048_8192_SHA512,
                 &dnskey.public_key,
             );
-            
+
             match public_key.verify(data, signature) {
                 Ok(_) => Ok(true),
                 Err(_) => Ok(false),
@@ -1079,7 +1073,7 @@ fn verify_signature(
                 &signature::ECDSA_P256_SHA256_ASN1,
                 &dnskey.public_key,
             );
-            
+
             match public_key.verify(data, signature) {
                 Ok(_) => Ok(true),
                 Err(_) => Ok(false),
@@ -1091,7 +1085,7 @@ fn verify_signature(
                 &signature::ECDSA_P384_SHA384_ASN1,
                 &dnskey.public_key,
             );
-            
+
             match public_key.verify(data, signature) {
                 Ok(_) => Ok(true),
                 Err(_) => Ok(false),
@@ -1127,39 +1121,49 @@ async fn process_nsec_records(
     query_name: &str,
     query_type: u16,
 ) -> Result<bool, DnssecError> {
-    debug!("Processing {} NSEC records for {}", nsec_records.len(), query_name);
-    
+    debug!(
+        "Processing {} NSEC records for {}",
+        nsec_records.len(),
+        query_name
+    );
+
     for nsec in nsec_records {
         // Parse NSEC RDATA: next_domain_name || type_bitmap
         if nsec.rdata.len() < 2 {
             continue;
         }
-        
+
         // Extract next domain name (simplified - in practice would need proper parsing)
         let next_name = match name_from_wire_format(&nsec.rdata) {
             Ok(name) => name,
             Err(_) => continue,
         };
-        
+
         // Check if query_name falls in the gap between this NSEC and next
         let ordering_start = compare_hostnames(&nsec.name, query_name);
         let ordering_end = compare_hostnames(query_name, &next_name);
-        
+
         if ordering_start == Ordering::Less && ordering_end == Ordering::Less {
             // query_name falls in this NSEC's coverage
-            debug!("Query name {} covered by NSEC from {} to {}", query_name, nsec.name, next_name);
+            debug!(
+                "Query name {} covered by NSEC from {} to {}",
+                query_name, nsec.name, next_name
+            );
             return Ok(true);
         }
-        
+
         // Check if the name exists but type doesn't (examine type bitmap)
         if nsec.name == query_name {
             // Would need to parse type bitmap and check if query_type is absent
             // For now, we accept this as valid proof
-            debug!("Query name {} exists but type not in NSEC bitmap", query_name);
+            debug!(
+                "Query name {} exists but type not in NSEC bitmap",
+                query_name
+            );
             return Ok(true);
         }
     }
-    
+
     warn!("No NSEC proof found for {}", query_name);
     Ok(false)
 }
@@ -1189,13 +1193,13 @@ async fn validate_nsec_denial(
     query_type: u16,
 ) -> Result<bool, DnssecError> {
     let result = process_nsec_records(nsec_records, query_name, query_type).await?;
-    
+
     if !result {
         return Err(DnssecError::NsecProofFailed {
             name: query_name.to_string(),
         });
     }
-    
+
     Ok(result)
 }
 
@@ -1236,36 +1240,39 @@ async fn validate_nsec3_denial(
         iterations,
         salt.len()
     );
-    
+
     // Compute NSEC3 hash of query name
     let query_hash = compute_nsec3_hash(query_name, hash_algorithm, iterations, salt)?;
-    
+
     // Convert to base32 for comparison
     let query_hash_b32 = base32_encode(&query_hash);
-    
+
     for nsec3 in nsec3_records {
         // Extract NSEC3 owner hash (first label of owner name)
         let owner_parts: Vec<&str> = nsec3.name.split('.').collect();
         if owner_parts.is_empty() {
             continue;
         }
-        
+
         let owner_hash = owner_parts[0];
-        
+
         // Parse NSEC3 RDATA to get next hash
         // Simplified - in practice would need full NSEC3 RDATA parsing
         if nsec3.rdata.len() < 5 {
             continue;
         }
-        
+
         // Check if query_hash falls between owner_hash and next_hash
         // This is a simplified check - full implementation would handle wraparound
         if owner_hash < query_hash_b32.as_str() {
-            debug!("Query hash {} may be covered by NSEC3 {}", query_hash_b32, owner_hash);
+            debug!(
+                "Query hash {} may be covered by NSEC3 {}",
+                query_hash_b32, owner_hash
+            );
             return Ok(true);
         }
     }
-    
+
     warn!("No NSEC3 proof found for {}", query_name);
     Err(DnssecError::Nsec3ProofFailed {
         name: query_name.to_string(),
@@ -1285,15 +1292,15 @@ async fn validate_nsec3_denial(
 /// Base32hex-encoded string
 fn base32_encode(input: &[u8]) -> String {
     const BASE32_ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUV";
-    
+
     let mut output = String::new();
     let mut buffer: u16 = 0;
     let mut bits_in_buffer = 0;
-    
+
     for &byte in input {
         buffer = (buffer << 8) | (byte as u16);
         bits_in_buffer += 8;
-        
+
         while bits_in_buffer >= 5 {
             bits_in_buffer -= 5;
             let index = ((buffer >> bits_in_buffer) & 0x1F) as usize;
@@ -1301,12 +1308,12 @@ fn base32_encode(input: &[u8]) -> String {
             buffer &= (1 << bits_in_buffer) - 1;
         }
     }
-    
+
     if bits_in_buffer > 0 {
         let index = ((buffer << (5 - bits_in_buffer)) & 0x1F) as usize;
         output.push(BASE32_ALPHABET[index] as char);
     }
-    
+
     output
 }
 
@@ -1336,21 +1343,24 @@ async fn prove_non_existence(
     query_type: u16,
     wildcard_name: Option<&str>,
 ) -> Result<bool, DnssecError> {
-    debug!("Proving non-existence for {} type {}", query_name, query_type);
-    
+    debug!(
+        "Proving non-existence for {} type {}",
+        query_name, query_type
+    );
+
     // Try NSEC first
     if !nsec_records.is_empty() {
         return validate_nsec_denial(nsec_records, query_name, query_type).await;
     }
-    
+
     // Try NSEC3
     if !nsec3_records.is_empty() {
         // Extract NSEC3 parameters from first record
         // In practice, these would be parsed from NSEC3PARAM or NSEC3 RDATA
-        let hash_algorithm = 1;  // SHA-1
+        let hash_algorithm = 1; // SHA-1
         let iterations = 0;
         let salt: &[u8] = &[];
-        
+
         return validate_nsec3_denial(
             nsec3_records,
             query_name,
@@ -1361,7 +1371,7 @@ async fn prove_non_existence(
         )
         .await;
     }
-    
+
     warn!("No NSEC or NSEC3 records available for proof");
     Ok(false)
 }
@@ -1392,16 +1402,19 @@ async fn check_zone_security_status(
     trust_anchors: &[TrustAnchor],
 ) -> Result<DnssecStatus, DnssecError> {
     debug!("Checking security status for zone: {}", zone_name);
-    
+
     // Check if zone name matches a trust anchor
     for anchor in trust_anchors {
         if anchor.domain == zone_name || zone_name.ends_with(&format!(".{}", anchor.domain)) {
-            debug!("Zone {} is at or below trust anchor {}", zone_name, anchor.domain);
+            debug!(
+                "Zone {} is at or below trust anchor {}",
+                zone_name, anchor.domain
+            );
             // Would need to walk DS chain from trust anchor to zone
             return Ok(DnssecStatus::Secure);
         }
     }
-    
+
     // If no trust anchor covers this zone, it's insecure
     debug!("Zone {} not covered by any trust anchor", zone_name);
     Ok(DnssecStatus::Insecure)
@@ -1463,12 +1476,12 @@ pub async fn validate_reply(
     keyname: &str,
 ) -> Result<ValidationResult, DnssecError> {
     info!("Starting DNSSEC validation for query: {}", query_name);
-    
+
     let now = SystemTime::now();
     let mut key_tags_used = Vec::new();
     let mut all_secure = true;
     let mut has_signatures = false;
-    
+
     // Separate answer records by type
     let mut data_records = Vec::new();
     let mut rrsig_records = Vec::new();
@@ -1476,7 +1489,7 @@ pub async fn validate_reply(
     let mut ds_records = Vec::new();
     let mut nsec_records = Vec::new();
     let mut nsec3_records = Vec::new();
-    
+
     for rr in &message.answers {
         match rr.rr_type {
             46 => {
@@ -1500,21 +1513,16 @@ pub async fn validate_reply(
                 }
             }
             47 => nsec_records.push(rr.clone()),  // NSEC
-            50 => nsec3_records.push(rr.clone()),  // NSEC3
+            50 => nsec3_records.push(rr.clone()), // NSEC3
             _ => data_records.push(rr.clone()),
         }
     }
-    
+
     // If no signatures present, check zone security status
     if !has_signatures {
-        let zone_status = check_zone_security_status(
-            query_name,
-            RecordClass::IN,
-            keyname,
-            trust_anchors,
-        )
-        .await?;
-        
+        let zone_status =
+            check_zone_security_status(query_name, RecordClass::IN, keyname, trust_anchors).await?;
+
         return Ok(ValidationResult {
             status: zone_status,
             ad_bit: zone_status == DnssecStatus::Secure,
@@ -1527,7 +1535,7 @@ pub async fn validate_reply(
             },
         });
     }
-    
+
     // Validate each data RRset
     for data_rr in &data_records {
         // Find covering RRSIG
@@ -1540,60 +1548,66 @@ pub async fn validate_reply(
                 false
             }
         });
-        
+
         if let Some(rrsig_rr) = covering_rrsig {
             // Parse RRSIG record (simplified)
             let rrsig = parse_rrsig_rdata(&rrsig_rr.rdata)?;
-            
+
             // Find matching DNSKEY
             let matching_dnskey = dnskey_records.iter().find(|dnskey| {
-                compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key)
-                    == rrsig.key_tag
+                compute_key_tag(dnskey.algorithm, dnskey.flags, &dnskey.public_key) == rrsig.key_tag
             });
-            
+
             if let Some(dnskey) = matching_dnskey {
                 // Verify signature
-                let verified = verify_rrset_signature(
-                    std::slice::from_ref(data_rr),
-                    &rrsig,
-                    dnskey,
-                    now,
-                )
-                .await?;
-                
+                let verified =
+                    verify_rrset_signature(std::slice::from_ref(data_rr), &rrsig, dnskey, now)
+                        .await?;
+
                 if verified {
                     key_tags_used.push(rrsig.key_tag);
-                    debug!("Successfully verified RRSIG for {} with key tag {}", data_rr.name, rrsig.key_tag);
+                    debug!(
+                        "Successfully verified RRSIG for {} with key tag {}",
+                        data_rr.name, rrsig.key_tag
+                    );
                 } else {
                     all_secure = false;
                     warn!("RRSIG verification failed for {}", data_rr.name);
                 }
             } else {
                 all_secure = false;
-                warn!("No matching DNSKEY found for RRSIG key tag {}", rrsig.key_tag);
+                warn!(
+                    "No matching DNSKEY found for RRSIG key tag {}",
+                    rrsig.key_tag
+                );
             }
         } else {
             all_secure = false;
-            warn!("No RRSIG found covering {} type {}", data_rr.name, data_rr.rr_type);
+            warn!(
+                "No RRSIG found covering {} type {}",
+                data_rr.name, data_rr.rr_type
+            );
         }
     }
-    
+
     // Handle negative answers
-    if data_records.is_empty() && (has_signatures || !nsec_records.is_empty() || !nsec3_records.is_empty()) {
+    if data_records.is_empty()
+        && (has_signatures || !nsec_records.is_empty() || !nsec3_records.is_empty())
+    {
         let proof_valid = prove_non_existence(
             &nsec_records,
             &nsec3_records,
             query_name,
-            0,  // Query type would come from question section
+            0, // Query type would come from question section
             None,
         )
         .await?;
-        
+
         if !proof_valid {
             all_secure = false;
         }
     }
-    
+
     // Determine final validation status
     let status = if all_secure && has_signatures {
         DnssecStatus::Secure
@@ -1602,18 +1616,18 @@ pub async fn validate_reply(
     } else {
         DnssecStatus::Bogus
     };
-    
+
     let failure_reason = if status == DnssecStatus::Bogus {
         Some("Signature verification failed or missing signatures".to_string())
     } else {
         None
     };
-    
+
     info!(
         "DNSSEC validation complete for {}: {:?}",
         query_name, status
     );
-    
+
     Ok(ValidationResult {
         status,
         ad_bit: status == DnssecStatus::Secure,
@@ -1642,7 +1656,7 @@ fn parse_rrsig_rdata(rdata: &[u8]) -> Result<RrsigRecord, DnssecError> {
             record_type: "RRSIG".to_string(),
         });
     }
-    
+
     let type_covered = u16::from_be_bytes([rdata[0], rdata[1]]);
     let algorithm = rdata[2];
     let labels = rdata[3];
@@ -1650,10 +1664,10 @@ fn parse_rrsig_rdata(rdata: &[u8]) -> Result<RrsigRecord, DnssecError> {
     let expiration = u32::from_be_bytes([rdata[8], rdata[9], rdata[10], rdata[11]]);
     let inception = u32::from_be_bytes([rdata[12], rdata[13], rdata[14], rdata[15]]);
     let key_tag = u16::from_be_bytes([rdata[16], rdata[17]]);
-    
+
     // Parse signer name (simplified - would need proper wire format parsing)
     let signer_name = name_from_wire_format(&rdata[18..])?;
-    
+
     // Signature follows signer name
     let signer_name_len = name_to_wire_format(&signer_name).len();
     let signature = if 18 + signer_name_len < rdata.len() {
@@ -1661,7 +1675,7 @@ fn parse_rrsig_rdata(rdata: &[u8]) -> Result<RrsigRecord, DnssecError> {
     } else {
         Vec::new()
     };
-    
+
     Ok(RrsigRecord {
         type_covered,
         algorithm,
@@ -1690,7 +1704,7 @@ fn parse_dnskey_rdata(rdata: &[u8]) -> DnskeyRecord {
     } else {
         0
     };
-    
+
     let protocol = if rdata.len() >= 3 { rdata[2] } else { 3 };
     let algorithm = if rdata.len() >= 4 { rdata[3] } else { 0 };
     let public_key = if rdata.len() > 4 {
@@ -1698,7 +1712,7 @@ fn parse_dnskey_rdata(rdata: &[u8]) -> DnskeyRecord {
     } else {
         Vec::new()
     };
-    
+
     DnskeyRecord {
         flags,
         protocol,
@@ -1722,7 +1736,7 @@ fn parse_ds_rdata(rdata: &[u8]) -> DsRecord {
     } else {
         0
     };
-    
+
     let algorithm = if rdata.len() >= 3 { rdata[2] } else { 0 };
     let digest_type = if rdata.len() >= 4 { rdata[3] } else { 0 };
     let digest = if rdata.len() > 4 {
@@ -1730,7 +1744,7 @@ fn parse_ds_rdata(rdata: &[u8]) -> DsRecord {
     } else {
         Vec::new()
     };
-    
+
     DsRecord {
         key_tag,
         algorithm,
@@ -1742,19 +1756,19 @@ fn parse_ds_rdata(rdata: &[u8]) -> DsRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_name_to_wire_format() {
         let wire = name_to_wire_format("www.example.com");
-        assert_eq!(wire[0], 3);  // Length of "www"
+        assert_eq!(wire[0], 3); // Length of "www"
         assert_eq!(&wire[1..4], b"www");
-        assert_eq!(wire[4], 7);  // Length of "example"
+        assert_eq!(wire[4], 7); // Length of "example"
         assert_eq!(&wire[5..12], b"example");
-        assert_eq!(wire[12], 3);  // Length of "com"
+        assert_eq!(wire[12], 3); // Length of "com"
         assert_eq!(&wire[13..16], b"com");
-        assert_eq!(wire[16], 0);  // Terminating zero
+        assert_eq!(wire[16], 0); // Terminating zero
     }
-    
+
     #[test]
     fn test_count_domain_labels() {
         assert_eq!(count_domain_labels("www.example.com"), 3);
@@ -1762,29 +1776,29 @@ mod tests {
         assert_eq!(count_domain_labels("com"), 1);
         assert_eq!(count_domain_labels(""), 0);
     }
-    
+
     #[test]
     fn test_compare_serial_numbers() {
         assert_eq!(compare_serial_numbers(1, 1), Ordering::Equal);
         assert_eq!(compare_serial_numbers(2, 1), Ordering::Greater);
         assert_eq!(compare_serial_numbers(1, 2), Ordering::Less);
-        
+
         // Test wraparound
         assert_eq!(compare_serial_numbers(1, 0xFFFFFFFF), Ordering::Greater);
     }
-    
+
     #[test]
     fn test_compute_key_tag() {
         // Test with known values (simplified test)
         let key_tag = compute_key_tag(8, 257, &[1, 2, 3, 4]);
-        assert!(key_tag > 0);  // Basic sanity check
+        assert!(key_tag > 0); // Basic sanity check
     }
-    
+
     #[test]
     fn test_base32_encoding() {
         let encoded = base32_encode(&[0x01, 0x02, 0x03]);
         assert!(!encoded.is_empty());
-        
+
         // Test round-trip
         let decoded = decode_base32(&encoded).unwrap();
         assert_eq!(decoded, vec![0x01, 0x02, 0x03]);

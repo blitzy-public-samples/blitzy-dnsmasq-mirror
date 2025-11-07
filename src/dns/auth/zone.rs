@@ -38,7 +38,9 @@ use std::sync::{Arc, RwLock};
 use crate::config::types::Config;
 use crate::dns::cache::DnsCache;
 use crate::dns::domain::domain_equal;
-use crate::dns::protocol::{DnsHeader, DnsMessage, DnsQuestion, RecordClass, RecordType, ResourceRecord};
+use crate::dns::protocol::{
+    DnsHeader, DnsMessage, DnsQuestion, RecordClass, RecordType, ResourceRecord,
+};
 use crate::types::errors::{AuthError, DnsError};
 use tracing::{debug, error, info, warn};
 
@@ -78,10 +80,7 @@ impl IpNetwork {
 
         if prefix_len > max_prefix {
             return Err(AuthError::InternalError {
-                message: format!(
-                    "Invalid prefix length {} for address {}",
-                    prefix_len, addr
-                ),
+                message: format!("Invalid prefix length {} for address {}", prefix_len, addr),
             });
         }
 
@@ -177,10 +176,10 @@ impl SoaRecord {
             primary_ns,
             admin_email,
             serial: 1,
-            refresh: 7200,  // 2 hours
-            retry: 1800,    // 30 minutes
+            refresh: 7200,   // 2 hours
+            retry: 1800,     // 30 minutes
             expire: 1209600, // 2 weeks
-            minimum: 3600,  // 1 hour
+            minimum: 3600,   // 1 hour
         }
     }
 }
@@ -323,10 +322,7 @@ fn is_excluded(zone: &AuthZone, addr: IpAddr) -> bool {
 pub fn should_answer_for_subnet(zone: &AuthZone, client_addr: IpAddr) -> bool {
     // Check exclusion list first
     if is_excluded(zone, client_addr) {
-        debug!(
-            "Client {} excluded from zone {}",
-            client_addr, zone.domain
-        );
+        debug!("Client {} excluded from zone {}", client_addr, zone.domain);
         return false;
     }
 
@@ -542,14 +538,8 @@ pub async fn answer_authoritative_query(
         }
         RecordType::PTR => {
             // Reverse lookup - PTR records
-            found_records = process_ptr_query(
-                query_name,
-                zone,
-                &cache,
-                local_query,
-                &mut response,
-            )
-            .await?;
+            found_records =
+                process_ptr_query(query_name, zone, &cache, local_query, &mut response).await?;
         }
         RecordType::SOA => {
             // SOA record query
@@ -576,7 +566,10 @@ pub async fn answer_authoritative_query(
     if !found_records {
         response.header.flags.rcode = 3; // NXDOMAIN
         add_soa_authority(zone, &mut response);
-        info!("NXDOMAIN response for {} in zone {}", query_name, zone.domain);
+        info!(
+            "NXDOMAIN response for {} in zone {}",
+            query_name, zone.domain
+        );
     }
 
     // Update header counts
@@ -608,10 +601,8 @@ async fn process_forward_query(
     let mut found = false;
 
     // Search cache for matching hostnames
-    let cache_guard = cache.read().map_err(|e| {
-        AuthError::InternalError {
-            message: format!("Failed to acquire cache read lock: {}", e),
-        }
+    let cache_guard = cache.read().map_err(|e| AuthError::InternalError {
+        message: format!("Failed to acquire cache read lock: {}", e),
     })?;
 
     let entries = cache_guard.find_by_name(query_name);
@@ -619,9 +610,11 @@ async fn process_forward_query(
         // Iterate through each record in the cache entry
         for record in &entry.records {
             // Check if record type matches query type
-            if matches!((query_type, record), 
-                (RecordType::A, ResourceRecord::A { .. }) | 
-                (RecordType::AAAA, ResourceRecord::AAAA { .. })) {
+            if matches!(
+                (query_type, record),
+                (RecordType::A, ResourceRecord::A { .. })
+                    | (RecordType::AAAA, ResourceRecord::AAAA { .. })
+            ) {
                 // Apply subnet filtering if not local query
                 if local_query || zone.subnets.is_empty() {
                     // Add record to response with zone's TTL
@@ -651,11 +644,17 @@ async fn process_forward_query(
 
     // Check static interface name mappings
     for (hostname, addr) in &zone.interface_names {
-        if domain_equal(query_name, hostname) && matches!((query_type, addr), 
-            (RecordType::A, IpAddr::V4(_)) | 
-            (RecordType::AAAA, IpAddr::V6(_))) {
+        if domain_equal(query_name, hostname)
+            && matches!(
+                (query_type, addr),
+                (RecordType::A, IpAddr::V4(_)) | (RecordType::AAAA, IpAddr::V6(_))
+            )
+        {
             // Apply subnet filtering
-            if local_query || zone.subnets.is_empty() || zone.subnets.iter().any(|net| net.contains(addr)) {
+            if local_query
+                || zone.subnets.is_empty()
+                || zone.subnets.iter().any(|net| net.contains(addr))
+            {
                 let rr = match addr {
                     IpAddr::V4(ipv4) => ResourceRecord::A {
                         name: query_name.to_string(),
@@ -700,15 +699,16 @@ async fn process_ptr_query(
     debug!("PTR query for address: {}", ip_addr);
 
     // Search cache for reverse mapping
-    let cache_guard = cache.read().map_err(|e| {
-        AuthError::InternalError {
-            message: format!("Failed to acquire cache read lock: {}", e),
-        }
+    let cache_guard = cache.read().map_err(|e| AuthError::InternalError {
+        message: format!("Failed to acquire cache read lock: {}", e),
     })?;
 
     if let Some(hostname) = cache_guard.find_by_addr(ip_addr) {
         // Apply subnet filtering
-        if local_query || zone.subnets.is_empty() || zone.subnets.iter().any(|net| net.contains(&ip_addr)) {
+        if local_query
+            || zone.subnets.is_empty()
+            || zone.subnets.iter().any(|net| net.contains(&ip_addr))
+        {
             let ptr_record = ResourceRecord::PTR {
                 name: query_name.to_string(),
                 class: RecordClass::IN,
@@ -726,7 +726,10 @@ async fn process_ptr_query(
     for (hostname, addr) in &zone.interface_names {
         if addr == &ip_addr {
             // Apply subnet filtering
-            if local_query || zone.subnets.is_empty() || zone.subnets.iter().any(|net| net.contains(addr)) {
+            if local_query
+                || zone.subnets.is_empty()
+                || zone.subnets.iter().any(|net| net.contains(addr))
+            {
                 let ptr_record = ResourceRecord::PTR {
                     name: query_name.to_string(),
                     class: RecordClass::IN,
@@ -832,7 +835,10 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
 
         if parts.len() != 4 {
             return Err(AuthError::MalformedQuery {
-                message: format!("Invalid IPv4 PTR name: expected 4 octets, got {}", parts.len()),
+                message: format!(
+                    "Invalid IPv4 PTR name: expected 4 octets, got {}",
+                    parts.len()
+                ),
             });
         }
 
@@ -844,7 +850,10 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
 
         if octets.len() != 4 {
             return Err(AuthError::MalformedQuery {
-                message: format!("Invalid IPv4 PTR address: expected 4 octets, got {}", octets.len()),
+                message: format!(
+                    "Invalid IPv4 PTR address: expected 4 octets, got {}",
+                    octets.len()
+                ),
             });
         }
 
@@ -861,7 +870,10 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
 
         if parts.len() != 32 {
             return Err(AuthError::MalformedQuery {
-                message: format!("Invalid IPv6 PTR name: expected 32 nibbles, got {}", parts.len()),
+                message: format!(
+                    "Invalid IPv6 PTR name: expected 32 nibbles, got {}",
+                    parts.len()
+                ),
             });
         }
 
@@ -888,7 +900,10 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
         Ok(IpAddr::V6(Ipv6Addr::from(bytes)))
     } else {
         Err(AuthError::MalformedQuery {
-            message: format!("PTR query name {} does not end with .in-addr.arpa or .ip6.arpa", name),
+            message: format!(
+                "PTR query name {} does not end with .in-addr.arpa or .ip6.arpa",
+                name
+            ),
         })
     }
 }
@@ -920,13 +935,18 @@ mod tests {
         .unwrap();
 
         assert!(net.contains(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))));
-        assert!(net.contains(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff))));
+        assert!(net.contains(&IpAddr::V6(Ipv6Addr::new(
+            0x2001, 0xdb8, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff
+        ))));
         assert!(!net.contains(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb9, 0, 0, 0, 0, 0, 1))));
     }
 
     #[test]
     fn test_is_in_zone_exact() {
-        let soa = SoaRecord::new("ns1.example.com".to_string(), "admin.example.com".to_string());
+        let soa = SoaRecord::new(
+            "ns1.example.com".to_string(),
+            "admin.example.com".to_string(),
+        );
         let zone = AuthZone::new("example.com".to_string(), soa);
 
         assert_eq!(is_in_zone(&zone, "example.com"), Some(String::new()));
@@ -935,16 +955,28 @@ mod tests {
 
     #[test]
     fn test_is_in_zone_subdomain() {
-        let soa = SoaRecord::new("ns1.example.com".to_string(), "admin.example.com".to_string());
+        let soa = SoaRecord::new(
+            "ns1.example.com".to_string(),
+            "admin.example.com".to_string(),
+        );
         let zone = AuthZone::new("example.com".to_string(), soa);
 
-        assert_eq!(is_in_zone(&zone, "host.example.com"), Some("host".to_string()));
-        assert_eq!(is_in_zone(&zone, "sub.domain.example.com"), Some("sub.domain".to_string()));
+        assert_eq!(
+            is_in_zone(&zone, "host.example.com"),
+            Some("host".to_string())
+        );
+        assert_eq!(
+            is_in_zone(&zone, "sub.domain.example.com"),
+            Some("sub.domain".to_string())
+        );
     }
 
     #[test]
     fn test_is_in_zone_not_in_zone() {
-        let soa = SoaRecord::new("ns1.example.com".to_string(), "admin.example.com".to_string());
+        let soa = SoaRecord::new(
+            "ns1.example.com".to_string(),
+            "admin.example.com".to_string(),
+        );
         let zone = AuthZone::new("example.com".to_string(), soa);
 
         assert_eq!(is_in_zone(&zone, "other.org"), None);
@@ -957,8 +989,14 @@ mod tests {
         let zone = AuthZone::new("local".to_string(), soa);
 
         // No subnets configured - allow all
-        assert!(should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-        assert!(should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
+        assert!(should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+        ));
+        assert!(should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
+        ));
     }
 
     #[test]
@@ -970,12 +1008,24 @@ mod tests {
         zone.add_subnet(subnet);
 
         // Inside subnet - allow
-        assert!(should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-        assert!(should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 255))));
+        assert!(should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+        ));
+        assert!(should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 255))
+        ));
 
         // Outside subnet - deny
-        assert!(!should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1))));
-        assert!(!should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
+        assert!(!should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1))
+        ));
+        assert!(!should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
+        ));
     }
 
     #[test]
@@ -986,10 +1036,16 @@ mod tests {
         zone.add_excluded(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
 
         // Excluded address - deny even without subnet filters
-        assert!(!should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))));
+        assert!(!should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))
+        ));
 
         // Other addresses - allow
-        assert!(should_answer_for_subnet(&zone, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+        assert!(should_answer_for_subnet(
+            &zone,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+        ));
     }
 
     #[test]
@@ -1010,7 +1066,10 @@ mod tests {
 
     #[test]
     fn test_soa_record_defaults() {
-        let soa = SoaRecord::new("ns1.example.com".to_string(), "admin.example.com".to_string());
+        let soa = SoaRecord::new(
+            "ns1.example.com".to_string(),
+            "admin.example.com".to_string(),
+        );
 
         assert_eq!(soa.primary_ns, "ns1.example.com");
         assert_eq!(soa.admin_email, "admin.example.com");
@@ -1021,4 +1080,3 @@ mod tests {
         assert_eq!(soa.minimum, 3600);
     }
 }
-

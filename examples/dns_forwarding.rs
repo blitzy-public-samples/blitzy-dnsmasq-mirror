@@ -89,7 +89,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use tracing::{error, info, Level};
+use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 // Import DNS server components from dnsmasq-rs
@@ -134,27 +134,26 @@ async fn main() -> Result<()> {
         .with_line_number(true)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     info!("=== DNS Forwarding Example Starting ===");
     info!("This example demonstrates comprehensive DNS caching and forwarding");
 
     // Step 1: Build configuration with upstream DNS servers
     info!("Step 1: Building DNS configuration with upstream servers");
-    
+
     let dns_config = build_dns_configuration()?;
-    
+
     // Step 2: Create global configuration with ConfigBuilder
     info!("Step 2: Creating global configuration");
-    
+
     let mut config_builder = ConfigBuilder::new();
     config_builder.dns(dns_config.clone());
-    
+
     // Validate configuration before building
     config_builder.validate()?;
     let global_config = Arc::new(config_builder.build()?);
-    
+
     info!(
         "Configuration validated: cache_size={}, upstream_servers={}, edns_size={}",
         dns_config.cache_size,
@@ -164,7 +163,7 @@ async fn main() -> Result<()> {
 
     // Step 3: Initialize DNS server with configuration
     info!("Step 3: Initializing DNS server");
-    
+
     let server_config = ServerConfig::default()
         .with_port(53)
         .with_cache_size(dns_config.cache_size)
@@ -172,13 +171,13 @@ async fn main() -> Result<()> {
         .with_tcp_timeout(Duration::from_secs(60))
         .with_query_logging(true)
         .with_reuse_port(false);
-    
+
     let mut dns_server = DnsServer::new(server_config, global_config.clone())?;
-    
+
     // Step 4: Bind to network interfaces
     info!("Step 4: Binding to network interfaces on port 53");
     info!("NOTE: Binding to port 53 requires root/administrator privileges");
-    
+
     match dns_server.bind() {
         Ok(()) => {
             info!("Successfully bound to UDP/TCP port 53");
@@ -196,7 +195,7 @@ async fn main() -> Result<()> {
 
     // Step 6: Setup signal handlers for graceful shutdown
     info!("Step 6: Setting up signal handlers (SIGTERM, SIGINT)");
-    
+
     let _signal_handler = match setup_signal_handlers() {
         Ok(handler) => {
             info!("Signal handlers installed successfully");
@@ -229,7 +228,7 @@ async fn main() -> Result<()> {
             return Err(e.into());
         }
     }
-    
+
     // Display final statistics before shutdown
     info!("");
     info!("=== Final DNS Server Statistics ===");
@@ -238,7 +237,7 @@ async fn main() -> Result<()> {
     info!("Queries Forwarded: {}", final_stats.queries_forwarded);
     info!("Cache Hits: {}", final_stats.cache_hits);
     info!("Cache Misses: {}", final_stats.cache_misses);
-    
+
     let total_cache_ops = final_stats.cache_hits + final_stats.cache_misses;
     if total_cache_ops > 0 {
         let hit_ratio = (final_stats.cache_hits as f64 / total_cache_ops as f64) * 100.0;
@@ -271,7 +270,7 @@ fn build_dns_configuration() -> Result<DnsConfig> {
     let google_dns_secondary: SocketAddr = "8.8.4.4:53".parse()?;
     let cloudflare_dns_primary: SocketAddr = "1.1.1.1:53".parse()?;
     let cloudflare_dns_secondary: SocketAddr = "1.0.0.1:53".parse()?;
-    
+
     // Create upstream server configurations
     // These servers handle all DNS queries not matched by local domains or forward rules
     let upstream_servers = vec![
@@ -280,20 +279,23 @@ fn build_dns_configuration() -> Result<DnsConfig> {
         UpstreamServer::new(cloudflare_dns_primary),
         UpstreamServer::new(cloudflare_dns_secondary),
     ];
-    
-    info!("Configured {} upstream DNS servers:", upstream_servers.len());
+
+    info!(
+        "Configured {} upstream DNS servers:",
+        upstream_servers.len()
+    );
     for (idx, server) in upstream_servers.iter().enumerate() {
         info!("  [{}] {} (port {})", idx + 1, server.address, server.port);
     }
-    
+
     // Build DNS configuration with caching parameters
     let dns_config = DnsConfig {
         // Cache configuration
         cache_size: 1000, // Store up to 1000 DNS records
-        
+
         // Upstream server configuration
         upstream_servers,
-        
+
         // Conditional forwarding rules (domain-specific routing)
         // Example: route corporate.local queries to internal DNS server
         forward_rules: vec![
@@ -304,7 +306,7 @@ fn build_dns_configuration() -> Result<DnsConfig> {
             //     no_resolv: true,
             // },
         ],
-        
+
         // Local domain definitions (no upstream forwarding)
         local_domains: vec![
             // Example: resolve .local TLD locally without forwarding
@@ -313,21 +315,21 @@ fn build_dns_configuration() -> Result<DnsConfig> {
             //     address: None, // Return NXDOMAIN
             // },
         ],
-        
+
         // Bogus domain filtering (ad-blocking, malware filtering)
         bogus_domains: vec![],
-        
+
         // EDNS0 configuration for larger UDP packets
         edns_packet_size: 4096, // Standard EDNS0 buffer size
-        
+
         // TTL override settings
         min_ttl: Some(Duration::from_secs(60)), // Minimum 1 minute TTL
         max_ttl: Some(Duration::from_secs(86400)), // Maximum 24 hours TTL
-        
+
         // Negative caching (NXDOMAIN responses)
         negative_ttl: Duration::from_secs(3600), // Cache negative responses for 1 hour
     };
-    
+
     Ok(dns_config)
 }
 
@@ -377,24 +379,18 @@ fn display_server_information(dns_config: &DnsConfig) {
     info!("  - Size: {} entries (LRU eviction)", dns_config.cache_size);
     info!(
         "  - Min TTL: {} seconds",
-        dns_config
-            .min_ttl
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
+        dns_config.min_ttl.map(|d| d.as_secs()).unwrap_or(0)
     );
     info!(
         "  - Max TTL: {} seconds",
-        dns_config
-            .max_ttl
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
+        dns_config.max_ttl.map(|d| d.as_secs()).unwrap_or(0)
     );
     info!(
         "  - Negative TTL: {} seconds",
         dns_config.negative_ttl.as_secs()
     );
     info!("");
-    
+
     info!("Upstream DNS Servers:");
     for (idx, server) in dns_config.upstream_servers.iter().enumerate() {
         if let Some(ref domain) = server.domain {
@@ -415,7 +411,7 @@ fn display_server_information(dns_config: &DnsConfig) {
         }
     }
     info!("");
-    
+
     if !dns_config.forward_rules.is_empty() {
         info!("Conditional Forwarding Rules:");
         for rule in &dns_config.forward_rules {
@@ -430,7 +426,7 @@ fn display_server_information(dns_config: &DnsConfig) {
         }
         info!("");
     }
-    
+
     if !dns_config.local_domains.is_empty() {
         info!("Local Domain Definitions:");
         for local in &dns_config.local_domains {
@@ -442,15 +438,16 @@ fn display_server_information(dns_config: &DnsConfig) {
         }
         info!("");
     }
-    
+
     info!("Protocol Settings:");
-    info!("  - EDNS0 Buffer Size: {} bytes", dns_config.edns_packet_size);
     info!(
-        "  - DNS Compression: Enabled (RFC 1035 label pointers)"
+        "  - EDNS0 Buffer Size: {} bytes",
+        dns_config.edns_packet_size
     );
+    info!("  - DNS Compression: Enabled (RFC 1035 label pointers)");
     info!("  - TCP Fallback: Enabled for truncated responses");
     info!("");
-    
+
     // Display feature-gated capabilities
     #[cfg(feature = "dnssec")]
     {
@@ -462,7 +459,7 @@ fn display_server_information(dns_config: &DnsConfig) {
     {
         info!("DNSSEC: Disabled (compile with --features dnssec to enable)");
     }
-    
+
     #[cfg(feature = "auth-dns")]
     {
         info!("Authoritative DNS: Enabled");
@@ -472,11 +469,9 @@ fn display_server_information(dns_config: &DnsConfig) {
     {
         info!("Authoritative DNS: Disabled");
     }
-    
+
     info!("");
 }
-
-
 
 /// Demonstrate comprehensive DNS cache API usage
 ///
@@ -489,14 +484,14 @@ fn display_server_information(dns_config: &DnsConfig) {
 /// Replaces cache operations from src/cache.c
 fn demonstrate_cache_api_usage() {
     info!("=== DNS Cache API Demonstration ===");
-    
+
     // Create a new cache with 1000-entry capacity (DnsCache::new)
     let cache = DnsCache::new(1000);
-    
+
     info!("Created DNS cache with 1000-entry capacity");
     info!("Cache uses LRU eviction policy with automatic TTL expiration");
     info!("");
-    
+
     // Demonstrate cache operations (insert, lookup)
     info!("Cache Operations Available:");
     info!("  - insert() - Add DNS records with TTL and source tracking");
@@ -504,7 +499,7 @@ fn demonstrate_cache_api_usage() {
     info!("  - get_statistics() - Retrieve hit/miss ratios and entry counts");
     info!("  - evict_expired() - Remove expired entries (automatic)");
     info!("");
-    
+
     // Get cache statistics
     let stats = cache.get_statistics();
     info!("Initial Cache Statistics:");
@@ -514,7 +509,7 @@ fn demonstrate_cache_api_usage() {
     info!("  - Cache Misses: {}", stats.misses);
     info!("  - Evictions: {}", stats.evictions);
     info!("");
-    
+
     info!("Cache features:");
     info!("  ✓ LRU eviction when capacity exceeded");
     info!("  ✓ Automatic TTL expiration");
@@ -522,7 +517,7 @@ fn demonstrate_cache_api_usage() {
     info!("  ✓ CNAME chain resolution");
     info!("  ✓ Reverse lookup support");
     info!("");
-    
+
     // Demonstrate additional cache capabilities
     demonstrate_domain_matching();
     demonstrate_record_types();
@@ -541,12 +536,12 @@ fn demonstrate_domain_matching() {
     let domain1 = "example.com";
     let domain2 = "EXAMPLE.COM";
     let domain3 = "example.com.";
-    
+
     // domain_equal performs case-insensitive comparison
     if domain_equal(domain1, domain2) {
         info!("{} equals {} (case-insensitive)", domain1, domain2);
     }
-    
+
     // Handles trailing dots in domain names
     if domain_equal(domain1, domain3) {
         info!("{} equals {} (canonical form)", domain1, domain3);
@@ -567,7 +562,7 @@ fn demonstrate_edns0_handling() {
     info!("  - Client subnet information (ECS)");
     info!("  - DNSSEC OK bit (DO) for DNSSEC-aware queries");
     info!("  - Additional protocol extensions via OPT record");
-    
+
     // EDNS0 functions available:
     // - OptRecord::find_opt_record() - Extract OPT record from DNS message
     // - OptRecord::add_opt_record() - Add EDNS0 extension to response
@@ -598,7 +593,7 @@ fn demonstrate_record_types() {
     info!("  - SRV: Service locator records");
     info!("  - NS: Name server records");
     info!("  - SOA: Start of authority records");
-    
+
     // Example usage (not executed):
     // match record_type {
     //     RecordType::A => handle_a_record(),
@@ -620,7 +615,7 @@ fn demonstrate_record_types() {
 fn demonstrate_cache_operations() {
     // Create a new cache with 1000-entry capacity
     let _cache = DnsCache::new(1000);
-    
+
     info!("DNS Cache Operations:");
     info!("  - new() - Create cache with specified capacity");
     info!("  - insert() - Add DNS records with TTL");
@@ -633,7 +628,7 @@ fn demonstrate_cache_operations() {
     info!("  - Negative caching (RFC 2308)");
     info!("  - CNAME chain resolution");
     info!("  - Reverse lookup support");
-    
+
     // Example usage (not executed):
     // cache.insert(key, records, ttl, CacheSource::Upstream);
     // if let Some(records) = cache.lookup(&key) {
@@ -668,7 +663,7 @@ async fn demonstrate_query_forwarding() {
     info!("  - Retry with exponential backoff");
     info!("  - Server health tracking");
     info!("  - Timeout handling with tokio::select!");
-    
+
     // Example usage (not executed):
     // let response = handle_query(
     //     query,
@@ -677,4 +672,3 @@ async fn demonstrate_query_forwarding() {
     //     servers.clone(),
     // ).await?;
 }
-

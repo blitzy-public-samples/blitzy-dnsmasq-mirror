@@ -214,7 +214,7 @@ pub mod conntrack;
 
 // Netlink types (always available on Linux)
 pub use netlink::{
-    enumerate_interfaces, NetlinkError, NetlinkEvent, NetlinkMonitor, NetlinkSocket,
+    NetlinkError, NetlinkEvent, NetlinkMonitor, NetlinkSocket, enumerate_interfaces,
 };
 
 // inotify types (conditional)
@@ -223,15 +223,15 @@ pub use inotify::{FileEvent, InotifyError, InotifyWatcher};
 
 // ipset types (conditional)
 #[cfg(feature = "ipset")]
-pub use ipset::{add_to_ipset, IpsetError, IpsetManager};
+pub use ipset::{IpsetError, IpsetManager, add_to_ipset};
 
 // nftables types (conditional)
 #[cfg(feature = "nftables")]
-pub use nftset::{add_to_nftset, NftablesManager, NftsetError};
+pub use nftset::{NftablesManager, NftsetError, add_to_nftset};
 
 // conntrack types (conditional)
 #[cfg(feature = "conntrack")]
-pub use conntrack::{get_incoming_mark, ConntrackError};
+pub use conntrack::{ConntrackError, get_incoming_mark};
 
 // ==============================================================================
 // Error Types
@@ -660,7 +660,10 @@ pub async fn init() -> Result<LinuxPlatform, LinuxPlatformError> {
             Some(Arc::new(watcher))
         }
         Err(e) => {
-            error!("Failed to initialize inotify, file watching disabled: {}", e);
+            error!(
+                "Failed to initialize inotify, file watching disabled: {}",
+                e
+            );
             None
         }
     };
@@ -673,7 +676,10 @@ pub async fn init() -> Result<LinuxPlatform, LinuxPlatformError> {
             Some(Arc::new(manager))
         }
         Err(e) => {
-            error!("Failed to initialize ipset, ipset integration disabled: {}", e);
+            error!(
+                "Failed to initialize ipset, ipset integration disabled: {}",
+                e
+            );
             None
         }
     };
@@ -686,7 +692,10 @@ pub async fn init() -> Result<LinuxPlatform, LinuxPlatformError> {
             Some(Arc::new(manager))
         }
         Err(e) => {
-            error!("Failed to initialize nftables, nftables integration disabled: {}", e);
+            error!(
+                "Failed to initialize nftables, nftables integration disabled: {}",
+                e
+            );
             None
         }
     };

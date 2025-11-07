@@ -74,12 +74,12 @@
 //! ```
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::BytesMut;
-use socket2::{Socket, Domain, Type, Protocol};
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::RwLock;
 use tokio::task;
@@ -87,9 +87,9 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::config::Config;
 use crate::constants::DNS_PACKET_SIZE;
-use crate::dns::cache::{DnsCache, CacheKey, CacheSource};
+use crate::dns::cache::{CacheKey, CacheSource, DnsCache};
 use crate::dns::edns::{OptRecord, find_opt_record};
-use crate::dns::forward::{handle_query, Server};
+use crate::dns::forward::{Server, handle_query};
 use crate::dns::protocol::DnsMessage;
 use crate::runtime::signal::SignalEvent;
 use crate::types::errors::{DnsmasqError, NetworkError};
@@ -348,7 +348,10 @@ impl DnsServer {
 
         info!(
             "DNS server initialized with cache_size={}, max_tcp={}, port={}, upstream_servers={}",
-            config.cache_size, config.max_tcp_connections, config.socket_config.port, servers.len()
+            config.cache_size,
+            config.max_tcp_connections,
+            config.socket_config.port,
+            servers.len()
         );
 
         Ok(Self {
@@ -382,8 +385,8 @@ impl DnsServer {
         // Determine bind addresses (empty list = bind to all interfaces)
         let bind_addresses: Vec<IpAddr> = if socket_config.bind_addresses.is_empty() {
             vec![
-                "0.0.0.0".parse().unwrap(),      // IPv4 wildcard
-                "::".parse().unwrap(),            // IPv6 wildcard
+                "0.0.0.0".parse().unwrap(), // IPv4 wildcard
+                "::".parse().unwrap(),      // IPv6 wildcard
             ]
         } else {
             socket_config.bind_addresses.clone()
@@ -407,7 +410,10 @@ impl DnsServer {
 
         // Create TCP listener on first bind address (or wildcard)
         let tcp_bind_addr = SocketAddr::new(
-            bind_addresses.first().copied().unwrap_or_else(|| "0.0.0.0".parse().unwrap()),
+            bind_addresses
+                .first()
+                .copied()
+                .unwrap_or_else(|| "0.0.0.0".parse().unwrap()),
             socket_config.port,
         );
 
@@ -475,7 +481,8 @@ impl DnsServer {
             .map_err(|e| DnsmasqError::Network(NetworkError::Bind(e.to_string())))?;
 
         // Convert to Tokio UdpSocket
-        socket.set_nonblocking(true)
+        socket
+            .set_nonblocking(true)
             .map_err(|e| DnsmasqError::Network(NetworkError::SocketOption(e.to_string())))?;
 
         let std_socket: std::net::UdpSocket = socket.into();
@@ -508,7 +515,8 @@ impl DnsServer {
             .listen(128)
             .map_err(|e| DnsmasqError::Network(NetworkError::Listen(e.to_string())))?;
 
-        socket.set_nonblocking(true)
+        socket
+            .set_nonblocking(true)
             .map_err(|e| DnsmasqError::Network(NetworkError::SocketOption(e.to_string())))?;
 
         let std_listener: std::net::TcpListener = socket.into();
@@ -671,12 +679,16 @@ impl DnsServer {
             if let Ok(result) = task_handle.await {
                 match result {
                     Ok((data, source, socket)) => return Ok((data, source, socket)),
-                    Err(e) => return Err(DnsmasqError::Network(NetworkError::Receive(e.to_string()))),
+                    Err(e) => {
+                        return Err(DnsmasqError::Network(NetworkError::Receive(e.to_string())));
+                    }
                 }
             }
         }
 
-        Err(DnsmasqError::Network(NetworkError::Receive("No UDP data received".to_string())))
+        Err(DnsmasqError::Network(NetworkError::Receive(
+            "No UDP data received".to_string(),
+        )))
     }
 
     /// Accept TCP connection from listener
@@ -728,7 +740,9 @@ impl DnsServer {
         let start_time = Instant::now();
 
         // Update statistics
-        self.statistics.queries_received.fetch_add(1, Ordering::Relaxed);
+        self.statistics
+            .queries_received
+            .fetch_add(1, Ordering::Relaxed);
 
         // Parse DNS message
         let query = match DnsMessage::parse(&data) {
@@ -759,7 +773,9 @@ impl DnsServer {
             Ok(data) => data,
             Err(e) => {
                 error!("Failed to serialize DNS response: {}", e);
-                self.statistics.servfail_responses.fetch_add(1, Ordering::Relaxed);
+                self.statistics
+                    .servfail_responses
+                    .fetch_add(1, Ordering::Relaxed);
                 return Ok(());
             }
         };
@@ -767,7 +783,12 @@ impl DnsServer {
         // Truncate if response exceeds UDP size
         let max_udp_size = self.get_max_udp_size(&response);
         let final_response = if response_data.len() > max_udp_size {
-            warn!("Response to {} truncated ({} > {})", source, response_data.len(), max_udp_size);
+            warn!(
+                "Response to {} truncated ({} > {})",
+                source,
+                response_data.len(),
+                max_udp_size
+            );
             self.truncate_response(response, max_udp_size)?
         } else {
             response_data
@@ -809,20 +830,26 @@ impl DnsServer {
         // Read and process queries until connection closes or timeout
         loop {
             // Read 2-byte length prefix with timeout
-            let length = match tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await {
-                Ok(Ok(len)) => len,
-                Ok(Err(e)) => {
-                    debug!("TCP read error from {}: {}", peer_addr, e);
-                    return Ok(()); // Connection closed or error
-                }
-                Err(_) => {
-                    debug!("TCP connection from {} timed out", peer_addr);
-                    return Ok(());
-                }
-            };
+            let length =
+                match tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await {
+                    Ok(Ok(len)) => len,
+                    Ok(Err(e)) => {
+                        debug!("TCP read error from {}: {}", peer_addr, e);
+                        return Ok(()); // Connection closed or error
+                    }
+                    Err(_) => {
+                        debug!("TCP connection from {} timed out", peer_addr);
+                        return Ok(());
+                    }
+                };
 
             // Read DNS message with timeout
-            let query_data = match tokio::time::timeout(timeout, self.read_tcp_data(&mut stream, length)).await {
+            let query_data = match tokio::time::timeout(
+                timeout,
+                self.read_tcp_data(&mut stream, length),
+            )
+            .await
+            {
                 Ok(Ok(data)) => data,
                 Ok(Err(e)) => {
                     error!("Failed to read TCP query from {}: {}", peer_addr, e);
@@ -835,7 +862,9 @@ impl DnsServer {
             };
 
             // Update statistics
-            self.statistics.queries_received.fetch_add(1, Ordering::Relaxed);
+            self.statistics
+                .queries_received
+                .fetch_add(1, Ordering::Relaxed);
 
             // Parse and process query
             let query = match DnsMessage::parse(&query_data) {
@@ -925,12 +954,11 @@ impl DnsServer {
         source: SocketAddr,
     ) -> ServerResult<DnsMessage> {
         // Extract first question for processing
-        let question = query
-            .questions
-            .first()
-            .ok_or_else(|| DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery {
-                message: "No questions in query".to_string()
-            }))?;
+        let question = query.questions.first().ok_or_else(|| {
+            DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery {
+                message: "No questions in query".to_string(),
+            })
+        })?;
 
         // Check cache first
         {
@@ -969,7 +997,9 @@ impl DnsServer {
         .await
         {
             Ok(response) => {
-                self.statistics.queries_forwarded.fetch_add(1, Ordering::Relaxed);
+                self.statistics
+                    .queries_forwarded
+                    .fetch_add(1, Ordering::Relaxed);
 
                 // Cache the response if appropriate
                 if !response.answers.is_empty() {
@@ -981,19 +1011,28 @@ impl DnsServer {
                     };
                     // Use minimum TTL from all answer records
                     let min_ttl = response.answers.iter().map(|r| r.ttl()).min().unwrap_or(0);
-                    cache.insert(cache_key, response.answers.clone(), min_ttl, CacheSource::Upstream);
+                    cache.insert(
+                        cache_key,
+                        response.answers.clone(),
+                        min_ttl,
+                        CacheSource::Upstream,
+                    );
                 }
 
                 // Check for NXDOMAIN
                 if response.header.flags.rcode == 3 {
-                    self.statistics.nxdomain_responses.fetch_add(1, Ordering::Relaxed);
+                    self.statistics
+                        .nxdomain_responses
+                        .fetch_add(1, Ordering::Relaxed);
                 }
 
                 Ok(response)
             }
             Err(e) => {
                 error!("Query forwarding failed: {}", e);
-                self.statistics.servfail_responses.fetch_add(1, Ordering::Relaxed);
+                self.statistics
+                    .servfail_responses
+                    .fetch_add(1, Ordering::Relaxed);
 
                 // Generate SERVFAIL response
                 let mut response = query;
@@ -1021,7 +1060,11 @@ impl DnsServer {
     /// Truncate response to fit in UDP payload
     ///
     /// Sets TC bit and removes answers/authority/additional records
-    fn truncate_response(&self, mut response: DnsMessage, max_size: usize) -> ServerResult<Vec<u8>> {
+    fn truncate_response(
+        &self,
+        mut response: DnsMessage,
+        max_size: usize,
+    ) -> ServerResult<Vec<u8>> {
         // Set truncation flag
         response.header.flags.tc = true;
 
@@ -1048,9 +1091,9 @@ impl DnsServer {
         response.answers.clear();
 
         // Final attempt - should always fit now
-        response
-            .serialize()
-            .map_err(|e| DnsmasqError::Dns(crate::types::errors::DnsError::Serialization(e.to_string())))
+        response.serialize().map_err(|e| {
+            DnsmasqError::Dns(crate::types::errors::DnsError::Serialization(e.to_string()))
+        })
     }
 
     /// Send error response (FORMERR, SERVFAIL, etc.)
@@ -1164,7 +1207,9 @@ impl ServerContext {
         let start_time = Instant::now();
 
         // Update statistics
-        self.statistics.queries_received.fetch_add(1, Ordering::Relaxed);
+        self.statistics
+            .queries_received
+            .fetch_add(1, Ordering::Relaxed);
 
         // Parse DNS message
         let query = match DnsMessage::parse(&data) {
@@ -1194,7 +1239,9 @@ impl ServerContext {
             Ok(data) => data,
             Err(e) => {
                 error!("Failed to serialize DNS response: {}", e);
-                self.statistics.servfail_responses.fetch_add(1, Ordering::Relaxed);
+                self.statistics
+                    .servfail_responses
+                    .fetch_add(1, Ordering::Relaxed);
                 return Ok(());
             }
         };
@@ -1218,7 +1265,11 @@ impl ServerContext {
             .await
             .map_err(|e| DnsmasqError::Network(NetworkError::Send(e.to_string())))?;
 
-        debug!("Handled UDP query from {} in {:?}", source, start_time.elapsed());
+        debug!(
+            "Handled UDP query from {} in {:?}",
+            source,
+            start_time.elapsed()
+        );
 
         Ok(())
     }
@@ -1235,18 +1286,26 @@ impl ServerContext {
 
         loop {
             // Read length prefix
-            let length = match tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await {
-                Ok(Ok(len)) => len,
-                Ok(Err(_)) | Err(_) => return Ok(()),
-            };
+            let length =
+                match tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await {
+                    Ok(Ok(len)) => len,
+                    Ok(Err(_)) | Err(_) => return Ok(()),
+                };
 
             // Read query data
-            let query_data = match tokio::time::timeout(timeout, self.read_tcp_data(&mut stream, length)).await {
+            let query_data = match tokio::time::timeout(
+                timeout,
+                self.read_tcp_data(&mut stream, length),
+            )
+            .await
+            {
                 Ok(Ok(data)) => data,
                 Ok(Err(_)) | Err(_) => return Ok(()),
             };
 
-            self.statistics.queries_received.fetch_add(1, Ordering::Relaxed);
+            self.statistics
+                .queries_received
+                .fetch_add(1, Ordering::Relaxed);
 
             // Parse and process
             let query = match DnsMessage::parse(&query_data) {
@@ -1260,8 +1319,9 @@ impl ServerContext {
             let response = self.process_query(query, peer_addr).await?;
 
             // Send response
-            let response_data = response.serialize()
-                .map_err(|e| DnsmasqError::Dns(crate::types::errors::DnsError::Serialization(e.to_string())))?;
+            let response_data = response.serialize().map_err(|e| {
+                DnsmasqError::Dns(crate::types::errors::DnsError::Serialization(e.to_string()))
+            })?;
 
             if let Err(e) = self.send_tcp_response(&mut stream, &response_data).await {
                 error!("Failed to send TCP response: {}", e);
@@ -1271,13 +1331,16 @@ impl ServerContext {
     }
 
     /// Process query in task context
-    async fn process_query(&self, query: DnsMessage, source: SocketAddr) -> ServerResult<DnsMessage> {
-        let question = query
-            .questions
-            .first()
-            .ok_or_else(|| DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery {
-                message: "No questions".to_string()
-            }))?;
+    async fn process_query(
+        &self,
+        query: DnsMessage,
+        source: SocketAddr,
+    ) -> ServerResult<DnsMessage> {
+        let question = query.questions.first().ok_or_else(|| {
+            DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery {
+                message: "No questions".to_string(),
+            })
+        })?;
 
         // Check cache
         {
@@ -1301,9 +1364,18 @@ impl ServerContext {
         // Forward query
         self.statistics.cache_misses.fetch_add(1, Ordering::Relaxed);
 
-        match handle_query(query.clone(), source, self.cache.clone(), self.servers.clone()).await {
+        match handle_query(
+            query.clone(),
+            source,
+            self.cache.clone(),
+            self.servers.clone(),
+        )
+        .await
+        {
             Ok(response) => {
-                self.statistics.queries_forwarded.fetch_add(1, Ordering::Relaxed);
+                self.statistics
+                    .queries_forwarded
+                    .fetch_add(1, Ordering::Relaxed);
 
                 if !response.answers.is_empty() {
                     let mut cache = self.cache.write().await;
@@ -1313,18 +1385,27 @@ impl ServerContext {
                         record_class: question.qclass,
                     };
                     let min_ttl = response.answers.iter().map(|r| r.ttl()).min().unwrap_or(0);
-                    cache.insert(cache_key, response.answers.clone(), min_ttl, CacheSource::Upstream);
+                    cache.insert(
+                        cache_key,
+                        response.answers.clone(),
+                        min_ttl,
+                        CacheSource::Upstream,
+                    );
                 }
 
                 if response.header.flags.rcode == 3 {
-                    self.statistics.nxdomain_responses.fetch_add(1, Ordering::Relaxed);
+                    self.statistics
+                        .nxdomain_responses
+                        .fetch_add(1, Ordering::Relaxed);
                 }
 
                 Ok(response)
             }
             Err(e) => {
                 error!("Forwarding failed: {}", e);
-                self.statistics.servfail_responses.fetch_add(1, Ordering::Relaxed);
+                self.statistics
+                    .servfail_responses
+                    .fetch_add(1, Ordering::Relaxed);
 
                 let mut response = query;
                 response.header.flags.qr = true;
@@ -1360,7 +1441,11 @@ impl ServerContext {
         Ok(())
     }
 
-    fn truncate_response(&self, mut response: DnsMessage, max_size: usize) -> ServerResult<Vec<u8>> {
+    fn truncate_response(
+        &self,
+        mut response: DnsMessage,
+        max_size: usize,
+    ) -> ServerResult<Vec<u8>> {
         response.header.flags.tc = true;
         response.additional.clear();
 
@@ -1378,14 +1463,17 @@ impl ServerContext {
         }
 
         response.answers.clear();
-        response.serialize()
-            .map_err(|e| DnsmasqError::Dns(crate::types::errors::DnsError::Serialization(e.to_string())))
+        response.serialize().map_err(|e| {
+            DnsmasqError::Dns(crate::types::errors::DnsError::Serialization(e.to_string()))
+        })
     }
 
     async fn read_tcp_length(&self, stream: &mut TcpStream) -> ServerResult<u16> {
         use tokio::io::AsyncReadExt;
         let mut buf = [0u8; 2];
-        stream.read_exact(&mut buf).await
+        stream
+            .read_exact(&mut buf)
+            .await
             .map_err(|e| DnsmasqError::Network(NetworkError::Receive(e.to_string())))?;
         Ok(u16::from_be_bytes(buf))
     }
@@ -1393,7 +1481,9 @@ impl ServerContext {
     async fn read_tcp_data(&self, stream: &mut TcpStream, length: u16) -> ServerResult<Vec<u8>> {
         use tokio::io::AsyncReadExt;
         let mut data = vec![0u8; length as usize];
-        stream.read_exact(&mut data).await
+        stream
+            .read_exact(&mut data)
+            .await
             .map_err(|e| DnsmasqError::Network(NetworkError::Receive(e.to_string())))?;
         Ok(data)
     }
@@ -1401,9 +1491,13 @@ impl ServerContext {
     async fn send_tcp_response(&self, stream: &mut TcpStream, data: &[u8]) -> ServerResult<()> {
         use tokio::io::AsyncWriteExt;
         let length = (data.len() as u16).to_be_bytes();
-        stream.write_all(&length).await
+        stream
+            .write_all(&length)
+            .await
             .map_err(|e| DnsmasqError::Network(NetworkError::Send(e.to_string())))?;
-        stream.write_all(data).await
+        stream
+            .write_all(data)
+            .await
             .map_err(|e| DnsmasqError::Network(NetworkError::Send(e.to_string())))?;
         Ok(())
     }
@@ -1453,4 +1547,3 @@ mod tests {
         assert_eq!(stats.queries_received.load(Ordering::Relaxed), 0);
     }
 }
-

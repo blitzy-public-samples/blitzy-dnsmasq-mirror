@@ -649,7 +649,7 @@ pub fn get_platform() -> Box<dyn NetworkPlatform> {
         // The C version would die() on initialization failure anyway
         Box::new(
             futures::executor::block_on(linux::LinuxPlatform::new())
-                .expect("Failed to initialize Linux platform")
+                .expect("Failed to initialize Linux platform"),
         )
     }
 

@@ -31,9 +31,7 @@ pub use protocol::{
     TftpOpcode, TftpPacket, TransferMode, sanitise_string,
 };
 
-pub use server::{
-    ServerError, TftpConfig, TftpServer, UniqueRootMode, handle_request,
-};
+pub use server::{ServerError, TftpConfig, TftpServer, UniqueRootMode, handle_request};
 
 pub use transfer::{
     FileMetadata, TftpFile, Transfer, TransferAction, TransferError, TransferOptions,

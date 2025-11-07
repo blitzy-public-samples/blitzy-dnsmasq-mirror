@@ -133,12 +133,12 @@ pub mod zone;
 // Re-export commonly used types for convenience
 #[cfg(feature = "auth-dns")]
 pub use zone::{
-    AuthZone,           // Main zone configuration structure
-    IpNetwork,          // IP network with CIDR prefix for subnet matching
-    SoaRecord,          // SOA record data for zone authority
+    AuthZone,                   // Main zone configuration structure
+    IpNetwork,                  // IP network with CIDR prefix for subnet matching
+    SoaRecord,                  // SOA record data for zone authority
     answer_authoritative_query, // Primary entry point for query processing
-    is_in_zone,         // Check if domain name is within zone
-    should_answer_for_subnet, // Subnet-based filtering for split-horizon DNS
+    is_in_zone,                 // Check if domain name is within zone
+    should_answer_for_subnet,   // Subnet-based filtering for split-horizon DNS
 };
 
 // Re-export error type for authoritative DNS operations

@@ -131,10 +131,10 @@ pub mod kqueue;
 // Re-exports for convenience
 
 pub use bpf::{
-    enumerate_interfaces_bsd, init_bpf, BpfError, BpfSocket, BsdNetworkMonitor, RawPacketFilter,
-    RoutingSocket,
+    BpfError, BpfSocket, BsdNetworkMonitor, RawPacketFilter, RoutingSocket,
+    enumerate_interfaces_bsd, init_bpf,
 };
-pub use kqueue::{watch_directory, watch_file, FileEvent as KqueueFileEvent, KqueueWatcher};
+pub use kqueue::{FileEvent as KqueueFileEvent, KqueueWatcher, watch_directory, watch_file};
 
 // Export common Interface representation
 pub use crate::platform::Interface;
@@ -332,9 +332,7 @@ impl BsdPlatform {
         };
 
         // Initialize kqueue for file monitoring
-        let kqueue = KqueueWatcher::new()
-            .await
-            .map_err(BsdPlatformError::from)?;
+        let kqueue = KqueueWatcher::new().await.map_err(BsdPlatformError::from)?;
         info!("kqueue file watcher initialized");
 
         // Enumerate interfaces and populate cache
@@ -581,12 +579,10 @@ impl PacketFilter for BsdPlatform {
         {
             // Extract RawPacketFilter from RawSocket and send
             if let Some(filter) = socket.inner.downcast_ref::<RawPacketFilter>() {
-                filter
-                    .send(data)
-                    .map_err(|e| PlatformError::IoError {
-                        operation: "BPF packet transmission".to_string(),
-                        source: std::io::Error::other(e.to_string()),
-                    })?;
+                filter.send(data).map_err(|e| PlatformError::IoError {
+                    operation: "BPF packet transmission".to_string(),
+                    source: std::io::Error::other(e.to_string()),
+                })?;
                 Ok(())
             } else {
                 Err(PlatformError::UnsupportedOperation {

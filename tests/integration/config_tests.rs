@@ -51,7 +51,7 @@ use std::fs;
 use std::io::Write;
 
 use proptest::prelude::*;
-use tempfile::{tempdir, NamedTempFile, TempDir};
+use tempfile::{NamedTempFile, TempDir, tempdir};
 
 // Import configuration parsing types from depends_on_files whitelist
 use dnsmasq::config::options::Cli;
@@ -184,7 +184,7 @@ fn assert_parse_error(error: &ParseError, expected_variant: &str, expected_subst
 fn cli_basic_options_parsing() {
     // Test basic CLI options matching C implementation's getopt_long() behavior
     // Source: option.c lines 17-121
-    
+
     let args = vec![
         "dnsmasq",
         "--port=5353",
@@ -192,9 +192,9 @@ fn cli_basic_options_parsing() {
         "--log-queries",
         "--cache-size=1000",
     ];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     // Verify basic option parsing
     assert!(cli.no_daemon, "no-daemon flag should be set");
     // Note: Full validation requires integration with config module
@@ -203,17 +203,16 @@ fn cli_basic_options_parsing() {
 #[test]
 fn cli_short_form_options() {
     // Test short-form option parsing (-x) matching OPTSTRING from option.c line 170
-    
+
     let args = vec![
-        "dnsmasq",
-        "-d",        // --no-daemon
-        "-q",        // --log-queries
-        "-k",        // --keep-in-foreground
+        "dnsmasq", "-d", // --no-daemon
+        "-q", // --log-queries
+        "-k", // --keep-in-foreground
         "-p", "5353", // --port=5353
     ];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert!(cli.no_daemon, "Short form -d should enable no-daemon");
     assert!(cli.keep_in_foreground, "Short form -k should work");
 }
@@ -221,7 +220,7 @@ fn cli_short_form_options() {
 #[test]
 fn cli_long_form_options() {
     // Test long-form option parsing (--option) from option.c lines 186-476
-    
+
     let args = vec![
         "dnsmasq",
         "--no-daemon",
@@ -229,24 +228,24 @@ fn cli_long_form_options() {
         "--cache-size=2000",
         "--listen-address=127.0.0.1",
     ];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert!(cli.no_daemon, "Long form --no-daemon should work");
 }
 
 #[test]
 fn cli_configuration_file_options() {
     // Test configuration file directive options from option.c line 26
-    
+
     let args = vec![
         "dnsmasq",
         "--conf-file=/etc/dnsmasq.conf",
         "--conf-dir=/etc/dnsmasq.d",
     ];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert_eq!(cli.conf_file.len(), 1, "Should parse conf-file option");
     assert_eq!(cli.conf_dir.len(), 1, "Should parse conf-dir option");
 }
@@ -254,16 +253,16 @@ fn cli_configuration_file_options() {
 #[test]
 fn cli_dns_server_options() {
     // Test upstream DNS server specifications from option.c
-    
+
     let args = vec![
         "dnsmasq",
         "--server=8.8.8.8",
         "--server=8.8.4.4",
         "--server=/localnet/192.168.1.1",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // Verify servers can be specified multiple times
     // Full validation requires config parser integration
 }
@@ -272,15 +271,15 @@ fn cli_dns_server_options() {
 #[cfg(feature = "dhcp")]
 fn cli_dhcp_range_options() {
     // Test DHCP range specifications from option.c lines 81-102
-    
+
     let args = vec![
         "dnsmasq",
         "--dhcp-range=192.168.1.50,192.168.1.150,12h",
         "--dhcp-range=tag:blue,192.168.2.10,192.168.2.100,24h",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // DHCP range parsing tested through DhcpConfig integration
 }
 
@@ -288,17 +287,17 @@ fn cli_dhcp_range_options() {
 #[cfg(feature = "dhcp")]
 fn cli_dhcp_option_specifications() {
     // Test DHCP option encoding from option.c parse_dhcp_opt()
-    
+
     let args = vec![
         "dnsmasq",
         "--dhcp-option=option:router,192.168.1.1",
         "--dhcp-option=option:dns-server,192.168.1.1",
         "--dhcp-option=option:domain-name,example.com",
-        "--dhcp-option=6,8.8.8.8,8.8.4.4",  // Numeric option code
+        "--dhcp-option=6,8.8.8.8,8.8.4.4", // Numeric option code
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // DHCP option parsing complex formats tested through DhcpConfig
 }
 
@@ -306,16 +305,16 @@ fn cli_dhcp_option_specifications() {
 #[cfg(feature = "dhcp")]
 fn cli_dhcp_host_static_assignments() {
     // Test static DHCP host configuration from option.c
-    
+
     let args = vec![
         "dnsmasq",
         "--dhcp-host=00:11:22:33:44:55,192.168.1.100",
         "--dhcp-host=00:11:22:33:44:66,hostname,192.168.1.101",
         "--dhcp-host=id:client1,192.168.1.102,infinite",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // Static host parsing validated through DhcpConfig.static_hosts
 }
 
@@ -323,7 +322,7 @@ fn cli_dhcp_host_static_assignments() {
 #[cfg(feature = "tftp")]
 fn cli_tftp_server_options() {
     // Test TFTP server options (feature-gated with HAVE_TFTP from option.c lines 87)
-    
+
     let args = vec![
         "dnsmasq",
         "--enable-tftp",
@@ -331,9 +330,9 @@ fn cli_tftp_server_options() {
         "--tftp-secure",
         "--tftp-unique-root",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // TFTP options validated through config parser
 }
 
@@ -341,16 +340,16 @@ fn cli_tftp_server_options() {
 #[cfg(feature = "dnssec")]
 fn cli_dnssec_options() {
     // Test DNSSEC validation options (feature-gated with HAVE_DNSSEC from option.c line 88)
-    
+
     let args = vec![
         "dnsmasq",
         "--dnssec",
         "--dnssec-check-unsigned",
         "--trust-anchor=.,19036,8,2,49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // DNSSEC options validated through DNSSEC config module
 }
 
@@ -358,16 +357,16 @@ fn cli_dnssec_options() {
 #[cfg(feature = "auth-dns")]
 fn cli_authoritative_dns_options() {
     // Test authoritative DNS options (feature-gated with HAVE_AUTH from option.c line 93)
-    
+
     let args = vec![
         "dnsmasq",
         "--auth-zone=example.com,192.168.1.0/24",
         "--auth-server=ns.example.com,eth0",
         "--auth-soa=1000,3600,7200,86400",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // Authoritative DNS options validated through auth config
 }
 
@@ -375,14 +374,11 @@ fn cli_authoritative_dns_options() {
 #[cfg(all(target_os = "linux", feature = "ipset"))]
 fn cli_ipset_integration() {
     // Test Linux ipset integration (feature-gated with HAVE_IPSET from option.c line 94)
-    
-    let args = vec![
-        "dnsmasq",
-        "--ipset=/yahoo.com/google.com/vpn,search",
-    ];
-    
+
+    let args = vec!["dnsmasq", "--ipset=/yahoo.com/google.com/vpn,search"];
+
     let _cli = Cli::parse_from(args);
-    
+
     // ipset configuration validated through platform integration
 }
 
@@ -390,16 +386,16 @@ fn cli_ipset_integration() {
 #[cfg(all(target_os = "linux", feature = "nftables"))]
 fn cli_nftables_integration() {
     // Test nftables set integration (feature-gated with HAVE_NFTSET from option.c line 95)
-    
+
     let args = vec![
         "dnsmasq",
         "--nftset=/yahoo.com/google.com/ip#test#vpn,ip#test#search",
         "--nftset=/yahoo.com/4#ip#test#vpn4",
         "--nftset=/yahoo.com/6#ip#test#vpn6",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // nftables configuration validated through platform integration
 }
 
@@ -407,11 +403,11 @@ fn cli_nftables_integration() {
 #[cfg(feature = "dbus")]
 fn cli_dbus_integration() {
     // Test D-Bus control interface (feature-gated with HAVE_DBUS from option.c line 89)
-    
+
     let args = vec!["dnsmasq", "--enable-dbus"];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // D-Bus option validated through integration module
 }
 
@@ -419,18 +415,18 @@ fn cli_dbus_integration() {
 #[cfg(feature = "ubus")]
 fn cli_ubus_integration() {
     // Test OpenWrt ubus integration (feature-gated with HAVE_UBUS from option.c line 90)
-    
+
     let args = vec!["dnsmasq", "--enable-ubus"];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // ubus option validated through integration module
 }
 
 #[test]
 fn cli_logging_options() {
     // Test comprehensive logging configuration options
-    
+
     let args = vec![
         "dnsmasq",
         "--log-queries",
@@ -438,16 +434,16 @@ fn cli_logging_options() {
         "--log-facility=local0",
         "--log-async",
     ];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert!(cli.log_dhcp, "log-dhcp should be enabled");
 }
 
 #[test]
 fn cli_network_interface_options() {
     // Test network interface binding options
-    
+
     let args = vec![
         "dnsmasq",
         "--interface=eth0",
@@ -456,58 +452,58 @@ fn cli_network_interface_options() {
         "--listen-address=192.168.1.1",
         "--bind-interfaces",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // Interface binding validated through network config
 }
 
 #[test]
 fn cli_security_options() {
     // Test privilege dropping and security options
-    
-    let args = vec![
-        "dnsmasq",
-        "--user=dnsmasq",
-        "--group=dnsmasq",
-    ];
-    
+
+    let args = vec!["dnsmasq", "--user=dnsmasq", "--group=dnsmasq"];
+
     let cli = Cli::parse_from(args);
-    
+
     assert_eq!(cli.user, Some("dnsmasq".to_string()), "User should be set");
-    assert_eq!(cli.group, Some("dnsmasq".to_string()), "Group should be set");
+    assert_eq!(
+        cli.group,
+        Some("dnsmasq".to_string()),
+        "Group should be set"
+    );
 }
 
 #[test]
 fn cli_pid_file_option() {
     // Test PID file configuration
-    
+
     let args = vec!["dnsmasq", "--pid-file=/var/run/dnsmasq.pid"];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert!(cli.pid_file.is_some(), "PID file should be configured");
 }
 
 #[test]
 fn cli_test_mode_validation() {
     // Test configuration validation mode (--test option)
-    
+
     let args = vec!["dnsmasq", "--test", "--conf-file=/etc/dnsmasq.conf"];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert!(cli.test, "Test mode should be enabled");
 }
 
 #[test]
 fn cli_version_display() {
     // Test version information display
-    
+
     let args = vec!["dnsmasq", "--version"];
-    
+
     let cli = Cli::parse_from(args);
-    
+
     assert!(cli.version, "Version flag should be set");
 }
 
@@ -518,7 +514,7 @@ fn cli_version_display() {
 #[test]
 fn file_basic_key_value_syntax() {
     // Test basic key=value configuration file syntax from option.c lines 23-41
-    
+
     let config_content = r#"
 port=5353
 domain-needed
@@ -526,9 +522,9 @@ bogus-priv
 no-resolv
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Configuration file parsing validated through parser module
     // This tests that the file is syntactically valid
 }
@@ -536,52 +532,52 @@ cache-size=1000
 #[test]
 fn file_comment_handling() {
     // Test comment parsing with # character (full line and end-of-line)
-    
+
     let config_content = r#"
 # This is a full-line comment
 port=5353  # This is an end-of-line comment
 # Another comment
 domain-needed
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Comments should be ignored during parsing
 }
 
 #[test]
 fn file_line_continuation() {
     // Test line continuation with backslash character
-    
+
     let config_content = r#"
 dhcp-option=option:domain-name,\
 example.com
 server=8.8.8.8
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Line continuation should join lines for parsing
 }
 
 #[test]
 fn file_quoted_values() {
     // Test quoted values with escape sequences
-    
+
     let config_content = r#"
 txt-record="example.com","v=spf1 mx -all"
 dhcp-option=option:domain-name,"example.com"
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Quoted values should preserve spaces and special characters
 }
 
 #[test]
 fn file_empty_lines_and_whitespace() {
     // Test handling of empty lines and whitespace variations
-    
+
     let config_content = r#"
 
 port=5353
@@ -590,16 +586,16 @@ port=5353
 	bogus-priv
 
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Empty lines and excess whitespace should be ignored
 }
 
 #[test]
 fn file_bare_flag_options() {
     // Test bare flag options without values
-    
+
     let config_content = r#"
 domain-needed
 bogus-priv
@@ -607,16 +603,16 @@ no-resolv
 no-poll
 bind-interfaces
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Bare flags should be parsed as boolean true
 }
 
 #[test]
 fn file_multiple_value_options() {
     // Test options that can be specified multiple times
-    
+
     let config_content = r#"
 server=8.8.8.8
 server=8.8.4.4
@@ -624,24 +620,24 @@ server=/localnet/192.168.1.1
 listen-address=127.0.0.1
 listen-address=192.168.1.1
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Multiple specifications should accumulate, not override
 }
 
 #[test]
 fn file_hierarchical_conf_file_directive() {
     // Test hierarchical configuration with conf-file directive from option.c line 26
-    
+
     let included_content = r#"
 cache-size=2000
 log-queries
 "#;
-    
+
     let _included_file = create_config_file(included_content);
     let included_path = _included_file.path().to_str().unwrap();
-    
+
     let main_content = format!(
         r#"
 port=5353
@@ -650,53 +646,56 @@ domain-needed
 "#,
         included_path
     );
-    
+
     let _main_file = create_config_file(&main_content);
-    
+
     // Included file options should be merged with main file
 }
 
 #[test]
 fn file_hierarchical_conf_dir_directive() {
     // Test hierarchical configuration with conf-dir directive from option.c line 26
-    
+
     let config_files = vec![
         ("00-base.conf", "port=5353\ndomain-needed\n"),
         ("10-dns.conf", "server=8.8.8.8\nserver=8.8.4.4\n"),
-        ("20-dhcp.conf", "#dhcp-range=192.168.1.50,192.168.1.150,12h\n"),
+        (
+            "20-dhcp.conf",
+            "#dhcp-range=192.168.1.50,192.168.1.150,12h\n",
+        ),
         ("99-local.conf", "log-queries\nlog-dhcp\n"),
     ];
-    
+
     let _dir = create_config_dir(&config_files);
-    
+
     // Files should be loaded in alphabetical order
 }
 
 #[test]
 fn file_conf_dir_skip_backup_files() {
     // Test that backup and temporary files are skipped in conf-dir
-    
+
     let config_files = vec![
         ("active.conf", "port=5353\n"),
-        ("backup.conf.dpkg-old", "port=9999\n"),  // Should be skipped
+        ("backup.conf.dpkg-old", "port=9999\n"), // Should be skipped
         ("backup.conf.dpkg-dist", "port=8888\n"), // Should be skipped
-        ("backup.conf.rpmsave", "port=7777\n"),   // Should be skipped
-        ("backup.conf~", "port=6666\n"),          // Should be skipped
-        ("test#backup.conf", "port=5555\n"),      // Should be skipped
+        ("backup.conf.rpmsave", "port=7777\n"),  // Should be skipped
+        ("backup.conf~", "port=6666\n"),         // Should be skipped
+        ("test#backup.conf", "port=5555\n"),     // Should be skipped
     ];
-    
+
     let _dir = create_config_dir(&config_files);
-    
+
     // Only active.conf should be loaded, others skipped per option.c
 }
 
 #[test]
 fn file_example_config_compatibility() {
     // Test parsing of dnsmasq.conf.example for backward compatibility
-    
+
     let example_config = create_example_config();
     let _config_file = create_config_file(&example_config);
-    
+
     // Full dnsmasq.conf.example should parse without errors
 }
 
@@ -707,24 +706,24 @@ fn file_example_config_compatibility() {
 #[test]
 fn precedence_cli_overrides_file() {
     // Test that CLI arguments override config file settings per Section 0.7.6
-    
+
     let config_content = r#"
 port=5353
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
     let config_path = _config_file.path().to_str().unwrap();
-    
+
     let args = vec![
         "dnsmasq",
         "--conf-file",
         config_path,
-        "--port=9999",  // CLI overrides file
+        "--port=9999", // CLI overrides file
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // CLI port value (9999) should override config file (5353)
     // Full precedence validation requires config merging logic
 }
@@ -732,14 +731,14 @@ cache-size=1000
 #[test]
 fn precedence_file_overrides_defaults() {
     // Test that config file settings override compiled defaults
-    
+
     let config_content = r#"
 port=5353
 cache-size=2000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Config file values should override defaults from defaults.rs
 }
 
@@ -748,31 +747,31 @@ cache-size=2000
 fn precedence_last_option_wins() {
     // Test that for single-value options, last specification wins
     // NOTE: This behavior requires additional clap configuration not yet implemented
-    
+
     let args = vec![
         "dnsmasq",
         "--port=5353",
-        "--port=9999",  // Last value should win
+        "--port=9999", // Last value should win
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // Last port specification should be effective
 }
 
 #[test]
 fn precedence_multiple_value_accumulation() {
     // Test that for multi-value options, all values accumulate
-    
+
     let args = vec![
         "dnsmasq",
         "--server=8.8.8.8",
         "--server=8.8.4.4",
         "--server=1.1.1.1",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // All server specifications should be preserved
 }
 
@@ -784,7 +783,7 @@ fn precedence_multiple_value_accumulation() {
 #[cfg(feature = "dhcp")]
 fn complex_dhcp_range_formats() {
     // Test complex DHCP range specifications from option.c
-    
+
     let test_cases = vec![
         // Basic range with lease time
         "192.168.1.50,192.168.1.150,12h",
@@ -797,7 +796,7 @@ fn complex_dhcp_range_formats() {
         // Proxy range (relay)
         "192.168.4.0,proxy",
     ];
-    
+
     for range_spec in test_cases {
         let dhcp_range_arg = format!("--dhcp-range={}", range_spec);
         let args = vec!["dnsmasq", &dhcp_range_arg];
@@ -810,7 +809,7 @@ fn complex_dhcp_range_formats() {
 #[cfg(feature = "dhcp-v6")]
 fn complex_dhcpv6_range_formats() {
     // Test DHCPv6 range specifications (IPv6 addresses)
-    
+
     let test_cases = vec![
         // IPv6 range
         "fd00::100,fd00::1ff,64",
@@ -819,7 +818,7 @@ fn complex_dhcpv6_range_formats() {
         // SLAAC mode
         "::,constructor:eth0,ra-stateless,ra-names",
     ];
-    
+
     for range_spec in test_cases {
         let dhcp_range_arg = format!("--dhcp-range={}", range_spec);
         let args = vec!["dnsmasq", &dhcp_range_arg];
@@ -831,7 +830,7 @@ fn complex_dhcpv6_range_formats() {
 #[test]
 fn complex_dns_server_specifications() {
     // Test complex upstream DNS server formats from option.c parse_server()
-    
+
     let test_cases = vec![
         // Basic server
         "8.8.8.8",
@@ -848,7 +847,7 @@ fn complex_dns_server_specifications() {
         // IPv6 server
         "2001:4860:4860::8888",
     ];
-    
+
     for server_spec in test_cases {
         let server_arg = format!("--server={}", server_spec);
         let args = vec!["dnsmasq", &server_arg];
@@ -861,21 +860,22 @@ fn complex_dns_server_specifications() {
 #[cfg(feature = "dnssec")]
 fn complex_trust_anchor_formats() {
     // Test DNSSEC trust anchor specifications
-    
-    let trust_anchor = ".,19036,8,2,49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5";
-    
+
+    let trust_anchor =
+        ".,19036,8,2,49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5";
+
     // Bind the formatted string to extend its lifetime
     let trust_anchor_arg = format!("--trust-anchor={}", trust_anchor);
     let args = vec!["dnsmasq", trust_anchor_arg.as_str()];
     let _cli = Cli::parse_from(args);
-    
+
     // Trust anchor with domain, key tag, algorithm, digest type, and digest
 }
 
 #[test]
 fn complex_address_specifications() {
     // Test address directive with domain-to-IP mappings
-    
+
     let test_cases = vec![
         // IPv4 address
         "/example.com/192.168.1.1",
@@ -886,7 +886,7 @@ fn complex_address_specifications() {
         // Multiple addresses
         "/example.com/192.168.1.1",
     ];
-    
+
     for addr_spec in test_cases {
         let address_arg = format!("--address={}", addr_spec);
         let args = vec!["dnsmasq", &address_arg];
@@ -898,13 +898,13 @@ fn complex_address_specifications() {
 #[test]
 fn complex_host_record_specifications() {
     // Test host-record directive with A/AAAA records
-    
+
     let test_cases = vec![
         "example.com,192.168.1.1",
         "example.com,fe80::1",
-        "example.com,192.168.1.1,fe80::1",  // Both IPv4 and IPv6
+        "example.com,192.168.1.1,fe80::1", // Both IPv4 and IPv6
     ];
-    
+
     for host_spec in test_cases {
         let host_record_arg = format!("--host-record={}", host_spec);
         let args = vec!["dnsmasq", &host_record_arg];
@@ -920,96 +920,96 @@ fn complex_host_record_specifications() {
 #[test]
 fn invalid_syntax_empty_value() {
     // Test error handling for empty option values
-    
+
     let config_content = r#"
 port=
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce InvalidValue error for empty port value
 }
 
 #[test]
 fn invalid_syntax_malformed_line() {
     // Test error handling for malformed configuration lines
-    
+
     let config_content = r#"
 port=5353
 this is not valid syntax
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce InvalidSyntax error with line number
 }
 
 #[test]
 fn invalid_option_unknown_directive() {
     // Test error handling for unknown configuration options
-    
+
     let config_content = r#"
 port=5353
 unknown-option=value
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce UnknownOption error with suggestion if similar option exists
 }
 
 #[test]
 fn invalid_value_port_out_of_range() {
     // Test error handling for invalid port numbers
-    
+
     let config_content = r#"
 port=999999
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce InvalidValue error for port > 65535
 }
 
 #[test]
 fn invalid_value_negative_cache_size() {
     // Test error handling for negative cache size
-    
+
     let config_content = r#"
 cache-size=-100
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce InvalidValue error for negative integer
 }
 
 #[test]
 fn invalid_value_malformed_ip_address() {
     // Test error handling for malformed IP addresses
-    
+
     let config_content = r#"
 listen-address=999.999.999.999
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce InvalidValue error for invalid IP
 }
 
 #[test]
 fn invalid_value_malformed_domain_name() {
     // Test error handling for invalid domain names
-    
+
     let config_content = r#"
 domain=invalid..domain..name
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce InvalidValue error for malformed domain
 }
 
@@ -1017,24 +1017,24 @@ domain=invalid..domain..name
 #[cfg(feature = "dhcp")]
 fn invalid_dhcp_range_overlap() {
     // Test error handling for overlapping DHCP ranges
-    
+
     let config_content = r#"
 dhcp-range=192.168.1.50,192.168.1.150,12h
 dhcp-range=192.168.1.100,192.168.1.200,12h
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should detect and report overlapping ranges
 }
 
 #[test]
 fn invalid_circular_include() {
     // Test detection of circular includes in configuration files
-    
+
     let mut file1 = NamedTempFile::new().expect("Failed to create file1");
     let file1_path = file1.path().to_owned();
-    
+
     // Create circular reference: file1 includes itself
     let circular_content = format!(
         r#"
@@ -1043,46 +1043,46 @@ conf-file={}
 "#,
         file1_path.display()
     );
-    
+
     file1
         .write_all(circular_content.as_bytes())
         .expect("Failed to write file1");
     file1.flush().expect("Failed to flush");
-    
+
     // Should detect circular include and produce CircularInclude error
 }
 
 #[test]
 fn invalid_recursion_depth_exceeded() {
     // Test maximum recursion depth limit for nested includes
-    
+
     // Create deeply nested include chain
     let mut files = Vec::new();
     let mut current_content = "port=5353\n".to_string();
-    
+
     for _i in 0..20 {
         let mut file = NamedTempFile::new().expect("Failed to create file");
         let file_path = file.path().to_owned();
-        
+
         file.write_all(current_content.as_bytes())
             .expect("Failed to write");
         file.flush().expect("Failed to flush");
-        
+
         files.push(file);
         current_content = format!("conf-file={}\n", file_path.display());
     }
-    
+
     // Should exceed maximum recursion depth and produce RecursionDepthExceeded error
 }
 
 #[test]
 fn invalid_file_not_found() {
     // Test error handling when configuration file doesn't exist
-    
+
     let args = vec!["dnsmasq", "--conf-file=/nonexistent/path/dnsmasq.conf"];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // Attempting to load nonexistent file should produce FileNotFound error
 }
 
@@ -1094,13 +1094,13 @@ fn invalid_file_not_found() {
 #[cfg(not(feature = "dhcp"))]
 fn feature_gated_dhcp_disabled() {
     // Test that DHCP options are rejected when dhcp feature is disabled
-    
+
     let config_content = r#"
 dhcp-range=192.168.1.50,192.168.1.150,12h
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce error indicating DHCP support not compiled in
 }
 
@@ -1108,14 +1108,14 @@ dhcp-range=192.168.1.50,192.168.1.150,12h
 #[cfg(not(feature = "tftp"))]
 fn feature_gated_tftp_disabled() {
     // Test that TFTP options are rejected when tftp feature is disabled
-    
+
     let config_content = r#"
 enable-tftp
 tftp-root=/var/tftp
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce error indicating TFTP support not compiled in
 }
 
@@ -1123,14 +1123,14 @@ tftp-root=/var/tftp
 #[cfg(not(feature = "dnssec"))]
 fn feature_gated_dnssec_disabled() {
     // Test that DNSSEC options are rejected when dnssec feature is disabled
-    
+
     let config_content = r#"
 dnssec
 dnssec-check-unsigned
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce error indicating DNSSEC support not compiled in
 }
 
@@ -1138,13 +1138,13 @@ dnssec-check-unsigned
 #[cfg(not(feature = "dbus"))]
 fn feature_gated_dbus_disabled() {
     // Test that D-Bus options are rejected when dbus feature is disabled
-    
+
     let config_content = r#"
 enable-dbus
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should produce error indicating D-Bus support not compiled in
 }
 
@@ -1156,7 +1156,7 @@ enable-dbus
 fn sighup_reload_supported_options() {
     // Test options that support runtime reload via SIGHUP
     // From option.c: new upstream servers, hosts file changes, DHCP options
-    
+
     let config_content = r#"
 # Options that can be reloaded with SIGHUP
 server=8.8.8.8
@@ -1164,9 +1164,9 @@ server=8.8.4.4
 addn-hosts=/etc/hosts.custom
 dhcp-option=option:router,192.168.1.1
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // These options should be marked as SIGHUP-reloadable
 }
 
@@ -1174,7 +1174,7 @@ dhcp-option=option:router,192.168.1.1
 fn sighup_reload_unsupported_options() {
     // Test options that require daemon restart (cannot be reloaded)
     // From option.c: listen interfaces, port bindings, feature enables
-    
+
     let config_content = r#"
 # Options that require restart
 port=5353
@@ -1182,9 +1182,9 @@ interface=eth0
 bind-interfaces
 enable-tftp
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // These options should be marked as requiring restart
 }
 
@@ -1195,7 +1195,7 @@ enable-tftp
 #[test]
 fn migration_validate_existing_config() {
     // Test configuration migration tool with valid dnsmasq.conf
-    
+
     let valid_config = r#"
 port=53
 domain-needed
@@ -1204,38 +1204,38 @@ no-resolv
 server=8.8.8.8
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(valid_config);
-    
+
     // Migration tool should report configuration as valid
 }
 
 #[test]
 fn migration_report_deprecated_options() {
     // Test detection of deprecated or obsolete options
-    
+
     let deprecated_config = r#"
 port=53
 # Some hypothetical deprecated option
 deprecated-option=value
 "#;
-    
+
     let _config_file = create_config_file(deprecated_config);
-    
+
     // Migration tool should warn about deprecated options
 }
 
 #[test]
 fn migration_suggest_rust_equivalents() {
     // Test migration suggestions for C-specific options
-    
+
     let c_specific_config = r#"
 port=53
 # C implementation might have specific options that need translation
 "#;
-    
+
     let _config_file = create_config_file(c_specific_config);
-    
+
     // Migration tool should suggest Rust-specific alternatives if needed
 }
 
@@ -1247,25 +1247,25 @@ proptest! {
     #[test]
     fn property_parse_serialize_roundtrip(port in 1u16..65535u16) {
         // Test that parse(serialize(config)) == config for port values
-        
+
         let config_content = format!("port={}\n", port);
         let _config_file = create_config_file(&config_content);
-        
+
         // Parsing and serializing should produce identical configuration
         // Full round-trip test requires config serialization support
     }
-    
+
     #[test]
     fn property_valid_port_numbers(port in 1u16..65535u16) {
         // Test that all valid port numbers parse successfully
-        
+
         let port_arg = format!("--port={}", port);
         let args = vec!["dnsmasq", &port_arg];
         let _cli = Cli::parse_from(args);
-        
+
         // All port numbers in valid range should parse without error
     }
-    
+
     #[test]
     fn property_valid_ipv4_addresses(
         a in 0u8..=255u8,
@@ -1274,37 +1274,37 @@ proptest! {
         d in 0u8..=255u8
     ) {
         // Test that all valid IPv4 addresses parse successfully
-        
+
         let ip_str = format!("{}.{}.{}.{}", a, b, c, d);
         let listen_address_arg = format!("--listen-address={}", ip_str);
         let args = vec!["dnsmasq", &listen_address_arg];
         let _cli = Cli::parse_from(args);
-        
+
         // All valid IPv4 addresses should parse successfully
     }
-    
+
     #[test]
     fn property_valid_cache_sizes(size in 0u32..1000000u32) {
         // Test that all reasonable cache sizes parse successfully
-        
+
         let cache_size_arg = format!("--cache-size={}", size);
         let args = vec!["dnsmasq", &cache_size_arg];
         let _cli = Cli::parse_from(args);
-        
+
         // All non-negative cache sizes should be accepted
     }
-    
+
     #[test]
     fn property_no_panic_on_random_input(input in "\\PC*") {
         // Test that parser never panics on any input string
-        
+
         let config_content = format!("{}\n", input);
         let _result = create_config_file(&config_content);
-        
+
         // Parser should handle any input gracefully without panicking
         // May return error, but should never panic
     }
-    
+
     #[test]
     fn property_config_merge_associativity(
         port1 in 1u16..1000u16,
@@ -1312,16 +1312,16 @@ proptest! {
         port3 in 2001u16..3000u16
     ) {
         // Test that configuration merging is associative
-        
+
         // (config1 + config2) + config3 == config1 + (config2 + config3)
         let config1 = format!("port={}\n", port1);
         let config2 = format!("port={}\n", port2);
         let config3 = format!("port={}\n", port3);
-        
+
         let _file1 = create_config_file(&config1);
         let _file2 = create_config_file(&config2);
         let _file3 = create_config_file(&config3);
-        
+
         // For last-value-wins options, final result should be port3
         // regardless of merge order
     }
@@ -1335,16 +1335,16 @@ proptest! {
 #[cfg(feature = "dhcp")]
 fn integration_dhcp_config_from_cli() {
     // Test full integration: CLI -> Config -> DhcpConfig
-    
+
     let args = vec![
         "dnsmasq",
         "--dhcp-range=192.168.1.50,192.168.1.150,12h",
         "--dhcp-option=option:router,192.168.1.1",
         "--dhcp-leasefile=/var/lib/dnsmasq/leases",
     ];
-    
+
     let _cli = Cli::parse_from(args);
-    
+
     // DhcpConfig should be properly populated from CLI arguments
     // Validate ranges, static_hosts, options, lease_file members
 }
@@ -1352,7 +1352,7 @@ fn integration_dhcp_config_from_cli() {
 #[test]
 fn integration_dns_config_from_file() {
     // Test full integration: Config file -> Config -> DnsConfig
-    
+
     let config_content = r#"
 port=5353
 server=8.8.8.8
@@ -1360,51 +1360,51 @@ server=8.8.4.4
 cache-size=2000
 no-resolv
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // DnsConfig should be properly populated from file parsing
 }
 
 #[test]
 fn integration_network_config_binding() {
     // Test network interface configuration integration
-    
+
     let config_content = r#"
 interface=eth0
 listen-address=127.0.0.1
 listen-address=192.168.1.1
 bind-interfaces
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // NetworkConfig should have interfaces and listen addresses populated
 }
 
 #[test]
 fn integration_logging_config_setup() {
     // Test logging configuration integration
-    
+
     let config_content = r#"
 log-queries
 log-dhcp
 log-facility=local0
 log-async
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // LoggingConfig should have all logging options configured
 }
 
 #[test]
 fn integration_complete_configuration() {
     // Test complete end-to-end configuration from example file
-    
+
     let example_config = create_example_config();
     let _config_file = create_config_file(&example_config);
-    
+
     // Complete configuration should parse and populate all subsystems
     // This validates full backward compatibility with dnsmasq.conf.example
 }
@@ -1416,56 +1416,56 @@ fn integration_complete_configuration() {
 #[test]
 fn error_message_includes_line_number() {
     // Test that parse errors include line numbers for debugging
-    
+
     let config_content = r#"
 port=5353
 invalid syntax here
 cache-size=1000
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Error should indicate line 3 has invalid syntax
 }
 
 #[test]
 fn error_message_includes_context() {
     // Test that errors include context about the invalid content
-    
+
     let config_content = r#"
 port=999999
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Error should show the invalid port value in the message
 }
 
 #[test]
 fn error_message_suggests_corrections() {
     // Test that errors for unknown options suggest similar valid options
-    
+
     let config_content = r#"
 prot=5353
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Error should suggest "Did you mean 'port'?" for typo 'prot'
 }
 
 #[test]
 fn error_message_explains_feature_requirements() {
     // Test that errors for feature-gated options explain requirements
-    
+
     #[cfg(not(feature = "dhcp"))]
     {
         let config_content = r#"
 dhcp-range=192.168.1.50,192.168.1.150,12h
 "#;
-        
+
         let _config_file = create_config_file(config_content);
-        
+
         // Error should explain that DHCP feature needs to be enabled
     }
 }
@@ -1477,43 +1477,43 @@ dhcp-range=192.168.1.50,192.168.1.150,12h
 #[test]
 fn performance_large_config_file() {
     // Test parsing performance with large configuration files
-    
+
     let mut config_content = String::new();
     for i in 0..10000 {
         config_content.push_str(&format!("server=10.0.{}.{}\n", i / 256, i % 256));
     }
-    
+
     let _config_file = create_config_file(&config_content);
-    
+
     // Should parse large files efficiently without excessive memory use
 }
 
 #[test]
 fn performance_deeply_nested_includes() {
     // Test performance with deeply nested include hierarchy
-    
+
     let mut files = Vec::new();
     let mut current_content = "port=5353\n".to_string();
-    
+
     for _ in 0..10 {
         let mut file = NamedTempFile::new().expect("Failed to create file");
         let file_path = file.path().to_owned();
-        
+
         file.write_all(current_content.as_bytes())
             .expect("Failed to write");
         file.flush().expect("Failed to flush");
-        
+
         files.push(file);
         current_content = format!("port=5353\nconf-file={}\n", file_path.display());
     }
-    
+
     // Should handle reasonable include depth efficiently
 }
 
 #[test]
 fn stress_many_options() {
     // Stress test with many different options configured
-    
+
     let config_content = r#"
 port=5353
 domain-needed
@@ -1535,8 +1535,8 @@ server=1.0.0.1
 listen-address=127.0.0.1
 listen-address=::1
 "#;
-    
+
     let _config_file = create_config_file(config_content);
-    
+
     // Should handle many simultaneous options efficiently
 }

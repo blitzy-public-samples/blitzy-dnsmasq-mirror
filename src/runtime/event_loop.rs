@@ -126,7 +126,7 @@ use std::time::Duration;
 // External imports from external_imports schema
 use bytes::BytesMut;
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, RwLock, Semaphore};
+use tokio::sync::{RwLock, Semaphore, broadcast};
 use tokio::time::{interval, sleep, timeout};
 use tracing::{debug, error, info, warn};
 
@@ -186,7 +186,7 @@ pub struct EventLoopHandle {
     /// Single-value channel that signals all event loop branches to initiate
     /// graceful shutdown when ().is sent. Multiple receivers via subscribe().
     shutdown_tx: broadcast::Sender<()>,
-    
+
     /// Broadcast channel for configuration reload requests
     ///
     /// Signals event loop to reload configuration files without full restart.
@@ -325,17 +325,17 @@ pub async fn run_event_loop(
     mut signal_handler: crate::runtime::signal::SignalHandler,
 ) -> DnsmasqResult<()> {
     info!("Starting main event loop with Tokio async reactor");
-    
+
     // Create broadcast channels for shutdown and reload coordination
     let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
     let (reload_tx, mut reload_rx) = broadcast::channel::<()>(1);
-    
+
     // Create EventLoopHandle for external control
     let _handle = EventLoopHandle {
         shutdown_tx: shutdown_tx.clone(),
         reload_tx: reload_tx.clone(),
     };
-    
+
     // Bind DNS listener socket (UDP port 53) if DNS enabled
     let dns_socket = if let Some(port) = config.dns_port() {
         info!("Binding DNS listener on UDP port {}", port);
@@ -354,7 +354,7 @@ pub async fn run_event_loop(
         info!("DNS disabled (port 0), skipping DNS listener");
         None
     };
-    
+
     // Bind DHCP listener socket (UDP port 67) if DHCP enabled
     #[cfg(feature = "dhcp")]
     let dhcp_socket = if config.dhcp_enabled() {
@@ -372,7 +372,7 @@ pub async fn run_event_loop(
     } else {
         None
     };
-    
+
     // Bind DHCPv6 listener socket (UDP port 547) if DHCPv6 enabled
     #[cfg(feature = "dhcp-v6")]
     let dhcp6_socket = if config.dhcp6_enabled() {
@@ -390,7 +390,7 @@ pub async fn run_event_loop(
     } else {
         None
     };
-    
+
     // Bind TFTP listener socket (UDP port 69) if TFTP enabled
     #[cfg(feature = "tftp")]
     let tftp_socket = if config.tftp_enabled() {
@@ -408,30 +408,30 @@ pub async fn run_event_loop(
     } else {
         None
     };
-    
+
     // Initialize TCP connection semaphore for DNS-over-TCP (max 20 concurrent)
     let tcp_semaphore = Arc::new(Semaphore::new(MAX_TCP_PROCESSES));
-    
+
     // Create periodic maintenance timer (1 second interval)
     let mut maintenance_timer = interval(MAINTENANCE_INTERVAL);
     maintenance_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    
+
     // Allocate separate packet buffers for each socket type to avoid simultaneous mutable borrows
     // in tokio::select! branches. Each buffer is reused across iterations for its respective socket.
     let mut dns_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
     dns_buf.resize(PACKET_BUFFER_SIZE, 0);
-    
+
     let mut dhcp_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
     dhcp_buf.resize(PACKET_BUFFER_SIZE, 0);
-    
+
     let mut dhcp6_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
     dhcp6_buf.resize(PACKET_BUFFER_SIZE, 0);
-    
+
     let mut tftp_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
     tftp_buf.resize(PACKET_BUFFER_SIZE, 0);
-    
+
     info!("Event loop initialization complete, entering main select! loop");
-    
+
     // Main event multiplexing loop
     //
     // This replaces C's while(1) { poll_reset(); poll_listen(...); do_poll(timeout); poll_check(...) }
@@ -463,7 +463,7 @@ pub async fn run_event_loop(
                     }
                 }
             }
-            
+
             // DHCPv4 packet reception (UDP port 67)
             //
             // Replaces: dhcp_packet(now, 0) in dnsmasq.c line 1448
@@ -498,7 +498,7 @@ pub async fn run_event_loop(
                     }
                 }
             }
-            
+
             // DHCPv6 packet reception (UDP port 547)
             //
             // Replaces: dhcp6_packet(now) in dnsmasq.c line 1455
@@ -532,7 +532,7 @@ pub async fn run_event_loop(
                     }
                 }
             }
-            
+
             // TFTP request reception (UDP port 69)
             //
             // Replaces: check_tftp_listeners(now) in dnsmasq.c line 1441
@@ -577,7 +577,7 @@ pub async fn run_event_loop(
                     }
                 }
             }
-            
+
             // Signal event reception (SIGHUP, SIGTERM, SIGUSR1, etc.)
             //
             // Replaces: async_event(piperead, now) in dnsmasq.c line 1394
@@ -615,7 +615,7 @@ pub async fn run_event_loop(
                     }
                 }
             }
-            
+
             // Shutdown request from external code (EventLoopHandle::shutdown())
             //
             // Allows programmatic shutdown without signals (e.g., from management API)
@@ -632,7 +632,7 @@ pub async fn run_event_loop(
                 info!("Graceful shutdown complete, exiting event loop");
                 break;
             }
-            
+
             // Configuration reload request from external code (EventLoopHandle::reload_config())
             //
             // Allows programmatic config reload without signals
@@ -644,7 +644,7 @@ pub async fn run_event_loop(
                     info!("Configuration reloaded successfully");
                 }
             }
-            
+
             // Periodic maintenance timer (1 second interval)
             //
             // Replaces: C's implicit timeout-based maintenance when no events occur
@@ -655,7 +655,7 @@ pub async fn run_event_loop(
             }
         }
     }
-    
+
     info!("Event loop terminated cleanly");
     Ok(())
 }
@@ -724,7 +724,11 @@ async fn bind_tftp_socket() -> std::io::Result<UdpSocket> {
 ///
 /// **C Reference**: check_dns_listeners(now) in dnsmasq.c line 1438
 async fn handle_dns_query(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
-    debug!("DNS query handler called: {} bytes from {}", packet.len(), peer);
+    debug!(
+        "DNS query handler called: {} bytes from {}",
+        packet.len(),
+        peer
+    );
     // Integration point: dns::server::process_query(packet, peer, state).await
 }
 
@@ -736,7 +740,11 @@ async fn handle_dns_query(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<Dae
 /// **C Reference**: dhcp_packet(now, 0) in dnsmasq.c line 1448
 #[cfg(feature = "dhcp")]
 async fn handle_dhcp_packet(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
-    debug!("DHCP packet handler called: {} bytes from {}", packet.len(), peer);
+    debug!(
+        "DHCP packet handler called: {} bytes from {}",
+        packet.len(),
+        peer
+    );
     // Integration point: dhcp::v4::server::process_packet(packet, peer, state).await
 }
 
@@ -748,7 +756,11 @@ async fn handle_dhcp_packet(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<D
 /// **C Reference**: dhcp6_packet(now) in dnsmasq.c line 1455
 #[cfg(feature = "dhcp-v6")]
 async fn handle_dhcp6_packet(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
-    debug!("DHCPv6 packet handler called: {} bytes from {}", packet.len(), peer);
+    debug!(
+        "DHCPv6 packet handler called: {} bytes from {}",
+        packet.len(),
+        peer
+    );
     // Integration point: dhcp::v6::server::process_packet(packet, peer, state).await
 }
 
@@ -760,7 +772,11 @@ async fn handle_dhcp6_packet(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<
 /// **C Reference**: check_tftp_listeners(now) in dnsmasq.c line 1441
 #[cfg(feature = "tftp")]
 async fn handle_tftp_request(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
-    debug!("TFTP request handler called: {} bytes from {}", packet.len(), peer);
+    debug!(
+        "TFTP request handler called: {} bytes from {}",
+        packet.len(),
+        peer
+    );
     // Integration point: tftp::server::process_request(packet, peer, state).await
 }
 
@@ -789,7 +805,10 @@ async fn flush_lease_database(state: Arc<RwLock<DaemonState>>) -> DnsmasqResult<
 /// 4. Re-read DHCP hosts via dhcp::reload_hosts()
 ///
 /// **C Reference**: dnsmasq.c clear_cache_and_reload() lines 1586-1638
-async fn reload_configuration(config: Arc<Config>, state: Arc<RwLock<DaemonState>>) -> DnsmasqResult<()> {
+async fn reload_configuration(
+    config: Arc<Config>,
+    state: Arc<RwLock<DaemonState>>,
+) -> DnsmasqResult<()> {
     info!("Reloading configuration");
     // Integration points for full reload sequence
     Ok(())

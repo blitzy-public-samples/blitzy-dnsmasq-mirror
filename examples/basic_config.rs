@@ -44,11 +44,7 @@ use anyhow::Result;
 use tracing_subscriber::FmtSubscriber;
 
 // Import configuration types and builders from dnsmasq
-use dnsmasq::config::{
-    ConfigBuilder,
-    parse_config_file,
-    Cli,
-};
+use dnsmasq::config::{Cli, ConfigBuilder, parse_config_file};
 
 // Import default constants
 use dnsmasq::config::defaults::DEFAULT_LEASE_TIME_V4_SECS;
@@ -74,22 +70,22 @@ fn main() -> Result<()> {
     // EXAMPLE 1: Programmatic Configuration with ConfigBuilder
     // =========================================================================
     println!("--- Example 1: Programmatic Configuration Building ---");
-    
+
     // Create a new configuration builder
     let mut builder = ConfigBuilder::new();
-    
+
     // Configure DNS settings
     println!("Configuring DNS forwarding...");
     let dns_config = dnsmasq::config::DnsConfig {
         // Set cache size for DNS records (LRU eviction when full)
         cache_size: 1000,
-        
+
         // Add upstream DNS servers for query forwarding
         upstream_servers: vec![
             dnsmasq::config::UpstreamServer {
                 address: "8.8.8.8:53".parse()?,
-                domain: None,  // Used for all domains
-                source: None,  // No specific source interface
+                domain: None, // Used for all domains
+                source: None, // No specific source interface
                 port: 53,
             },
             dnsmasq::config::UpstreamServer {
@@ -99,15 +95,15 @@ fn main() -> Result<()> {
                 port: 53,
             },
         ],
-        
+
         // TTL settings for cache management
-        min_ttl: Some(Duration::from_secs(300)),      // Minimum cache TTL: 5 minutes
-        max_ttl: Some(Duration::from_secs(86400)),    // Maximum cache TTL: 24 hours
-        negative_ttl: Duration::from_secs(3600),      // Negative response cache: 1 hour
-        
+        min_ttl: Some(Duration::from_secs(300)), // Minimum cache TTL: 5 minutes
+        max_ttl: Some(Duration::from_secs(86400)), // Maximum cache TTL: 24 hours
+        negative_ttl: Duration::from_secs(3600), // Negative response cache: 1 hour
+
         // EDNS0 packet size for large responses (DNSSEC-friendly)
         edns_packet_size: 4096,
-        
+
         ..Default::default()
     };
     builder.dns(dns_config);
@@ -118,12 +114,12 @@ fn main() -> Result<()> {
     // Configure network settings
     println!("\nConfiguring network interfaces...");
     let network_config = dnsmasq::config::NetworkConfig {
-        port: 53,                    // Standard DNS port
-        bind_interfaces: true,       // Bind only to specified interfaces
-        bind_dynamic: false,         // Don't bind to dynamic interfaces
-        interfaces: vec![],          // Empty = bind to all interfaces
-        listen_addresses: vec![],    // Empty = listen on all addresses
-        
+        port: 53,                 // Standard DNS port
+        bind_interfaces: true,    // Bind only to specified interfaces
+        bind_dynamic: false,      // Don't bind to dynamic interfaces
+        interfaces: vec![],       // Empty = bind to all interfaces
+        listen_addresses: vec![], // Empty = listen on all addresses
+
         ..Default::default()
     };
     builder.network(network_config);
@@ -136,26 +132,22 @@ fn main() -> Result<()> {
         println!("\nConfiguring DHCP server...");
         let dhcp_config = DhcpConfig {
             // Define DHCP address range
-            ranges: vec![
-                dnsmasq::config::DhcpRange {
-                    start: "192.168.1.50".parse()?,
-                    end: "192.168.1.150".parse()?,
-                    lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
-                    netmask: Some("255.255.255.0".parse()?),
-                    tag: None,
-                },
-            ],
-            
+            ranges: vec![dnsmasq::config::DhcpRange {
+                start: "192.168.1.50".parse()?,
+                end: "192.168.1.150".parse()?,
+                lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
+                netmask: Some("255.255.255.0".parse()?),
+                tag: None,
+            }],
+
             // Static host assignments
-            static_hosts: vec![
-                dnsmasq::config::DhcpStaticHost {
-                    mac: "00:11:22:33:44:55".parse()?,
-                    ip: "192.168.1.10".parse()?,
-                    hostname: Some("server1".to_string()),
-                    client_id: None,
-                },
-            ],
-            
+            static_hosts: vec![dnsmasq::config::DhcpStaticHost {
+                mac: "00:11:22:33:44:55".parse()?,
+                ip: "192.168.1.10".parse()?,
+                hostname: Some("server1".to_string()),
+                client_id: None,
+            }],
+
             // DHCP options to send to clients
             options: vec![
                 // Option 3: Router (default gateway)
@@ -168,31 +160,33 @@ fn main() -> Result<()> {
                 // Option 6: DNS servers (sending as binary data for list)
                 DhcpOption {
                     code: 6,
-                    value: DhcpOptionValue::Binary(vec![192, 168, 1, 1]),  // IP address as bytes
+                    value: DhcpOptionValue::Binary(vec![192, 168, 1, 1]), // IP address as bytes
                     tag: None,
                     force: false,
                 },
             ],
-            
+
             // Lease file path for persistence
             lease_file: Some(PathBuf::from("/var/lib/dnsmasq/dnsmasq.leases")),
-            
+
             // Default lease time for all ranges (can be overridden per-range)
             lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
-            
+
             // Additional DHCP settings
-            authoritative: false,     // Not authoritative for subnet
+            authoritative: false, // Not authoritative for subnet
         };
         builder.dhcp(dhcp_config);
-        
+
         println!("  ✓ DHCP range: 192.168.1.50 - 192.168.1.150");
-        println!("  ✓ Default lease time: {} seconds ({})", 
-                 DEFAULT_LEASE_TIME_V4_SECS,
-                 humanize_duration(Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS)));
+        println!(
+            "  ✓ Default lease time: {} seconds ({})",
+            DEFAULT_LEASE_TIME_V4_SECS,
+            humanize_duration(Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS))
+        );
         println!("  ✓ Static host: 00:11:22:33:44:55 → 192.168.1.10 (server1)");
         println!("  ✓ Gateway: 192.168.1.1");
     }
-    
+
     #[cfg(not(feature = "dhcp"))]
     {
         println!("\nDHCP configuration skipped (feature 'dhcp' not enabled)");
@@ -203,13 +197,16 @@ fn main() -> Result<()> {
     println!("\nValidating configuration...");
     builder.validate()?;
     println!("  ✓ Configuration validation passed");
-    
+
     let config = builder.build()?;
     println!("  ✓ Configuration built successfully");
-    
+
     println!("\nFinal configuration summary:");
     println!("  - DNS cache size: {}", config.dns.cache_size);
-    println!("  - Upstream servers: {}", config.dns.upstream_servers.len());
+    println!(
+        "  - Upstream servers: {}",
+        config.dns.upstream_servers.len()
+    );
     println!("  - Listen port: {}", config.network.port);
     #[cfg(feature = "dhcp")]
     {
@@ -223,17 +220,23 @@ fn main() -> Result<()> {
     // EXAMPLE 2: Loading Configuration from File
     // =========================================================================
     println!("\n\n--- Example 2: Loading from Configuration File ---");
-    
+
     // Demonstrate loading from a dnsmasq.conf file (100% backward compatible)
     let conf_file_path = PathBuf::from("/etc/dnsmasq.conf");
-    
-    println!("Attempting to load configuration from: {}", conf_file_path.display());
-    
+
+    println!(
+        "Attempting to load configuration from: {}",
+        conf_file_path.display()
+    );
+
     // Note: This will fail if the file doesn't exist, which is expected in most environments
     match parse_config_file(&conf_file_path) {
         Ok(loaded_config) => {
             println!("  ✓ Configuration loaded successfully from file");
-            println!("  - DNS cache size: {}", loaded_config.cache_size.unwrap_or(150));
+            println!(
+                "  - DNS cache size: {}",
+                loaded_config.cache_size.unwrap_or(150)
+            );
             println!("  - Upstream servers: {}", loaded_config.servers.len());
         }
         Err(e) => {
@@ -258,26 +261,26 @@ fn main() -> Result<()> {
     // EXAMPLE 3: Command-Line Argument Parsing
     // =========================================================================
     println!("\n\n--- Example 3: Command-Line Argument Parsing ---");
-    
+
     // Demonstrate CLI parsing (normally called with Cli::parse() from main args)
     // Here we simulate with hardcoded arguments
     println!("Simulating CLI arguments: dnsmasq --port=5353 --cache-size=2000");
-    
+
     let simulated_cli = Cli::parse_from([
         "dnsmasq",
         "--port=5353",
         "--cache-size=2000",
         "--server=1.1.1.1",
     ]);
-    
+
     println!("  ✓ CLI arguments parsed successfully");
     println!("  - Port: {:?}", simulated_cli.port);
     println!("  - Cache size: {:?}", simulated_cli.cache_size);
     println!("  - Servers: {:?}", simulated_cli.server);
-    
+
     println!("\nMerging CLI arguments with config builder...");
     let mut cli_builder = ConfigBuilder::new();
-    
+
     // Apply CLI settings (CLI takes precedence over config file)
     let mut cli_dns_config = dnsmasq::config::DnsConfig::default();
     if let Some(cache_size) = simulated_cli.cache_size {
@@ -285,20 +288,22 @@ fn main() -> Result<()> {
     }
     // Note: Port is stored in NetworkConfig, not DnsConfig
     let cli_port = simulated_cli.port;
-    
+
     // Add servers from CLI
     for server_str in simulated_cli.server.iter() {
         if let Ok(addr) = server_str.parse() {
-            cli_dns_config.upstream_servers.push(dnsmasq::config::UpstreamServer {
-                address: addr,
-                domain: None,
-                source: None,
-                port: 53,
-            });
+            cli_dns_config
+                .upstream_servers
+                .push(dnsmasq::config::UpstreamServer {
+                    address: addr,
+                    domain: None,
+                    source: None,
+                    port: 53,
+                });
         }
     }
     cli_builder.dns(cli_dns_config);
-    
+
     let cli_config = cli_builder.build()?;
     println!("  ✓ CLI configuration built successfully");
     println!("  - Final DNS port: {}", cli_port);
@@ -308,22 +313,22 @@ fn main() -> Result<()> {
     // EXAMPLE 4: Error Handling and Validation
     // =========================================================================
     println!("\n\n--- Example 4: Configuration Validation and Error Handling ---");
-    
+
     // Demonstrate validation catching invalid configurations
     println!("Testing invalid configuration (cache size = 0 with caching enabled)...");
-    
+
     let mut invalid_builder = ConfigBuilder::new();
     let invalid_dns_config = dnsmasq::config::DnsConfig {
-        cache_size: 0,  // Zero cache size
+        cache_size: 0, // Zero cache size
         ..Default::default()
     };
     invalid_builder.dns(invalid_dns_config);
-    
+
     match invalid_builder.validate() {
         Ok(_) => println!("  ℹ Configuration accepted (cache-size=0 disables caching)"),
         Err(e) => println!("  ✗ Validation error: {}", e),
     }
-    
+
     println!("\nDemonstrating type-safe configuration:");
     println!("  ✓ Port numbers validated at compile time (u16)");
     println!("  ✓ IP addresses validated at parse time (std::net::IpAddr)");
@@ -342,7 +347,7 @@ fn main() -> Result<()> {
     println!("  4. Validate with builder.validate() before build()");
     println!("  5. Use feature flags for conditional compilation of subsystems");
     println!("  6. Rust's type system prevents invalid configurations at compile time");
-    
+
     println!("\nNext steps:");
     println!("  - See examples/dns_forwarding.rs for DNS-specific examples");
     println!("  - See examples/dhcp_server.rs for DHCP configuration");
@@ -355,7 +360,7 @@ fn main() -> Result<()> {
 /// Helper function to format durations in human-readable format
 fn humanize_duration(duration: std::time::Duration) -> String {
     let secs = duration.as_secs();
-    
+
     if secs < 60 {
         format!("{} seconds", secs)
     } else if secs < 3600 {

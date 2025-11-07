@@ -96,7 +96,9 @@ async fn test_linux_netlink_initialization() {
     match result {
         Ok(socket) => {
             // Socket created successfully - verify it's functional
-            let interfaces_result = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await;
+            let interfaces_result = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await;
 
             // Should successfully enumerate even if list is empty
             assert!(
@@ -108,9 +110,9 @@ async fn test_linux_netlink_initialization() {
             println!("Enumerated {} interfaces via netlink", interfaces.len());
 
             // At minimum, loopback interface should exist
-            let has_loopback = interfaces.iter().any(|iface| {
-                iface.name == "lo" || iface.flags.contains(InterfaceFlags::LOOPBACK)
-            });
+            let has_loopback = interfaces
+                .iter()
+                .any(|iface| iface.name == "lo" || iface.flags.contains(InterfaceFlags::LOOPBACK));
 
             assert!(
                 has_loopback || interfaces.is_empty(),
@@ -143,12 +145,18 @@ async fn test_linux_netlink_address_events() {
     let socket = socket_result.unwrap();
 
     // Test that we can enumerate addresses
-    let interfaces = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await.unwrap();
+    let interfaces = socket
+        .enumerate_interfaces(LinuxAddressFamily::Unspec)
+        .await
+        .unwrap();
 
     for iface in interfaces {
         // Validate interface structure completeness
         assert!(!iface.name.is_empty(), "Interface name must not be empty");
-        assert!(iface.index > 0 || iface.name == "lo", "Interface index must be positive");
+        assert!(
+            iface.index > 0 || iface.name == "lo",
+            "Interface index must be positive"
+        );
 
         // Validate addresses have correct format
         for addr in &iface.addresses {
@@ -195,8 +203,14 @@ async fn test_linux_netlink_event_deduplication() {
     let socket = socket_result.unwrap();
 
     // Enumerate multiple times to verify consistent results
-    let enum1 = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await.unwrap();
-    let enum2 = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await.unwrap();
+    let enum1 = socket
+        .enumerate_interfaces(LinuxAddressFamily::Unspec)
+        .await
+        .unwrap();
+    let enum2 = socket
+        .enumerate_interfaces(LinuxAddressFamily::Unspec)
+        .await
+        .unwrap();
 
     // Results should be deterministic
     assert_eq!(
@@ -238,7 +252,10 @@ async fn test_bsd_routing_socket_initialization() {
             );
         }
         Err(e) => {
-            println!("BSD routing socket creation failed (may be restricted): {}", e);
+            println!(
+                "BSD routing socket creation failed (may be restricted): {}",
+                e
+            );
         }
     }
 }
@@ -260,8 +277,8 @@ async fn test_bsd_routing_socket_initialization() {
 ))]
 #[tokio::test]
 async fn test_bsd_routing_message_validation() {
-    use dnsmasq::platform::bsd::bpf::enumerate_interfaces;
     use dnsmasq::platform::bsd::bpf::AddressFamily;
+    use dnsmasq::platform::bsd::bpf::enumerate_interfaces;
 
     // Test interface enumeration via getifaddrs()
     let result = enumerate_interfaces(AddressFamily::Unspec).await;
@@ -272,7 +289,10 @@ async fn test_bsd_routing_message_validation() {
 
             // Validate that at least loopback exists
             let has_lo = interfaces.iter().any(|i| i.name.starts_with("lo"));
-            assert!(has_lo || interfaces.is_empty(), "BSD systems should have loopback interface");
+            assert!(
+                has_lo || interfaces.is_empty(),
+                "BSD systems should have loopback interface"
+            );
 
             // Validate interface structure completeness
             for iface in &interfaces {
@@ -345,7 +365,10 @@ async fn test_generic_interface_enumeration() {
 
     match result {
         Ok(interfaces) => {
-            println!("Generic platform enumerated {} interfaces", interfaces.len());
+            println!(
+                "Generic platform enumerated {} interfaces",
+                interfaces.len()
+            );
 
             for iface in interfaces {
                 // Validate basic structure
@@ -404,7 +427,10 @@ async fn test_cross_platform_interface_index_name_mapping() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
+            if let Ok(interfaces) = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await
+            {
                 // Build mapping
                 let mut seen_indices = std::collections::HashSet::new();
                 let mut seen_names = std::collections::HashSet::new();
@@ -436,8 +462,8 @@ async fn test_cross_platform_interface_index_name_mapping() {
         target_os = "macos"
     ))]
     {
-        use dnsmasq::platform::bsd::bpf::enumerate_interfaces;
         use dnsmasq::platform::bsd::bpf::AddressFamily;
+        use dnsmasq::platform::bsd::bpf::enumerate_interfaces;
 
         if let Ok(interfaces) = enumerate_interfaces(AddressFamily::Unspec).await {
             let mut seen_indices = std::collections::HashSet::new();
@@ -462,7 +488,10 @@ async fn test_cross_platform_interface_flags() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
+            if let Ok(interfaces) = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await
+            {
                 for iface in interfaces {
                     // Loopback interfaces should have LOOPBACK flag
                     if iface.name == "lo" {
@@ -493,7 +522,10 @@ async fn test_cross_platform_address_family_filtering() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
+            if let Ok(interfaces) = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await
+            {
                 for iface in interfaces {
                     for addr in &iface.addresses {
                         // Each address should be either IPv4 or IPv6 (SocketAddr type)
@@ -623,7 +655,7 @@ proptest! {
         // HashSet guarantees uniqueness, so we verify the count
         prop_assert!(!indices.is_empty(), "Should have at least one interface");
         prop_assert!(indices.len() < 10, "Should have less than 10 interfaces");
-        
+
         // Verify all indices are in valid range
         for idx in &indices {
             prop_assert!(*idx > 0, "Interface index must be positive");
@@ -704,7 +736,9 @@ async fn test_interface_enumeration_performance() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            let _ = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await;
+            let _ = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await;
         }
     }
 
@@ -716,8 +750,8 @@ async fn test_interface_enumeration_performance() {
         target_os = "macos"
     ))]
     {
-        use dnsmasq::platform::bsd::bpf::enumerate_interfaces;
         use dnsmasq::platform::bsd::bpf::AddressFamily;
+        use dnsmasq::platform::bsd::bpf::enumerate_interfaces;
 
         let _ = enumerate_interfaces(AddressFamily::Unspec).await;
     }
@@ -782,7 +816,10 @@ async fn test_interface_without_addresses() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
+            if let Ok(interfaces) = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await
+            {
                 for iface in interfaces {
                     // Interfaces may have zero addresses (valid state during config)
                     if iface.addresses.is_empty() {
@@ -810,7 +847,9 @@ async fn test_interface_removal_during_enumeration() {
         if let Ok(socket) = NetlinkSocket::new().await {
             // Multiple rapid enumerations might catch transient interfaces
             for _ in 0..3 {
-                let _ = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await;
+                let _ = socket
+                    .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                    .await;
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
@@ -900,7 +939,10 @@ async fn test_interface_record_completeness() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
+            if let Ok(interfaces) = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await
+            {
                 for iface in interfaces {
                     // Verify all fields are populated
                     assert!(!iface.name.is_empty(), "name required");
@@ -925,7 +967,10 @@ async fn test_interface_mtu_values() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
+            if let Ok(interfaces) = socket
+                .enumerate_interfaces(LinuxAddressFamily::Unspec)
+                .await
+            {
                 for iface in interfaces {
                     if iface.name == "lo" {
                         // Loopback typically has large MTU

@@ -77,13 +77,11 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 // Import DNS subsystem modules from depends_on_files
-use dnsmasq::dns::cache::{DnsCache, CacheKey, CacheSource};
+use dnsmasq::dns::cache::{CacheKey, CacheSource, DnsCache};
 use dnsmasq::dns::compression::extract_name;
 use dnsmasq::dns::edns::OptRecord;
 // use dnsmasq::dns::forward::handle_query;
-use dnsmasq::dns::protocol::{
-    RecordClass, RecordType, ResourceRecord,
-};
+use dnsmasq::dns::protocol::{RecordClass, RecordType, ResourceRecord};
 // use dnsmasq::dns::server::DnsServer;
 
 // Test constants
@@ -105,8 +103,7 @@ const MAX_EDNS_PACKET: usize = 4096;
 fn test_dns_name_extraction_simple() {
     // Wire format for "example.com" (7 example 3 com 0)
     let packet = vec![
-        0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-        0x03, b'c', b'o', b'm',
+        0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm',
         0x00, // root label terminator
     ];
 
@@ -131,12 +128,12 @@ fn test_dns_name_extraction_with_compression() {
     // Offset 0: "example" . "com" . 0
     // Offset 13: "www" . pointer_to_offset_0
     let mut packet = Vec::new();
-    
+
     // First name at offset 0: "example.com"
     packet.extend_from_slice(&[0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e']);
     packet.extend_from_slice(&[0x03, b'c', b'o', b'm']);
     packet.push(0x00);
-    
+
     // Second name at offset 13: "www" + pointer to offset 0
     packet.extend_from_slice(&[0x03, b'w', b'w', b'w']);
     packet.extend_from_slice(&[0xC0, 0x00]); // Compression pointer to offset 0
@@ -145,10 +142,16 @@ fn test_dns_name_extraction_with_compression() {
     let mut offset = 13;
     let result = extract_name(&packet, &mut offset, 0);
 
-    assert!(result.is_ok(), "Compression pointer following should succeed");
+    assert!(
+        result.is_ok(),
+        "Compression pointer following should succeed"
+    );
     let name = result.unwrap();
     assert_eq!(name.to_string(), "www.example.com");
-    assert_eq!(offset, 19, "Offset should be after the pointer (13 + 4 bytes for 'www' + 2 bytes for pointer)");
+    assert_eq!(
+        offset, 19,
+        "Offset should be after the pointer (13 + 4 bytes for 'www' + 2 bytes for pointer)"
+    );
     assert!(name.compressed, "Name should be marked as compressed");
 }
 
@@ -166,7 +169,10 @@ fn test_compression_pointer_hop_limit() {
     let mut offset = 0;
     let result = extract_name(&packet, &mut offset, 0);
 
-    assert!(result.is_err(), "Circular compression pointer should be rejected");
+    assert!(
+        result.is_err(),
+        "Circular compression pointer should be rejected"
+    );
     let error = result.unwrap_err();
     assert!(
         error.to_string().contains("hops") || error.to_string().contains("loop"),
@@ -281,16 +287,14 @@ fn test_invalid_label_type_rejection() {
 #[tokio::test]
 async fn test_a_record_parsing() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create A record for example.com -> 192.0.2.1
-    let records = vec![
-        ResourceRecord::A {
-            name: "example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            address: Ipv4Addr::new(192, 0, 2, 1),
-        }
-    ];
+    let records = vec![ResourceRecord::A {
+        name: "example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        address: Ipv4Addr::new(192, 0, 2, 1),
+    }];
 
     let key = CacheKey {
         name: "example.com".to_string(),
@@ -305,7 +309,7 @@ async fn test_a_record_parsing() {
     assert!(lookup_result.is_some(), "A record should be found in cache");
     let records = lookup_result.unwrap();
     assert_eq!(records.len(), 1, "Should have one A record");
-    
+
     match &records[0] {
         ResourceRecord::A { address, .. } => {
             assert_eq!(*address, Ipv4Addr::new(192, 0, 2, 1));
@@ -320,16 +324,14 @@ async fn test_a_record_parsing() {
 #[tokio::test]
 async fn test_aaaa_record_parsing() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create AAAA record for example.com -> 2001:db8::1
-    let records = vec![
-        ResourceRecord::AAAA {
-            name: "example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            address: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
-        }
-    ];
+    let records = vec![ResourceRecord::AAAA {
+        name: "example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        address: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+    }];
 
     let key = CacheKey {
         name: "example.com".to_string(),
@@ -340,9 +342,12 @@ async fn test_aaaa_record_parsing() {
     cache.insert(key.clone(), records, 300, CacheSource::Upstream);
     let lookup_result = cache.lookup(&key);
 
-    assert!(lookup_result.is_some(), "AAAA record should be found in cache");
+    assert!(
+        lookup_result.is_some(),
+        "AAAA record should be found in cache"
+    );
     let records = lookup_result.unwrap();
-    
+
     match &records[0] {
         ResourceRecord::AAAA { address, .. } => {
             assert_eq!(*address, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
@@ -358,25 +363,21 @@ async fn test_aaaa_record_parsing() {
 #[tokio::test]
 async fn test_cname_record_chain_resolution() {
     let mut cache = DnsCache::new(100);
-    
-    // Create CNAME chain: www.example.com -> example.com -> 192.0.2.1
-    let cname_record = vec![
-        ResourceRecord::CNAME {
-            name: "www.example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            cname: "example.com".to_string(),
-        }
-    ];
 
-    let a_record = vec![
-        ResourceRecord::A {
-            name: "example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            address: Ipv4Addr::new(192, 0, 2, 1),
-        }
-    ];
+    // Create CNAME chain: www.example.com -> example.com -> 192.0.2.1
+    let cname_record = vec![ResourceRecord::CNAME {
+        name: "www.example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        cname: "example.com".to_string(),
+    }];
+
+    let a_record = vec![ResourceRecord::A {
+        name: "example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        address: Ipv4Addr::new(192, 0, 2, 1),
+    }];
 
     // Insert both records
     let cname_key = CacheKey {
@@ -384,7 +385,7 @@ async fn test_cname_record_chain_resolution() {
         record_type: RecordType::CNAME,
         record_class: RecordClass::IN,
     };
-    
+
     let a_key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::A,
@@ -396,10 +397,16 @@ async fn test_cname_record_chain_resolution() {
 
     // Resolve CNAME chain
     let chain_result = cache.resolve_cname_chain("www.example.com");
-    assert!(chain_result.is_ok(), "CNAME chain resolution should succeed");
-    
+    assert!(
+        chain_result.is_ok(),
+        "CNAME chain resolution should succeed"
+    );
+
     let final_records = chain_result.unwrap();
-    assert!(!final_records.is_empty(), "Should have resolved to A records");
+    assert!(
+        !final_records.is_empty(),
+        "Should have resolved to A records"
+    );
     match &final_records[0] {
         ResourceRecord::A { address, .. } => {
             assert_eq!(*address, Ipv4Addr::new(192, 0, 2, 1));
@@ -414,17 +421,15 @@ async fn test_cname_record_chain_resolution() {
 #[tokio::test]
 async fn test_mx_record_parsing() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create MX record for example.com
-    let records = vec![
-        ResourceRecord::MX {
-            name: "example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            preference: 10,
-            exchange: "mail.example.com".to_string(),
-        }
-    ];
+    let records = vec![ResourceRecord::MX {
+        name: "example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        preference: 10,
+        exchange: "mail.example.com".to_string(),
+    }];
 
     let key = CacheKey {
         name: "example.com".to_string(),
@@ -438,7 +443,11 @@ async fn test_mx_record_parsing() {
     assert!(lookup_result.is_some(), "MX record should be found");
     let records = lookup_result.unwrap();
     match &records[0] {
-        ResourceRecord::MX { preference, exchange, .. } => {
+        ResourceRecord::MX {
+            preference,
+            exchange,
+            ..
+        } => {
             assert_eq!(*preference, 10);
             assert_eq!(exchange, "mail.example.com");
         }
@@ -453,16 +462,14 @@ async fn test_mx_record_parsing() {
 #[tokio::test]
 async fn test_ptr_record_reverse_dns() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create PTR record for 192.0.2.1 (1.2.0.192.in-addr.arpa)
-    let records = vec![
-        ResourceRecord::PTR {
-            name: "1.2.0.192.in-addr.arpa".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            ptrdname: "example.com".to_string(),
-        }
-    ];
+    let records = vec![ResourceRecord::PTR {
+        name: "1.2.0.192.in-addr.arpa".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        ptrdname: "example.com".to_string(),
+    }];
 
     let key = CacheKey {
         name: "1.2.0.192.in-addr.arpa".to_string(),
@@ -489,22 +496,20 @@ async fn test_ptr_record_reverse_dns() {
 #[tokio::test]
 async fn test_soa_record_parsing() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create SOA record
-    let records = vec![
-        ResourceRecord::SOA {
-            name: "example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 3600,
-            mname: "ns1.example.com".to_string(),
-            rname: "admin.example.com".to_string(),
-            serial: 2024010101,
-            refresh: 3600,
-            retry: 600,
-            expire: 86400,
-            minimum: 300,
-        }
-    ];
+    let records = vec![ResourceRecord::SOA {
+        name: "example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 3600,
+        mname: "ns1.example.com".to_string(),
+        rname: "admin.example.com".to_string(),
+        serial: 2024010101,
+        refresh: 3600,
+        retry: 600,
+        expire: 86400,
+        minimum: 300,
+    }];
 
     let key = CacheKey {
         name: "example.com".to_string(),
@@ -532,19 +537,17 @@ async fn test_soa_record_parsing() {
 #[tokio::test]
 async fn test_srv_record_parsing() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create SRV record for _http._tcp.example.com
-    let records = vec![
-        ResourceRecord::SRV {
-            name: "_http._tcp.example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            priority: 10,
-            weight: 60,
-            port: 80,
-            target: "server.example.com".to_string(),
-        }
-    ];
+    let records = vec![ResourceRecord::SRV {
+        name: "_http._tcp.example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        priority: 10,
+        weight: 60,
+        port: 80,
+        target: "server.example.com".to_string(),
+    }];
 
     let key = CacheKey {
         name: "_http._tcp.example.com".to_string(),
@@ -558,7 +561,13 @@ async fn test_srv_record_parsing() {
     assert!(lookup_result.is_some(), "SRV record should be found");
     let records = lookup_result.unwrap();
     match &records[0] {
-        ResourceRecord::SRV { priority, weight, port, target, .. } => {
+        ResourceRecord::SRV {
+            priority,
+            weight,
+            port,
+            target,
+            ..
+        } => {
             assert_eq!(*priority, 10);
             assert_eq!(*weight, 60);
             assert_eq!(*port, 80);
@@ -574,16 +583,14 @@ async fn test_srv_record_parsing() {
 #[tokio::test]
 async fn test_txt_record_parsing() {
     let mut cache = DnsCache::new(100);
-    
+
     // Create TXT record with multiple strings
-    let records = vec![
-        ResourceRecord::TXT {
-            name: "example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            data: vec!["v=spf1 mx -all".to_string()],
-        }
-    ];
+    let records = vec![ResourceRecord::TXT {
+        name: "example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        data: vec!["v=spf1 mx -all".to_string()],
+    }];
 
     let key = CacheKey {
         name: "example.com".to_string(),
@@ -617,15 +624,13 @@ async fn test_txt_record_parsing() {
 #[tokio::test]
 async fn test_cache_insert_and_lookup() {
     let mut cache = DnsCache::new(100);
-    
-    let records = vec![
-        ResourceRecord::A {
-            name: "test.example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            address: Ipv4Addr::new(192, 0, 2, 10),
-        }
-    ];
+
+    let records = vec![ResourceRecord::A {
+        name: "test.example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        address: Ipv4Addr::new(192, 0, 2, 10),
+    }];
 
     let key = CacheKey {
         name: "test.example.com".to_string(),
@@ -647,15 +652,13 @@ async fn test_cache_insert_and_lookup() {
 #[tokio::test]
 async fn test_cache_ttl_expiration() {
     let mut cache = DnsCache::new(100);
-    
-    let records = vec![
-        ResourceRecord::A {
-            name: "short-ttl.example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 1, // 1 second TTL
-            address: Ipv4Addr::new(192, 0, 2, 20),
-        }
-    ];
+
+    let records = vec![ResourceRecord::A {
+        name: "short-ttl.example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 1, // 1 second TTL
+        address: Ipv4Addr::new(192, 0, 2, 20),
+    }];
 
     let key = CacheKey {
         name: "short-ttl.example.com".to_string(),
@@ -664,19 +667,22 @@ async fn test_cache_ttl_expiration() {
     };
 
     cache.insert(key.clone(), records, 1, CacheSource::Upstream);
-    
+
     // Record should be present immediately
     assert!(cache.lookup(&key).is_some(), "Record should be in cache");
 
     // Wait for TTL to expire
     sleep(Duration::from_secs(2)).await;
-    
+
     // Expire old entries
     cache.expire_old_entries();
 
     // Record should be gone
     let lookup_result = cache.lookup(&key);
-    assert!(lookup_result.is_none(), "Expired record should not be in cache");
+    assert!(
+        lookup_result.is_none(),
+        "Expired record should not be in cache"
+    );
 }
 
 /// Test DNS cache LRU eviction
@@ -687,17 +693,15 @@ async fn test_cache_ttl_expiration() {
 async fn test_cache_lru_eviction() {
     // Create small cache that can hold only 3 entries
     let mut cache = DnsCache::new(3);
-    
+
     // Insert 4 records (should trigger eviction of oldest)
     for i in 1..=4 {
-        let records = vec![
-            ResourceRecord::A {
-                name: format!("host{}.example.com", i),
-                class: RecordClass::IN,
-                ttl: 300,
-                address: Ipv4Addr::new(192, 0, 2, i as u8),
-            }
-        ];
+        let records = vec![ResourceRecord::A {
+            name: format!("host{}.example.com", i),
+            class: RecordClass::IN,
+            ttl: 300,
+            address: Ipv4Addr::new(192, 0, 2, i as u8),
+        }];
 
         let key = CacheKey {
             name: format!("host{}.example.com", i),
@@ -714,7 +718,7 @@ async fn test_cache_lru_eviction() {
         record_type: RecordType::A,
         record_class: RecordClass::IN,
     };
-    
+
     let lookup_result = cache.lookup(&first_key);
     assert!(lookup_result.is_none(), "Oldest entry should be evicted");
 
@@ -735,7 +739,7 @@ async fn test_cache_lru_eviction() {
 #[tokio::test]
 async fn test_cache_negative_nxdomain() {
     let mut cache = DnsCache::new(100);
-    
+
     let key = CacheKey {
         name: "nonexistent.example.com".to_string(),
         record_type: RecordType::A,
@@ -747,8 +751,11 @@ async fn test_cache_negative_nxdomain() {
 
     // Should be able to look up negative entry
     let lookup_result = cache.lookup(&key);
-    assert!(lookup_result.is_some(), "Negative cache entry should be found");
-    
+    assert!(
+        lookup_result.is_some(),
+        "Negative cache entry should be found"
+    );
+
     let records = lookup_result.unwrap();
     assert!(records.is_empty(), "Negative entry should have no records");
 }
@@ -759,15 +766,13 @@ async fn test_cache_negative_nxdomain() {
 #[tokio::test]
 async fn test_cache_statistics() {
     let mut cache = DnsCache::new(100);
-    
-    let records = vec![
-        ResourceRecord::A {
-            name: "cached.example.com".to_string(),
-            class: RecordClass::IN,
-            ttl: 300,
-            address: Ipv4Addr::new(192, 0, 2, 30),
-        }
-    ];
+
+    let records = vec![ResourceRecord::A {
+        name: "cached.example.com".to_string(),
+        class: RecordClass::IN,
+        ttl: 300,
+        address: Ipv4Addr::new(192, 0, 2, 30),
+    }];
 
     let key = CacheKey {
         name: "cached.example.com".to_string(),
@@ -778,7 +783,7 @@ async fn test_cache_statistics() {
     // Insert and lookup to generate statistics
     cache.insert(key.clone(), records, 300, CacheSource::Upstream);
     cache.lookup(&key); // Cache hit
-    
+
     let uncached_key = CacheKey {
         name: "uncached.example.com".to_string(),
         record_type: RecordType::A,
@@ -803,9 +808,7 @@ async fn test_cache_statistics() {
 #[test]
 fn test_edns0_opt_record_creation() {
     // Create OPT record with DNSSEC OK bit set
-    let opt = OptRecord::new()
-        .with_udp_size(4096)
-        .with_dnssec_ok(true);
+    let opt = OptRecord::new().with_udp_size(4096).with_dnssec_ok(true);
 
     assert_eq!(opt.udp_payload_size, 4096, "UDP payload size should be set");
     assert!(opt.dnssec_ok, "DNSSEC OK bit should be set");
@@ -820,12 +823,16 @@ fn test_edns0_opt_record_creation() {
 fn test_edns0_udp_payload_negotiation() {
     // Standard DNS without EDNS0: 512 bytes
     let opt_none: Option<OptRecord> = None;
-    let max_size_standard = opt_none.as_ref().map_or(512, |opt| opt.udp_payload_size as usize);
+    let max_size_standard = opt_none
+        .as_ref()
+        .map_or(512, |opt| opt.udp_payload_size as usize);
     assert_eq!(max_size_standard, MAX_UDP_PACKET);
 
     // With EDNS0: 4096 bytes
     let opt_edns = Some(OptRecord::new().with_udp_size(4096));
-    let max_size_edns = opt_edns.as_ref().map_or(512, |opt| opt.udp_payload_size as usize);
+    let max_size_edns = opt_edns
+        .as_ref()
+        .map_or(512, |opt| opt.udp_payload_size as usize);
     assert_eq!(max_size_edns, MAX_EDNS_PACKET);
 }
 
@@ -866,7 +873,7 @@ proptest! {
         // Parse name
         let mut offset = 0;
         let result = extract_name(&wire_format, &mut offset, 0);
-        
+
         prop_assert!(result.is_ok(), "Valid name should parse successfully");
         let parsed_name = result.unwrap();
         prop_assert_eq!(parsed_name.to_string(), s, "Round-trip should preserve name");
@@ -920,7 +927,7 @@ async fn test_dns_server_integration() {
 //         qclass: RecordClass::IN,
 //     }
 // }
-// 
+//
 // Helper function to create a test cache key
 // fn create_test_cache_key(name: &str, qtype: RecordType) -> CacheKey {
 //     CacheKey {

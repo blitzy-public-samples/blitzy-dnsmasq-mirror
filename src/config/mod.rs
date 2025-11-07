@@ -131,15 +131,13 @@ pub mod options;
 pub use types::{Config, ConfigBuilder, ConfigError};
 
 // Subsystem configuration structures
-pub use types::{
-    DnsConfig, LoggingConfig, NetworkConfig, SecurityConfig,
-};
+pub use types::{DnsConfig, LoggingConfig, NetworkConfig, SecurityConfig};
 
 // Common types used across configuration
-pub use types::{UpstreamServer, MacAddress, Protocol, SyslogFacility};
+pub use types::{MacAddress, Protocol, SyslogFacility, UpstreamServer};
 
 // Parser functions and error types
-pub use parser::{parse_config_file, parse_config_string, ParseError};
+pub use parser::{ParseError, parse_config_file, parse_config_string};
 
 // CLI argument structure
 pub use options::Cli;
@@ -176,10 +174,10 @@ pub use types::AuthConfig;
 /// This internal helper converts the intermediate parsed configuration structure
 /// into the final configuration type, applying defaults and building the Config.
 fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, ConfigError> {
-    use types::{UpstreamServer, Interface};
-    
+    use types::{Interface, UpstreamServer};
+
     let mut builder = types::ConfigBuilder::new();
-    
+
     // DNS configuration
     let mut dns_config = types::DnsConfig::default();
     if let Some(cache_size) = parsed.cache_size {
@@ -207,7 +205,7 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
         });
     }
     builder.dns(dns_config);
-    
+
     // Network configuration
     let mut network_config = types::NetworkConfig::default();
     if let Some(port) = parsed.port {
@@ -224,15 +222,20 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
     }
     // Add listen addresses to network config
     // Convert IpAddr to ListenAddress with DNS protocol (default)
-    network_config.listen_addresses.extend(
-        parsed.listen_addresses.into_iter().map(|addr| types::ListenAddress {
-            address: addr,
-            port: network_config.port,
-            protocol: types::Protocol::Dns,
-        })
-    );
+    network_config
+        .listen_addresses
+        .extend(
+            parsed
+                .listen_addresses
+                .into_iter()
+                .map(|addr| types::ListenAddress {
+                    address: addr,
+                    port: network_config.port,
+                    protocol: types::Protocol::Dns,
+                }),
+        );
     builder.network(network_config);
-    
+
     // DHCP configuration (feature-gated)
     #[cfg(feature = "dhcp")]
     {
@@ -247,10 +250,10 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
         // It may be used for runtime limits, not configuration
         builder.dhcp(dhcp_config);
     }
-    
+
     // Build the base configuration
     let mut config = builder.build()?;
-    
+
     // TFTP configuration (feature-gated) - set directly on Config after building
     #[cfg(feature = "tftp")]
     {
@@ -266,7 +269,7 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
             config.tftp = Some(tftp_config);
         }
     }
-    
+
     // DNSSEC configuration (feature-gated)
     #[cfg(feature = "dnssec")]
     {
@@ -278,14 +281,14 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
             config.dnssec = Some(dnssec_config);
         }
     }
-    
+
     // Files configuration - set directly on Config
     // Note: no_hosts, addn_hosts, hostsdir, and conf_file from parser don't have destinations in FileConfig
     // or are handled elsewhere. conf_file is the input file path, not a config field
     if let Some(pid_file) = parsed.pid_file {
         config.files.pid_file = Some(pid_file);
     }
-    
+
     Ok(config)
 }
 
@@ -337,8 +340,9 @@ pub fn load_config(cli: Cli) -> Result<Config, ConfigError> {
     // Load configuration file(s) if specified
     // cli.conf_file is Vec<PathBuf>, iterate over all specified files
     for conf_file in &cli.conf_file {
-        let file_config_builder = parse_config_file(conf_file)
-            .map_err(|e| ConfigError::ValidationError(format!("Failed to parse config file: {}", e)))?;
+        let file_config_builder = parse_config_file(conf_file).map_err(|e| {
+            ConfigError::ValidationError(format!("Failed to parse config file: {}", e))
+        })?;
         let file_config = convert_parsed_config(file_config_builder)?;
         config = merge_configs(config, file_config);
     }
@@ -356,12 +360,14 @@ pub fn load_config(cli: Cli) -> Result<Config, ConfigError> {
     apply_cli_overrides(&mut config, &cli);
 
     // Perform comprehensive validation
-    validate_config(&config)
-        .map_err(|errors| {
-            // Convert Vec<ConfigError> to a single ConfigError
-            let error_msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-            ConfigError::ValidationError(format!("Configuration validation failed:\n{}", error_msgs.join("\n")))
-        })?;
+    validate_config(&config).map_err(|errors| {
+        // Convert Vec<ConfigError> to a single ConfigError
+        let error_msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        ConfigError::ValidationError(format!(
+            "Configuration validation failed:\n{}",
+            error_msgs.join("\n")
+        ))
+    })?;
 
     Ok(config)
 }
@@ -405,7 +411,7 @@ pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config
     // DNS configuration merge (dns is not Option, it's always present)
     let dns_override = override_config.dns;
     let dns_base = &mut base_config.dns;
-    
+
     // Merge DNS settings - cache_size is usize, not Option
     if dns_override.cache_size > 0 {
         dns_base.cache_size = dns_override.cache_size;
@@ -414,14 +420,16 @@ pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config
         dns_base.edns_packet_size = dns_override.edns_packet_size;
     }
     // Append upstream servers
-    dns_base.upstream_servers.extend(dns_override.upstream_servers);
+    dns_base
+        .upstream_servers
+        .extend(dns_override.upstream_servers);
     // Append local domains
     dns_base.local_domains.extend(dns_override.local_domains);
 
     // Network configuration merge (network is not Option, it's always present)
     let network_override = override_config.network;
     let network_base = &mut base_config.network;
-    
+
     // Port is on NetworkConfig, not DnsConfig
     if network_override.port > 0 {
         network_base.port = network_override.port;
@@ -436,7 +444,9 @@ pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config
     // Append interfaces
     network_base.interfaces.extend(network_override.interfaces);
     // Append listen addresses
-    network_base.listen_addresses.extend(network_override.listen_addresses);
+    network_base
+        .listen_addresses
+        .extend(network_override.listen_addresses);
 
     // DHCP configuration merge (feature-gated)
     #[cfg(feature = "dhcp")]
@@ -482,7 +492,9 @@ pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config
                     dnssec_base.check_unsigned = true;
                 }
                 // Append trust anchors
-                dnssec_base.trust_anchors.extend(dnssec_override.trust_anchors);
+                dnssec_base
+                    .trust_anchors
+                    .extend(dnssec_override.trust_anchors);
             } else {
                 base_config.dnssec = Some(dnssec_override);
             }
@@ -582,7 +594,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
 
     // Validate DNS configuration (dns is always present, not Option)
     let dns = &config.dns;
-    
+
     // Validate cache size (usize, not Option<usize>)
     if dns.cache_size == 0 {
         errors.push(ConfigError::InvalidCacheSize(0));
@@ -601,7 +613,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
 
     // Validate network configuration (network is always present, not Option)
     let network = &config.network;
-    
+
     // Validate DNS port (port is on NetworkConfig, not DnsConfig)
     if network.port == 0 {
         errors.push(ConfigError::InvalidPort(0));
@@ -616,7 +628,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
     // Validate bind_interfaces and bind_dynamic are mutually exclusive (bool, not Option<bool>)
     if network.bind_interfaces && network.bind_dynamic {
         errors.push(ConfigError::ValidationError(
-            "bind-interfaces and bind-dynamic are mutually exclusive".to_string()
+            "bind-interfaces and bind-dynamic are mutually exclusive".to_string(),
         ));
     }
 
@@ -631,17 +643,19 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
             // Validate static host uniqueness
             let mut seen_ips = HashSet::new();
             let mut seen_macs = HashSet::new();
-            
+
             for host in &dhcp.static_hosts {
                 if !seen_ips.insert(host.ip) {
-                    errors.push(ConfigError::ValidationError(
-                        format!("Duplicate static IP address: {}", host.ip)
-                    ));
+                    errors.push(ConfigError::ValidationError(format!(
+                        "Duplicate static IP address: {}",
+                        host.ip
+                    )));
                 }
                 if !seen_macs.insert(host.mac) {
-                    errors.push(ConfigError::ValidationError(
-                        format!("Duplicate MAC address: {}", host.mac)
-                    ));
+                    errors.push(ConfigError::ValidationError(format!(
+                        "Duplicate MAC address: {}",
+                        host.mac
+                    )));
                 }
             }
 
@@ -649,9 +663,10 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
             if let Some(ref lease_file) = dhcp.lease_file {
                 if let Some(parent) = lease_file.parent() {
                     if !parent.exists() {
-                        errors.push(ConfigError::InvalidPath(
-                            format!("Lease file parent directory does not exist: {}", parent.display())
-                        ));
+                        errors.push(ConfigError::InvalidPath(format!(
+                            "Lease file parent directory does not exist: {}",
+                            parent.display()
+                        )));
                     }
                 }
             }
@@ -665,23 +680,25 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
             // Validate TFTP root directory exists (root is PathBuf, not Option)
             let root = &tftp.root;
             if !root.exists() {
-                errors.push(ConfigError::InvalidPath(
-                    format!("TFTP root directory does not exist: {}", root.display())
-                ));
+                errors.push(ConfigError::InvalidPath(format!(
+                    "TFTP root directory does not exist: {}",
+                    root.display()
+                )));
             }
             if !root.is_dir() {
-                errors.push(ConfigError::InvalidPath(
-                    format!("TFTP root is not a directory: {}", root.display())
-                ));
+                errors.push(ConfigError::InvalidPath(format!(
+                    "TFTP root is not a directory: {}",
+                    root.display()
+                )));
             }
 
             // Validate port range
             if let Some(ref port_range) = tftp.port_range {
                 if port_range.0 >= port_range.1 {
-                    errors.push(ConfigError::ValidationError(
-                        format!("Invalid TFTP port range: {}-{} (start must be less than end)", 
-                            port_range.0, port_range.1)
-                    ));
+                    errors.push(ConfigError::ValidationError(format!(
+                        "Invalid TFTP port range: {}-{} (start must be less than end)",
+                        port_range.0, port_range.1
+                    )));
                 }
             }
         }
@@ -694,7 +711,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
             // If DNSSEC is enabled, must have at least one trust anchor (enabled is bool, not Option<bool>)
             if dnssec.enabled && dnssec.trust_anchors.is_empty() {
                 errors.push(ConfigError::ValidationError(
-                    "DNSSEC enabled but no trust anchors configured".to_string()
+                    "DNSSEC enabled but no trust anchors configured".to_string(),
                 ));
             }
         }
@@ -723,7 +740,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
 /// * `cli` - Parsed CLI arguments containing override values
 fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
     use types::Interface;
-    
+
     // Apply general options
     if cli.no_daemon {
         // Override daemon mode
@@ -734,7 +751,7 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
 
     // Apply DNS options (dns is always present, not Option)
     let dns = &mut config.dns;
-    
+
     if let Some(cache_size) = cli.cache_size {
         dns.cache_size = cache_size;
     }
@@ -756,12 +773,13 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
 
     // Apply network options (network is always present, not Option)
     let network = &mut config.network;
-    
+
     // port is u16, not Option<u16>
-    if cli.port != 53 {  // Only override if different from default
+    if cli.port != 53 {
+        // Only override if different from default
         network.port = cli.port;
     }
-    
+
     if cli.bind_interfaces {
         network.bind_interfaces = true;
     }
@@ -800,7 +818,7 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
 
     // Apply security options (security is always present, not Option)
     let security = &mut config.security;
-    
+
     if let Some(ref user) = cli.user {
         security.user = Some(user.clone());
     }
@@ -828,22 +846,27 @@ fn load_conf_dir(conf_dir: &Path) -> Result<Vec<Config>, ConfigError> {
 
     // Check directory exists
     if !conf_dir.exists() {
-        return Err(ConfigError::InvalidPath(
-            format!("Configuration directory does not exist: {}", conf_dir.display())
-        ));
+        return Err(ConfigError::InvalidPath(format!(
+            "Configuration directory does not exist: {}",
+            conf_dir.display()
+        )));
     }
 
     if !conf_dir.is_dir() {
-        return Err(ConfigError::InvalidPath(
-            format!("Path is not a directory: {}", conf_dir.display())
-        ));
+        return Err(ConfigError::InvalidPath(format!(
+            "Path is not a directory: {}",
+            conf_dir.display()
+        )));
     }
 
     // Read directory entries
-    let entries = std::fs::read_dir(conf_dir)
-        .map_err(|e| ConfigError::InvalidPath(
-            format!("Failed to read directory {}: {}", conf_dir.display(), e)
-        ))?;
+    let entries = std::fs::read_dir(conf_dir).map_err(|e| {
+        ConfigError::InvalidPath(format!(
+            "Failed to read directory {}: {}",
+            conf_dir.display(),
+            e
+        ))
+    })?;
 
     // Collect and sort entries by name
     let mut conf_files: Vec<PathBuf> = entries
@@ -861,10 +884,9 @@ fn load_conf_dir(conf_dir: &Path) -> Result<Vec<Config>, ConfigError> {
 
     // Parse each configuration file
     for conf_file in conf_files {
-        let config_builder = parse_config_file(&conf_file)
-            .map_err(|e| ConfigError::ValidationError(
-                format!("Failed to parse {}: {}", conf_file.display(), e)
-            ))?;
+        let config_builder = parse_config_file(&conf_file).map_err(|e| {
+            ConfigError::ValidationError(format!("Failed to parse {}: {}", conf_file.display(), e))
+        })?;
         let config = convert_parsed_config(config_builder)?;
         configs.push(config);
     }
@@ -894,25 +916,27 @@ fn check_dhcp_range_overlaps(ranges: &[DhcpRange]) -> Vec<ConfigError> {
             // Only check ranges for same address family
             match (&range1.start, &range2.start) {
                 (std::net::IpAddr::V4(start1), std::net::IpAddr::V4(start2)) => {
-                    if let (std::net::IpAddr::V4(end1), std::net::IpAddr::V4(end2)) = 
-                        (&range1.end, &range2.end) {
+                    if let (std::net::IpAddr::V4(end1), std::net::IpAddr::V4(end2)) =
+                        (&range1.end, &range2.end)
+                    {
                         // Check for overlap: range1.start <= range2.end && range2.start <= range1.end
                         if start1 <= end2 && start2 <= end1 {
-                            errors.push(ConfigError::OverlappingRanges(
-                                format!("{}-{} overlaps with {}-{}", 
-                                    start1, end1, start2, end2)
-                            ));
+                            errors.push(ConfigError::OverlappingRanges(format!(
+                                "{}-{} overlaps with {}-{}",
+                                start1, end1, start2, end2
+                            )));
                         }
                     }
                 }
                 (std::net::IpAddr::V6(start1), std::net::IpAddr::V6(start2)) => {
-                    if let (std::net::IpAddr::V6(end1), std::net::IpAddr::V6(end2)) = 
-                        (&range1.end, &range2.end) {
+                    if let (std::net::IpAddr::V6(end1), std::net::IpAddr::V6(end2)) =
+                        (&range1.end, &range2.end)
+                    {
                         if start1 <= end2 && start2 <= end1 {
-                            errors.push(ConfigError::OverlappingRanges(
-                                format!("{}-{} overlaps with {}-{}", 
-                                    start1, end1, start2, end2)
-                            ));
+                            errors.push(ConfigError::OverlappingRanges(format!(
+                                "{}-{} overlaps with {}-{}",
+                                start1, end1, start2, end2
+                            )));
                         }
                     }
                 }
@@ -1017,7 +1041,9 @@ mod tests {
 
     #[test]
     fn test_config_builder_defaults() {
-        let config = ConfigBuilder::new().build().expect("Failed to build config");
+        let config = ConfigBuilder::new()
+            .build()
+            .expect("Failed to build config");
         // dns is always present, not Option
         assert_eq!(config.dns.cache_size, 150); // Default cache size
     }
@@ -1055,7 +1081,11 @@ mod tests {
         let result = validate_config(&config);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| matches!(e, ConfigError::InvalidCacheSize(0))));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ConfigError::InvalidCacheSize(0)))
+        );
     }
 
     #[test]
@@ -1082,6 +1112,10 @@ mod tests {
 
         let errors = check_dhcp_range_overlaps(&[range1, range2]);
         assert!(!errors.is_empty());
-        assert!(errors.iter().any(|e| matches!(e, ConfigError::OverlappingRanges(_))));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ConfigError::OverlappingRanges(_)))
+        );
     }
 }
