@@ -87,9 +87,9 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::config::Config;
 use crate::constants::DNS_PACKET_SIZE;
-use crate::dns::cache::DnsCache;
-use crate::dns::edns::OptRecord;
-use crate::dns::forward::handle_query;
+use crate::dns::cache::{DnsCache, CacheKey, CacheSource};
+use crate::dns::edns::{OptRecord, find_opt_record};
+use crate::dns::forward::{handle_query, Server};
 use crate::dns::protocol::DnsMessage;
 use crate::runtime::signal::SignalEvent;
 use crate::types::errors::{DnsmasqError, NetworkError};
@@ -300,6 +300,9 @@ pub struct DnsServer {
     /// Global configuration (for upstream servers, etc.)
     global_config: Arc<Config>,
 
+    /// Upstream servers for query forwarding
+    servers: Arc<Vec<Server>>,
+
     /// Server statistics
     statistics: Arc<ServerStatistics>,
 
@@ -329,9 +332,23 @@ impl DnsServer {
         // Initialize DNS cache with configured size
         let cache = DnsCache::new(config.cache_size);
 
+        // Convert UpstreamServers to Servers for forwarding
+        let servers: Vec<Server> = global_config
+            .dns
+            .upstream_servers
+            .iter()
+            .map(|upstream| {
+                let mut server = Server::new(upstream.address);
+                if let Some(ref domain) = upstream.domain {
+                    server = server.with_domains(domain.clone());
+                }
+                server
+            })
+            .collect();
+
         info!(
-            "DNS server initialized with cache_size={}, max_tcp={}, port={}",
-            config.cache_size, config.max_tcp_connections, config.socket_config.port
+            "DNS server initialized with cache_size={}, max_tcp={}, port={}, upstream_servers={}",
+            config.cache_size, config.max_tcp_connections, config.socket_config.port, servers.len()
         );
 
         Ok(Self {
@@ -340,6 +357,7 @@ impl DnsServer {
             tcp_listener: None,
             cache: Arc::new(RwLock::new(cache)),
             global_config,
+            servers: Arc::new(servers),
             statistics: Arc::new(ServerStatistics::new()),
             shutdown_requested: Arc::new(tokio::sync::Notify::new()),
         })
@@ -538,6 +556,7 @@ impl DnsServer {
                             let server = Self::clone_for_task(
                                 self.cache.clone(),
                                 self.global_config.clone(),
+                                self.servers.clone(),
                                 self.statistics.clone(),
                                 self.config.clone(),
                             );
@@ -563,6 +582,7 @@ impl DnsServer {
                                 let server = Self::clone_for_task(
                                     self.cache.clone(),
                                     self.global_config.clone(),
+                                    self.servers.clone(),
                                     self.statistics.clone(),
                                     self.config.clone(),
                                 );
@@ -678,12 +698,14 @@ impl DnsServer {
     fn clone_for_task(
         cache: Arc<RwLock<DnsCache>>,
         global_config: Arc<Config>,
+        servers: Arc<Vec<Server>>,
         statistics: Arc<ServerStatistics>,
         config: Arc<ServerConfig>,
     ) -> ServerContext {
         ServerContext {
             cache,
             global_config,
+            servers,
             statistics,
             config,
         }
@@ -906,22 +928,27 @@ impl DnsServer {
         let question = query
             .questions
             .first()
-            .ok_or_else(|| DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery(
-                "No questions in query".to_string()
-            )))?;
+            .ok_or_else(|| DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery {
+                message: "No questions in query".to_string()
+            }))?;
 
         // Check cache first
         {
-            let cache = self.cache.read().await;
-            if let Some(cached_records) = cache.lookup(&question.qname, question.qtype) {
+            let cache_key = CacheKey {
+                name: question.qname.clone(),
+                record_type: question.qtype,
+                record_class: question.qclass,
+            };
+            let mut cache = self.cache.write().await;
+            if let Some(cached_records) = cache.lookup(&cache_key) {
                 self.statistics.cache_hits.fetch_add(1, Ordering::Relaxed);
                 debug!("Cache HIT for {} {:?}", question.qname, question.qtype);
 
                 // Build response from cached records
                 let mut response = query.clone();
-                response.header.qr = true;
-                response.header.aa = false;
-                response.header.ra = true;
+                response.header.flags.qr = true;
+                response.header.flags.aa = false;
+                response.header.flags.ra = true;
                 response.answers = cached_records;
 
                 return Ok(response);
@@ -935,8 +962,9 @@ impl DnsServer {
         // Forward query to upstream servers
         match handle_query(
             query.clone(),
+            source,
             self.cache.clone(),
-            self.global_config.clone(),
+            self.servers.clone(),
         )
         .await
         {
@@ -946,11 +974,18 @@ impl DnsServer {
                 // Cache the response if appropriate
                 if !response.answers.is_empty() {
                     let mut cache = self.cache.write().await;
-                    cache.insert(&question.qname, question.qtype, response.answers.clone());
+                    let cache_key = CacheKey {
+                        name: question.qname.clone(),
+                        record_type: question.qtype,
+                        record_class: question.qclass,
+                    };
+                    // Use minimum TTL from all answer records
+                    let min_ttl = response.answers.iter().map(|r| r.ttl()).min().unwrap_or(0);
+                    cache.insert(cache_key, response.answers.clone(), min_ttl, CacheSource::Upstream);
                 }
 
                 // Check for NXDOMAIN
-                if response.header.rcode == 3 {
+                if response.header.flags.rcode == 3 {
                     self.statistics.nxdomain_responses.fetch_add(1, Ordering::Relaxed);
                 }
 
@@ -962,8 +997,8 @@ impl DnsServer {
 
                 // Generate SERVFAIL response
                 let mut response = query;
-                response.header.qr = true;
-                response.header.rcode = 2; // SERVFAIL
+                response.header.flags.qr = true;
+                response.header.flags.rcode = 2; // SERVFAIL
                 Ok(response)
             }
         }
@@ -974,11 +1009,9 @@ impl DnsServer {
     /// Returns configured UDP buffer size or EDNS0 payload size if larger
     fn get_max_udp_size(&self, response: &DnsMessage) -> usize {
         // Check for EDNS0 OPT record in additional section
-        for record in &response.additional {
-            if let Some(_opt) = OptRecord::find_opt_record(&response.additional) {
-                // EDNS0 present - use larger buffer size
-                return self.config.udp_buffer_size;
-            }
+        if let Some(_opt) = find_opt_record(&response.additional) {
+            // EDNS0 present - use larger buffer size
+            return self.config.udp_buffer_size;
         }
 
         // No EDNS0 - use standard DNS packet size
@@ -990,7 +1023,7 @@ impl DnsServer {
     /// Sets TC bit and removes answers/authority/additional records
     fn truncate_response(&self, mut response: DnsMessage, max_size: usize) -> ServerResult<Vec<u8>> {
         // Set truncation flag
-        response.header.tc = true;
+        response.header.flags.tc = true;
 
         // Remove additional records first
         response.additional.clear();
@@ -1031,8 +1064,8 @@ impl DnsServer {
         // Try to parse query to preserve ID
         let response_data = if let Ok(query) = DnsMessage::parse(query_data) {
             let mut response = query;
-            response.header.qr = true;
-            response.header.rcode = rcode;
+            response.header.flags.qr = true;
+            response.header.flags.rcode = rcode;
             response.answers.clear();
             response.authority.clear();
             response.additional.clear();
@@ -1115,6 +1148,7 @@ impl DnsServer {
 struct ServerContext {
     cache: Arc<RwLock<DnsCache>>,
     global_config: Arc<Config>,
+    servers: Arc<Vec<Server>>,
     statistics: Arc<ServerStatistics>,
     config: Arc<ServerConfig>,
 }
@@ -1241,19 +1275,24 @@ impl ServerContext {
         let question = query
             .questions
             .first()
-            .ok_or_else(|| DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery(
-                "No questions".to_string()
-            )))?;
+            .ok_or_else(|| DnsmasqError::Dns(crate::types::errors::DnsError::InvalidQuery {
+                message: "No questions".to_string()
+            }))?;
 
         // Check cache
         {
-            let cache = self.cache.read().await;
-            if let Some(cached_records) = cache.lookup(&question.qname, question.qtype) {
+            let cache_key = CacheKey {
+                name: question.qname.clone(),
+                record_type: question.qtype,
+                record_class: question.qclass,
+            };
+            let mut cache = self.cache.write().await;
+            if let Some(cached_records) = cache.lookup(&cache_key) {
                 self.statistics.cache_hits.fetch_add(1, Ordering::Relaxed);
 
                 let mut response = query.clone();
-                response.header.qr = true;
-                response.header.ra = true;
+                response.header.flags.qr = true;
+                response.header.flags.ra = true;
                 response.answers = cached_records;
                 return Ok(response);
             }
@@ -1262,16 +1301,22 @@ impl ServerContext {
         // Forward query
         self.statistics.cache_misses.fetch_add(1, Ordering::Relaxed);
 
-        match handle_query(query.clone(), self.cache.clone(), self.global_config.clone()).await {
+        match handle_query(query.clone(), source, self.cache.clone(), self.servers.clone()).await {
             Ok(response) => {
                 self.statistics.queries_forwarded.fetch_add(1, Ordering::Relaxed);
 
                 if !response.answers.is_empty() {
                     let mut cache = self.cache.write().await;
-                    cache.insert(&question.qname, question.qtype, response.answers.clone());
+                    let cache_key = CacheKey {
+                        name: question.qname.clone(),
+                        record_type: question.qtype,
+                        record_class: question.qclass,
+                    };
+                    let min_ttl = response.answers.iter().map(|r| r.ttl()).min().unwrap_or(0);
+                    cache.insert(cache_key, response.answers.clone(), min_ttl, CacheSource::Upstream);
                 }
 
-                if response.header.rcode == 3 {
+                if response.header.flags.rcode == 3 {
                     self.statistics.nxdomain_responses.fetch_add(1, Ordering::Relaxed);
                 }
 
@@ -1282,8 +1327,8 @@ impl ServerContext {
                 self.statistics.servfail_responses.fetch_add(1, Ordering::Relaxed);
 
                 let mut response = query;
-                response.header.qr = true;
-                response.header.rcode = 2; // SERVFAIL
+                response.header.flags.qr = true;
+                response.header.flags.rcode = 2; // SERVFAIL
                 Ok(response)
             }
         }
@@ -1299,8 +1344,8 @@ impl ServerContext {
     ) -> ServerResult<()> {
         let response_data = if let Ok(query) = DnsMessage::parse(query_data) {
             let mut response = query;
-            response.header.qr = true;
-            response.header.rcode = rcode;
+            response.header.flags.qr = true;
+            response.header.flags.rcode = rcode;
             response.answers.clear();
             response.serialize().unwrap_or_else(|_| vec![0u8; 12])
         } else {
@@ -1316,7 +1361,7 @@ impl ServerContext {
     }
 
     fn truncate_response(&self, mut response: DnsMessage, max_size: usize) -> ServerResult<Vec<u8>> {
-        response.header.tc = true;
+        response.header.flags.tc = true;
         response.additional.clear();
 
         if let Ok(data) = response.serialize() {
