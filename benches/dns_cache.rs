@@ -50,9 +50,9 @@
 //! ```
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use dnsmasq_rs::dns::cache::{CacheKey, CacheSource, CacheStatistics, DnsCache};
-use dnsmasq_rs::dns::domain::domain_equal;
-use dnsmasq_rs::dns::protocol::{RecordClass, RecordType, ResourceRecord};
+use dnsmasq::dns::cache::{CacheKey, CacheSource, DnsCache};
+use dnsmasq::dns::domain::domain_equal;
+use dnsmasq::dns::protocol::{RecordClass, RecordType, ResourceRecord};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
@@ -357,9 +357,8 @@ fn benchmark_insertion_varied_ttl(c: &mut Criterion) {
                     ttl: ttl_val,
                     address: Ipv4Addr::new(192, 0, 2, (insert_idx % 255) as u8),
                 };
-                cache.insert(key, vec![record], ttl_val, CacheSource::Upstream);
+                black_box(cache.insert(key, vec![record], ttl_val, CacheSource::Upstream));
                 insert_idx += 1;
-                black_box(&cache)
             });
         });
     }
@@ -630,9 +629,8 @@ fn benchmark_negative_caching_insert(c: &mut Criterion) {
                     RecordType::A,
                     RecordClass::IN,
                 );
-                cache.insert_negative(key, 3600); // Negative cache with 1 hour TTL
+                black_box(cache.insert_negative(key, 3600)); // Negative cache with 1 hour TTL
                 insert_idx += 1;
-                black_box(&cache)
             });
         });
     }
@@ -779,9 +777,8 @@ fn benchmark_dhcp_host_insert(c: &mut Criterion) {
                 let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, (insert_idx % 254 + 1) as u8));
                 let lease_time = Duration::from_secs(3600);
 
-                cache.insert_dhcp_host(hostname, addr, lease_time);
+                black_box(cache.insert_dhcp_host(hostname, addr, lease_time));
                 insert_idx += 1;
-                black_box(&cache)
             });
         });
     }
