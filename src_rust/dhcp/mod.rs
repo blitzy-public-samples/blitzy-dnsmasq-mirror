@@ -5,6 +5,9 @@
 // Common utilities shared by DHCPv4 and DHCPv6
 pub mod common;
 
+// Lease database management
+pub mod lease;
+
 #[cfg(feature = "dhcp")]
 pub mod v4;
 
