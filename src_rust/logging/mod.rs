@@ -69,7 +69,7 @@
 //! ```
 //!
 //! **Priority Calculation:**
-//! ```rust
+//! ```text
 //! priority = (facility << 3) | severity
 //! // Example: LOG_DAEMON (24) with LOG_INFO (6) = (24 << 3) | 6 = 198
 //! ```
@@ -165,7 +165,6 @@
 //! // Initialize tracing subscriber with JSON formatter
 //! fmt()
 //!     .event_format(JsonFormatter::new())
-//!     .json()
 //!     .init();
 //!
 //! // Log with structured fields
