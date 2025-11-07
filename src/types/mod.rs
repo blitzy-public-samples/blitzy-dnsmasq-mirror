@@ -78,7 +78,7 @@
 //! ```c
 //! // C architecture (from dnsmasq.h)
 //! extern struct daemon *daemon;  // Global mutable state
-//! 
+//!
 //! union all_addr {
 //!     struct in_addr addr4;
 //!     struct in6_addr addr6;
