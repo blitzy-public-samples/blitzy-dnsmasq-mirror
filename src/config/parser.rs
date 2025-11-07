@@ -263,7 +263,7 @@ impl ConfigBuilder {
 
         // Validate EDNS packet size
         if let Some(size) = self.edns_packet_max {
-            if size < 512 || size > 65535 {
+            if !(512..=65535).contains(&size) {
                 return Err(ParseError::ValidationError(
                     format!("EDNS packet size {} out of range 512-65535", size)
                 ));
@@ -434,10 +434,41 @@ pub fn parse_config_file(path: &Path) -> Result<ConfigBuilder, ParseError> {
 pub fn parse_config_string(content: &str) -> Result<ConfigBuilder, ParseError> {
     let mut builder = ConfigBuilder::new();
     let lines: Vec<&str> = content.lines().collect();
+    let mut line_continuation = String::new();
+    let mut continuation_line_num = 0;
     
     for (line_num, line) in lines.iter().enumerate() {
         let line_number = line_num + 1;
-        parse_line(line, line_number, &mut builder)?;
+        
+        // Handle line continuation
+        if line.trim_end().ends_with('\\') {
+            if line_continuation.is_empty() {
+                continuation_line_num = line_number;
+            }
+            let trimmed = line.trim_end();
+            line_continuation.push_str(&trimmed[..trimmed.len() - 1]);
+            line_continuation.push(' ');
+            continue;
+        }
+        
+        // Process complete line (with or without continuation)
+        let complete_line = if line_continuation.is_empty() {
+            line.to_string()
+        } else {
+            line_continuation.push_str(line);
+            let result = line_continuation.clone();
+            line_continuation.clear();
+            result
+        };
+        
+        let effective_line_num = if continuation_line_num > 0 {
+            continuation_line_num
+        } else {
+            line_number
+        };
+        
+        parse_line(&complete_line, effective_line_num, &mut builder)?;
+        continuation_line_num = 0;
     }
     
     builder.validate()?;
@@ -555,9 +586,8 @@ fn strip_comment(line: &str) -> String {
     let mut result = String::new();
     let mut in_quotes = false;
     let mut escape_next = false;
-    let mut chars = line.chars().peekable();
 
-    while let Some(ch) = chars.next() {
+    for ch in line.chars() {
         if escape_next {
             result.push(ch);
             escape_next = false;
@@ -825,11 +855,11 @@ fn edit_distance(a: &str, b: &str) -> usize {
     
     let mut matrix = vec![vec![0usize; b_len + 1]; a_len + 1];
     
-    for i in 0..=a_len {
-        matrix[i][0] = i;
+    for (i, row) in matrix.iter_mut().enumerate().take(a_len + 1) {
+        row[0] = i;
     }
-    for j in 0..=b_len {
-        matrix[0][j] = j;
+    for (j, cell) in matrix[0].iter_mut().enumerate().take(b_len + 1) {
+        *cell = j;
     }
     
     for i in 1..=a_len {
@@ -870,7 +900,7 @@ fn handle_server(value: &str, line: usize, builder: &mut ConfigBuilder) -> Resul
     }
 
     // Parse server address
-    let addr_str = value.split('/').last().unwrap_or(value);
+    let addr_str = value.split('/').next_back().unwrap_or(value);
     let (ip_part, port) = if let Some(hash_pos) = addr_str.find('#') {
         let ip = &addr_str[..hash_pos];
         let port_str = &addr_str[hash_pos + 1..];
@@ -974,7 +1004,7 @@ fn handle_edns_packet_max(value: &str, line: usize, builder: &mut ConfigBuilder)
         }
     })?;
 
-    if size < 512 || size > 65535 {
+    if !(512..=65535).contains(&size) {
         return Err(ParseError::InvalidValue {
             line,
             option: "edns-packet-max".to_string(),
@@ -1519,16 +1549,16 @@ fn parse_duration(s: &str) -> Result<Duration, ParseError> {
     let trimmed = s.trim();
     
     // Check for suffix
-    let (value_str, multiplier) = if trimmed.ends_with('w') {
-        (&trimmed[..trimmed.len() - 1], 7 * 24 * 3600)
-    } else if trimmed.ends_with('d') {
-        (&trimmed[..trimmed.len() - 1], 24 * 3600)
-    } else if trimmed.ends_with('h') {
-        (&trimmed[..trimmed.len() - 1], 3600)
-    } else if trimmed.ends_with('m') {
-        (&trimmed[..trimmed.len() - 1], 60)
-    } else if trimmed.ends_with('s') {
-        (&trimmed[..trimmed.len() - 1], 1)
+    let (value_str, multiplier) = if let Some(stripped) = trimmed.strip_suffix('w') {
+        (stripped, 7 * 24 * 3600)
+    } else if let Some(stripped) = trimmed.strip_suffix('d') {
+        (stripped, 24 * 3600)
+    } else if let Some(stripped) = trimmed.strip_suffix('h') {
+        (stripped, 3600)
+    } else if let Some(stripped) = trimmed.strip_suffix('m') {
+        (stripped, 60)
+    } else if let Some(stripped) = trimmed.strip_suffix('s') {
+        (stripped, 1)
     } else {
         (trimmed, 1) // Default to seconds
     };
