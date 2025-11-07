@@ -1,350 +1,1025 @@
-//! DNS cache data structures
-//!
-//! Defines types for DNS cache entries, replacing C structs from cache.c.
+// dnsmasq is Copyright (c) 2000-2022 Simon Kelley
+//
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; version 2 dated June, 1991, or
+// (at your option) version 3 dated 29 June, 2007.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+//! DNS cache data type definitions
+//!
+//! # Purpose
+//!
+//! This module provides type-safe Rust data structures for DNS cache records,
+//! replacing the C implementation's `struct crec` from cache.c and dnsmasq.h.
+//! The Rust implementation eliminates memory safety vulnerabilities inherent in
+//! the C version's discriminated union for address types, raw pointer chains for
+//! hash tables and LRU lists, and manual flag bit manipulation.
+//!
+//! # Memory Safety Improvements
+//!
+//! The C implementation used several unsafe patterns that are eliminated here:
+//!
+//! - **Union all_addr**: C used a discriminated union with manual flag checking to
+//!   determine which field (addr4, addr6, cname, srv, key, ds) is valid. Rust's
+//!   enum `CacheRecordData` makes this type-safe at compile time.
+//!
+//! - **Raw pointers for list management**: C used `next`, `prev`, `hash_next` raw
+//!   pointers for maintaining hash chains and LRU doubly-linked lists. Rust uses
+//!   `CacheRecordId` newtypes as safe indices into Vec storage.
+//!
+//! - **Manual flag bit manipulation**: C used `#define` constants and bitwise OR/AND
+//!   operations on unsigned int flags. Rust's `bitflags!` macro provides type-safe
+//!   flag operations with contains(), insert(), remove() methods.
+//!
+//! - **time_t expiry tracking**: C used time_t (signed integer seconds since epoch)
+//!   which can overflow. Rust uses `Instant` (monotonic) + `Duration` for overflow-
+//!   resistant TTL tracking.
+//!
+//! - **Discriminated name storage**: C used a union with three variants (inline sname,
+//!   bigname pointer, namep heap pointer) discriminated by flags. Rust uses String
+//!   with automatic memory management.
+//!
+//! # Key Data Structures
+//!
+//! - `CacheRecord`: Main cache entry with domain name, record data, TTL, flags, and uid
+//! - `CacheRecordData`: Type-safe enum for different record types (Address, CNAME, SRV, DNSSEC)
+//! - `CacheFlags`: Bitflags for cache entry properties (IMMORTAL, NEG, DHCP, HOSTS, etc.)
+//! - `CacheRecordId`: Newtype wrapper for safe indexing into Vec<CacheRecord>
+//! - `DomainKey`: Hash key for cache lookup by (name, qtype)
+//! - `SrvData`, `DnsKeyData`, `DsData`: Structured data for specialized RR types
+//!
+//! # Architecture Integration
+//!
+//! This module is used by:
+//! - `dns::cache` - Main cache implementation with HashMap and LRU list
+//! - `dns::forwarder` - Inserts upstream responses into cache
+//! - `dns::dnssec::validator` - Caches DNSSEC keys and signatures
+//! - `dhcp::v4::server`, `dhcp::v6::server` - Inserts dynamic DHCP hostnames
+//!
+//! # RFC Compliance
+//!
+//! - RFC 1035: DNS caching of A, AAAA, CNAME, PTR, MX, SRV, and other RR types
+//! - RFC 2308: Negative caching of NXDOMAIN and NODATA responses with separate TTLs
+//! - RFC 2181: TTL handling, authoritative answer caching, RRset consistency
+//! - RFC 4034: DNSSEC DNSKEY, DS, RRSIG caching
+//!
+//! # Examples
+//!
+//! ```rust,ignore
+//! use dnsmasq::dns::cache_types::*;
+//! use std::net::IpAddr;
+//! use std::time::{Duration, Instant};
+//!
+//! // Create an A record cache entry
+//! let record = CacheRecord::new(
+//!     "example.com".to_string(),
+//!     CacheRecordData::Address(IpAddr::V4("192.0.2.1".parse().unwrap())),
+//!     Instant::now() + Duration::from_secs(300),
+//!     UID_NONE,
+//!     CacheFlags::FORWARD | CacheFlags::IPV4,
+//! );
+//!
+//! assert_eq!(record.name(), "example.com");
+//! assert!(record.flags().contains(CacheFlags::FORWARD));
+//! assert!(!record.is_expired());
+//! ```
+
+use crate::dns::blockdata::BlockData;
+use crate::dns::protocol::{C_IN, MAXDNAME, T_A, T_AAAA, T_CNAME, T_DNSKEY, T_DS, T_SRV};
+use bitflags::bitflags;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-/// Cache entry type discriminator
+// ============================================================================
+// Cache Record ID Type
+// ============================================================================
+
+/// Safe newtype wrapper for cache record indices
+///
+/// Replaces raw pointers (next, prev, hash_next) from C implementation with
+/// safe indices into Vec<CacheRecord> storage. This prevents use-after-free,
+/// dangling pointers, and null pointer dereferences that were possible in C.
+///
+/// # Safety Invariants
+///
+/// - CacheRecordId values must be valid indices into the cache storage Vec
+/// - The cache implementation must validate indices before dereferencing
+/// - Invalid indices should be represented as Option<CacheRecordId>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CacheEntryType {
-    /// IPv4 address record
-    A,
-    /// IPv6 address record
-    Aaaa,
-    /// Canonical name record
-    Cname,
-    /// Pointer record (reverse lookup)
-    Ptr,
-    /// Mail exchange record
-    Mx,
-    /// Service record
-    Srv,
-    /// Text record
-    Txt,
-    /// Negative cache entry (NXDOMAIN or NODATA)
-    Negative,
-}
+pub struct CacheRecordId(usize);
 
-/// Cache entry data payload
-#[derive(Debug, Clone)]
-pub enum CacheData {
-    /// IPv4 address
-    A(Ipv4Addr),
-    /// IPv6 address
-    Aaaa(Ipv6Addr),
-    /// Canonical name
-    Cname(String),
-    /// Pointer (reverse lookup domain)
-    Ptr(String),
-    /// Mail exchange (priority, hostname)
-    Mx { 
-        /// MX priority
-        priority: u16, 
-        /// Mail server hostname
-        hostname: String 
-    },
-    /// Service record
-    Srv {
-        /// Service priority
-        priority: u16,
-        /// Service weight
-        weight: u16,
-        /// Service port
-        port: u16,
-        /// Target hostname
-        target: String,
-    },
-    /// Text record
-    Txt(Vec<String>),
-    /// Negative cache entry
-    Negative,
-}
+impl CacheRecordId {
+    /// Create a new CacheRecordId from a raw index
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Index into cache storage vector
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure the index is valid for the target Vec
+    #[must_use]
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
 
-impl CacheData {
-    /// Get the cache entry type for this data
-    #[must_use] 
-    pub fn entry_type(&self) -> CacheEntryType {
-        match self {
-            CacheData::A(_) => CacheEntryType::A,
-            CacheData::Aaaa(_) => CacheEntryType::Aaaa,
-            CacheData::Cname(_) => CacheEntryType::Cname,
-            CacheData::Ptr(_) => CacheEntryType::Ptr,
-            CacheData::Mx { .. } => CacheEntryType::Mx,
-            CacheData::Srv { .. } => CacheEntryType::Srv,
-            CacheData::Txt(_) => CacheEntryType::Txt,
-            CacheData::Negative => CacheEntryType::Negative,
-        }
+    /// Extract the raw index value
+    ///
+    /// # Returns
+    ///
+    /// The underlying usize index value
+    #[must_use]
+    pub fn get(&self) -> usize {
+        self.0
     }
 }
 
-/// A single DNS cache entry
-///
-/// Replaces C's struct crec from cache.c with safe Rust implementation.
-#[derive(Debug, Clone)]
-pub struct CacheEntry {
-    /// Domain name (e.g., "example.com")
-    pub name: String,
-    
-    /// Resource record data
-    pub data: CacheData,
-    
-    /// Time when this entry was created
-    pub created_at: Instant,
-    
-    /// Time-to-live in seconds (from DNS response)
-    pub ttl: u32,
-    
-    /// Flags for this cache entry
-    pub flags: CacheFlags,
+// ============================================================================
+// Cache Source Constants
+// ============================================================================
+
+/// uid field value indicating no source tracking
+pub const UID_NONE: u32 = 0;
+
+/// Cache record source: configuration file
+pub const SRC_CONFIG: u32 = 1;
+
+/// Cache record source: /etc/hosts file
+pub const SRC_HOSTS: u32 = 2;
+
+/// Cache record source: authoritative hosts
+pub const SRC_AH: u32 = 3;
+
+// ============================================================================
+// Cache Flags Bitflags
+// ============================================================================
+
+bitflags! {
+    /// Cache record flags bitfield
+    ///
+    /// Type-safe flag operations replacing C's manual bit manipulation.
+    /// Each flag indicates a property of the cache record such as source
+    /// (DHCP, HOSTS, CONFIG), type (FORWARD, REVERSE), address family
+    /// (IPV4, IPV6), or special behavior (IMMORTAL, NEG, DNSSEC).
+    ///
+    /// # Flag Categories
+    ///
+    /// **Lifetime Flags:**
+    /// - IMMORTAL: Never expires (from /etc/hosts or static config)
+    ///
+    /// **Source Flags:**
+    /// - DHCP: Entry from DHCP lease (dynamic hostname)
+    /// - HOSTS: Entry from /etc/hosts file
+    /// - CONFIG: Entry from config file (static configuration)
+    /// - UPSTREAM: Cached from upstream server response
+    /// - AUTH: From authoritative zone (local authority)
+    ///
+    /// **Direction Flags:**
+    /// - FORWARD: Forward lookup (name→addr)
+    /// - REVERSE: Reverse lookup (addr→name)
+    ///
+    /// **Address Family Flags:**
+    /// - IPV4: IPv4 address (addr.addr4 valid in C, Address(V4) in Rust)
+    /// - IPV6: IPv6 address (addr.addr6 valid in C, Address(V6) in Rust)
+    ///
+    /// **Record Type Flags:**
+    /// - CNAME: CNAME record
+    /// - SRV: SRV record
+    /// - DNSKEY: DNSSEC DNSKEY record
+    /// - DS: DNSSEC DS record
+    ///
+    /// **Negative Cache Flags:**
+    /// - NEG: Negative cache entry (NXDOMAIN or NODATA)
+    /// - NXDOMAIN: Domain does not exist
+    /// - NO_RR: No resource records found (NODATA response)
+    ///
+    /// **DNSSEC Flags:**
+    /// - DNSSEC: DNSSEC-related record
+    /// - DNSSECOK: DNSSEC validation succeeded (secure)
+    /// - KEYTAG: DNSSEC key tag stored in uid field
+    /// - SECSTAT: DNSSEC security status indicator
+    ///
+    /// **Integration Flags:**
+    /// - IPSET: Add to ipset when resolved (Linux ipset integration)
+    ///
+    /// **Internal Flags:**
+    /// - RRNAME: Resource record name (not address record)
+    /// - SERVER: Server record in cache
+    /// - QUERY: Active query in progress
+    /// - NOERR: Response was NOERROR (not NXDOMAIN/SERVFAIL)
+    /// - NOEXTRA: Don't add to extra/additional section
+    /// - DOMAINSRV: Domain-specific server record
+    /// - RCODE: DNS response code stored
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct CacheFlags: u32 {
+        /// Never expire (from /etc/hosts or static config)
+        const IMMORTAL  = 1 << 0;
+        /// Reverse lookup (PTR record: addr→name)
+        const REVERSE   = 1 << 2;
+        /// Forward lookup (A/AAAA record: name→addr)
+        const FORWARD   = 1 << 3;
+        /// Entry from DHCP lease (dynamic hostname)
+        const DHCP      = 1 << 4;
+        /// Negative cache entry (NXDOMAIN or NODATA)
+        const NEG       = 1 << 5;
+        /// Entry from /etc/hosts file
+        const HOSTS     = 1 << 6;
+        /// IPv4 address
+        const IPV4      = 1 << 7;
+        /// IPv6 address
+        const IPV6      = 1 << 8;
+        /// Domain does not exist (NXDOMAIN)
+        const NXDOMAIN  = 1 << 10;
+        /// CNAME record
+        const CNAME     = 1 << 11;
+        /// DNSSEC DNSKEY record
+        const DNSKEY    = 1 << 12;
+        /// Entry from config file (static configuration)
+        const CONFIG    = 1 << 13;
+        /// DNSSEC DS record
+        const DS        = 1 << 14;
+        /// DNSSEC validation succeeded (secure)
+        const DNSSECOK  = 1 << 15;
+        /// Cached from upstream server response
+        const UPSTREAM  = 1 << 16;
+        /// Resource record name (not address record)
+        const RRNAME    = 1 << 17;
+        /// Server record in cache
+        const SERVER    = 1 << 18;
+        /// Active query in progress
+        const QUERY     = 1 << 19;
+        /// Response was NOERROR (not NXDOMAIN/SERVFAIL)
+        const NOERR     = 1 << 20;
+        /// From authoritative zone (local authority)
+        const AUTH      = 1 << 21;
+        /// DNSSEC-related record (DNSKEY/DS/RRSIG)
+        const DNSSEC    = 1 << 22;
+        /// DNSSEC key tag stored in uid field
+        const KEYTAG    = 1 << 23;
+        /// DNSSEC security status indicator
+        const SECSTAT   = 1 << 24;
+        /// No resource records found (NODATA response)
+        const NO_RR     = 1 << 25;
+        /// Add to ipset when resolved (Linux ipset integration)
+        const IPSET     = 1 << 26;
+        /// Don't add to extra/additional section
+        const NOEXTRA   = 1 << 27;
+        /// Domain-specific server record
+        const DOMAINSRV = 1 << 28;
+        /// DNS response code stored
+        const RCODE     = 1 << 29;
+        /// SRV record
+        const SRV       = 1 << 30;
+    }
 }
 
-impl CacheEntry {
-    /// Create a new cache entry
+impl Default for CacheFlags {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+// ============================================================================
+// Specialized Record Data Types
+// ============================================================================
+
+/// SRV record data per RFC 2782
+///
+/// Contains service-specific target hostname, port, priority, and weight
+/// for load balancing and failover across multiple service instances.
+///
+/// # RFC 2782 Requirements
+///
+/// - Priority: Lower values preferred (0-65535)
+/// - Weight: Proportional load distribution among same-priority servers
+/// - Port: Service port number on target host
+/// - Target: Domain name of server providing the service
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SrvData {
+    /// Target hostname providing the service (stored in BlockData for efficiency)
+    target: BlockData,
+    /// Target hostname length in bytes
+    targetlen: u16,
+    /// Service port number (0-65535)
+    srvport: u16,
+    /// SRV priority (0-65535, lower values preferred)
+    priority: u16,
+    /// SRV weight for load balancing (0-65535, higher gets more traffic)
+    weight: u16,
+}
+
+impl SrvData {
+    /// Create a new SRV record data structure
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Target hostname as byte slice
+    /// * `port` - Service port number
+    /// * `priority` - SRV priority (lower is preferred)
+    /// * `weight` - Load balancing weight (higher gets more traffic)
+    ///
+    /// # Returns
+    ///
+    /// SrvData instance with target stored in BlockData
+    #[must_use]
+    pub fn new(target: &[u8], port: u16, priority: u16, weight: u16) -> Self {
+        let targetlen = target.len().min(u16::MAX as usize) as u16;
+        Self {
+            target: BlockData::from_bytes(target),
+            targetlen,
+            srvport: port,
+            priority,
+            weight,
+        }
+    }
+
+    /// Get the target hostname
+    ///
+    /// # Returns
+    ///
+    /// Target hostname as byte vector
+    #[must_use]
+    pub fn target(&self) -> Vec<u8> {
+        self.target.to_bytes()
+    }
+
+    /// Get the service port number
+    ///
+    /// # Returns
+    ///
+    /// Port number (0-65535)
+    #[must_use]
+    pub fn port(&self) -> u16 {
+        self.srvport
+    }
+
+    /// Get the SRV priority
+    ///
+    /// # Returns
+    ///
+    /// Priority value (0-65535, lower is preferred)
+    #[must_use]
+    pub fn priority(&self) -> u16 {
+        self.priority
+    }
+
+    /// Get the SRV weight
+    ///
+    /// # Returns
+    ///
+    /// Weight value (0-65535, higher gets proportionally more traffic)
+    #[must_use]
+    pub fn weight(&self) -> u16 {
+        self.weight
+    }
+}
+
+/// DNSSEC DNSKEY record data per RFC 4034
+///
+/// Contains public key data, algorithm identifier, flags, and computed key tag
+/// for DNSSEC signature verification. The key data is stored in BlockData for
+/// memory efficiency with variable-length keys.
+///
+/// # RFC 4034 Requirements
+///
+/// - Flags: Zone key (bit 7), secure entry point/SEP (bit 15)
+/// - Protocol: Must be 3 for DNSSEC
+/// - Algorithm: Cryptographic algorithm identifier (RSA, ECDSA, Ed25519, etc.)
+/// - Public Key: Variable-length cryptographic key material
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DnsKeyData {
+    /// Public key data (stored in BlockData for variable-length efficiency)
+    keydata: BlockData,
+    /// Key data length in bytes
+    keylen: u16,
+    /// DNSKEY flags (zone key bit 7, SEP bit 15)
+    flags: u16,
+    /// Computed key tag for matching with DS/RRSIG records
+    keytag: u16,
+    /// DNSSEC algorithm identifier (RSA, ECDSA, Ed25519, etc.)
+    algo: u8,
+}
+
+impl DnsKeyData {
+    /// Create a new DNSKEY record data structure
+    ///
+    /// # Arguments
+    ///
+    /// * `keydata` - Public key material as byte slice
+    /// * `flags` - DNSKEY flags (zone key, SEP)
+    /// * `keytag` - Computed key tag
+    /// * `algorithm` - DNSSEC algorithm identifier
+    ///
+    /// # Returns
+    ///
+    /// DnsKeyData instance with key stored in BlockData
+    #[must_use]
+    pub fn new(keydata: &[u8], flags: u16, keytag: u16, algorithm: u8) -> Self {
+        let keylen = keydata.len().min(u16::MAX as usize) as u16;
+        Self {
+            keydata: BlockData::from_bytes(keydata),
+            keylen,
+            flags,
+            keytag,
+            algo: algorithm,
+        }
+    }
+
+    /// Get the public key data
+    ///
+    /// # Returns
+    ///
+    /// Public key as byte vector
+    #[must_use]
+    pub fn keydata(&self) -> Vec<u8> {
+        self.keydata.to_bytes()
+    }
+
+    /// Get the DNSKEY flags
+    ///
+    /// # Returns
+    ///
+    /// Flags field (zone key bit 7, SEP bit 15)
+    #[must_use]
+    pub fn flags(&self) -> u16 {
+        self.flags
+    }
+
+    /// Get the computed key tag
+    ///
+    /// # Returns
+    ///
+    /// Key tag for matching with DS/RRSIG records
+    #[must_use]
+    pub fn keytag(&self) -> u16 {
+        self.keytag
+    }
+
+    /// Get the DNSSEC algorithm identifier
+    ///
+    /// # Returns
+    ///
+    /// Algorithm identifier (RSA, ECDSA, Ed25519, etc.)
+    #[must_use]
+    pub fn algorithm(&self) -> u8 {
+        self.algo
+    }
+}
+
+/// DNSSEC DS (Delegation Signer) record data per RFC 4034
+///
+/// Contains hash of a DNSKEY record to establish chain of trust from parent
+/// zone to child zone. The DS record is published in the parent zone and
+/// matches a DNSKEY in the child zone via the key tag.
+///
+/// # RFC 4034 Requirements
+///
+/// - Key Tag: Matches the DNSKEY key tag (computed from DNSKEY)
+/// - Algorithm: Must match the DNSKEY algorithm
+/// - Digest Type: Hash algorithm used (SHA-1, SHA-256, SHA-384)
+/// - Digest: Hash of the DNSKEY record
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DsData {
+    /// Digest (hash) of the DNSKEY record (stored in BlockData)
+    keydata: BlockData,
+    /// Digest length in bytes
+    keylen: u16,
+    /// Key tag matching the DNSKEY
+    keytag: u16,
+    /// DNSSEC algorithm identifier (must match DNSKEY)
+    algo: u8,
+    /// Digest type (SHA-1, SHA-256, SHA-384)
+    digest: u8,
+}
+
+impl DsData {
+    /// Create a new DS record data structure
+    ///
+    /// # Arguments
+    ///
+    /// * `keydata` - Digest (hash) of DNSKEY as byte slice
+    /// * `keytag` - Key tag matching the DNSKEY
+    /// * `algorithm` - DNSSEC algorithm identifier
+    /// * `digest_type` - Hash algorithm (SHA-1, SHA-256, SHA-384)
+    ///
+    /// # Returns
+    ///
+    /// DsData instance with digest stored in BlockData
+    #[must_use]
+    pub fn new(keydata: &[u8], keytag: u16, algorithm: u8, digest_type: u8) -> Self {
+        let keylen = keydata.len().min(u16::MAX as usize) as u16;
+        Self {
+            keydata: BlockData::from_bytes(keydata),
+            keylen,
+            keytag,
+            algo: algorithm,
+            digest: digest_type,
+        }
+    }
+
+    /// Get the digest (hash) of the DNSKEY
+    ///
+    /// # Returns
+    ///
+    /// Digest as byte vector
+    #[must_use]
+    pub fn keydata(&self) -> Vec<u8> {
+        self.keydata.to_bytes()
+    }
+
+    /// Get the key tag
+    ///
+    /// # Returns
+    ///
+    /// Key tag matching the DNSKEY
+    #[must_use]
+    pub fn keytag(&self) -> u16 {
+        self.keytag
+    }
+
+    /// Get the DNSSEC algorithm identifier
+    ///
+    /// # Returns
+    ///
+    /// Algorithm identifier (must match DNSKEY)
+    #[must_use]
+    pub fn algorithm(&self) -> u8 {
+        self.algo
+    }
+
+    /// Get the digest type
+    ///
+    /// # Returns
+    ///
+    /// Digest type (SHA-1=1, SHA-256=2, SHA-384=4)
+    #[must_use]
+    pub fn digest_type(&self) -> u8 {
+        self.digest
+    }
+}
+
+// ============================================================================
+// Cache Record Data Enum
+// ============================================================================
+
+/// Type-safe discriminated union for cache record data
+///
+/// Replaces C's `union all_addr` with safe Rust enum. The C version used
+/// manual flag checking to determine which union field is valid, leading
+/// to potential type confusion bugs. Rust's enum makes the variant explicit
+/// at compile time and eliminates undefined behavior from accessing the
+/// wrong union member.
+///
+/// # Memory Safety
+///
+/// The C union allowed accessing any field regardless of the actual type,
+/// checked only by runtime flags. Rust's enum:
+/// - Prevents accessing invalid variants at compile time
+/// - Uses pattern matching to safely extract data
+/// - Automatically manages memory for String and BlockData
+///
+/// # Variants
+///
+/// - `Address(IpAddr)`: IPv4 or IPv6 address (A/AAAA records)
+/// - `Cname(String)`: Canonical name target (CNAME records)
+/// - `Srv(SrvData)`: Service location data (SRV records)
+/// - `DnsKey(DnsKeyData)`: DNSSEC public key (DNSKEY records)
+/// - `Ds(DsData)`: DNSSEC delegation signer (DS records)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheRecordData {
+    /// IPv4 or IPv6 address (A/AAAA records)
+    ///
+    /// Replaces C's union all_addr.addr4 (struct in_addr) and addr6 (struct in6_addr).
+    /// Rust's IpAddr enum unifies both address families with type safety.
+    Address(IpAddr),
+
+    /// Canonical name target (CNAME records)
+    ///
+    /// Replaces C's union all_addr.cname.target.name (char*). Rust String provides
+    /// automatic memory management and UTF-8 validation.
+    Cname(String),
+
+    /// Service location data (SRV records)
+    ///
+    /// Replaces C's union all_addr.srv with structured SrvData. Contains target
+    /// hostname (in BlockData), port, priority, and weight per RFC 2782.
+    Srv(SrvData),
+
+    /// DNSSEC public key (DNSKEY records)
+    ///
+    /// Replaces C's union all_addr.key with structured DnsKeyData. Contains key
+    /// material (in BlockData), flags, key tag, and algorithm per RFC 4034.
+    DnsKey(DnsKeyData),
+
+    /// DNSSEC delegation signer (DS records)
+    ///
+    /// Replaces C's union all_addr.ds with structured DsData. Contains digest
+    /// (in BlockData), key tag, algorithm, and digest type per RFC 4034.
+    Ds(DsData),
+}
+
+// ============================================================================
+// Domain Key for HashMap Lookup
+// ============================================================================
+
+/// Hash key for cache lookup by (name, qtype)
+///
+/// Used as the key type for HashMap<DomainKey, Vec<CacheRecordId>> in the
+/// cache implementation. Combines domain name and query type to uniquely
+/// identify cache entries while allowing multiple records for the same
+/// (name, type) pair (e.g., multiple A records for load balancing).
+///
+/// # Hash and Equality
+///
+/// - Hash is computed from both name (case-insensitive) and qtype
+/// - Equality compares both fields
+/// - Name comparison is case-insensitive per DNS spec (RFC 1035 Section 3.1)
+///
+/// # Memory Efficiency
+///
+/// Uses String for name storage with automatic memory management. The C
+/// version used manual pointer management with inline storage for short
+/// names and heap allocation for long names, controlled by flags. Rust
+/// String abstracts this complexity with automatic small string optimization.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DomainKey {
+    /// Domain name (case-insensitive for comparison)
+    name: String,
+    /// DNS query type (T_A, T_AAAA, T_CNAME, etc.)
+    qtype: u16,
+}
+
+impl DomainKey {
+    /// Create a new domain key for cache lookup
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Domain name (will be converted to lowercase for consistency)
+    /// * `qtype` - DNS query type constant (T_A, T_AAAA, etc.)
+    ///
+    /// # Returns
+    ///
+    /// DomainKey instance for use as HashMap key
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dnsmasq::dns::cache_types::DomainKey;
+    /// use dnsmasq::dns::protocol::T_A;
+    ///
+    /// let key = DomainKey::new("example.com".to_string(), T_A);
+    /// ```
+    #[must_use]
+    pub fn new(name: String, qtype: u16) -> Self {
+        // Convert to lowercase for case-insensitive comparison
+        Self {
+            name: name.to_lowercase(),
+            qtype,
+        }
+    }
+
+    /// Get the domain name
+    ///
+    /// # Returns
+    ///
+    /// Reference to the domain name string
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the query type
+    ///
+    /// # Returns
+    ///
+    /// DNS query type constant (T_A, T_AAAA, etc.)
+    #[must_use]
+    pub fn qtype(&self) -> u16 {
+        self.qtype
+    }
+}
+
+// ============================================================================
+// Cache Record Structure
+// ============================================================================
+
+/// DNS cache record
+///
+/// Main cache entry structure replacing C's `struct crec`. Contains domain name,
+/// record data (address/CNAME/SRV/DNSSEC), TTL expiry time, flags, and uid for
+/// source tracking.
+///
+/// # Memory Safety Improvements over C
+///
+/// The C `struct crec` had several unsafe patterns:
+///
+/// 1. **Raw pointers for list management**: next, prev, hash_next pointers
+///    → Eliminated: Cache implementation uses Vec<CacheRecord> with CacheRecordId indices
+///
+/// 2. **Discriminated union**: union all_addr with manual flag checking
+///    → Replaced: CacheRecordData enum with type-safe variants
+///
+/// 3. **Manual name memory management**: Union of sname[50], bname*, namep*
+///    → Replaced: String with automatic memory management
+///
+/// 4. **time_t overflow**: Signed integer seconds since epoch
+///    → Replaced: Instant (monotonic) + Duration (overflow-resistant)
+///
+/// 5. **Manual flag manipulation**: Bitwise OR/AND on unsigned int
+///    → Replaced: bitflags! macro with type-safe operations
+///
+/// # Fields
+///
+/// - `name`: Domain name (String with automatic memory management)
+/// - `data`: Record data (type-safe enum: Address, Cname, Srv, DnsKey, Ds)
+/// - `ttd`: Time-to-die (Instant, monotonic and overflow-resistant)
+/// - `uid`: Source tracking or DNSSEC class (u32)
+/// - `flags`: Cache entry properties (CacheFlags bitflags)
+///
+/// # Usage
+///
+/// ```ignore
+/// use dnsmasq::dns::cache_types::*;
+/// use std::net::IpAddr;
+/// use std::time::{Duration, Instant};
+///
+/// let record = CacheRecord::new(
+///     "example.com".to_string(),
+///     CacheRecordData::Address(IpAddr::V4("192.0.2.1".parse().unwrap())),
+///     Instant::now() + Duration::from_secs(300),
+///     UID_NONE,
+///     CacheFlags::FORWARD | CacheFlags::IPV4 | CacheFlags::UPSTREAM,
+/// );
+///
+/// if !record.is_expired() {
+///     println!("Cache hit: {} -> {:?}", record.name(), record.data());
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct CacheRecord {
+    /// Domain name (replaces C's union of sname[SMALLDNAME], bname*, namep*)
+    name: String,
+    /// Record data (replaces C's union all_addr)
+    data: CacheRecordData,
+    /// Time-to-die (expiry time, replaces C's time_t ttd)
+    ttd: Instant,
+    /// Source tracking or DNSSEC class (replaces C's unsigned int uid)
+    uid: u32,
+    /// Cache entry flags (replaces C's unsigned int flags)
+    flags: CacheFlags,
+}
+
+impl CacheRecord {
+    /// Create a new cache record
     ///
     /// # Arguments
     ///
     /// * `name` - Domain name
-    /// * `data` - Resource record data
-    /// * `ttl` - Time-to-live in seconds
-    #[must_use] 
-    pub fn new(name: String, data: CacheData, ttl: u32) -> Self {
+    /// * `data` - Record data (Address, Cname, Srv, DnsKey, Ds)
+    /// * `ttd` - Time-to-die (expiry time)
+    /// * `uid` - Source tracking or DNSSEC class
+    /// * `flags` - Cache entry flags
+    ///
+    /// # Returns
+    ///
+    /// CacheRecord instance ready for insertion into cache
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dnsmasq::dns::cache_types::*;
+    /// use std::net::IpAddr;
+    /// use std::time::{Duration, Instant};
+    ///
+    /// // A record from upstream with 300 second TTL
+    /// let record = CacheRecord::new(
+    ///     "example.com".to_string(),
+    ///     CacheRecordData::Address(IpAddr::V4("192.0.2.1".parse().unwrap())),
+    ///     Instant::now() + Duration::from_secs(300),
+    ///     UID_NONE,
+    ///     CacheFlags::FORWARD | CacheFlags::IPV4 | CacheFlags::UPSTREAM,
+    /// );
+    /// ```
+    #[must_use]
+    pub fn new(name: String, data: CacheRecordData, ttd: Instant, uid: u32, flags: CacheFlags) -> Self {
         Self {
             name,
             data,
-            created_at: Instant::now(),
-            ttl,
-            flags: CacheFlags::default(),
+            ttd,
+            uid,
+            flags,
         }
     }
 
-    /// Check if this cache entry has expired
-    #[must_use] 
-    pub fn is_expired(&self) -> bool {
-        let elapsed = self.created_at.elapsed();
-        elapsed >= Duration::from_secs(u64::from(self.ttl))
-    }
-
-    /// Get remaining TTL in seconds
-    #[must_use]
-    #[allow(clippy::cast_possible_truncation)]
-    pub fn remaining_ttl(&self) -> u32 {
-        let elapsed = self.created_at.elapsed().as_secs() as u32;
-        self.ttl.saturating_sub(elapsed)
-    }
-
-    /// Get the entry type
-    #[must_use] 
-    pub fn entry_type(&self) -> CacheEntryType {
-        self.data.entry_type()
-    }
-}
-
-bitflags::bitflags! {
-    /// Cache entry flags
+    /// Get the domain name
     ///
-    /// Replaces C bit flags with type-safe bitflags.
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-    pub struct CacheFlags: u8 {
-        /// Entry came from /etc/hosts or static configuration
-        const IS_STATIC = 0b0001;
-        
-        /// Entry has been validated by DNSSEC
-        const IS_DNSSEC_VALIDATED = 0b0010;
-        
-        /// Entry is a negative cache (NXDOMAIN or NODATA)
-        const IS_NEGATIVE = 0b0100;
-        
-        /// Entry is from authoritative nameserver
-        const IS_AUTHORITATIVE = 0b1000;
-    }
-}
-
-impl CacheFlags {
-    /// Create default flags
-    #[must_use] 
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create flags for static entry
-    #[must_use] 
-    pub fn static_entry() -> Self {
-        Self::IS_STATIC
-    }
-
-    /// Create flags for negative cache entry
-    #[must_use] 
-    pub fn negative_entry() -> Self {
-        Self::IS_NEGATIVE
-    }
-}
-
-/// Cache lookup key
-///
-/// Used for efficient cache lookups combining name and type.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CacheKey {
-    /// Domain name
-    pub name: String,
-    /// Entry type
-    pub entry_type: CacheEntryType,
-}
-
-impl CacheKey {
-    /// Create a new cache key
-    #[must_use] 
-    pub fn new(name: String, entry_type: CacheEntryType) -> Self {
-        Self { name, entry_type }
-    }
-}
-
-/// Cache statistics
-///
-/// Tracks cache performance metrics.
-#[derive(Debug, Clone, Default)]
-pub struct CacheStats {
-    /// Total number of cache hits
-    pub hits: u64,
-    
-    /// Total number of cache misses
-    pub misses: u64,
-    
-    /// Total number of insertions
-    pub insertions: u64,
-    
-    /// Total number of evictions
-    pub evictions: u64,
-    
-    /// Current number of entries
-    pub entries: usize,
-}
-
-impl CacheStats {
-    /// Create new empty statistics
-    #[must_use] 
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Calculate cache hit rate (0.0 to 1.0)
+    /// # Returns
+    ///
+    /// Reference to the domain name string
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
-    pub fn hit_rate(&self) -> f64 {
-        let total = self.hits + self.misses;
-        if total == 0 {
-            0.0
-        } else {
-            self.hits as f64 / total as f64
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the record data
+    ///
+    /// # Returns
+    ///
+    /// Reference to the CacheRecordData enum
+    #[must_use]
+    pub fn data(&self) -> &CacheRecordData {
+        &self.data
+    }
+
+    /// Get the time-to-die (expiry time)
+    ///
+    /// # Returns
+    ///
+    /// Instant representing when this record expires
+    #[must_use]
+    pub fn ttd(&self) -> Instant {
+        self.ttd
+    }
+
+    /// Get the uid (source tracking or DNSSEC class)
+    ///
+    /// # Returns
+    ///
+    /// uid value (UID_NONE, SRC_CONFIG, SRC_HOSTS, SRC_AH, or DNSSEC class)
+    #[must_use]
+    pub fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    /// Get the cache entry flags
+    ///
+    /// # Returns
+    ///
+    /// CacheFlags bitflags
+    #[must_use]
+    pub fn flags(&self) -> CacheFlags {
+        self.flags
+    }
+
+    /// Check if the cache record has expired
+    ///
+    /// # Returns
+    ///
+    /// `true` if the record has expired (ttd <= now), `false` otherwise.
+    /// Records with IMMORTAL flag never expire.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// if !record.is_expired() {
+    ///     // Use cached record
+    /// } else {
+    ///     // Evict expired record
+    /// }
+    /// ```
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        // IMMORTAL records never expire (from /etc/hosts or static config)
+        if self.flags.contains(CacheFlags::IMMORTAL) {
+            return false;
         }
-    }
-
-    /// Record a cache hit
-    pub fn record_hit(&mut self) {
-        self.hits += 1;
-    }
-
-    /// Record a cache miss
-    pub fn record_miss(&mut self) {
-        self.misses += 1;
-    }
-
-    /// Record an insertion
-    pub fn record_insertion(&mut self) {
-        self.insertions += 1;
-    }
-
-    /// Record an eviction
-    pub fn record_eviction(&mut self) {
-        self.evictions += 1;
+        
+        // Check if current time exceeds TTD
+        Instant::now() >= self.ttd
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-    use std::time::Duration as StdDuration;
 
     #[test]
-    fn test_cache_entry_basic() {
-        let entry = CacheEntry::new(
-            "example.com".to_string(),
-            CacheData::A(Ipv4Addr::new(93, 184, 216, 34)),
-            300,
-        );
-
-        assert_eq!(entry.name, "example.com");
-        assert_eq!(entry.ttl, 300);
-        assert_eq!(entry.entry_type(), CacheEntryType::A);
-        assert!(!entry.is_expired());
-    }
-
-    #[test]
-    fn test_cache_entry_ttl() {
-        let entry = CacheEntry::new(
-            "example.com".to_string(),
-            CacheData::A(Ipv4Addr::new(93, 184, 216, 34)),
-            1, // 1 second TTL
-        );
-
-        assert!(!entry.is_expired());
-        assert_eq!(entry.remaining_ttl(), 1);
-
-        // Sleep for 2 seconds to let it expire
-        thread::sleep(StdDuration::from_secs(2));
-        
-        assert!(entry.is_expired());
-        assert_eq!(entry.remaining_ttl(), 0);
-    }
-
-    #[test]
-    fn test_cache_data_types() {
-        let data_a = CacheData::A(Ipv4Addr::LOCALHOST);
-        assert_eq!(data_a.entry_type(), CacheEntryType::A);
-
-        let data_aaaa = CacheData::Aaaa(Ipv6Addr::LOCALHOST);
-        assert_eq!(data_aaaa.entry_type(), CacheEntryType::Aaaa);
-
-        let data_cname = CacheData::Cname("alias.example.com".to_string());
-        assert_eq!(data_cname.entry_type(), CacheEntryType::Cname);
+    fn test_cache_record_id() {
+        let id = CacheRecordId::new(42);
+        assert_eq!(id.get(), 42);
     }
 
     #[test]
     fn test_cache_flags() {
-        let mut flags = CacheFlags::new();
-        assert!(!flags.contains(CacheFlags::IS_STATIC));
-        assert!(!flags.contains(CacheFlags::IS_DNSSEC_VALIDATED));
+        let mut flags = CacheFlags::FORWARD | CacheFlags::IPV4;
+        assert!(flags.contains(CacheFlags::FORWARD));
+        assert!(flags.contains(CacheFlags::IPV4));
+        assert!(!flags.contains(CacheFlags::IPV6));
 
-        flags.insert(CacheFlags::IS_STATIC);
-        assert!(flags.contains(CacheFlags::IS_STATIC));
+        flags.insert(CacheFlags::UPSTREAM);
+        assert!(flags.contains(CacheFlags::UPSTREAM));
 
-        let static_flags = CacheFlags::static_entry();
-        assert!(static_flags.contains(CacheFlags::IS_STATIC));
+        flags.remove(CacheFlags::IPV4);
+        assert!(!flags.contains(CacheFlags::IPV4));
     }
 
     #[test]
-    fn test_cache_key() {
-        let key1 = CacheKey::new("example.com".to_string(), CacheEntryType::A);
-        let key2 = CacheKey::new("example.com".to_string(), CacheEntryType::A);
-        let key3 = CacheKey::new("example.com".to_string(), CacheEntryType::Aaaa);
+    fn test_srv_data() {
+        let srv = SrvData::new(b"target.example.com", 80, 10, 20);
+        assert_eq!(srv.target(), b"target.example.com");
+        assert_eq!(srv.port(), 80);
+        assert_eq!(srv.priority(), 10);
+        assert_eq!(srv.weight(), 20);
+    }
 
+    #[test]
+    fn test_dnskey_data() {
+        let keydata = vec![0x01, 0x02, 0x03, 0x04];
+        let dnskey = DnsKeyData::new(&keydata, 256, 12345, 8);
+        assert_eq!(dnskey.keydata(), keydata);
+        assert_eq!(dnskey.flags(), 256);
+        assert_eq!(dnskey.keytag(), 12345);
+        assert_eq!(dnskey.algorithm(), 8);
+    }
+
+    #[test]
+    fn test_ds_data() {
+        let digest = vec![0xde, 0xad, 0xbe, 0xef];
+        let ds = DsData::new(&digest, 54321, 8, 2);
+        assert_eq!(ds.keydata(), digest);
+        assert_eq!(ds.keytag(), 54321);
+        assert_eq!(ds.algorithm(), 8);
+        assert_eq!(ds.digest_type(), 2);
+    }
+
+    #[test]
+    fn test_domain_key() {
+        let key1 = DomainKey::new("example.com".to_string(), T_A);
+        let key2 = DomainKey::new("EXAMPLE.COM".to_string(), T_A);
+        let key3 = DomainKey::new("example.com".to_string(), T_AAAA);
+
+        // Case-insensitive name comparison
         assert_eq!(key1, key2);
+        // Different qtype
         assert_ne!(key1, key3);
+
+        assert_eq!(key1.name(), "example.com");
+        assert_eq!(key1.qtype(), T_A);
     }
 
     #[test]
-    fn test_cache_stats() {
-        let mut stats = CacheStats::new();
-        
-        assert!((stats.hit_rate() - 0.0).abs() < f64::EPSILON);
-        
-        stats.record_hit();
-        stats.record_hit();
-        stats.record_miss();
-        
-        assert_eq!(stats.hits, 2);
-        assert_eq!(stats.misses, 1);
-        assert!((stats.hit_rate() - (2.0 / 3.0)).abs() < f64::EPSILON);
+    fn test_cache_record() {
+        let addr = "192.0.2.1".parse::<std::net::Ipv4Addr>().unwrap();
+        let ttd = Instant::now() + Duration::from_secs(300);
+        let flags = CacheFlags::FORWARD | CacheFlags::IPV4 | CacheFlags::UPSTREAM;
+
+        let record = CacheRecord::new(
+            "example.com".to_string(),
+            CacheRecordData::Address(IpAddr::V4(addr)),
+            ttd,
+            UID_NONE,
+            flags,
+        );
+
+        assert_eq!(record.name(), "example.com");
+        assert_eq!(record.uid(), UID_NONE);
+        assert!(record.flags().contains(CacheFlags::FORWARD));
+        assert!(!record.is_expired());
+    }
+
+    #[test]
+    fn test_cache_record_immortal() {
+        let addr = "192.0.2.1".parse::<std::net::Ipv4Addr>().unwrap();
+        // Set TTD in the past
+        let ttd = Instant::now() - Duration::from_secs(300);
+        let flags = CacheFlags::IMMORTAL | CacheFlags::HOSTS;
+
+        let record = CacheRecord::new(
+            "localhost".to_string(),
+            CacheRecordData::Address(IpAddr::V4(addr)),
+            ttd,
+            SRC_HOSTS,
+            flags,
+        );
+
+        // IMMORTAL records never expire even with past TTD
+        assert!(!record.is_expired());
+    }
+
+    #[test]
+    fn test_cache_record_expired() {
+        let addr = "192.0.2.1".parse::<std::net::Ipv4Addr>().unwrap();
+        // Set TTD in the past
+        let ttd = Instant::now() - Duration::from_secs(1);
+        let flags = CacheFlags::FORWARD | CacheFlags::IPV4;
+
+        let record = CacheRecord::new(
+            "expired.example.com".to_string(),
+            CacheRecordData::Address(IpAddr::V4(addr)),
+            ttd,
+            UID_NONE,
+            flags,
+        );
+
+        // Non-IMMORTAL record with past TTD is expired
+        assert!(record.is_expired());
     }
 }
