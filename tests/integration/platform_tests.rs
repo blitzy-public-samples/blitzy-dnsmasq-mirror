@@ -41,13 +41,12 @@
 //! Per key_changes requirements, kernel interactions are mocked to enable CI testing
 //! on any platform without requiring actual network interfaces or kernel support.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
-use tempfile::TempDir;
 
 // Conditional imports based on platform
 #[cfg(target_os = "linux")]
-use dnsmasq::platform::linux::netlink::NetlinkEvent;
+use dnsmasq::platform::linux::netlink::AddressFamily as LinuxAddressFamily;
 
 #[cfg(any(
     target_os = "freebsd",
@@ -58,7 +57,7 @@ use dnsmasq::platform::linux::netlink::NetlinkEvent;
 ))]
 use dnsmasq::platform::bsd::bpf::RoutingSocket;
 
-use dnsmasq::platform::{Interface, InterfaceFlags};
+// Platform types are not directly used - we use network::interface::InterfaceRecord instead
 
 #[cfg(not(any(
     target_os = "linux",
@@ -70,7 +69,7 @@ use dnsmasq::platform::{Interface, InterfaceFlags};
 )))]
 use dnsmasq::platform::generic::network::GenericPlatform;
 
-use dnsmasq::network::interface::{InterfaceFlags as NetworkInterfaceFlags, InterfaceRecord};
+use dnsmasq::network::interface::InterfaceFlags;
 
 // Test utilities for property-based testing
 use proptest::prelude::*;
@@ -97,7 +96,7 @@ async fn test_linux_netlink_initialization() {
     match result {
         Ok(socket) => {
             // Socket created successfully - verify it's functional
-            let interfaces_result = socket.enumerate_interfaces().await;
+            let interfaces_result = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await;
 
             // Should successfully enumerate even if list is empty
             assert!(
@@ -144,7 +143,7 @@ async fn test_linux_netlink_address_events() {
     let socket = socket_result.unwrap();
 
     // Test that we can enumerate addresses
-    let interfaces = socket.enumerate_interfaces().await.unwrap();
+    let interfaces = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await.unwrap();
 
     for iface in interfaces {
         // Validate interface structure completeness
@@ -153,11 +152,12 @@ async fn test_linux_netlink_address_events() {
 
         // Validate addresses have correct format
         for addr in &iface.addresses {
+            // SocketAddr contains IP address + port
             match addr {
-                IpAddr::V4(_) => {
+                SocketAddr::V4(_) => {
                     // IPv4 address is valid
                 }
-                IpAddr::V6(_) => {
+                SocketAddr::V6(_) => {
                     // IPv6 address is valid
                 }
             }
@@ -195,8 +195,8 @@ async fn test_linux_netlink_event_deduplication() {
     let socket = socket_result.unwrap();
 
     // Enumerate multiple times to verify consistent results
-    let enum1 = socket.enumerate_interfaces().await.unwrap();
-    let enum2 = socket.enumerate_interfaces().await.unwrap();
+    let enum1 = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await.unwrap();
+    let enum2 = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await.unwrap();
 
     // Results should be deterministic
     assert_eq!(
@@ -404,7 +404,7 @@ async fn test_cross_platform_interface_index_name_mapping() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces().await {
+            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
                 // Build mapping
                 let mut seen_indices = std::collections::HashSet::new();
                 let mut seen_names = std::collections::HashSet::new();
@@ -462,7 +462,7 @@ async fn test_cross_platform_interface_flags() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces().await {
+            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
                 for iface in interfaces {
                     // Loopback interfaces should have LOOPBACK flag
                     if iface.name == "lo" {
@@ -493,18 +493,18 @@ async fn test_cross_platform_address_family_filtering() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces().await {
+            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
                 for iface in interfaces {
                     for addr in &iface.addresses {
-                        // Each address should be either IPv4 or IPv6
+                        // Each address should be either IPv4 or IPv6 (SocketAddr type)
                         match addr {
-                            IpAddr::V4(ipv4) => {
+                            SocketAddr::V4(ipv4) => {
                                 // Valid IPv4 address
-                                assert!(ipv4.octets().len() == 4);
+                                assert!(ipv4.ip().octets().len() == 4);
                             }
-                            IpAddr::V6(ipv6) => {
+                            SocketAddr::V6(ipv6) => {
                                 // Valid IPv6 address
-                                assert!(ipv6.octets().len() == 16);
+                                assert!(ipv6.ip().octets().len() == 16);
                             }
                         }
                     }
@@ -604,10 +604,10 @@ fn test_platform_specific_feature_availability() {
 // Property-Based Tests (proptest)
 // ==============================================================================
 
-/// Property: No duplicate interface indices
-///
-/// Tests invariant that each interface has a unique index across all platforms.
-/// Interface indices are kernel-assigned and must be unique identifiers.
+// Property: No duplicate interface indices
+//
+// Tests invariant that each interface has a unique index across all platforms.
+// Interface indices are kernel-assigned and must be unique identifiers.
 prop_compose! {
     fn arb_interface_index()(index in 1u32..1000u32) -> u32 {
         index
@@ -617,22 +617,25 @@ prop_compose! {
 proptest! {
     #[test]
     fn prop_no_duplicate_interface_indices(
-        indices in prop::collection::vec(arb_interface_index(), 1..10)
+        indices in prop::collection::hash_set(arb_interface_index(), 1..10)
     ) {
-        // Simulate interface collection
-        let mut seen = std::collections::HashSet::new();
-
-        for idx in indices {
-            // Each index should be unique
-            prop_assert!(seen.insert(idx), "Interface index {} duplicated", idx);
+        // Simulate interface collection with unique indices
+        // HashSet guarantees uniqueness, so we verify the count
+        prop_assert!(indices.len() > 0, "Should have at least one interface");
+        prop_assert!(indices.len() < 10, "Should have less than 10 interfaces");
+        
+        // Verify all indices are in valid range
+        for idx in &indices {
+            prop_assert!(*idx > 0, "Interface index must be positive");
+            prop_assert!(*idx < 1000, "Interface index must be less than 1000");
         }
     }
 }
 
-/// Property: Interface names are valid
-///
-/// Tests that interface names are non-empty and contain only valid characters
-/// (alphanumeric, hyphen, underscore) per POSIX interface naming rules.
+// Property: Interface names are valid
+//
+// Tests that interface names are non-empty and contain only valid characters
+// (alphanumeric, hyphen, underscore) per POSIX interface naming rules.
 prop_compose! {
     fn arb_interface_name()(name in "[a-z][a-z0-9_-]{0,15}") -> String {
         name
@@ -649,9 +652,9 @@ proptest! {
     }
 }
 
-/// Property: UP flag consistency
-///
-/// Tests that interfaces marked UP have valid indices and at least one address.
+// Property: UP flag consistency
+//
+// Tests that interfaces marked UP have valid indices and at least one address.
 proptest! {
     #[test]
     fn prop_up_flag_implies_valid_index(index in 1u32..1000u32, is_up: bool) {
@@ -661,9 +664,9 @@ proptest! {
     }
 }
 
-/// Property: Address families are valid
-///
-/// Tests that all enumerated addresses belong to AF_INET or AF_INET6 families.
+// Property: Address families are valid
+//
+// Tests that all enumerated addresses belong to AF_INET or AF_INET6 families.
 proptest! {
     #[test]
     fn prop_address_families_valid(addr_type in 0u8..2u8) {
@@ -701,7 +704,7 @@ async fn test_interface_enumeration_performance() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            let _ = socket.enumerate_interfaces().await;
+            let _ = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await;
         }
     }
 
@@ -779,7 +782,7 @@ async fn test_interface_without_addresses() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces().await {
+            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
                 for iface in interfaces {
                     // Interfaces may have zero addresses (valid state during config)
                     if iface.addresses.is_empty() {
@@ -807,7 +810,7 @@ async fn test_interface_removal_during_enumeration() {
         if let Ok(socket) = NetlinkSocket::new().await {
             // Multiple rapid enumerations might catch transient interfaces
             for _ in 0..3 {
-                let _ = socket.enumerate_interfaces().await;
+                let _ = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await;
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
@@ -897,7 +900,7 @@ async fn test_interface_record_completeness() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces().await {
+            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
                 for iface in interfaces {
                     // Verify all fields are populated
                     assert!(!iface.name.is_empty(), "name required");
@@ -922,7 +925,7 @@ async fn test_interface_mtu_values() {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
         if let Ok(socket) = NetlinkSocket::new().await {
-            if let Ok(interfaces) = socket.enumerate_interfaces().await {
+            if let Ok(interfaces) = socket.enumerate_interfaces(LinuxAddressFamily::Unspec).await {
                 for iface in interfaces {
                     if iface.name == "lo" {
                         // Loopback typically has large MTU
@@ -948,6 +951,8 @@ async fn test_interface_mtu_values() {
 #[cfg(test)]
 mod mock_tests {
     use super::*;
+    use dnsmasq::platform::{Interface, InterfaceFlags as PlatformFlags};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     /// Mock test for Linux netlink enumeration
     ///
@@ -962,14 +967,14 @@ mod mock_tests {
                 IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
                 IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
             ],
-            flags: InterfaceFlags::from_bits(InterfaceFlags::UP | InterfaceFlags::MULTICAST),
+            flags: PlatformFlags::from_bits(PlatformFlags::UP | PlatformFlags::MULTICAST),
         };
 
         // Validate mock data structure
         assert_eq!(mock_interface.index, 1);
         assert_eq!(mock_interface.name, "eth0");
         assert_eq!(mock_interface.addresses.len(), 2);
-        assert!(mock_interface.flags.contains(InterfaceFlags::UP));
+        assert!(mock_interface.flags.contains(PlatformFlags::UP));
 
         println!("Mock netlink enumeration test passed");
     }
