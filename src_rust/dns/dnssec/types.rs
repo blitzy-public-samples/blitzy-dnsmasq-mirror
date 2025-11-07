@@ -45,9 +45,7 @@
 //! memory management with struct blockdata pointer chains. This eliminates
 //! memory leaks, use-after-free, and buffer overflow vulnerabilities.
 
-use crate::dns::protocol::{T_DNSKEY, T_RRSIG, T_DS, T_NSEC, T_NSEC3, MAXDNAME, C_IN};
 use serde::{Serialize, Deserialize};
-use std::convert::TryFrom;
 use std::fmt;
 use std::time::{SystemTime, Duration, UNIX_EPOCH};
 
@@ -69,23 +67,23 @@ use std::time::{SystemTime, Duration, UNIX_EPOCH};
 #[repr(u8)]
 pub enum DnssecAlgorithm {
     /// RSA/SHA-1 (algorithm 5) per RFC 4034
-    RSA_SHA1 = 5,
+    RsaSha1 = 5,
     /// RSA/SHA-1 with NSEC3 (algorithm 7) per RFC 5155
-    RSA_SHA1_NSEC3 = 7,
+    RsaSha1Nsec3 = 7,
     /// RSA/SHA-256 (algorithm 8) per RFC 5702
-    RSA_SHA256 = 8,
+    RsaSha256 = 8,
     /// RSA/SHA-512 (algorithm 10) per RFC 5702
-    RSA_SHA512 = 10,
+    RsaSha512 = 10,
     /// GOST R 34.10-2001 (algorithm 12) per RFC 5933
-    GOST = 12,
+    Gost = 12,
     /// ECDSA Curve P-256 with SHA-256 (algorithm 13) per RFC 6605
-    ECDSA_P256_SHA256 = 13,
+    EcdsaP256Sha256 = 13,
     /// ECDSA Curve P-384 with SHA-384 (algorithm 14) per RFC 6605
-    ECDSA_P384_SHA384 = 14,
+    EcdsaP384Sha384 = 14,
     /// Ed25519 (algorithm 15) per RFC 8032
-    ED25519 = 15,
+    Ed25519 = 15,
     /// Ed448 (algorithm 16) per RFC 8032
-    ED448 = 16,
+    Ed448 = 16,
 }
 
 impl DnssecAlgorithm {
@@ -101,15 +99,15 @@ impl DnssecAlgorithm {
     /// * `None` - Unsupported or invalid algorithm number
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
-            5 => Some(DnssecAlgorithm::RSA_SHA1),
-            7 => Some(DnssecAlgorithm::RSA_SHA1_NSEC3),
-            8 => Some(DnssecAlgorithm::RSA_SHA256),
-            10 => Some(DnssecAlgorithm::RSA_SHA512),
-            12 => Some(DnssecAlgorithm::GOST),
-            13 => Some(DnssecAlgorithm::ECDSA_P256_SHA256),
-            14 => Some(DnssecAlgorithm::ECDSA_P384_SHA384),
-            15 => Some(DnssecAlgorithm::ED25519),
-            16 => Some(DnssecAlgorithm::ED448),
+            5 => Some(DnssecAlgorithm::RsaSha1),
+            7 => Some(DnssecAlgorithm::RsaSha1Nsec3),
+            8 => Some(DnssecAlgorithm::RsaSha256),
+            10 => Some(DnssecAlgorithm::RsaSha512),
+            12 => Some(DnssecAlgorithm::Gost),
+            13 => Some(DnssecAlgorithm::EcdsaP256Sha256),
+            14 => Some(DnssecAlgorithm::EcdsaP384Sha384),
+            15 => Some(DnssecAlgorithm::Ed25519),
+            16 => Some(DnssecAlgorithm::Ed448),
             _ => None,
         }
     }
@@ -133,12 +131,12 @@ impl DnssecAlgorithm {
     /// Hash algorithm name string (e.g., "sha256", "sha512")
     pub fn digest_name(self) -> &'static str {
         match self {
-            DnssecAlgorithm::RSA_SHA1 | DnssecAlgorithm::RSA_SHA1_NSEC3 => "sha1",
-            DnssecAlgorithm::RSA_SHA256 | DnssecAlgorithm::ECDSA_P256_SHA256 => "sha256",
-            DnssecAlgorithm::RSA_SHA512 => "sha512",
-            DnssecAlgorithm::ECDSA_P384_SHA384 => "sha384",
-            DnssecAlgorithm::GOST => "gost94",
-            DnssecAlgorithm::ED25519 | DnssecAlgorithm::ED448 => "null", // EdDSA uses null hash
+            DnssecAlgorithm::RsaSha1 | DnssecAlgorithm::RsaSha1Nsec3 => "sha1",
+            DnssecAlgorithm::RsaSha256 | DnssecAlgorithm::EcdsaP256Sha256 => "sha256",
+            DnssecAlgorithm::RsaSha512 => "sha512",
+            DnssecAlgorithm::EcdsaP384Sha384 => "sha384",
+            DnssecAlgorithm::Gost => "gost94",
+            DnssecAlgorithm::Ed25519 | DnssecAlgorithm::Ed448 => "null", // EdDSA uses null hash
         }
     }
 }
@@ -146,15 +144,15 @@ impl DnssecAlgorithm {
 impl fmt::Display for DnssecAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
-            DnssecAlgorithm::RSA_SHA1 => "RSASHA1",
-            DnssecAlgorithm::RSA_SHA1_NSEC3 => "RSASHA1-NSEC3-SHA1",
-            DnssecAlgorithm::RSA_SHA256 => "RSASHA256",
-            DnssecAlgorithm::RSA_SHA512 => "RSASHA512",
-            DnssecAlgorithm::GOST => "GOST R 34.10-2001",
-            DnssecAlgorithm::ECDSA_P256_SHA256 => "ECDSAP256SHA256",
-            DnssecAlgorithm::ECDSA_P384_SHA384 => "ECDSAP384SHA384",
-            DnssecAlgorithm::ED25519 => "ED25519",
-            DnssecAlgorithm::ED448 => "ED448",
+            DnssecAlgorithm::RsaSha1 => "RSASHA1",
+            DnssecAlgorithm::RsaSha1Nsec3 => "RSASHA1-NSEC3-SHA1",
+            DnssecAlgorithm::RsaSha256 => "RSASHA256",
+            DnssecAlgorithm::RsaSha512 => "RSASHA512",
+            DnssecAlgorithm::Gost => "GOST R 34.10-2001",
+            DnssecAlgorithm::EcdsaP256Sha256 => "ECDSAP256SHA256",
+            DnssecAlgorithm::EcdsaP384Sha384 => "ECDSAP384SHA384",
+            DnssecAlgorithm::Ed25519 => "ED25519",
+            DnssecAlgorithm::Ed448 => "ED448",
         };
         write!(f, "{}", name)
     }
@@ -520,7 +518,9 @@ impl DnsKey {
     ///
     /// ```no_run
     /// # use dnsmasq::dns::dnssec::types::{DnsKey, DnssecAlgorithm};
-    /// let key = DnsKey::new(257, 3, DnssecAlgorithm::RSA_SHA256, vec![1,2,3,4]);
+    /// let key = DnsKey::new(257, 3, DnssecAlgorithm::RsaSha256, vec![1,2,3,4]);
+    /// let digest = vec![0u8; 32]; // SHA-256 digest
+    /// let signature = vec![0u8; 256]; // RSA signature
     /// let result = key.verify_with_digest(&digest, &signature);
     /// match result {
     ///     Ok(true) => println!("Signature valid"),
@@ -1401,12 +1401,12 @@ mod tests {
 
     #[test]
     fn test_dnssec_algorithm_conversion() {
-        assert_eq!(DnssecAlgorithm::from_u8(5), Some(DnssecAlgorithm::RSA_SHA1));
-        assert_eq!(DnssecAlgorithm::from_u8(8), Some(DnssecAlgorithm::RSA_SHA256));
-        assert_eq!(DnssecAlgorithm::from_u8(13), Some(DnssecAlgorithm::ECDSA_P256_SHA256));
+        assert_eq!(DnssecAlgorithm::from_u8(5), Some(DnssecAlgorithm::RsaSha1));
+        assert_eq!(DnssecAlgorithm::from_u8(8), Some(DnssecAlgorithm::RsaSha256));
+        assert_eq!(DnssecAlgorithm::from_u8(13), Some(DnssecAlgorithm::EcdsaP256Sha256));
         assert_eq!(DnssecAlgorithm::from_u8(255), None);
         
-        assert_eq!(DnssecAlgorithm::RSA_SHA256.to_u8(), 8);
+        assert_eq!(DnssecAlgorithm::RsaSha256.to_u8(), 8);
     }
 
     #[test]
@@ -1439,7 +1439,7 @@ mod tests {
         let key = DnsKey::new(
             256, // flags
             3,   // protocol
-            DnssecAlgorithm::RSA_SHA256,
+            DnssecAlgorithm::RsaSha256,
             vec![1, 2, 3, 4], // public key
         );
         let tag = key.keytag();
@@ -1455,7 +1455,7 @@ mod tests {
         
         let rrsig = RRSig::new(
             1, // A record
-            DnssecAlgorithm::RSA_SHA256,
+            DnssecAlgorithm::RsaSha256,
             2,
             300,
             now + 3600, // expires in 1 hour
@@ -1474,7 +1474,7 @@ mod tests {
         let original = DnsKey::new(
             257,
             3,
-            DnssecAlgorithm::RSA_SHA256,
+            DnssecAlgorithm::RsaSha256,
             vec![1, 2, 3, 4, 5],
         );
         
@@ -1488,7 +1488,7 @@ mod tests {
     fn test_ds_record_wire_format_roundtrip() {
         let original = DsRecord::new(
             12345,
-            DnssecAlgorithm::RSA_SHA256,
+            DnssecAlgorithm::RsaSha256,
             DigestType::SHA256,
             vec![1, 2, 3, 4, 5, 6, 7, 8],
         );
