@@ -1083,6 +1083,77 @@ pub struct Config {
     pub files: FileConfig,
 }
 
+impl Config {
+    /// Returns the DNS port if DNS is enabled
+    ///
+    /// DNS is considered enabled if the configured port is non-zero.
+    /// A port of 0 disables DNS functionality.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(port)` if DNS is enabled (port != 0)
+    /// - `None` if DNS is disabled (port == 0)
+    pub fn dns_port(&self) -> Option<u16> {
+        if self.network.port == 0 {
+            None
+        } else {
+            Some(self.network.port)
+        }
+    }
+
+    /// Returns true if DHCP is enabled
+    ///
+    /// DHCP is enabled if the dhcp configuration is present.
+    /// Requires the "dhcp" feature to be compiled.
+    #[cfg(feature = "dhcp")]
+    pub fn dhcp_enabled(&self) -> bool {
+        self.dhcp.is_some()
+    }
+
+    /// Returns false if DHCP feature is not compiled
+    #[cfg(not(feature = "dhcp"))]
+    pub fn dhcp_enabled(&self) -> bool {
+        false
+    }
+
+    /// Returns true if DHCPv6 is enabled
+    ///
+    /// DHCPv6 is enabled if the dhcp configuration is present and
+    /// the dhcp-v6 feature is compiled in.
+    #[cfg(feature = "dhcp-v6")]
+    pub fn dhcp6_enabled(&self) -> bool {
+        #[cfg(feature = "dhcp")]
+        {
+            self.dhcp.is_some()
+        }
+        #[cfg(not(feature = "dhcp"))]
+        {
+            false
+        }
+    }
+
+    /// Returns false if DHCPv6 feature is not compiled
+    #[cfg(not(feature = "dhcp-v6"))]
+    pub fn dhcp6_enabled(&self) -> bool {
+        false
+    }
+
+    /// Returns true if TFTP is enabled
+    ///
+    /// TFTP is enabled if the tftp configuration is present.
+    /// Requires the "tftp" feature to be compiled.
+    #[cfg(feature = "tftp")]
+    pub fn tftp_enabled(&self) -> bool {
+        self.tftp.is_some()
+    }
+
+    /// Returns false if TFTP feature is not compiled
+    #[cfg(not(feature = "tftp"))]
+    pub fn tftp_enabled(&self) -> bool {
+        false
+    }
+}
+
 /// File path configuration
 ///
 /// Specifies paths for configuration files, runtime files, and data files.
