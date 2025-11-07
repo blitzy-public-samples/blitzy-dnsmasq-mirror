@@ -877,7 +877,7 @@ pub mod conntrack {
 
     /// Connection tracking entry wrapper
     pub struct ConntrackEntry {
-        entry: *mut nf_conntrack,
+        pub(crate) entry: *mut nf_conntrack,
     }
 
     impl ConntrackEntry {
