@@ -75,9 +75,6 @@ pub const FORWARD_TEST: u32 = 50;
 /// From C forward.c: #define FORWARD_TIME 20
 pub const FORWARD_TIME: u64 = 20;
 
-/// Flag constant for D-Bus configured servers (exposed for integration module)
-pub const SERV_FROM_DBUS: u16 = 256;
-
 // ============================================================================
 // Server Flags
 // ============================================================================
@@ -172,6 +169,31 @@ impl fmt::Display for ServerFlags {
         write!(f, "{}", flags.join("|"))
     }
 }
+
+// ============================================================================
+// Public ServerFlags Constants for Backward Compatibility
+// ============================================================================
+
+/// Server flag constants exported for use in pattern matching and filtering
+/// These are public aliases to ServerFlags constants for backward compatibility
+/// with C implementation's SERV_* macros.
+
+pub const SERV_LITERAL_ADDRESS: ServerFlags = ServerFlags::LITERAL_ADDRESS;
+pub const SERV_USE_RESOLV: ServerFlags = ServerFlags::USE_RESOLV;
+pub const SERV_ALL_ZEROS: ServerFlags = ServerFlags::ALL_ZEROS;
+pub const SERV_4ADDR: ServerFlags = ServerFlags::ADDR_4;
+pub const SERV_6ADDR: ServerFlags = ServerFlags::ADDR_6;
+pub const SERV_HAS_SOURCE: ServerFlags = ServerFlags::HAS_SOURCE;
+pub const SERV_FOR_NODOTS: ServerFlags = ServerFlags::FOR_NODOTS;
+pub const SERV_WARNED_RECURSIVE: ServerFlags = ServerFlags::WARNED_RECURSIVE;
+pub const SERV_FROM_DBUS: ServerFlags = ServerFlags::FROM_DBUS;
+pub const SERV_MARK: ServerFlags = ServerFlags::MARK;
+pub const SERV_WILDCARD: ServerFlags = ServerFlags::WILDCARD;
+pub const SERV_FROM_RESOLV: ServerFlags = ServerFlags::FROM_RESOLV;
+pub const SERV_FROM_FILE: ServerFlags = ServerFlags::FROM_FILE;
+pub const SERV_LOOP: ServerFlags = ServerFlags::LOOP;
+pub const SERV_DO_DNSSEC: ServerFlags = ServerFlags::DO_DNSSEC;
+pub const SERV_GOT_TCP: ServerFlags = ServerFlags::GOT_TCP;
 
 // ============================================================================
 // Server Identifier
