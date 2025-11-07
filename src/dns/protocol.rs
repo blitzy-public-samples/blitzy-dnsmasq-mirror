@@ -1439,9 +1439,9 @@ mod tests {
         
         let header = DnsHeader::parse(&data).unwrap();
         assert_eq!(header.id, 0x1234);
-        assert_eq!(header.flags.qr, true);
-        assert_eq!(header.flags.rd, true);
-        assert_eq!(header.flags.ra, true);
+        assert!(header.flags.qr);
+        assert!(header.flags.rd);
+        assert!(header.flags.ra);
         assert_eq!(header.qdcount, 1);
         assert_eq!(header.ancount, 1);
     }
@@ -1501,7 +1501,7 @@ mod tests {
         serialize_rr(&rr, &mut buf).unwrap();
         
         // Verify some key parts
-        assert!(buf.len() > 0);
+        assert!(!buf.is_empty());
         // Should contain the IP address at the end
         let ip_offset = buf.len() - 4;
         assert_eq!(&buf[ip_offset..], &[192, 0, 2, 1]);
@@ -1530,9 +1530,9 @@ mod tests {
         let response = create_response(&query, vec![answer]);
         
         assert_eq!(response.header.id, 0x1234);
-        assert_eq!(response.header.flags.qr, true);
-        assert_eq!(response.header.flags.rd, true);
-        assert_eq!(response.header.flags.ra, true);
+        assert!(response.header.flags.qr);
+        assert!(response.header.flags.rd);
+        assert!(response.header.flags.ra);
         assert_eq!(response.questions.len(), 1);
         assert_eq!(response.answers.len(), 1);
     }
