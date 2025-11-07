@@ -380,7 +380,7 @@ pub use self::domain::{
 pub use self::edns0::{ClientSubnet, Edns0Option, Edns0OptionCode};
 pub use self::forwarder::{Forwarder, ForwardConfig, ForwardQuery};
 pub use self::hash::{QuestionHashTable, DnsQuestion as HashDnsQuestion};
-pub use self::parser::{DnsMessage, DnsParser, DnsQuestion};
+pub use self::parser::{extract_name, skip_name, skip_questions, skip_section, extract_addresses, extract_request, in_arpa_name_2_addr, ParseError};
 pub use self::pattern::{DomainPattern, DomainPatternMatcher};
 pub use self::protocol::{DnsOpcode, DnsRcode, DnsRrType, DnsHeader};
 pub use self::rrfilter::{RrFilter, FilterAction, FilterRule};

@@ -58,25 +58,16 @@
 //! ```
 
 use crate::dns::protocol::{
-    MAXDNAME, MAXLABEL, NAME_ESCAPE, C_IN, T_A, T_AAAA, T_PTR, T_CNAME, T_MX, T_NS, T_SOA, T_SRV,
-    PACKETSZ, RRFIXEDSZ,
+    MAXDNAME, MAXLABEL, C_IN, T_A, T_AAAA,
 };
 use crate::dns::compression::{
-    COMPRESSION_POINTER_FLAG, COMPRESSION_OFFSET_MASK, MAX_COMPRESSION_HOPS, LabelType,
+    MAX_COMPRESSION_HOPS, LabelType,
     decode_compression_pointer,
 };
 
-use nom::{
-    IResult,
-    bytes::complete::{take, take_while},
-    number::complete::{be_u16, be_u32},
-    multi::{count, fold_many0},
-    combinator::{map, opt},
-    branch::alt,
-    sequence::tuple,
-    error::Error as NomError,
-    Err as NomErr,
-};
+// Note: This module performs manual parsing instead of using nom combinators
+// to maintain close alignment with the original C implementation's logic.
+// Future refactoring could migrate to nom combinators for additional safety.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -250,7 +241,7 @@ impl CompressionState {
 ///     Err(e) => eprintln!("Parse error: {}", e),
 /// }
 /// ```
-pub fn extract_name<'a>(packet: &'a [u8], mut input: &'a [u8]) -> Result<(&'a [u8], String), ParseError> {
+pub fn extract_name<'a>(packet: &'a [u8], input: &'a [u8]) -> Result<(&'a [u8], String), ParseError> {
     let mut name = String::with_capacity(MAXDNAME);
     let mut compression_state = CompressionState::new();
     let mut current_pos = input.as_ptr() as usize - packet.as_ptr() as usize;
@@ -956,7 +947,7 @@ fn parse_ipv6_arpa(components: &[&str]) -> Result<IpAddr, ParseError> {
     let mut addr_bytes = [0u8; 16];
     
     // Process nibbles in reverse order
-    for (i, &nibble_str) in components.iter().enumerate() {
+    for (_i, &nibble_str) in components.iter().enumerate() {
         // Each component should be exactly 1 hex digit
         if nibble_str.len() != 1 {
             return Err(ParseError::InvalidArpaName {
