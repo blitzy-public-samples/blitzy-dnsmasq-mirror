@@ -711,3 +711,4 @@ mod tests {
         assert_eq!(returns_result().unwrap(), 42);
     }
 }
+
