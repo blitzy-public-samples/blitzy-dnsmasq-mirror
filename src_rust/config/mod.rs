@@ -155,19 +155,22 @@
 //! ## Loading Configuration from Default Location
 //!
 //! ```rust,no_run
+//! use std::path::Path;
 //! use dnsmasq::config::{parse_config_file, validate_config, default_config};
 //!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Start with defaults
 //! let mut config = default_config();
 //!
 //! // Override with config file if present
-//! if let Ok(file_config) = parse_config_file("/etc/dnsmasq.conf") {
+//! if let Ok(file_config) = parse_config_file(Path::new("/etc/dnsmasq.conf")).await {
 //!     config = file_config;
 //! }
 //!
 //! // Validate final configuration
 //! validate_config(&config)?;
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Parsing Command-Line Arguments

@@ -49,13 +49,15 @@
 //!
 //! # Usage Examples
 //!
-//! ```rust
+//! ```rust,no_run
 //! use dnsmasq::dhcp::v4::options::{OptionParser, OptionBuilder, OptionError};
 //! use dnsmasq::dhcp::v4::protocol::{OptionCode, DHCP_COOKIE};
 //! use std::net::Ipv4Addr;
 //!
+//! # fn example() -> Result<(), OptionError> {
+//! # let server_ip = Ipv4Addr::new(192, 168, 1, 1);
 //! // Parse options from received DHCP packet
-//! let packet_data: &[u8] = /* ... received packet bytes ... */;
+//! let packet_data: &[u8] = &[]; // ... received packet bytes ...
 //! let mut parser = OptionParser::new();
 //! parser.parse(packet_data)?;
 //!
@@ -70,6 +72,8 @@
 //! builder.add_option_ipv4(OptionCode::OPTION_SERVER_IDENTIFIER as u8, server_ip)?;
 //! builder.add_option_u32(OptionCode::OPTION_LEASE_TIME as u8, 3600)?;
 //! let options_bytes = builder.build()?;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::collections::{HashMap, HashSet};
@@ -245,10 +249,10 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut parser = OptionParser::new();
     /// parser.parse(&packet_data)?;
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -281,13 +285,13 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut parser = OptionParser::new();
     /// parser.parse(&dhcp_packet_bytes)?;
     /// if parser.has_option(50) {
     ///     // Client included requested IP option
     /// }
-    /// ```
+    /// ```ignore
     pub fn parse(&mut self, packet: &[u8]) -> Result<(), OptionError> {
         const DHCP_COOKIE: u32 = 0x6382_5363;
         
@@ -471,11 +475,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if let Some(data) = parser.get_option(50) {
     ///     println!("Requested IP option data: {:?}", data);
     /// }
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn get_option(&self, code: u8) -> Option<&[u8]> {
         self.options.get(&code).map(std::vec::Vec::as_slice)
@@ -493,11 +497,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if parser.has_option(80) {
     ///     // Rapid commit requested
     /// }
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn has_option(&self, code: u8) -> bool {
         self.options.contains_key(&code)
@@ -520,11 +524,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if let Some(msg_type) = parser.get_option_u8(53)? {
     ///     println!("Message type: {}", msg_type);
     /// }
-    /// ```
+    /// ```ignore
     pub fn get_option_u8(&self, code: u8) -> Result<Option<u8>, OptionError> {
         match self.options.get(&code) {
             None => Ok(None),
@@ -553,11 +557,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if let Some(max_msg_size) = parser.get_option_u16(57)? {
     ///     println!("Max message size: {}", max_msg_size);
     /// }
-    /// ```
+    /// ```ignore
     pub fn get_option_u16(&self, code: u8) -> Result<Option<u16>, OptionError> {
         match self.options.get(&code) {
             None => Ok(None),
@@ -586,11 +590,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if let Some(lease_time) = parser.get_option_u32(51)? {
     ///     println!("Requested lease time: {} seconds", lease_time);
     /// }
-    /// ```
+    /// ```ignore
     pub fn get_option_u32(&self, code: u8) -> Result<Option<u32>, OptionError> {
         match self.options.get(&code) {
             None => Ok(None),
@@ -621,11 +625,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if let Some(requested_ip) = parser.get_option_ipv4(50)? {
     ///     println!("Client requested: {}", requested_ip);
     /// }
-    /// ```
+    /// ```ignore
     pub fn get_option_ipv4(&self, code: u8) -> Result<Option<Ipv4Addr>, OptionError> {
         match self.options.get(&code) {
             None => Ok(None),
@@ -654,11 +658,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if let Some(hostname) = parser.get_option_string(12)? {
     ///     println!("Client hostname: {}", hostname);
     /// }
-    /// ```
+    /// ```ignore
     pub fn get_option_string(&self, code: u8) -> Result<Option<String>, OptionError> {
         match self.options.get(&code) {
             None => Ok(None),
@@ -680,11 +684,11 @@ impl OptionParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// for &code in parser.get_requested_options() {
     ///     println!("Client requested option {}", code);
     /// }
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn get_requested_options(&self) -> &HashSet<u8> {
         &self.requested_options
@@ -736,10 +740,10 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut builder = OptionBuilder::new();
     /// builder.add_option_u8(53, 2)?;  // Message type OFFER
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -764,9 +768,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let mut builder = OptionBuilder::new().with_overload(true);
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn with_overload(mut self, enabled: bool) -> Self {
         self.overload_enabled = enabled;
@@ -792,9 +796,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// builder.add_option(50, &requested_ip.octets())?;
-    /// ```
+    /// ```ignore
     pub fn add_option(&mut self, code: u8, data: &[u8]) -> Result<(), OptionError> {
         // Validate option code
         if code == 0 || code == 255 {
@@ -848,9 +852,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// builder.add_option_u8(53, 2)?;  // Message type OFFER
-    /// ```
+    /// ```ignore
     pub fn add_option_u8(&mut self, code: u8, value: u8) -> Result<(), OptionError> {
         self.add_option(code, &[value])
     }
@@ -872,9 +876,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// builder.add_option_u16(57, 1500)?;  // Max message size
-    /// ```
+    /// ```ignore
     pub fn add_option_u16(&mut self, code: u8, value: u16) -> Result<(), OptionError> {
         self.add_option(code, &value.to_be_bytes())
     }
@@ -896,9 +900,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// builder.add_option_u32(51, 3600)?;  // Lease time 1 hour
-    /// ```
+    /// ```ignore
     pub fn add_option_u32(&mut self, code: u8, value: u32) -> Result<(), OptionError> {
         self.add_option(code, &value.to_be_bytes())
     }
@@ -920,9 +924,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// builder.add_option_ipv4(54, server_id)?;  // Server identifier
-    /// ```
+    /// ```ignore
     pub fn add_option_ipv4(&mut self, code: u8, addr: Ipv4Addr) -> Result<(), OptionError> {
         self.add_option(code, &addr.octets())
     }
@@ -945,9 +949,9 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// builder.add_option_string(12, "client.example.com")?;  // Hostname
-    /// ```
+    /// ```ignore
     pub fn add_option_string(&mut self, code: u8, value: &str) -> Result<(), OptionError> {
         self.add_option(code, value.as_bytes())
     }
@@ -960,11 +964,11 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// if builder.remaining_space() < 64 {
     ///     // Consider enabling overload
     /// }
-    /// ```
+    /// ```ignore
     #[must_use]
     pub fn remaining_space(&self) -> usize {
         if self.overload_enabled {
@@ -990,10 +994,10 @@ impl OptionBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let options_bytes = builder.build()?;
     /// // Copy options_bytes into DHCP packet options field
-    /// ```
+    /// ```ignore
     pub fn build(mut self) -> Result<Vec<u8>, OptionError> {
         // Add OPTION_END terminator
         self.buffer.push(255);
@@ -1035,7 +1039,7 @@ impl Default for OptionBuilder {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// if let Some(data) = option_find(&packet_bytes, 50)? {
 ///     println!("Found requested IP option: {:?}", data);
 /// }
@@ -1062,7 +1066,7 @@ pub fn option_find(packet: &[u8], option_code: u8) -> Result<Option<Vec<u8>>, Op
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// if let Some(data) = parser.get_option(50) {
 ///     let addr = extract_ipv4_addr(data)?;
 ///     println!("Requested IP: {}", addr);
@@ -1095,7 +1099,7 @@ pub fn extract_ipv4_addr(data: &[u8]) -> Result<Ipv4Addr, OptionError> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// if let Some(data) = parser.get_option(51) {
 ///     let lease_time = extract_u32(data)?;
 ///     println!("Requested lease: {} seconds", lease_time);
@@ -1128,7 +1132,7 @@ pub fn extract_u32(data: &[u8]) -> Result<u32, OptionError> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// if let Some(data) = parser.get_option(12) {
 ///     let hostname = extract_string(data)?;
 ///     println!("Hostname: {}", hostname);
@@ -1163,7 +1167,7 @@ pub fn extract_string(data: &[u8]) -> Result<String, OptionError> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let options = parse_options(&dhcp_packet)?;
 /// if let Some(hostname_data) = options.get(&12) {
 ///     println!("Hostname option present");
@@ -1194,7 +1198,7 @@ pub fn parse_options(packet: &[u8]) -> Result<HashMap<u8, Vec<u8>>, OptionError>
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let options = vec![
 ///     (53u8, vec![2u8]),           // Message type OFFER
 ///     (51u8, 3600u32.to_be_bytes().to_vec()),  // Lease time

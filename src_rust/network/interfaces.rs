@@ -698,8 +698,8 @@ pub fn iface_check(interface: &Interface, config: &NetworkConfig) -> IoResult<()
 ///
 /// # Examples
 ///
-/// ```
-/// # use dnsmasq::network::interfaces::wildcard_match;
+/// ```ignore
+/// // wildcard_match is private, shown here for documentation only
 /// assert!(wildcard_match("eth*", "eth0"));
 /// assert!(wildcard_match("eth*", "eth1"));
 /// assert!(wildcard_match("wlan?", "wlan0"));

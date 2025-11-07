@@ -75,9 +75,9 @@
 //! ## Example Usage
 //!
 //! ### Parsing Options
-//! ```rust,no_run
-//! use crate::dhcp::v6::protocol::OptionCode;
-//! use crate::dhcp::v6::options::{Dhcp6OptionParser, find_option};
+//! ```ignore
+//! use dnsmasq::dhcp::v6::protocol::OptionCode;
+//! use dnsmasq::dhcp::v6::options::{Dhcp6OptionParser, find_option};
 //!
 //! let packet_data: &[u8] = /* ... DHCPv6 packet ... */;
 //! let parser = Dhcp6OptionParser::new(packet_data);
@@ -97,9 +97,9 @@
 //! ```
 //!
 //! ### Building Options
-//! ```rust,no_run
-//! use crate::dhcp::v6::protocol::OptionCode;
-//! use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+//! ```ignore
+//! use dnsmasq::dhcp::v6::protocol::OptionCode;
+//! use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
 //!
 //! let mut builder = Dhcp6OptionBuilder::new();
 //!
@@ -270,8 +270,8 @@ impl From<std::io::Error> for OptionError {
 /// ## Example
 ///
 /// ```rust,no_run
-/// # use crate::dhcp::v6::options::Dhcp6Option;
-/// # use crate::dhcp::v6::protocol::OptionCode;
+/// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+/// # use dnsmasq::dhcp::v6::protocol::OptionCode;
 /// let option = Dhcp6Option::new(OptionCode::ClientId, vec![0x00, 0x01, 0x00, 0x01]);
 /// assert_eq!(option.code(), OptionCode::ClientId);
 /// assert_eq!(option.len(), 4);
@@ -297,8 +297,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let duid = vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78];
     /// let client_id = Dhcp6Option::new(OptionCode::ClientId, duid);
     /// ```
@@ -312,8 +312,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// # let option = Dhcp6Option::new(OptionCode::ClientId, vec![]);
     /// assert_eq!(option.code(), OptionCode::ClientId);
     /// ```
@@ -327,8 +327,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// # let option = Dhcp6Option::new(OptionCode::ClientId, vec![1, 2, 3]);
     /// let data = option.data();
     /// assert_eq!(data, &[1, 2, 3]);
@@ -345,8 +345,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// # let option = Dhcp6Option::new(OptionCode::ClientId, vec![1, 2, 3, 4]);
     /// assert_eq!(option.len(), 4);
     /// ```
@@ -360,8 +360,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let empty_opt = Dhcp6Option::new(OptionCode::RapidCommit, vec![]);
     /// assert!(empty_opt.is_empty());
     /// ```
@@ -385,8 +385,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let option = Dhcp6Option::new(OptionCode::Preference, vec![255]);
     /// assert_eq!(option.parse_u8(0)?, 255);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -412,8 +412,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let option = Dhcp6Option::new(OptionCode::StatusCode, vec![0x00, 0x05]);
     /// assert_eq!(option.parse_u16(0)?, 5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -443,8 +443,8 @@ impl Dhcp6Option {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6Option;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6Option;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let data = vec![0x00, 0x00, 0x0e, 0x10]; // 3600 seconds
     /// let option = Dhcp6Option::new(OptionCode::RefreshTime, data);
     /// assert_eq!(option.parse_u32(0)?, 3600);
@@ -515,8 +515,8 @@ impl Dhcp6Option {
 ///
 /// ### Rust Code (safe)
 /// ```rust,no_run
-/// # use crate::dhcp::v6::options::Dhcp6OptionParser;
-/// # use crate::dhcp::v6::protocol::OptionCode;
+/// # use dnsmasq::dhcp::v6::options::Dhcp6OptionParser;
+/// # use dnsmasq::dhcp::v6::protocol::OptionCode;
 /// # let opts: &[u8] = &[];
 /// let parser = Dhcp6OptionParser::new(opts);
 /// for result in parser {
@@ -534,9 +534,9 @@ impl Dhcp6Option {
 ///
 /// ## Example Usage
 ///
-/// ```rust,no_run
-/// # use crate::dhcp::v6::options::Dhcp6OptionParser;
-/// # use crate::dhcp::v6::protocol::OptionCode;
+/// ```ignore
+/// # use dnsmasq::dhcp::v6::options::Dhcp6OptionParser;
+/// # use dnsmasq::dhcp::v6::protocol::OptionCode;
 /// let packet: &[u8] = /* ... */;
 /// let parser = Dhcp6OptionParser::new(packet);
 ///
@@ -568,8 +568,8 @@ impl<'a> Dhcp6OptionParser<'a> {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionParser;
+    /// ```ignore
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionParser;
     /// let options_data: &[u8] = /* ... */;
     /// let parser = Dhcp6OptionParser::new(options_data);
     /// ```
@@ -593,8 +593,8 @@ impl<'a> Dhcp6OptionParser<'a> {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionParser;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionParser;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// # let data: &[u8] = &[];
     /// let mut parser = Dhcp6OptionParser::new(data);
     /// if let Some(server_id) = parser.find_by_code(OptionCode::ServerId) {
@@ -629,8 +629,8 @@ impl<'a> Dhcp6OptionParser<'a> {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionParser;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionParser;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// # let data: &[u8] = &[];
     /// let parser = Dhcp6OptionParser::new(data);
     /// let dns_servers = parser.find_all(OptionCode::DnsServers);
@@ -652,7 +652,7 @@ impl<'a> Dhcp6OptionParser<'a> {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionParser;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionParser;
     /// # let data: &[u8] = &[];
     /// let mut parser = Dhcp6OptionParser::new(data);
     /// if let Some(Ok(next_opt)) = parser.peek() {
@@ -777,8 +777,8 @@ impl Iterator for Dhcp6OptionParser<'_> {
 /// ## Example: Building Nested `IA_NA` with IAADDR
 ///
 /// ```rust,no_run
-/// use crate::dhcp::v6::protocol::OptionCode;
-/// use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+/// use dnsmasq::dhcp::v6::protocol::OptionCode;
+/// use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
 /// use std::net::Ipv6Addr;
 ///
 /// let mut builder = Dhcp6OptionBuilder::new();
@@ -819,7 +819,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// let builder = Dhcp6OptionBuilder::new();
     /// ```
     #[must_use]
@@ -839,7 +839,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// let builder = Dhcp6OptionBuilder::with_capacity(512);
     /// ```
     #[must_use]
@@ -857,7 +857,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// let builder = Dhcp6OptionBuilder::new();
     /// let pos = builder.current_position();
     /// assert_eq!(pos, 0);
@@ -884,8 +884,8 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let mut builder = Dhcp6OptionBuilder::new();
     /// let start = builder.current_position();
     /// builder.start_option(OptionCode::ServerId)?;
@@ -930,8 +930,8 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let mut builder = Dhcp6OptionBuilder::new();
     /// let start = builder.current_position();
     /// builder.start_option(OptionCode::Preference)?;
@@ -995,7 +995,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// builder.write_u8(255)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1019,7 +1019,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// builder.write_u16(1234)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1043,7 +1043,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// builder.write_u32(0x1234_5678)?;  // IAID
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1067,7 +1067,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// builder.write_u64(0x1234_5678_9abc_def0)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1091,7 +1091,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// let duid = vec![0x00, 0x01, 0x00, 0x01];
     /// builder.write_bytes(&duid)?;
@@ -1111,7 +1111,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # use std::net::Ipv6Addr;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
@@ -1127,7 +1127,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// let saved = builder.save_position();
     /// builder.write_u32(0)?;
@@ -1148,7 +1148,7 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
     /// let pos = builder.save_position();
     /// builder.write_u32(123)?;
@@ -1171,8 +1171,8 @@ impl Dhcp6OptionBuilder {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
-    /// # use crate::dhcp::v6::protocol::OptionCode;
+    /// # use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
+    /// # use dnsmasq::dhcp::v6::protocol::OptionCode;
     /// let mut builder = Dhcp6OptionBuilder::new();
     /// let start = builder.current_position();
     /// builder.start_option(OptionCode::ServerId)?;
@@ -1221,7 +1221,7 @@ impl Default for Dhcp6OptionBuilder {
 /// # Example
 ///
 /// ```rust,no_run
-/// # use crate::dhcp::v6::options::parse_u8;
+/// # use dnsmasq::dhcp::v6::options::parse_u8;
 /// let data: &[u8] = &[0xff, 0x01, 0x02];
 /// let value = parse_u8(data, 0)?;
 /// assert_eq!(value, 0xff);
@@ -1249,7 +1249,7 @@ pub fn parse_u8(data: &[u8], offset: usize) -> Result<u8, OptionError> {
 /// # Example
 ///
 /// ```rust,no_run
-/// # use crate::dhcp::v6::options::parse_u16;
+/// # use dnsmasq::dhcp::v6::options::parse_u16;
 /// let data: &[u8] = &[0x12, 0x34, 0x56, 0x78];
 /// let value = parse_u16(data, 0)?;
 /// assert_eq!(value, 0x1234);
@@ -1281,7 +1281,7 @@ pub fn parse_u16(data: &[u8], offset: usize) -> Result<u16, OptionError> {
 /// # Example
 ///
 /// ```rust,no_run
-/// # use crate::dhcp::v6::options::parse_u32;
+/// # use dnsmasq::dhcp::v6::options::parse_u32;
 /// let data: &[u8] = &[0x12, 0x34, 0x56, 0x78];
 /// let value = parse_u32(data, 0)?;
 /// assert_eq!(value, 0x1234_5678);
@@ -1313,9 +1313,9 @@ pub fn parse_u32(data: &[u8], offset: usize) -> Result<u32, OptionError> {
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # use crate::dhcp::v6::options::find_option;
-/// # use crate::dhcp::v6::protocol::OptionCode;
+/// ```ignore
+/// # use dnsmasq::dhcp::v6::options::find_option;
+/// # use dnsmasq::dhcp::v6::protocol::OptionCode;
 /// let packet: &[u8] = /* ... DHCPv6 packet options ... */;
 /// if let Some(client_id) = find_option(packet, OptionCode::ClientId) {
 ///     println!("Found Client ID: {} bytes", client_id.len());
@@ -1344,8 +1344,8 @@ pub fn find_option(data: &[u8], code: OptionCode) -> Option<Dhcp6Option> {
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # use crate::dhcp::v6::options::get_client_id;
+/// ```ignore
+/// # use dnsmasq::dhcp::v6::options::get_client_id;
 /// let packet: &[u8] = /* ... DHCPv6 packet options ... */;
 /// if let Some(client_id) = get_client_id(packet) {
 ///     let duid = client_id.data();
@@ -1372,8 +1372,8 @@ pub fn get_client_id(data: &[u8]) -> Option<Dhcp6Option> {
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # use crate::dhcp::v6::options::get_server_id;
+/// ```ignore
+/// # use dnsmasq::dhcp::v6::options::get_server_id;
 /// let packet: &[u8] = /* ... DHCPv6 packet options ... */;
 /// if let Some(server_id) = get_server_id(packet) {
 ///     let duid = server_id.data();

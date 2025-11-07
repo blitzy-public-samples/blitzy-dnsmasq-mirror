@@ -128,8 +128,8 @@
 //! ## Usage Example
 //!
 //! ```rust,ignore
-//! use crate::dns::{cache::Cache, forwarder::Forwarder, parser::DnsParser};
-//! use crate::config::DnsConfig;
+//! use dnsmasq::dns::{cache::Cache, forwarder::Forwarder, parser::DnsParser};
+//! use dnsmasq::config::DnsConfig;
 //!
 //! // Create DNS cache
 //! let mut cache = Cache::new(config.cache_size);

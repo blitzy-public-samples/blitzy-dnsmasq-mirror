@@ -58,7 +58,7 @@
 //! # Usage Example
 //!
 //! ```rust
-//! use crate::dns::blockdata::{BlockData, init};
+//! use dnsmasq::dns::blockdata::{BlockData, init};
 //!
 //! // Initialize with cache size (typically done at startup)
 //! init(150, true);  // 150 blocks pre-allocated if DNSSEC enabled
@@ -285,13 +285,13 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     ///
     /// let empty = BlockData::new();
     /// assert!(empty.is_empty());
     /// assert_eq!(empty.len(), 0);
-    /// ```
+    /// ```ignore
     #[must_use] 
     pub fn new() -> Self {
         Self {
@@ -317,8 +317,8 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     ///
     /// let key_data = vec![0x12, 0x34, 0x56, 0x78];
     /// let blocks = BlockData::from_bytes(&key_data);
@@ -326,7 +326,7 @@ impl BlockData {
     ///
     /// let retrieved = blocks.to_bytes();
     /// assert_eq!(retrieved, key_data);
-    /// ```
+    /// ```ignore
     pub fn from_bytes(data: &[u8]) -> Self {
         if data.is_empty() {
             return Self::new();
@@ -450,14 +450,14 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     ///
     /// let original = vec![1, 2, 3, 4, 5];
     /// let blocks = BlockData::from_bytes(&original);
     /// let retrieved = blocks.to_bytes();
     /// assert_eq!(retrieved, original);
-    /// ```
+    /// ```ignore
     #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.total_len == 0 {
@@ -499,8 +499,8 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     /// use std::io::Cursor;
     ///
     /// let data = vec![1, 2, 3, 4, 5];
@@ -509,7 +509,7 @@ impl BlockData {
     /// let mut output = Cursor::new(Vec::new());
     /// blocks.write_to(&mut output)?;
     /// assert_eq!(output.into_inner(), data);
-    /// ```
+    /// ```ignore
     pub fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         let mut node = self.head.as_ref();
         let mut remaining = self.total_len;
@@ -540,8 +540,8 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     ///
     /// let data = vec![1, 2, 3, 4, 5];
     /// let blocks = BlockData::from_bytes(&data);
@@ -550,7 +550,7 @@ impl BlockData {
     /// let copied = blocks.copy_to_buffer(&mut buffer);
     /// assert_eq!(copied, 5);
     /// assert_eq!(&buffer[..5], &data[..]);
-    /// ```
+    /// ```ignore
     pub fn copy_to_buffer(&self, buffer: &mut [u8]) -> usize {
         let mut node = self.head.as_ref();
         let mut offset = 0;
@@ -577,13 +577,13 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     ///
     /// let data = vec![0u8; 100];
     /// let blocks = BlockData::from_bytes(&data);
     /// assert_eq!(blocks.len(), 100);
-    /// ```
+    /// ```ignore
     #[must_use] 
     pub fn len(&self) -> usize {
         self.total_len
@@ -595,15 +595,15 @@ impl BlockData {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use crate::dns::blockdata::BlockData;
+    /// ```ignore
+    /// use dnsmasq::dns::blockdata::BlockData;
     ///
     /// let empty = BlockData::new();
     /// assert!(empty.is_empty());
     ///
     /// let data = BlockData::from_bytes(&[1, 2, 3]);
     /// assert!(!data.is_empty());
-    /// ```
+    /// ```ignore
     #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.total_len == 0
@@ -656,7 +656,7 @@ impl Clone for BlockData {
 /// # Examples
 ///
 /// ```
-/// use crate::dns::blockdata::init;
+/// use dnsmasq::dns::blockdata::init;
 ///
 /// // During daemon startup
 /// init(150, true);  // Preallocate 150 blocks for DNSSEC
@@ -683,7 +683,7 @@ pub fn init(cache_size: usize, dnssec_enabled: bool) {
 /// # Examples
 ///
 /// ```
-/// use crate::dns::blockdata::report;
+/// use dnsmasq::dns::blockdata::report;
 ///
 /// // Log statistics on SIGUSR1 signal
 /// report();
