@@ -95,7 +95,7 @@
 //! drop_privileges(
 //!     "dnsmasq",           // username
 //!     "dnsmasq",           // groupname
-//!     vec!["NET_BIND_SERVICE", "NET_RAW"],  // required capabilities
+//!     false,               // debug_mode
 //! )?;
 //!
 //! // Now running as unprivileged user, main event loop can proceed

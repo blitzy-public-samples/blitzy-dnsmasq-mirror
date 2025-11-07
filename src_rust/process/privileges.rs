@@ -37,11 +37,14 @@
 //! # Example
 //!
 //! ```no_run
-//! use dnsmasq::process::privileges::drop_privileges;
+//! use dnsmasq::process::privileges::{drop_privileges, PrivilegeError};
 //!
-//! // After binding privileged ports and opening files
-//! drop_privileges("dnsmasq", "dnsmasq", false)?;
-//! // Now running as unprivileged user
+//! fn main() -> Result<(), PrivilegeError> {
+//!     // After binding privileged ports and opening files
+//!     drop_privileges("dnsmasq", "dnsmasq", false)?;
+//!     // Now running as unprivileged user
+//!     Ok(())
+//! }
 //! ```
 
 use nix::unistd::{getuid, setgid, setgroups, setuid, Gid, Uid};
@@ -86,7 +89,7 @@ extern "C" {
 }
 
 #[cfg(target_os = "linux")]
-const _LINUX_CAPABILITY_VERSION_3: u32 = 0x20080522;
+const _LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 
 #[cfg(target_os = "linux")]
 const CAP_SETUID: u32 = 7;
@@ -100,16 +103,16 @@ pub enum PrivilegeError {
     /// Failed to lookup user in system database
     UserNotFound(String, IoError),
     
-    /// Failed to set group ID via setgid()
+    /// Failed to set group ID via `setgid()`
     SetGroupFailed(String, u32, IoError),
     
-    /// Failed to set user ID via setuid()
+    /// Failed to set user ID via `setuid()`
     SetUserFailed(String, u32, IoError),
     
-    /// Failed to clear supplementary groups via setgroups()
+    /// Failed to clear supplementary groups via `setgroups()`
     SetGroupsFailed(IoError),
     
-    /// Failed to manage Linux capabilities (capset/capget)
+    /// Failed to manage Linux capabilities (`capset`/`capget`)
     CapabilityError(String, IoError),
     
     /// Failed to manage Solaris privilege sets
@@ -123,25 +126,25 @@ impl Display for PrivilegeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             PrivilegeError::GroupNotFound(name, err) => {
-                write!(f, "Failed to lookup group '{}': {}", name, err)
+                write!(f, "Failed to lookup group '{name}': {err}")
             }
             PrivilegeError::UserNotFound(name, err) => {
-                write!(f, "Failed to lookup user '{}': {}", name, err)
+                write!(f, "Failed to lookup user '{name}': {err}")
             }
             PrivilegeError::SetGroupFailed(name, gid, err) => {
-                write!(f, "Failed to set group '{}' (GID {}): {}", name, gid, err)
+                write!(f, "Failed to set group '{name}' (GID {gid}): {err}")
             }
             PrivilegeError::SetUserFailed(name, uid, err) => {
-                write!(f, "Failed to set user '{}' (UID {}): {}", name, uid, err)
+                write!(f, "Failed to set user '{name}' (UID {uid}): {err}")
             }
             PrivilegeError::SetGroupsFailed(err) => {
-                write!(f, "Failed to clear supplementary groups: {}", err)
+                write!(f, "Failed to clear supplementary groups: {err}")
             }
             PrivilegeError::CapabilityError(context, err) => {
-                write!(f, "Capability operation failed ({}): {}", context, err)
+                write!(f, "Capability operation failed ({context}): {err}")
             }
             PrivilegeError::PrivilegeSetError(context, err) => {
-                write!(f, "Privilege set operation failed ({}): {}", context, err)
+                write!(f, "Privilege set operation failed ({context}): {err}")
             }
             PrivilegeError::AlreadyUnprivileged => {
                 write!(f, "Already running as unprivileged user (UID != 0)")
@@ -204,6 +207,7 @@ impl Error for PrivilegeError {}
 /// - Any system call (setgroups/setgid/setuid) fails
 /// - Capability/privilege set manipulation fails
 /// - Already running as non-root (cannot drop what you don't have)
+#[allow(clippy::similar_names)] // target_gid and target_uid are standard Unix terminology
 pub fn drop_privileges(
     username: &str,
     groupname: &str,
@@ -324,10 +328,10 @@ fn lookup_user(username: &str) -> Result<Uid, PrivilegeError> {
         .map(|u| u.uid)
 }
 
-/// Linux: Setup capabilities before setuid()
+/// Linux: Setup capabilities before `setuid()`
 ///
-/// Adds CAP_SETUID capability and enables PR_SET_KEEPCAPS to preserve
-/// capabilities across the setuid() call.
+/// Adds `CAP_SETUID` capability and enables `PR_SET_KEEPCAPS` to preserve
+/// capabilities across the `setuid()` call.
 ///
 /// Matches C code from dnsmasq.c lines 925-930
 #[cfg(target_os = "linux")]
@@ -346,8 +350,8 @@ fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
     // The kernel will fill in the data structure
     let result = unsafe {
         capget(
-            &header as *const __user_cap_header_struct,
-            data.as_mut_ptr() as *mut __user_cap_data_struct,
+            &raw const header,
+            data.as_mut_ptr().cast::<__user_cap_data_struct>(),
         )
     };
     
@@ -376,8 +380,8 @@ fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
     // SAFETY: capset is called with valid header and modified data
     let result = unsafe {
         capset(
-            &header as *const __user_cap_header_struct,
-            data.as_ptr() as *const __user_cap_data_struct,
+            &raw const header,
+            data.as_ptr(),
         )
     };
     
@@ -411,9 +415,9 @@ fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
     Ok(())
 }
 
-/// Linux: Drop CAP_SETUID capability after setuid()
+/// Linux: Drop `CAP_SETUID` capability after `setuid()`
 ///
-/// Removes the CAP_SETUID capability now that we've completed the privilege drop.
+/// Removes the `CAP_SETUID` capability now that we've completed the privilege drop.
 /// This ensures we cannot change UID again (defense-in-depth).
 ///
 /// Matches C code from dnsmasq.c lines 967-977
@@ -432,8 +436,8 @@ fn linux_drop_setuid_capability() -> Result<(), PrivilegeError> {
     // SAFETY: capget is called with valid pointers
     let result = unsafe {
         capget(
-            &header as *const __user_cap_header_struct,
-            data.as_mut_ptr() as *mut __user_cap_data_struct,
+            &raw const header,
+            data.as_mut_ptr().cast::<__user_cap_data_struct>(),
         )
     };
     
@@ -461,8 +465,8 @@ fn linux_drop_setuid_capability() -> Result<(), PrivilegeError> {
     // SAFETY: capset is called with valid pointers
     let result = unsafe {
         capset(
-            &header as *const __user_cap_header_struct,
-            data.as_ptr() as *const __user_cap_data_struct,
+            &raw const header,
+            data.as_ptr(),
         )
     };
     
