@@ -89,19 +89,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::select;
-use tracing::{error, info, warn, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 // Import DNS server components from dnsmasq-rs
 use dnsmasq::config::{ConfigBuilder, DnsConfig, UpstreamServer};
 use dnsmasq::dns::cache::DnsCache;
 use dnsmasq::dns::domain::domain_equal;
-use dnsmasq::dns::edns::OptRecord;
-use dnsmasq::dns::forward::handle_query;
-use dnsmasq::dns::protocol::RecordType;
 use dnsmasq::dns::server::{DnsServer, ServerConfig};
-use dnsmasq::network::socket::UdpSocket;
 use dnsmasq::runtime::signal::setup_signal_handlers;
 
 /// Main entry point for DNS forwarding example
@@ -202,7 +197,7 @@ async fn main() -> Result<()> {
     // Step 6: Setup signal handlers for graceful shutdown
     info!("Step 6: Setting up signal handlers (SIGTERM, SIGINT)");
     
-    let signal_handler = match setup_signal_handlers() {
+    let _signal_handler = match setup_signal_handlers() {
         Ok(handler) => {
             info!("Signal handlers installed successfully");
             handler
@@ -219,42 +214,35 @@ async fn main() -> Result<()> {
     // Step 7: Display cache and forwarding information
     display_server_information(&dns_config);
 
-    // Step 8: Start DNS server event loop with concurrent statistics display
+    // Step 8: Start DNS server event loop
     info!("Step 8: Starting DNS server event loop");
     info!("DNS server is now ready to accept queries on port 53");
     info!("Press Ctrl+C or send SIGTERM to shutdown gracefully");
 
-    // Spawn statistics display task
-    let stats_task = tokio::spawn(display_statistics_periodically(
-        dns_server.statistics().clone(),
-    ));
-
     // Run server until shutdown signal
-    let server_task = tokio::spawn(async move {
-        match dns_server.run().await {
-            Ok(()) => {
-                info!("DNS server stopped gracefully");
-                Ok(())
-            }
-            Err(e) => {
-                error!("DNS server error: {}", e);
-                Err(e)
-            }
+    match dns_server.run().await {
+        Ok(()) => {
+            info!("DNS server stopped gracefully");
         }
-    });
-
-    // Wait for either server shutdown or statistics task completion
-    select! {
-        result = server_task => {
-            match result {
-                Ok(Ok(())) => info!("Server task completed successfully"),
-                Ok(Err(e)) => error!("Server task failed: {}", e),
-                Err(e) => error!("Server task panicked: {}", e),
-            }
+        Err(e) => {
+            error!("DNS server error: {}", e);
+            return Err(e.into());
         }
-        _ = stats_task => {
-            info!("Statistics task completed");
-        }
+    }
+    
+    // Display final statistics before shutdown
+    info!("");
+    info!("=== Final DNS Server Statistics ===");
+    let final_stats = dns_server.statistics().snapshot();
+    info!("Queries Received: {}", final_stats.queries_received);
+    info!("Queries Forwarded: {}", final_stats.queries_forwarded);
+    info!("Cache Hits: {}", final_stats.cache_hits);
+    info!("Cache Misses: {}", final_stats.cache_misses);
+    
+    let total_cache_ops = final_stats.cache_hits + final_stats.cache_misses;
+    if total_cache_ops > 0 {
+        let hit_ratio = (final_stats.cache_hits as f64 / total_cache_ops as f64) * 100.0;
+        info!("Cache Hit Ratio: {:.1}%", hit_ratio);
     }
 
     info!("=== DNS Forwarding Example Completed ===");
@@ -488,63 +476,7 @@ fn display_server_information(dns_config: &DnsConfig) {
     info!("");
 }
 
-/// Display DNS server statistics periodically
-///
-/// Spawns an async task that displays cache hit/miss ratios, query counts,
-/// and forwarding statistics every 30 seconds. This demonstrates real-time
-/// monitoring of DNS server performance.
-///
-/// # Arguments
-///
-/// * `statistics` - Arc reference to server statistics for monitoring
-///
-/// # C Source Reference
-///
-/// Replaces manual statistics tracking in src/cache.c and src/forward.c
-async fn display_statistics_periodically(
-    statistics: Arc<dnsmasq::dns::server::ServerStatistics>,
-) {
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
-    
-    loop {
-        interval.tick().await;
-        
-        let stats = statistics.snapshot();
-        
-        // Calculate cache hit ratio
-        let total_cache_ops = stats.cache_hits + stats.cache_misses;
-        let hit_ratio = if total_cache_ops > 0 {
-            (stats.cache_hits as f64 / total_cache_ops as f64) * 100.0
-        } else {
-            0.0
-        };
-        
-        info!("");
-        info!("=== DNS Server Statistics ===");
-        info!("Queries:");
-        info!("  - Total Received: {}", stats.queries_received);
-        info!("  - Forwarded to Upstream: {}", stats.queries_forwarded);
-        info!("");
-        info!("Cache Performance:");
-        info!("  - Cache Hits: {} ({:.1}%)", stats.cache_hits, hit_ratio);
-        info!("  - Cache Misses: {}", stats.cache_misses);
-        info!("");
-        info!("Responses:");
-        info!("  - SERVFAIL: {}", stats.servfail_responses);
-        info!("  - NXDOMAIN: {}", stats.nxdomain_responses);
-        info!("");
-        
-        // Display cache efficiency message
-        if hit_ratio > 50.0 {
-            info!("✓ Good cache efficiency (>{:.0}% hit ratio)", hit_ratio);
-        } else if total_cache_ops > 100 {
-            warn!(
-                "⚠ Low cache efficiency ({:.1}% hit ratio) - consider increasing cache size",
-                hit_ratio
-            );
-        }
-    }
-}
+
 
 /// Demonstrate comprehensive DNS cache API usage
 ///
@@ -559,7 +491,7 @@ fn demonstrate_cache_api_usage() {
     info!("=== DNS Cache API Demonstration ===");
     
     // Create a new cache with 1000-entry capacity (DnsCache::new)
-    let mut cache = DnsCache::new(1000);
+    let cache = DnsCache::new(1000);
     
     info!("Created DNS cache with 1000-entry capacity");
     info!("Cache uses LRU eviction policy with automatic TTL expiration");
@@ -576,7 +508,8 @@ fn demonstrate_cache_api_usage() {
     // Get cache statistics
     let stats = cache.get_statistics();
     info!("Initial Cache Statistics:");
-    info!("  - Total Entries: {}", stats.entries);
+    info!("  - Current Entries: {}", stats.current_size);
+    info!("  - Maximum Capacity: {}", stats.max_size);
     info!("  - Cache Hits: {}", stats.hits);
     info!("  - Cache Misses: {}", stats.misses);
     info!("  - Evictions: {}", stats.evictions);
@@ -686,7 +619,7 @@ fn demonstrate_record_types() {
 #[allow(dead_code)]
 fn demonstrate_cache_operations() {
     // Create a new cache with 1000-entry capacity
-    let mut cache = DnsCache::new(1000);
+    let _cache = DnsCache::new(1000);
     
     info!("DNS Cache Operations:");
     info!("  - new() - Create cache with specified capacity");
