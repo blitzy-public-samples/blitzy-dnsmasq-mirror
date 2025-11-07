@@ -20,3 +20,4 @@ Cargo.lock
 *.pdb
 cobertura.xml
 tarpaulin-report.html
+*.proptest-regressions
