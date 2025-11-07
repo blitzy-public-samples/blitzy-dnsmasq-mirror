@@ -68,12 +68,10 @@ use tokio::sync::RwLock;
 
 // Import internal modules for benchmarking
 // All imports validated against depends_on_files list
-use dnsmasq_rs::dns::cache::{CacheKey, CacheSource, DnsCache};
-use dnsmasq_rs::dns::edns::OptRecord;
-use dnsmasq_rs::dns::forward::ForwardRecord;
-use dnsmasq_rs::dns::protocol::{DnsMessage, RecordClass, RecordType};
-use dnsmasq_rs::network::socket::UdpSocket;
-use dnsmasq_rs::types::daemon_state::DaemonState;
+use dnsmasq::dns::cache::{CacheKey, CacheSource, DnsCache};
+use dnsmasq::dns::edns::OptRecord;
+use dnsmasq::dns::forward::ForwardRecord;
+use dnsmasq::dns::protocol::{RecordClass, RecordType};
 
 /// Benchmark end-to-end DNS query forwarding latency
 ///
@@ -83,7 +81,7 @@ use dnsmasq_rs::types::daemon_state::DaemonState;
 ///
 /// Performance target: <1ms per query (excluding actual network I/O)
 fn bench_end_to_end_forwarding(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let _rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("forwarding_end_to_end");
     
     // Setup: Create test upstream server address
@@ -184,7 +182,7 @@ fn bench_id_randomization(c: &mut Criterion) {
     });
     
     // Benchmark collision handling when ID space is crowded
-    let mut crowded_ids: HashSet<u16> = (0..50000).map(|_| rand::random::<u16>()).collect();
+    let crowded_ids: HashSet<u16> = (0..50000).map(|_| rand::random::<u16>()).collect();
     
     group.bench_function("generate_id_with_collisions", |b| {
         b.iter(|| {
@@ -208,7 +206,7 @@ fn bench_port_randomization(c: &mut Criterion) {
     let mut group = c.benchmark_group("port_randomization");
     
     group.bench_function("select_random_port", |b| {
-        b.to_async(&rt).iter(|| async {
+        b.iter(|| {
             // Simulate random port selection from randfd_list
             let port = black_box(select_random_port(1024, 65535));
             port
@@ -216,12 +214,14 @@ fn bench_port_randomization(c: &mut Criterion) {
     });
     
     group.bench_function("bind_random_port_socket", |b| {
-        b.to_async(&rt).iter(|| async {
-            // Measure actual socket binding with random port
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-            let socket = tokio::net::UdpSocket::bind(addr).await.unwrap();
-            let local_addr = socket.local_addr().unwrap();
-            black_box(local_addr.port())
+        b.iter(|| {
+            rt.block_on(async {
+                // Measure actual socket binding with random port
+                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+                let socket = tokio::net::UdpSocket::bind(addr).await.unwrap();
+                let local_addr = socket.local_addr().unwrap();
+                black_box(local_addr.port())
+            })
         });
     });
     
@@ -317,7 +317,7 @@ fn bench_retry_logic(c: &mut Criterion) {
 ///
 /// Performance target: <500µs for TCP connection setup decision
 fn bench_tcp_fallback(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let _rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("tcp_fallback");
     
     group.bench_function("detect_truncation", |b| {
@@ -457,9 +457,9 @@ fn bench_response_processing(c: &mut Criterion) {
     });
     
     group.bench_function("cache_response", |b| {
-        b.to_async(&rt).iter(|| {
+        b.iter(|| {
             let cache_clone = Arc::clone(&cache);
-            async move {
+            rt.block_on(async move {
                 // Simulate cache insertion from response processing
                 let key = CacheKey::new(
                     "example.com".to_string(),
@@ -474,7 +474,7 @@ fn bench_response_processing(c: &mut Criterion) {
                     black_box(3600),
                     black_box(CacheSource::Upstream),
                 );
-            }
+            })
         });
     });
     
@@ -501,34 +501,36 @@ fn bench_concurrent_queries(c: &mut Criterion) {
             BenchmarkId::from_parameter(num_queries),
             num_queries,
             |b, &num| {
-                b.to_async(&rt).iter(|| async move {
-                    // Simulate concurrent query forwarding
-                    let mut tasks = Vec::new();
-                    
-                    for i in 0..num {
-                        let client_addr = SocketAddr::new(
-                            client_base,
-                            (20000 + i) as u16,
-                        );
+                b.iter(|| {
+                    rt.block_on(async move {
+                        // Simulate concurrent query forwarding
+                        let mut tasks = Vec::new();
                         
-                        let task = tokio::spawn(async move {
-                            let record = ForwardRecord::new(
-                                i as u16,
-                                client_addr,
-                                upstream,
-                                i as u64,
-                                0,
+                        for i in 0..num {
+                            let client_addr = SocketAddr::new(
+                                client_base,
+                                (20000 + i) as u16,
                             );
-                            black_box(record)
-                        });
+                            
+                            let task = tokio::spawn(async move {
+                                let record = ForwardRecord::new(
+                                    i as u16,
+                                    client_addr,
+                                    upstream,
+                                    i as u64,
+                                    0,
+                                );
+                                black_box(record)
+                            });
+                            
+                            tasks.push(task);
+                        }
                         
-                        tasks.push(task);
-                    }
-                    
-                    // Wait for all queries to complete
-                    for task in tasks {
-                        let _ = task.await;
-                    }
+                        // Wait for all queries to complete
+                        for task in tasks {
+                            let _ = task.await;
+                        }
+                    })
                 });
             },
         );
@@ -659,7 +661,7 @@ fn select_best_server(servers: &[TestServer], query_domain: &str) -> Option<usiz
 }
 
 /// Select healthy server from server list
-fn select_healthy_server(servers: &[TestServer], query_domain: &str) -> Option<usize> {
+fn select_healthy_server(servers: &[TestServer], _query_domain: &str) -> Option<usize> {
     // Select server with lowest failure rate
     servers
         .iter()
@@ -685,7 +687,13 @@ fn select_next_server_for_retry(servers: &[TestServer], current_idx: usize) -> u
 fn create_opt_record(udp_size: u16, do_bit: bool) -> OptRecord {
     // This would be the actual OptRecord construction
     // For benchmarking purposes, we simulate the structure
-    OptRecord
+    OptRecord {
+        udp_payload_size: udp_size,
+        extended_rcode: 0,
+        version: 0,
+        dnssec_ok: do_bit,
+        options: vec![],
+    }
 }
 
 /// Create test forward records with some expired
@@ -726,9 +734,6 @@ struct TestServer {
     failed_queries: u32,
     total_queries: u32,
 }
-
-// Stub type for OptRecord (would be imported from dns::edns)
-struct OptRecord;
 
 // ===== Criterion Benchmark Groups =====
 

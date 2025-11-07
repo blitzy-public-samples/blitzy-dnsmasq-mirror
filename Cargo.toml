@@ -218,6 +218,11 @@ name = "packet_parsing"
 harness = false
 path = "benches/packet_parsing.rs"
 
+[[bench]]
+name = "forwarding"
+harness = false
+path = "benches/forwarding.rs"
+
 # Cargo metadata for crates.io publication
 [package.metadata.docs.rs]
 all-features = true
