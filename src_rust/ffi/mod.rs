@@ -246,9 +246,9 @@ pub use libc_wrappers::{LinuxCapability, CapabilitySet};
 #[cfg(target_os = "linux")]
 pub use platform::netlink;
 
-/// OpenWrt ubus IPC interface (Linux only, optional feature)
+/// `OpenWrt` ubus IPC interface (Linux only, optional feature)
 ///
-/// Provides microbus IPC for embedded OpenWrt systems.
+/// Provides microbus IPC for embedded `OpenWrt` systems.
 #[cfg(all(target_os = "linux", feature = "ubus"))]
 pub use platform::ubus;
 
@@ -295,13 +295,11 @@ mod tests {
     fn test_libc_wrappers_accessible() {
         // Verify libc_wrappers module is accessible
         // The actual functionality is tested in libc_wrappers module tests
-        assert!(true);
     }
 
     #[test]
     fn test_platform_module_accessible() {
         // Verify platform module is accessible
         // Platform-specific functionality tested in platform module tests
-        assert!(true);
     }
 }

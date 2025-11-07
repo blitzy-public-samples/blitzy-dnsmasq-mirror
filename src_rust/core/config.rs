@@ -1032,18 +1032,20 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_version_constant() {
         assert!(!VERSION.is_empty());
         assert!(VERSION.contains("2.90"));
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_resource_limits() {
-        // Verify sensible resource limits
-        assert!(FTABSIZ > 0);
-        assert!(CACHESIZ > 0);
-        assert!(MAXLEASES > 0);
-        assert!(MAX_PROCS > 0);
+        // Verify resource limits are defined with expected values (compile-time constants)
+        assert_eq!(FTABSIZ, 150);
+        assert_eq!(CACHESIZ, 150);
+        assert_eq!(MAXLEASES, 1000);
+        assert_eq!(MAX_PROCS, 20);
     }
 
     #[test]
@@ -1056,6 +1058,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_packet_sizes() {
         // Verify packet size relationships
         assert!(EDNS_PKTSZ > SAFE_PKTSZ);
@@ -1064,6 +1067,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_dhcp_constants() {
         // Verify DHCP configuration
         assert_eq!(DEFLEASE, 3600); // 1 hour
@@ -1102,10 +1106,11 @@ mod tests {
         assert_eq!(AUTH_TTL.as_secs(), 600);
         assert_eq!(SOA_REFRESH.as_secs(), 1200);
         assert_eq!(SOA_RETRY.as_secs(), 180);
-        assert_eq!(SOA_EXPIRY.as_secs(), 1209600);
+        assert_eq!(SOA_EXPIRY.as_secs(), 1_209_600);
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_cname_chain_limit() {
         // Verify CNAME chain protection
         assert_eq!(CNAME_CHAIN, 10);
@@ -1117,10 +1122,11 @@ mod tests {
     fn test_cache_ttl_limits() {
         // Verify TTL constraints
         assert_eq!(TTL_FLOOR_LIMIT, 3600);
-        assert!(DNSSEC_MIN_TTL.as_secs() < TTL_FLOOR_LIMIT as u64);
+        assert!(DNSSEC_MIN_TTL.as_secs() < u64::from(TTL_FLOOR_LIMIT));
     }
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_platform_specific_paths() {
         // Verify platform-specific paths are defined
         assert!(!LEASEFILE.is_empty());
@@ -1161,6 +1167,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_privilege_dropping_constants() {
         // Verify user/group constants are defined
         assert!(!CHUSER.is_empty());
@@ -1277,6 +1284,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_all_constants_positive() {
         // Verify all numeric constants are positive
         assert!(FTABSIZ > 0);
@@ -1302,6 +1310,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_all_durations_nonzero() {
         // Verify all Duration constants are non-zero
         assert!(CHILD_LIFETIME.as_secs() > 0);
@@ -1320,6 +1329,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_packet_size_sanity() {
         // EDNS0 packet size should be larger than safe packet size
         assert!(EDNS_PKTSZ > SAFE_PKTSZ);
@@ -1336,6 +1346,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_dhcp_timing_relationships() {
         // DHCPv6 leases should be longer than DHCPv4 leases
         assert!(DEFLEASE6 > DEFLEASE);
@@ -1351,6 +1362,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_cname_chain_reasonable() {
         // CNAME chain should allow some chaining but prevent loops
         assert!(CNAME_CHAIN >= 5); // Allow reasonable multi-level CNAMEs
@@ -1358,6 +1370,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_dnssec_work_prevents_dos() {
         // DNSSEC work limit should prevent DoS but allow legitimate validation
         assert!(DNSSEC_WORK >= 20); // Allow complex validation chains

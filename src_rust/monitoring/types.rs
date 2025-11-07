@@ -548,13 +548,14 @@ mod tests {
 
     #[test]
     fn test_all_returns_complete_metric_set() {
+        use std::collections::HashSet;
+        
         let all_metrics = MetricId::all();
 
         // Verify count matches C implementation (20 metrics)
         assert_eq!(all_metrics.len(), 20);
 
         // Verify no duplicates
-        use std::collections::HashSet;
         let unique_metrics: HashSet<_> = all_metrics.iter().collect();
         assert_eq!(unique_metrics.len(), 20);
 
@@ -574,7 +575,7 @@ mod tests {
 
         let names: HashSet<_> = MetricId::all()
             .iter()
-            .map(|m| m.to_prometheus_name())
+            .map(super::MetricId::to_prometheus_name)
             .collect();
 
         // All metric names must be unique
@@ -583,6 +584,8 @@ mod tests {
 
     #[test]
     fn test_enum_traits() {
+        use std::collections::HashMap;
+        
         let metric1 = MetricId::DnsQueriesForwarded;
         let metric2 = MetricId::DnsQueriesForwarded;
         let metric3 = MetricId::DhcpAck;
@@ -592,7 +595,7 @@ mod tests {
         assert_eq!(copied, metric1);
 
         // Test Clone
-        let cloned = metric1.clone();
+        let cloned = metric1;
         assert_eq!(cloned, metric1);
 
         // Test PartialEq
@@ -600,13 +603,12 @@ mod tests {
         assert_ne!(metric1, metric3);
 
         // Test Hash (can be used as HashMap key)
-        use std::collections::HashMap;
         let mut map = HashMap::new();
         map.insert(metric1, 42);
         assert_eq!(map.get(&metric2), Some(&42));
 
         // Test Debug
-        let debug_str = format!("{:?}", metric1);
+        let debug_str = format!("{metric1:?}");
         assert!(debug_str.contains("DnsQueriesForwarded"));
     }
 

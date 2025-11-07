@@ -99,20 +99,13 @@ impl BlockDataNode {
             next: None,
         }
     }
-
-    /// Create a node with data copied from slice
-    fn with_data(data: &[u8]) -> Self {
-        let mut node = Self::new();
-        let copy_len = data.len().min(KEYBLOCK_LEN);
-        node.data[..copy_len].copy_from_slice(&data[..copy_len]);
-        node
-    }
 }
 
 /// Block allocator managing freelist and statistics
 ///
 /// Singleton structure maintaining the global freelist of available blocks
 /// and tracking allocation statistics. Replaces C's global static variables.
+#[allow(clippy::vec_box)]
 struct BlockAllocator {
     /// Freelist of available blocks for reuse
     freelist: Mutex<Vec<Box<BlockDataNode>>>,
@@ -222,8 +215,8 @@ impl BlockAllocator {
 
     /// Reset allocator state and optionally preallocate blocks
     ///
-    /// Clears the freelist and resets all counters to zero. If dnssec_enabled
-    /// is true and cache_size > 0, preallocates cache_size blocks to reduce
+    /// Clears the freelist and resets all counters to zero. If `dnssec_enabled`
+    /// is true and `cache_size` > 0, preallocates `cache_size` blocks to reduce
     /// heap fragmentation during runtime.
     fn reset(&self, cache_size: usize, dnssec_enabled: bool) {
         // Clear freelist
@@ -242,7 +235,7 @@ impl BlockAllocator {
 
     /// Get current statistics for reporting
     ///
-    /// Returns tuple of (blocks_in_use, high_water_mark, total_allocated)
+    /// Returns tuple of (`blocks_in_use`, `high_water_mark`, `total_allocated`)
     fn get_stats(&self) -> (usize, usize, usize) {
         (
             self.count.load(Ordering::Relaxed),
@@ -255,14 +248,14 @@ impl BlockAllocator {
 /// Global block allocator instance
 ///
 /// Module-level singleton managing the freelist and statistics.
-/// Replaces C's global static variables (keyblock_free, blockdata_count, etc.)
+/// Replaces C's global static variables (`keyblock_free`, `blockdata_count`, etc.)
 static BLOCK_ALLOCATOR: BlockAllocator = BlockAllocator::new();
 
 /// Block-chained data storage
 ///
 /// Public API representing a chain of blocks containing variable-length data.
 /// Automatically manages memory through RAII - blocks are returned to freelist
-/// when BlockData is dropped.
+/// when `BlockData` is dropped.
 ///
 /// # Memory Layout
 ///
@@ -273,9 +266,9 @@ static BLOCK_ALLOCATOR: BlockAllocator = BlockAllocator::new();
 ///
 /// # Thread Safety
 ///
-/// BlockData itself is not Send/Sync as it uses RefCell internally for the
+/// `BlockData` itself is not Send/Sync as it uses `RefCell` internally for the
 /// freelist. All operations must be performed on the same thread. However,
-/// statistics counters use AtomicUsize for thread-safe access.
+/// statistics counters use `AtomicUsize` for thread-safe access.
 #[derive(Debug)]
 pub struct BlockData {
     /// Head of the block chain
@@ -285,7 +278,7 @@ pub struct BlockData {
 }
 
 impl BlockData {
-    /// Create a new empty BlockData
+    /// Create a new empty `BlockData`
     ///
     /// Creates an empty block chain with no allocated blocks. Useful as a
     /// placeholder or for incremental construction.
@@ -299,6 +292,7 @@ impl BlockData {
     /// assert!(empty.is_empty());
     /// assert_eq!(empty.len(), 0);
     /// ```
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             head: None,
@@ -306,10 +300,10 @@ impl BlockData {
         }
     }
 
-    /// Create BlockData from a byte slice
+    /// Create `BlockData` from a byte slice
     ///
     /// Allocates a block chain and copies data from the provided slice.
-    /// Each block holds up to KEYBLOCK_LEN bytes. This is the primary
+    /// Each block holds up to `KEYBLOCK_LEN` bytes. This is the primary
     /// construction method for storing DNSSEC keys, signatures, and other
     /// cryptographic data.
     ///
@@ -319,7 +313,7 @@ impl BlockData {
     ///
     /// # Returns
     ///
-    /// BlockData containing the copied data, or empty BlockData if allocation fails
+    /// `BlockData` containing the copied data, or empty `BlockData` if allocation fails
     ///
     /// # Examples
     ///
@@ -340,19 +334,16 @@ impl BlockData {
 
         let mut remaining = data;
         let mut head: Option<Box<BlockDataNode>> = None;
-        let mut tail: *mut Option<Box<BlockDataNode>> = &mut head;
+        let mut tail: *mut Option<Box<BlockDataNode>> = &raw mut head;
 
         while !remaining.is_empty() {
             // Allocate a block from freelist or heap
-            let mut block = match BLOCK_ALLOCATOR.alloc_block() {
-                Some(b) => b,
-                None => {
-                    // Allocation failed - free partial chain and return empty
-                    if let Some(chain) = head {
-                        BLOCK_ALLOCATOR.free_chain(Some(chain));
-                    }
-                    return Self::new();
+            let Some(mut block) = BLOCK_ALLOCATOR.alloc_block() else {
+                // Allocation failed - free partial chain and return empty
+                if let Some(chain) = head {
+                    BLOCK_ALLOCATOR.free_chain(Some(chain));
                 }
+                return Self::new();
             };
 
             // Copy data into this block
@@ -364,7 +355,7 @@ impl BlockData {
             unsafe {
                 *tail = Some(block);
                 if let Some(ref mut node) = *tail {
-                    tail = &mut node.next;
+                    tail = &raw mut node.next;
                 }
             }
         }
@@ -375,7 +366,7 @@ impl BlockData {
         }
     }
 
-    /// Read data from a reader into a new BlockData
+    /// Read data from a reader into a new `BlockData`
     ///
     /// Allocates a block chain and reads exactly `len` bytes from the provided
     /// reader. Used for loading persisted DNSSEC data from disk during cache
@@ -406,32 +397,28 @@ impl BlockData {
 
         let mut remaining = len;
         let mut head: Option<Box<BlockDataNode>> = None;
-        let mut tail: *mut Option<Box<BlockDataNode>> = &mut head;
+        let mut tail: *mut Option<Box<BlockDataNode>> = &raw mut head;
 
         while remaining > 0 {
             // Allocate a block from freelist or heap
-            let mut block = match BLOCK_ALLOCATOR.alloc_block() {
-                Some(b) => b,
-                None => {
-                    // Allocation failed - free partial chain
-                    if let Some(chain) = head.take() {
-                        BLOCK_ALLOCATOR.free_chain(Some(chain));
-                    }
-                    return Err(io::Error::new(
-                        io::ErrorKind::OutOfMemory,
-                        "Failed to allocate block",
-                    ));
+            let Some(mut block) = BLOCK_ALLOCATOR.alloc_block() else {
+                // Allocation failed - free partial chain
+                if let Some(chain) = head.take() {
+                    BLOCK_ALLOCATOR.free_chain(Some(chain));
                 }
+                return Err(io::Error::new(
+                    io::ErrorKind::OutOfMemory,
+                    "Failed to allocate block",
+                ));
             };
 
             // Read data directly into this block
             let read_len = remaining.min(KEYBLOCK_LEN);
-            reader.read_exact(&mut block.data[..read_len]).map_err(|e| {
+            reader.read_exact(&mut block.data[..read_len]).inspect_err(|_e| {
                 // Free partial chain on read error
                 if let Some(chain) = head.take() {
                     BLOCK_ALLOCATOR.free_chain(Some(chain));
                 }
-                e
             })?;
 
             remaining -= read_len;
@@ -440,7 +427,7 @@ impl BlockData {
             unsafe {
                 *tail = Some(block);
                 if let Some(ref mut node) = *tail {
-                    tail = &mut node.next;
+                    tail = &raw mut node.next;
                 }
             }
         }
@@ -454,7 +441,7 @@ impl BlockData {
     /// Convert block chain to a contiguous byte vector
     ///
     /// Copies all data from the block chain into a single contiguous Vec<u8>.
-    /// This is the inverse of from_bytes(). Used when contiguous data access
+    /// This is the inverse of `from_bytes()`. Used when contiguous data access
     /// is needed, such as for cryptographic verification.
     ///
     /// # Returns
@@ -471,6 +458,7 @@ impl BlockData {
     /// let retrieved = blocks.to_bytes();
     /// assert_eq!(retrieved, original);
     /// ```
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         if self.total_len == 0 {
             return Vec::new();
@@ -499,6 +487,10 @@ impl BlockData {
     /// # Arguments
     ///
     /// * `writer` - Destination to write data to
+    ///
+    /// # Errors
+    ///
+    /// Returns `io::Error` if the underlying writer fails to write data
     ///
     /// # Returns
     ///
@@ -534,9 +526,9 @@ impl BlockData {
 
     /// Copy data into a provided buffer
     ///
-    /// Copies up to buffer.len() bytes from the block chain into the provided
+    /// Copies up to `buffer.len()` bytes from the block chain into the provided
     /// buffer. Returns the number of bytes actually copied, which may be less
-    /// than buffer.len() if the chain contains less data.
+    /// than `buffer.len()` if the chain contains less data.
     ///
     /// # Arguments
     ///
@@ -592,13 +584,14 @@ impl BlockData {
     /// let blocks = BlockData::from_bytes(&data);
     /// assert_eq!(blocks.len(), 100);
     /// ```
+    #[must_use] 
     pub fn len(&self) -> usize {
         self.total_len
     }
 
     /// Check if the block chain is empty
     ///
-    /// Returns true if the chain contains no data (len() == 0).
+    /// Returns true if the chain contains no data (`len()` == 0).
     ///
     /// # Examples
     ///
@@ -611,6 +604,7 @@ impl BlockData {
     /// let data = BlockData::from_bytes(&[1, 2, 3]);
     /// assert!(!data.is_empty());
     /// ```
+    #[must_use] 
     pub fn is_empty(&self) -> bool {
         self.total_len == 0
     }
@@ -623,9 +617,9 @@ impl Default for BlockData {
 }
 
 impl Drop for BlockData {
-    /// Automatically return blocks to freelist when BlockData is dropped
+    /// Automatically return blocks to freelist when `BlockData` is dropped
     ///
-    /// RAII pattern ensures blocks are recycled without explicit free() calls.
+    /// RAII pattern ensures blocks are recycled without explicit `free()` calls.
     /// This eliminates memory leaks and use-after-free bugs from the C implementation.
     fn drop(&mut self) {
         if let Some(head) = self.head.take() {
@@ -647,8 +641,8 @@ impl Clone for BlockData {
 /// Initialize blockdata pool and preallocate blocks
 ///
 /// Initializes the blockdata memory pool system by resetting all counters
-/// and clearing the freelist. If DNSSEC validation is enabled and cache_size
-/// is non-zero, preallocates cache_size blocks to reduce heap fragmentation
+/// and clearing the freelist. If DNSSEC validation is enabled and `cache_size`
+/// is non-zero, preallocates `cache_size` blocks to reduce heap fragmentation
 /// during runtime.
 ///
 /// This function should be called once during daemon startup before any
@@ -735,6 +729,7 @@ mod tests {
     #[test]
     fn test_multiple_blocks() {
         // Create data larger than KEYBLOCK_LEN to span multiple blocks
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let data: Vec<u8> = (0..100).map(|i| (i % 256) as u8).collect();
         let blocks = BlockData::from_bytes(&data);
         assert_eq!(blocks.len(), 100);
@@ -820,6 +815,7 @@ mod tests {
     #[test]
     fn test_large_data() {
         // Test with data significantly larger than a single block
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let data: Vec<u8> = (0..1000).map(|i| (i % 256) as u8).collect();
         let blocks = BlockData::from_bytes(&data);
         assert_eq!(blocks.len(), 1000);
@@ -845,7 +841,7 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let blocks: BlockData = Default::default();
+        let blocks = BlockData::default();
         assert!(blocks.is_empty());
         assert_eq!(blocks.len(), 0);
     }

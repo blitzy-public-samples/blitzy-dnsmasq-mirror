@@ -13,17 +13,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! # DHCPv6 Option Parsing and Assembly
+//! # `DHCPv6` Option Parsing and Assembly
 //!
-//! This module provides memory-safe DHCPv6 option handling with Type-Length-Value (TLV)
+//! This module provides memory-safe `DHCPv6` option handling with Type-Length-Value (TLV)
 //! encoding per RFC 3315 Section 22. It replaces C's unsafe pointer arithmetic from
 //! `rfc3315.c` and manual buffer manipulation from `outpacket.c` with safe Rust abstractions.
 //!
 //! ## Architecture Overview
 //!
-//! DHCPv6 options use TLV encoding: `[code:2][len:2][data:len]` where all multi-byte
+//! `DHCPv6` options use TLV encoding: `[code:2][len:2][data:len]` where all multi-byte
 //! values are in network byte order (big-endian). Options can be nested (e.g., IAADDR
-//! inside IA_NA), requiring careful position tracking during construction.
+//! inside `IA_NA`), requiring careful position tracking during construction.
 //!
 //! ## Key Components
 //!
@@ -62,8 +62,8 @@
 //! ## RFC Compliance
 //!
 //! - RFC 3315 Section 22: Option format with 16-bit code and length in network byte order
-//! - RFC 3315 Section 22.4-22.6: IA_NA, IA_TA, IAADDR option structures
-//! - RFC 3633: IA_PD and IAPREFIX for prefix delegation
+//! - RFC 3315 Section 22.4-22.6: `IA_NA`, `IA_TA`, IAADDR option structures
+//! - RFC 3633: `IA_PD` and IAPREFIX for prefix delegation
 //!
 //! ## Performance Characteristics
 //!
@@ -105,7 +105,7 @@
 //!
 //! // Build IA_NA with nested IAADDR
 //! builder.start_option(OptionCode::IaNa)?;
-//! builder.write_u32(0x12345678)?;  // IAID
+//! builder.write_u32(0x1234_5678)?;  // IAID
 //! builder.write_u32(3600)?;        // T1
 //! builder.write_u32(7200)?;        // T2
 //!
@@ -133,7 +133,7 @@ use crate::dhcp::v6::protocol::OptionCode;
 // Error Types
 // ================================================================================================
 
-/// Errors that can occur during DHCPv6 option parsing or construction
+/// Errors that can occur during `DHCPv6` option parsing or construction
 ///
 /// Provides detailed error information for diagnosing option processing failures,
 /// replacing C's simple return codes (-1) with structured error types.
@@ -205,32 +205,29 @@ impl fmt::Display for OptionError {
             OptionError::InvalidLength { declared, available } => {
                 write!(
                     f,
-                    "Invalid option length: declared {} bytes but only {} available",
-                    declared, available
+                    "Invalid option length: declared {declared} bytes but only {available} available"
                 )
             }
             OptionError::Truncated { remaining } => {
                 write!(
                     f,
-                    "Truncated option header: only {} bytes remaining (need 4)",
-                    remaining
+                    "Truncated option header: only {remaining} bytes remaining (need 4)"
                 )
             }
             OptionError::InvalidCode { code } => {
-                write!(f, "Invalid option code: {}", code)
+                write!(f, "Invalid option code: {code}")
             }
             OptionError::BufferTooSmall { required, current } => {
                 write!(
                     f,
-                    "Buffer too small: need {} bytes but only {} available",
-                    required, current
+                    "Buffer too small: need {required} bytes but only {current} available"
                 )
             }
             OptionError::InvalidFormat { code, message } => {
-                write!(f, "Invalid format for option {:?}: {}", code, message)
+                write!(f, "Invalid format for option {code:?}: {message}")
             }
             OptionError::ParseError { message } => {
-                write!(f, "Parse error: {}", message)
+                write!(f, "Parse error: {message}")
             }
         }
     }
@@ -250,7 +247,7 @@ impl From<std::io::Error> for OptionError {
 // Dhcp6Option - Parsed Option Representation
 // ================================================================================================
 
-/// Represents a single parsed DHCPv6 option with code and data
+/// Represents a single parsed `DHCPv6` option with code and data
 ///
 /// Replaces C's raw pointer-based option access with a safe struct holding
 /// option code and a reference to option data. The data is a borrowed slice
@@ -258,7 +255,7 @@ impl From<std::io::Error> for OptionError {
 ///
 /// ## Memory Layout
 ///
-/// DHCPv6 option format per RFC 3315 Section 22.1:
+/// `DHCPv6` option format per RFC 3315 Section 22.1:
 /// ```text
 /// 0                   1                   2                   3
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -290,7 +287,7 @@ pub struct Dhcp6Option {
 }
 
 impl Dhcp6Option {
-    /// Creates a new DHCPv6 option with specified code and data
+    /// Creates a new `DHCPv6` option with specified code and data
     ///
     /// # Arguments
     ///
@@ -489,9 +486,9 @@ impl Dhcp6Option {
 // Dhcp6OptionParser - Safe Iterator for Option Parsing
 // ================================================================================================
 
-/// Iterator for parsing DHCPv6 options from a byte slice
+/// Iterator for parsing `DHCPv6` options from a byte slice
 ///
-/// Provides safe, bounds-checked iteration over DHCPv6 option sequences, replacing
+/// Provides safe, bounds-checked iteration over `DHCPv6` option sequences, replacing
 /// C's manual pointer arithmetic (`opt6_next`, `opt6_find`) with Rust's `Iterator` trait.
 ///
 /// ## Safety Guarantees
@@ -567,7 +564,7 @@ impl<'a> Dhcp6OptionParser<'a> {
     ///
     /// # Arguments
     ///
-    /// * `data` - Byte slice containing DHCPv6 options
+    /// * `data` - Byte slice containing `DHCPv6` options
     ///
     /// # Example
     ///
@@ -619,7 +616,7 @@ impl<'a> Dhcp6OptionParser<'a> {
     /// Finds all options matching a specific code
     ///
     /// Returns an iterator over all matching options. Useful for options that
-    /// can appear multiple times (e.g., DNS_SERVER).
+    /// can appear multiple times (e.g., `DNS_SERVER`).
     ///
     /// # Arguments
     ///
@@ -643,7 +640,7 @@ impl<'a> Dhcp6OptionParser<'a> {
     /// ```
     #[must_use]
     pub fn find_all(self, code: OptionCode) -> Vec<Dhcp6Option> {
-        self.filter_map(|result| result.ok())
+        self.filter_map(std::result::Result::ok)
             .filter(|opt| opt.code() == code)
             .collect()
     }
@@ -663,6 +660,7 @@ impl<'a> Dhcp6OptionParser<'a> {
     ///     // Parser position unchanged, can still call next()
     /// }
     /// ```
+    #[must_use] 
     pub fn peek(&self) -> Option<Result<Dhcp6Option, OptionError>> {
         let mut clone = self.clone();
         clone.next()
@@ -704,7 +702,7 @@ impl<'a> Dhcp6OptionParser<'a> {
         self.position += length;
 
         // Convert code to OptionCode enum (unknown codes use raw value)
-        let code = OptionCode::try_from(code_value).unwrap_or_else(|_| {
+        let code = OptionCode::try_from(code_value).unwrap_or({
             // For unknown option codes, we'll just skip them
             // This matches C behavior of processing only known options
             OptionCode::ClientId // Placeholder, should handle unknown codes gracefully
@@ -714,7 +712,7 @@ impl<'a> Dhcp6OptionParser<'a> {
     }
 }
 
-impl<'a> Iterator for Dhcp6OptionParser<'a> {
+impl Iterator for Dhcp6OptionParser<'_> {
     type Item = Result<Dhcp6Option, OptionError>;
 
     /// Advances the iterator and returns the next option
@@ -742,7 +740,7 @@ impl<'a> Iterator for Dhcp6OptionParser<'a> {
 // Dhcp6OptionBuilder - Safe Option Construction
 // ================================================================================================
 
-/// Builder for constructing DHCPv6 option sequences with automatic length tracking
+/// Builder for constructing `DHCPv6` option sequences with automatic length tracking
 ///
 /// Replaces C's manual buffer manipulation (`new_opt6`, `end_opt6`, `put_opt6_*`) from
 /// `outpacket.c` with safe builder pattern. Automatically tracks option positions and
@@ -776,7 +774,7 @@ impl<'a> Iterator for Dhcp6OptionParser<'a> {
 /// - RAII ensures cleanup even on early return/error
 /// - Builder pattern makes nesting explicit and safe
 ///
-/// ## Example: Building Nested IA_NA with IAADDR
+/// ## Example: Building Nested `IA_NA` with IAADDR
 ///
 /// ```rust,no_run
 /// use crate::dhcp::v6::protocol::OptionCode;
@@ -927,7 +925,7 @@ impl Dhcp6OptionBuilder {
     ///
     /// # Errors
     ///
-    /// Returns `OptionError` if option_start is invalid or length exceeds u16::MAX.
+    /// Returns `OptionError` if `option_start` is invalid or length exceeds `u16::MAX`.
     ///
     /// # Example
     ///
@@ -947,8 +945,7 @@ impl Dhcp6OptionBuilder {
             if stack_pos != option_start {
                 return Err(OptionError::ParseError {
                     message: format!(
-                        "Option position mismatch: expected {}, got {}",
-                        stack_pos, option_start
+                        "Option position mismatch: expected {stack_pos}, got {option_start}"
                     ),
                 });
             }
@@ -961,7 +958,7 @@ impl Dhcp6OptionBuilder {
         // Verify option_start is valid (must have 4-byte header)
         if option_start + 4 > self.buffer.len() {
             return Err(OptionError::ParseError {
-                message: format!("Invalid option_start position: {}", option_start),
+                message: format!("Invalid option_start position: {option_start}"),
             });
         }
 
@@ -978,6 +975,8 @@ impl Dhcp6OptionBuilder {
 
         // Back-patch the length field at option_start + 2
         let length_pos = option_start + 2;
+        // SAFETY: We validated data_length <= u16::MAX above, so cast to u16 is safe
+        #[allow(clippy::cast_possible_truncation)]
         let length_bytes = (data_length as u16).to_be_bytes();
         self.buffer[length_pos] = length_bytes[0];
         self.buffer[length_pos + 1] = length_bytes[1];
@@ -988,6 +987,10 @@ impl Dhcp6OptionBuilder {
     /// Writes a u8 value to the buffer
     ///
     /// Replaces C's `put_opt6_char(val)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::ParseError` if writing to the buffer fails
     ///
     /// # Example
     ///
@@ -1009,6 +1012,10 @@ impl Dhcp6OptionBuilder {
     ///
     /// Replaces C's `put_opt6_short(val)` which used `PUTSHORT` macro.
     ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::ParseError` if writing to the buffer fails
+    ///
     /// # Example
     ///
     /// ```rust,no_run
@@ -1029,12 +1036,16 @@ impl Dhcp6OptionBuilder {
     ///
     /// Replaces C's `put_opt6_long(val)` which used `PUTLONG` macro.
     ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::ParseError` if writing to the buffer fails
+    ///
     /// # Example
     ///
     /// ```rust,no_run
     /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
-    /// builder.write_u32(0x12345678)?;  // IAID
+    /// builder.write_u32(0x1234_5678)?;  // IAID
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_u32(&mut self, value: u32) -> Result<(), OptionError> {
@@ -1049,12 +1060,16 @@ impl Dhcp6OptionBuilder {
     ///
     /// Extension beyond C implementation for future protocol support.
     ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::ParseError` if writing to the buffer fails
+    ///
     /// # Example
     ///
     /// ```rust,no_run
     /// # use crate::dhcp::v6::options::Dhcp6OptionBuilder;
     /// # let mut builder = Dhcp6OptionBuilder::new();
-    /// builder.write_u64(0x123456789abcdef0)?;
+    /// builder.write_u64(0x1234_5678_9abc_def0)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn write_u64(&mut self, value: u64) -> Result<(), OptionError> {
@@ -1068,6 +1083,10 @@ impl Dhcp6OptionBuilder {
     /// Writes arbitrary bytes to the buffer
     ///
     /// Replaces C's `put_opt6(data, len)`.
+    ///
+    /// # Errors
+    ///
+    /// Currently never returns an error, but signature is Result for API consistency
     ///
     /// # Example
     ///
@@ -1084,6 +1103,10 @@ impl Dhcp6OptionBuilder {
     }
 
     /// Writes an IPv6 address (16 bytes) to the buffer
+    ///
+    /// # Errors
+    ///
+    /// Currently never returns an error, but signature is Result for API consistency
     ///
     /// # Example
     ///
@@ -1261,7 +1284,7 @@ pub fn parse_u16(data: &[u8], offset: usize) -> Result<u16, OptionError> {
 /// # use crate::dhcp::v6::options::parse_u32;
 /// let data: &[u8] = &[0x12, 0x34, 0x56, 0x78];
 /// let value = parse_u32(data, 0)?;
-/// assert_eq!(value, 0x12345678);
+/// assert_eq!(value, 0x1234_5678);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn parse_u32(data: &[u8], offset: usize) -> Result<u32, OptionError> {
@@ -1281,7 +1304,7 @@ pub fn parse_u32(data: &[u8], offset: usize) -> Result<u32, OptionError> {
 ///
 /// # Arguments
 ///
-/// * `data` - Byte slice containing DHCPv6 options
+/// * `data` - Byte slice containing `DHCPv6` options
 /// * `code` - Option code to search for
 ///
 /// # Returns
@@ -1298,21 +1321,22 @@ pub fn parse_u32(data: &[u8], offset: usize) -> Result<u32, OptionError> {
 ///     println!("Found Client ID: {} bytes", client_id.len());
 /// }
 /// ```
+#[must_use] 
 pub fn find_option(data: &[u8], code: OptionCode) -> Option<Dhcp6Option> {
     let parser = Dhcp6OptionParser::new(data);
     parser
-        .filter_map(|result| result.ok())
+        .filter_map(std::result::Result::ok)
         .find(|opt| opt.code() == code)
 }
 
-/// Extracts the Client ID (DUID) option from a DHCPv6 packet
+/// Extracts the Client ID (DUID) option from a `DHCPv6` packet
 ///
 /// Convenience wrapper around `find_option()` for the commonly accessed Client ID option.
 /// Replaces C's pattern of `opt6_find(opts, end, OPTION6_CLIENT_ID, 1)`.
 ///
 /// # Arguments
 ///
-/// * `data` - Byte slice containing DHCPv6 options
+/// * `data` - Byte slice containing `DHCPv6` options
 ///
 /// # Returns
 ///
@@ -1328,18 +1352,19 @@ pub fn find_option(data: &[u8], code: OptionCode) -> Option<Dhcp6Option> {
 ///     println!("Client DUID: {:02x?}", duid);
 /// }
 /// ```
+#[must_use] 
 pub fn get_client_id(data: &[u8]) -> Option<Dhcp6Option> {
     find_option(data, OptionCode::ClientId)
 }
 
-/// Extracts the Server ID (DUID) option from a DHCPv6 packet
+/// Extracts the Server ID (DUID) option from a `DHCPv6` packet
 ///
 /// Convenience wrapper around `find_option()` for the commonly accessed Server ID option.
 /// Replaces C's pattern of `opt6_find(opts, end, OPTION6_SERVER_ID, 1)`.
 ///
 /// # Arguments
 ///
-/// * `data` - Byte slice containing DHCPv6 options
+/// * `data` - Byte slice containing `DHCPv6` options
 ///
 /// # Returns
 ///
@@ -1355,6 +1380,7 @@ pub fn get_client_id(data: &[u8]) -> Option<Dhcp6Option> {
 ///     println!("Server DUID: {:02x?}", duid);
 /// }
 /// ```
+#[must_use] 
 pub fn get_server_id(data: &[u8]) -> Option<Dhcp6Option> {
     find_option(data, OptionCode::ServerId)
 }
@@ -1396,7 +1422,7 @@ mod tests {
         ];
 
         let parser = Dhcp6OptionParser::new(&data);
-        let options: Vec<_> = parser.filter_map(|r| r.ok()).collect();
+        let options: Vec<_> = parser.filter_map(std::result::Result::ok).collect();
 
         assert_eq!(options.len(), 2);
         assert_eq!(options[0].code(), OptionCode::ClientId);
@@ -1473,7 +1499,7 @@ mod tests {
         assert_eq!(data[4], 0xff); // data
     }
 
-    /// Test nested options (IA_NA containing IAADDR)
+    /// Test nested options (`IA_NA` containing IAADDR)
     #[test]
     fn test_builder_nested_options() {
         let mut builder = Dhcp6OptionBuilder::new();
@@ -1481,7 +1507,7 @@ mod tests {
         // Start IA_NA
         let ia_na_start = builder.current_position();
         builder.start_option(OptionCode::IaNa).unwrap();
-        builder.write_u32(0x12345678).unwrap(); // IAID
+        builder.write_u32(0x1234_5678).unwrap(); // IAID
         builder.write_u32(3600).unwrap(); // T1
         builder.write_u32(7200).unwrap(); // T2
 
@@ -1508,7 +1534,7 @@ mod tests {
         assert_eq!(ia_na.len(), 40);
     }
 
-    /// Test find_option utility function
+    /// Test `find_option` utility function
     #[test]
     fn test_find_option() {
         let data = vec![
@@ -1527,7 +1553,7 @@ mod tests {
         assert!(missing.is_none());
     }
 
-    /// Test get_client_id convenience function
+    /// Test `get_client_id` convenience function
     #[test]
     fn test_get_client_id() {
         let data = vec![
@@ -1541,7 +1567,7 @@ mod tests {
         assert_eq!(client_id.unwrap().data(), &[0x00, 0x01, 0x00, 0x01]);
     }
 
-    /// Test get_server_id convenience function
+    /// Test `get_server_id` convenience function
     #[test]
     fn test_get_server_id() {
         let data = vec![
@@ -1555,7 +1581,7 @@ mod tests {
         assert_eq!(server_id.unwrap().len(), 6);
     }
 
-    /// Test parse_u16 utility function
+    /// Test `parse_u16` utility function
     #[test]
     fn test_parse_u16() {
         let data = [0x12, 0x34, 0x56, 0x78];
@@ -1569,12 +1595,12 @@ mod tests {
         ));
     }
 
-    /// Test parse_u32 utility function
+    /// Test `parse_u32` utility function
     #[test]
     fn test_parse_u32() {
         let data = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc];
-        assert_eq!(parse_u32(&data, 0).unwrap(), 0x12345678);
-        assert_eq!(parse_u32(&data, 2).unwrap(), 0x56789abc);
+        assert_eq!(parse_u32(&data, 0).unwrap(), 0x1234_5678);
+        assert_eq!(parse_u32(&data, 2).unwrap(), 0x5678_9abc);
 
         // Test truncation
         assert!(matches!(
@@ -1583,7 +1609,7 @@ mod tests {
         ));
     }
 
-    /// Test Dhcp6Option parsing methods
+    /// Test `Dhcp6Option` parsing methods
     #[test]
     fn test_option_parse_methods() {
         let data = vec![
@@ -1595,7 +1621,7 @@ mod tests {
 
         assert_eq!(opt.parse_u8(0).unwrap(), 0xff);
         assert_eq!(opt.parse_u16(1).unwrap(), 0x1234);
-        assert_eq!(opt.parse_u32(3).unwrap(), 0x56789abc);
+        assert_eq!(opt.parse_u32(3).unwrap(), 0x5678_9abc);
     }
 
     /// Test builder error on unfinished options
@@ -1616,9 +1642,9 @@ mod tests {
         let mut builder = Dhcp6OptionBuilder::new();
 
         let pos1 = builder.save_position();
-        builder.write_u32(0xdeadbeef).unwrap();
+        builder.write_u32(0xdead_beef).unwrap();
         let pos2 = builder.save_position();
-        builder.write_u32(0xcafebabe).unwrap();
+        builder.write_u32(0xcafe_babe).unwrap();
 
         // Restore to pos2, removing the second write
         builder.restore_position(pos2);
@@ -1630,7 +1656,7 @@ mod tests {
         assert_eq!(builder.buffer.len(), 0);
     }
 
-    /// Test maximum option length (u16::MAX)
+    /// Test maximum option length (`u16::MAX`)
     #[test]
     fn test_max_option_length() {
         // Create option with maximum valid length
@@ -1648,7 +1674,7 @@ mod tests {
         assert_eq!(packet.len(), 4 + max_len);
     }
 
-    /// Test option length exceeding u16::MAX causes error
+    /// Test option length exceeding `u16::MAX` causes error
     #[test]
     fn test_option_length_overflow() {
         let oversized_data = vec![0u8; (u16::MAX as usize) + 1];

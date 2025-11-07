@@ -816,7 +816,7 @@ mod tests {
         // Verify all 20 metrics are registered
         for metric in MetricId::all() {
             let value = collector.get_value(*metric).expect("Metric should exist");
-            assert_eq!(value, 0, "Metric {:?} should start at 0", metric);
+            assert_eq!(value, 0, "Metric {metric:?} should start at 0");
         }
     }
 
@@ -892,8 +892,8 @@ mod tests {
         // Verify help text is defined for all metrics
         for metric in MetricId::all() {
             let help = MetricsCollector::get_metric_help(*metric);
-            assert!(!help.is_empty(), "Help text missing for {:?}", metric);
-            assert!(help.len() > 10, "Help text too short for {:?}", metric);
+            assert!(!help.is_empty(), "Help text missing for {metric:?}");
+            assert!(help.len() > 10, "Help text too short for {metric:?}");
         }
     }
 
@@ -931,14 +931,14 @@ mod tests {
         let error = MetricsError::InvalidMetricId {
             metric_id: "test_metric".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Invalid metric ID"));
         assert!(display.contains("test_metric"));
 
         let error = MetricsError::LockPoisoned {
             lock_name: "counters".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("poisoned"));
         assert!(display.contains("counters"));
     }
@@ -946,7 +946,7 @@ mod tests {
     #[test]
     fn test_debug_impl() {
         let collector = MetricsCollector::new().unwrap();
-        let debug_str = format!("{:?}", collector);
+        let debug_str = format!("{collector:?}");
         assert!(debug_str.contains("MetricsCollector"));
     }
 }

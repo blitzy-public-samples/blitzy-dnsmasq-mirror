@@ -563,9 +563,11 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_version_is_set() {
-        assert!(!VERSION.is_empty());
-        assert!(VERSION.len() > 0);
+        // Verify VERSION constant is accessible and contains version data
+        assert!(!VERSION.is_empty(), "VERSION should not be empty");
+        assert!(VERSION.contains('.'), "VERSION should contain dots (e.g., 2.90.0)");
     }
 
     #[test]
@@ -580,7 +582,7 @@ mod tests {
             context: "test operation".to_string(),
             source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("I/O error"));
         assert!(display.contains("test operation"));
     }
@@ -590,7 +592,7 @@ mod tests {
         let error = Error::Config {
             message: "invalid port number".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Configuration error"));
         assert!(display.contains("invalid port number"));
     }
@@ -601,7 +603,7 @@ mod tests {
             message: "unexpected token".to_string(),
             location: Some("line 42".to_string()),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Parse error"));
         assert!(display.contains("line 42"));
         assert!(display.contains("unexpected token"));
@@ -613,7 +615,7 @@ mod tests {
             message: "failed to bind socket".to_string(),
             source: Some(io::Error::new(io::ErrorKind::AddrInUse, "address in use")),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Network error"));
         assert!(display.contains("failed to bind socket"));
     }
@@ -623,7 +625,7 @@ mod tests {
         let error = Error::Dns {
             message: "invalid query format".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("DNS error"));
         assert!(display.contains("invalid query format"));
     }
@@ -633,7 +635,7 @@ mod tests {
         let error = Error::Dhcp {
             message: "no available leases".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("DHCP error"));
         assert!(display.contains("no available leases"));
     }
@@ -643,7 +645,7 @@ mod tests {
         let error = Error::Permission {
             message: "cannot bind to port 53".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Permission denied"));
         assert!(display.contains("cannot bind to port 53"));
     }
@@ -653,7 +655,7 @@ mod tests {
         let error = Error::NotFound {
             resource: "/etc/dnsmasq.conf".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Resource not found"));
         assert!(display.contains("/etc/dnsmasq.conf"));
     }
@@ -663,7 +665,7 @@ mod tests {
         let error = Error::InvalidState {
             message: "cannot modify config after startup".to_string(),
         };
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Invalid state"));
         assert!(display.contains("cannot modify config after startup"));
     }
@@ -693,6 +695,7 @@ mod tests {
 
     #[test]
     fn test_result_type_alias() {
+        #[allow(clippy::unnecessary_wraps)]
         fn returns_result() -> Result<i32> {
             Ok(42)
         }

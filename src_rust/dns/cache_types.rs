@@ -300,10 +300,10 @@ mod tests {
 
     #[test]
     fn test_cache_data_types() {
-        let data_a = CacheData::A(Ipv4Addr::new(127, 0, 0, 1));
+        let data_a = CacheData::A(Ipv4Addr::LOCALHOST);
         assert_eq!(data_a.entry_type(), CacheEntryType::A);
 
-        let data_aaaa = CacheData::Aaaa(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
+        let data_aaaa = CacheData::Aaaa(Ipv6Addr::LOCALHOST);
         assert_eq!(data_aaaa.entry_type(), CacheEntryType::Aaaa);
 
         let data_cname = CacheData::Cname("alias.example.com".to_string());
@@ -337,7 +337,7 @@ mod tests {
     fn test_cache_stats() {
         let mut stats = CacheStats::new();
         
-        assert_eq!(stats.hit_rate(), 0.0);
+        assert!((stats.hit_rate() - 0.0).abs() < f64::EPSILON);
         
         stats.record_hit();
         stats.record_hit();
@@ -345,6 +345,6 @@ mod tests {
         
         assert_eq!(stats.hits, 2);
         assert_eq!(stats.misses, 1);
-        assert_eq!(stats.hit_rate(), 2.0 / 3.0);
+        assert!((stats.hit_rate() - (2.0 / 3.0)).abs() < f64::EPSILON);
     }
 }

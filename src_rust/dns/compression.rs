@@ -48,7 +48,7 @@
 //! let mut ctx = CompressionContext::new();
 //! 
 //! // Add a label at position 12 in the packet
-//! ctx.add_label("example.com".to_string(), 12);
+//! ctx.add_label("example.com", 12);
 //!
 //! // Later, check if we can compress a reference to this label
 //! if let Some(offset) = ctx.find_suffix("example.com") {
@@ -128,22 +128,22 @@ impl Display for CompressionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CompressionError::CyclicPointer { offset } => {
-                write!(f, "Cyclic compression pointer detected at offset {}", offset)
+                write!(f, "Cyclic compression pointer detected at offset {offset}")
             }
             CompressionError::InvalidLabelType { label_type } => {
-                write!(f, "Invalid DNS label type: 0x{:02X}", label_type)
+                write!(f, "Invalid DNS label type: 0x{label_type:02X}")
             }
             CompressionError::ExceededMaxHops { hops } => {
-                write!(f, "Exceeded maximum compression hops: {} > {}", hops, MAX_COMPRESSION_HOPS)
+                write!(f, "Exceeded maximum compression hops: {hops} > {MAX_COMPRESSION_HOPS}")
             }
             CompressionError::OffsetOutOfBounds { offset, packet_len } => {
-                write!(f, "Compression pointer offset {} exceeds packet length {}", offset, packet_len)
+                write!(f, "Compression pointer offset {offset} exceeds packet length {packet_len}")
             }
             CompressionError::NameTooLong { length } => {
-                write!(f, "Decompressed name length {} exceeds MAXDNAME {}", length, MAXDNAME)
+                write!(f, "Decompressed name length {length} exceeds MAXDNAME {MAXDNAME}")
             }
             CompressionError::LabelTooLong { length } => {
-                write!(f, "Label length {} exceeds MAXLABEL {}", length, MAXLABEL)
+                write!(f, "Label length {length} exceeds MAXLABEL {MAXLABEL}")
             }
         }
     }
@@ -239,9 +239,9 @@ impl LabelType {
 #[must_use]
 pub fn decode_compression_pointer(byte1: u8, byte2: u8) -> u16 {
     // Extract lower 6 bits from first byte and shift left 8 bits
-    let high_bits = ((byte1 & 0x3F) as u16) << 8;
+    let high_bits = u16::from(byte1 & 0x3F) << 8;
     // Combine with second byte
-    let low_bits = byte2 as u16;
+    let low_bits = u16::from(byte2);
     high_bits | low_bits
 }
 
@@ -257,7 +257,10 @@ pub fn decode_compression_pointer(byte1: u8, byte2: u8) -> u16 {
 /// # Returns
 ///
 /// * `Ok([byte1, byte2])` - The two-byte compression pointer
-/// * `Err(CompressionError::OffsetOutOfBounds)` - If offset >= 0x4000
+///
+/// # Errors
+///
+/// * `CompressionError::OffsetOutOfBounds` - If offset >= 0x4000 (exceeds 14-bit limit)
 ///
 /// # Example
 ///
@@ -302,7 +305,7 @@ pub fn encode_compression_pointer(offset: u16) -> Result<[u8; 2], CompressionErr
 /// # Memory Safety
 ///
 /// - No manual pointer arithmetic (replaced with safe offset tracking)
-/// - HashMap provides automatic memory management
+/// - `HashMap` provides automatic memory management
 /// - Offset validation prevents out-of-bounds pointer creation
 /// - Type-safe operations eliminate buffer overflows
 ///
@@ -366,10 +369,10 @@ impl CompressionContext {
     /// use dnsmasq::dns::compression::CompressionContext;
     ///
     /// let mut ctx = CompressionContext::new();
-    /// ctx.add_label("example.com".to_string(), 12);
-    /// ctx.add_label("mail.example.com".to_string(), 50);
+    /// ctx.add_label("example.com", 12);
+    /// ctx.add_label("mail.example.com", 50);
     /// ```
-    pub fn add_label(&mut self, name: String, offset: u16) -> bool {
+    pub fn add_label(&mut self, name: &str, offset: u16) -> bool {
         // Validate offset fits in 14 bits
         if offset > COMPRESSION_OFFSET_MASK {
             return false;
@@ -395,7 +398,10 @@ impl CompressionContext {
             
             // Advance offset by this label's size (length byte + label data)
             if i < parts.len() {
-                current_offset += parts[i].len() as u16 + 1;
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    current_offset += parts[i].len() as u16 + 1;
+                }
             }
         }
         
@@ -424,7 +430,7 @@ impl CompressionContext {
     /// use dnsmasq::dns::compression::CompressionContext;
     ///
     /// let mut ctx = CompressionContext::new();
-    /// ctx.add_label("example.com".to_string(), 12);
+    /// ctx.add_label("example.com", 12);
     ///
     /// // Exact match
     /// assert_eq!(ctx.find_suffix("example.com"), Some(12));
@@ -471,7 +477,7 @@ impl CompressionContext {
     /// use dnsmasq::dns::compression::CompressionContext;
     ///
     /// let mut ctx = CompressionContext::new();
-    /// ctx.add_label("example.com".to_string(), 12);
+    /// ctx.add_label("example.com", 12);
     ///
     /// if let Some(Ok(pointer)) = ctx.create_pointer("example.com") {
     ///     // pointer contains [0xC0, 0x0C]
@@ -484,7 +490,7 @@ impl CompressionContext {
     /// Follow a compression pointer chain in a DNS packet
     ///
     /// Dereferences compression pointers to extract the complete domain name.
-    /// Implements cycle detection using HashSet to prevent infinite loops from
+    /// Implements cycle detection using `HashSet` to prevent infinite loops from
     /// malicious packets. Enforces maximum 255 hops per RFC 1035.
     ///
     /// # Arguments
@@ -636,7 +642,7 @@ impl CompressionContext {
     /// use dnsmasq::dns::compression::CompressionContext;
     ///
     /// let mut ctx = CompressionContext::new();
-    /// ctx.add_label("example.com".to_string(), 12);
+    /// ctx.add_label("example.com", 12);
     ///
     /// ctx.clear();
     /// assert!(ctx.find_suffix("example.com").is_none());
@@ -723,18 +729,18 @@ mod tests {
     fn test_compression_context_add_label() {
         let mut ctx = CompressionContext::new();
         
-        assert!(ctx.add_label("example.com".to_string(), 12));
-        assert!(ctx.add_label("test.com".to_string(), 50));
+        assert!(ctx.add_label("example.com", 12));
+        assert!(ctx.add_label("test.com", 50));
         
         // Offset too large
-        assert!(!ctx.add_label("toolarge.com".to_string(), 0x4000));
+        assert!(!ctx.add_label("toolarge.com", 0x4000));
     }
 
     #[test]
     fn test_compression_context_find_suffix() {
         let mut ctx = CompressionContext::new();
         
-        ctx.add_label("example.com".to_string(), 12);
+        ctx.add_label("example.com", 12);
         
         // Exact match
         assert_eq!(ctx.find_suffix("example.com"), Some(12));
@@ -754,7 +760,7 @@ mod tests {
     fn test_compression_context_suffix_matching() {
         let mut ctx = CompressionContext::new();
         
-        ctx.add_label("mail.example.com".to_string(), 12);
+        ctx.add_label("mail.example.com", 12);
         
         // "mail.example.com" at 12
         assert_eq!(ctx.find_suffix("mail.example.com"), Some(12));
@@ -773,7 +779,7 @@ mod tests {
     fn test_compression_context_create_pointer() {
         let mut ctx = CompressionContext::new();
         
-        ctx.add_label("example.com".to_string(), 12);
+        ctx.add_label("example.com", 12);
         
         // Create pointer to "example.com"
         match ctx.create_pointer("example.com") {
@@ -799,7 +805,7 @@ mod tests {
     fn test_compression_context_clear() {
         let mut ctx = CompressionContext::new();
         
-        ctx.add_label("example.com".to_string(), 12);
+        ctx.add_label("example.com", 12);
         assert!(ctx.find_suffix("example.com").is_some());
         
         ctx.clear();
@@ -808,7 +814,7 @@ mod tests {
 
     #[test]
     fn test_follow_pointer_simple() {
-        let mut ctx = CompressionContext::new();
+        let ctx = CompressionContext::new();
         
         // Create a simple DNS packet with one name at offset 12
         // Format: [12 bytes header] [7 'example' 3 'com' 0]
@@ -825,7 +831,7 @@ mod tests {
 
     #[test]
     fn test_follow_pointer_with_compression() {
-        let mut ctx = CompressionContext::new();
+        let ctx = CompressionContext::new();
         
         // Packet with compression pointer
         // [12 bytes header]
@@ -892,11 +898,14 @@ mod tests {
         // Add 9 more labels, each pointing back to the previous chain
         for i in 1..=9 {
             let current_offset = packet.len();
-            let label = format!("l{}", i);
+            let label = format!("l{i}");
             
-            packet.extend_from_slice(&[label.len() as u8]);
-            packet.extend_from_slice(label.as_bytes());
-            packet.extend_from_slice(&encode_compression_pointer(prev_offset as u16).unwrap());
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                packet.extend_from_slice(&[label.len() as u8]);
+                packet.extend_from_slice(label.as_bytes());
+                packet.extend_from_slice(&encode_compression_pointer(prev_offset as u16).unwrap());
+            }
             
             prev_offset = current_offset;
         }

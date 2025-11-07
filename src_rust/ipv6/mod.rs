@@ -269,6 +269,5 @@ mod tests {
         }
         
         // This test always passes if compilation succeeds
-        assert!(true);
     }
 }

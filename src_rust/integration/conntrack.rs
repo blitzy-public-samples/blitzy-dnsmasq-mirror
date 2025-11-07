@@ -292,13 +292,12 @@ impl ConntrackManager {
 
         // Run blocking FFI operation in thread pool to avoid stalling async runtime
         task::spawn_blocking(move || {
-            Self::get_incoming_mark_blocking(peer_addr, local_addr, dest_port, is_tcp, warned)
+            Self::get_incoming_mark_blocking(peer_addr, local_addr, dest_port, is_tcp, &warned)
         })
         .await
         .unwrap_or_else(|e| {
             error!("Conntrack task panicked: {}", e);
-            Err(ConntrackError::QueryFailed(IoError::new(
-                ErrorKind::Other,
+            Err(ConntrackError::QueryFailed(IoError::other(
                 "Conntrack query task panicked",
             )))
         })
@@ -306,7 +305,7 @@ impl ConntrackManager {
 
     /// Blocking implementation of conntrack mark retrieval
     ///
-    /// This function performs the actual synchronous FFI calls to libnetfilter_conntrack.
+    /// This function performs the actual synchronous FFI calls to `libnetfilter_conntrack`.
     /// It should only be called from `tokio::spawn_blocking()` to avoid blocking the
     /// async runtime.
     ///
@@ -326,7 +325,7 @@ impl ConntrackManager {
         local_addr: IpAddr,
         dest_port: u16,
         is_tcp: bool,
-        warned: Arc<Mutex<bool>>,
+        warned: &Arc<Mutex<bool>>,
     ) -> Result<Option<u32>, ConntrackError> {
         trace!(
             "Querying conntrack for mark: peer={}, local={}, port={}, tcp={}",
@@ -463,23 +462,20 @@ impl ConntrackManager {
             Ok(()) => {
                 // Query succeeded, check if callback populated mark
                 let mark_opt = *mark_result.lock().unwrap();
-                match mark_opt {
-                    Some(mark) => {
-                        debug!(
-                            "Retrieved conntrack mark 0x{:x} for connection {}:{} -> {}:{}",
-                            mark,
-                            peer_addr.ip(),
-                            peer_addr.port(),
-                            local_addr,
-                            dest_port
-                        );
-                        Ok(Some(mark))
-                    }
-                    None => {
-                        // Query succeeded but no entry found (callback not invoked)
-                        trace!("No conntrack entry found for connection");
-                        Ok(None)
-                    }
+                if let Some(mark) = mark_opt {
+                    debug!(
+                        "Retrieved conntrack mark 0x{:x} for connection {}:{} -> {}:{}",
+                        mark,
+                        peer_addr.ip(),
+                        peer_addr.port(),
+                        local_addr,
+                        dest_port
+                    );
+                    Ok(Some(mark))
+                } else {
+                    // Query succeeded but no entry found (callback not invoked)
+                    trace!("No conntrack entry found for connection");
+                    Ok(None)
                 }
             }
             Err(io_err) => {
@@ -544,6 +540,14 @@ impl Default for ConntrackManager {
 /// * `Ok(None)` - No conntrack entry found
 /// * `Err(ConntrackError)` - Query failed
 ///
+/// # Errors
+///
+/// Returns `ConntrackError` if:
+/// * Permission denied (requires `CAP_NET_ADMIN` capability)
+/// * Failed to open netlink socket for conntrack communication
+/// * Failed to allocate conntrack entry structure
+/// * Conntrack query operation failed
+///
 /// # Examples
 ///
 /// ```no_run
@@ -573,23 +577,23 @@ pub async fn get_incoming_mark(
 
 /// Conntrack query callback function (extern "C" ABI)
 ///
-/// This callback is invoked by libnetfilter_conntrack when a matching
-/// conntrack entry is found. It extracts the ATTR_MARK value and stores
+/// This callback is invoked by `libnetfilter_conntrack` when a matching
+/// conntrack entry is found. It extracts the `ATTR_MARK` value and stores
 /// it in the caller-provided Arc<Mutex<Option<u32>>>.
 ///
 /// # Safety
 ///
 /// This function has `extern "C"` ABI and is called from C code in
-/// libnetfilter_conntrack. Safety requirements:
-/// - `data` pointer must be valid Arc<Mutex<Option<u32>>> created via Arc::into_raw
-/// - `ct` pointer must be valid nf_conntrack structure managed by libnetfilter_conntrack
+/// `libnetfilter_conntrack`. Safety requirements:
+/// - `data` pointer must be valid Arc<Mutex<Option<u32>>> created via `Arc::into_raw`
+/// - `ct` pointer must be valid `nf_conntrack` structure managed by `libnetfilter_conntrack`
 /// - Function must not panic (would unwind across FFI boundary)
 ///
 /// # Arguments
 ///
 /// * `_type` - Message type (unused in this implementation, required by API)
 /// * `ct` - Pointer to conntrack entry structure
-/// * `data` - User data pointer (Arc<Mutex<Option<u32>>> passed from register_callback)
+/// * `data` - User data pointer (Arc<Mutex<Option<u32>>> passed from `register_callback`)
 ///
 /// # Returns
 ///
@@ -650,25 +654,16 @@ mod tests {
         // This test will likely return Ok(None) or Err depending on system state
         let manager = ConntrackManager::new().expect("Failed to create manager");
 
-        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 12345);
-        let local = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 12345);
+        let local = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
         let result = manager.get_incoming_mark(peer, local, 53, false).await;
 
-        // Either no entry found or permission error is acceptable
-        match result {
-            Ok(None) => {
-                // No conntrack entry for localhost (expected)
-            }
-            Err(ConntrackError::PermissionDenied) => {
-                // Test running without CAP_NET_ADMIN (expected in CI)
-            }
-            Err(ConntrackError::SocketOpenFailed(_)) => {
-                // Conntrack not available (acceptable)
-            }
-            _ => {
-                // Other results are less expected but not necessarily wrong
-            }
-        }
+        // All outcomes are acceptable:
+        // - Ok(None): No conntrack entry for localhost
+        // - PermissionDenied: Test running without CAP_NET_ADMIN (expected in CI)
+        // - SocketOpenFailed: Conntrack not available
+        // - Other results: Less expected but not necessarily wrong
+        let _ = result;
     }
 }

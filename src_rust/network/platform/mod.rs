@@ -575,7 +575,7 @@ mod tests {
             IpAddr::V6(addr) => {
                 assert!(addr.is_unicast_link_local(), "Should be link-local IPv6");
             }
-            _ => panic!("Expected IPv6 address"),
+            IpAddr::V4(_) => panic!("Expected IPv6 address"),
         }
     }
     
@@ -603,7 +603,7 @@ mod tests {
             index: 3,
             flags: 0x10 | 0x1, // IFF_POINTOPOINT | IFF_UP
             prefixlen: 32,
-            netmask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255)),
+            netmask: IpAddr::V4(Ipv4Addr::BROADCAST),
         };
         
         assert!(ppp.is_point_to_point(), "Should detect point-to-point flag");
@@ -636,7 +636,7 @@ mod tests {
                 assert_eq!(prefixlen, 24);
                 match addr {
                     IpAddr::V4(v4) => assert_eq!(v4, Ipv4Addr::new(192, 168, 1, 10)),
-                    _ => panic!("Expected IPv4"),
+                    IpAddr::V6(_) => panic!("Expected IPv4"),
                 }
             }
             _ => panic!("Wrong variant"),
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn test_network_change_route_changed() {
         let route = NetworkChange::RouteChanged {
-            destination: Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
+            destination: Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
             gateway: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
         };
         
@@ -691,10 +691,7 @@ mod tests {
             let error_string = error.to_string();
             assert!(
                 error_string.contains(expected_msg),
-                "Error kind {:?} should contain '{}', got '{}'",
-                kind,
-                expected_msg,
-                error_string
+                "Error kind {kind:?} should contain '{expected_msg}', got '{error_string}'"
             );
         }
     }
@@ -727,7 +724,7 @@ mod tests {
                 assert_eq!(if_index, 2);
                 match addr {
                     IpAddr::V6(_) => {},
-                    _ => panic!("Expected IPv6"),
+                    IpAddr::V4(_) => panic!("Expected IPv6"),
                 }
             }
             _ => panic!("Wrong variant"),

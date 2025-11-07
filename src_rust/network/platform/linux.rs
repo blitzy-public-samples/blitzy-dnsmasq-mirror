@@ -709,12 +709,9 @@ impl Platform for LinuxPlatform {
                     .iter()
                     .find_map(|nla| {
                         match nla {
-                            netlink_packet_route::address::AddressAttribute::Local(addr) if addr.is_ipv4() => {
-                                Some(*addr)
-                            }
-                            netlink_packet_route::address::AddressAttribute::Address(addr) if addr.is_ipv4() => {
-                                Some(*addr)
-                            }
+                            netlink_packet_route::address::AddressAttribute::Local(addr)
+                            | netlink_packet_route::address::AddressAttribute::Address(addr)
+                                if addr.is_ipv4() => Some(*addr),
                             _ => None,
                         }
                     });
@@ -784,12 +781,9 @@ impl Platform for LinuxPlatform {
                     .iter()
                     .find_map(|nla| {
                         match nla {
-                            netlink_packet_route::address::AddressAttribute::Local(addr) if addr.is_ipv6() => {
-                                Some(*addr)
-                            }
-                            netlink_packet_route::address::AddressAttribute::Address(addr) if addr.is_ipv6() => {
-                                Some(*addr)
-                            }
+                            netlink_packet_route::address::AddressAttribute::Local(addr)
+                            | netlink_packet_route::address::AddressAttribute::Address(addr)
+                                if addr.is_ipv6() => Some(*addr),
                             _ => None,
                         }
                     });
@@ -1319,12 +1313,8 @@ impl LinuxPlatform {
                     .iter()
                     .find_map(|nla| {
                         match nla {
-                            netlink_packet_route::address::AddressAttribute::Local(addr) => {
-                                Some(*addr)
-                            }
-                            netlink_packet_route::address::AddressAttribute::Address(addr) => {
-                                Some(*addr)
-                            }
+                            netlink_packet_route::address::AddressAttribute::Local(addr)
+                            | netlink_packet_route::address::AddressAttribute::Address(addr) => Some(*addr),
                             _ => None,
                         }
                     });
@@ -1350,6 +1340,10 @@ impl LinuxPlatform {
 
             // RTM_NEWROUTE: Routing table changed
             RouteNetlinkMessage::NewRoute(route_msg) => {
+                // Routing table constants (table field is u8)
+                const RT_TABLE_MAIN: u8 = 254;
+                const RT_TABLE_LOCAL: u8 = 255;
+
                 // Deduplicate: only send one NEWROUTE event per batch
                 // Replaces C: if ((state & STATE_NEWROUTE)==0) at line 804
                 if (*event_state & STATE_NEWROUTE) != 0 {
@@ -1361,10 +1355,6 @@ impl LinuxPlatform {
                 let rtm_type = route_msg.header.kind;
                 let rtm_scope = route_msg.header.scope;
                 let rtm_table = route_msg.header.table;
-
-                // Routing table constants (table field is u8)
-                const RT_TABLE_MAIN: u8 = 254;
-                const RT_TABLE_LOCAL: u8 = 255;
 
                 if rtm_type == RouteType::Unicast
                     && rtm_scope == RouteScope::Link
@@ -1426,7 +1416,7 @@ mod tests {
                     }
                 }
                 Err(e) => {
-                    println!("Interface enumeration failed: {}", e);
+                    println!("Interface enumeration failed: {e}");
                 }
             }
         }
@@ -1446,7 +1436,7 @@ mod tests {
                     }
                 }
                 Err(e) => {
-                    println!("ARP enumeration failed: {}", e);
+                    println!("ARP enumeration failed: {e}");
                 }
             }
         }
@@ -1466,7 +1456,7 @@ mod tests {
                     let timeout_duration = std::time::Duration::from_secs(2);
                     match tokio::time::timeout(timeout_duration, rx.recv()).await {
                         Ok(Some(change)) => {
-                            println!("Received network change: {:?}", change);
+                            println!("Received network change: {change:?}");
                         }
                         Ok(None) => {
                             println!("Channel closed");
@@ -1477,7 +1467,7 @@ mod tests {
                     }
                 }
                 Err(e) => {
-                    println!("Monitor initialization failed: {}", e);
+                    println!("Monitor initialization failed: {e}");
                 }
             }
         }

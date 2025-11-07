@@ -78,7 +78,7 @@ mod linux_impl {
     /// ipset operation errors
     ///
     /// Comprehensive error type covering all ipset operation failure modes.
-    /// Uses thiserror for automatic std::error::Error trait implementation.
+    /// Uses thiserror for automatic `std::error::Error` trait implementation.
     #[derive(Error, Debug)]
     pub enum IpsetError {
         /// Failed to create Netlink socket
@@ -127,7 +127,7 @@ mod linux_impl {
 
         /// Legacy raw socket protocol (kernel < 2.6.32)
         ///
-        /// IPv4 only, uses SOL_IP getsockopt/setsockopt with option 83.
+        /// IPv4 only, uses `SOL_IP` getsockopt/setsockopt with option 83.
         Legacy,
     }
 
@@ -156,14 +156,14 @@ mod linux_impl {
     impl IpsetManager {
         /// Create new ipset manager and initialize kernel connection
         ///
-        /// Opens AF_NETLINK socket with NETLINK_NETFILTER protocol and detects
+        /// Opens `AF_NETLINK` socket with `NETLINK_NETFILTER` protocol and detects
         /// kernel ipset version. Modern kernels (>= 2.6.32) use Netlink protocol,
         /// older kernels use legacy raw socket protocol.
         ///
         /// # Errors
         ///
         /// Returns `IpsetError::SocketCreationFailed` if:
-        /// - Permission denied (requires CAP_NET_ADMIN capability)
+        /// - Permission denied (requires `CAP_NET_ADMIN` capability)
         /// - Out of file descriptors
         /// - ipset kernel module not loaded
         ///
@@ -214,9 +214,9 @@ mod linux_impl {
             }
         }
 
-        /// Create IpsetManager with explicit protocol for testing (test-only)
+        /// Create `IpsetManager` with explicit protocol for testing (test-only)
         ///
-        /// This allows tests to create IpsetManager instances without requiring
+        /// This allows tests to create `IpsetManager` instances without requiring
         /// actual socket creation or root permissions.
         #[cfg(test)]
         pub(crate) fn new_with_protocol(protocol: KernelProtocol) -> Self {
@@ -233,7 +233,7 @@ mod linux_impl {
         ///
         /// # Detection Strategy
         ///
-        /// 1. Attempt to create NETLINK_NETFILTER socket (modern protocol test)
+        /// 1. Attempt to create `NETLINK_NETFILTER` socket (modern protocol test)
         /// 2. If successful, kernel supports modern protocol
         /// 3. If fails with EPROTONOSUPPORT, fall back to legacy
         /// 4. Other errors propagated as initialization failure
@@ -290,7 +290,7 @@ mod linux_impl {
 
         /// Add IP address to named ipset (async wrapper)
         ///
-        /// Adds the specified IP address to a kernel ipset. Uses tokio spawn_blocking
+        /// Adds the specified IP address to a kernel ipset. Uses tokio `spawn_blocking`
         /// for non-blocking operation in async context. The operation is idempotent:
         /// adding an address already in the set is not an error.
         ///
@@ -345,13 +345,13 @@ mod linux_impl {
             })
             .await
             .map_err(|e| {
-                IpsetError::MessageConstructionFailed(format!("Task join error: {}", e))
+                IpsetError::MessageConstructionFailed(format!("Task join error: {e}"))
             })?
         }
 
         /// Remove IP address from named ipset (async wrapper)
         ///
-        /// Removes the specified IP address from a kernel ipset. Uses tokio spawn_blocking
+        /// Removes the specified IP address from a kernel ipset. Uses tokio `spawn_blocking`
         /// for non-blocking operation in async context. The operation is idempotent:
         /// removing an address not in the set is not an error.
         ///
@@ -412,7 +412,7 @@ mod linux_impl {
 
         /// Blocking implementation of ipset add/remove operation
         ///
-        /// Synchronous implementation called from spawn_blocking. Selects protocol
+        /// Synchronous implementation called from `spawn_blocking`. Selects protocol
         /// implementation based on kernel version.
         ///
         /// # Arguments
@@ -460,7 +460,7 @@ mod linux_impl {
         ///
         /// * `setname` - ipset name (validated length)
         /// * `addr` - IP address to add/remove
-        /// * `remove` - true for IPSET_CMD_DEL, false for IPSET_CMD_ADD
+        /// * `remove` - true for `IPSET_CMD_DEL`, false for `IPSET_CMD_ADD`
         ///
         /// # Returns
         ///
@@ -468,10 +468,10 @@ mod linux_impl {
         ///
         /// # Netlink Protocol Details
         ///
-        /// - All lengths must be NL_ALIGN'd (4-byte boundary)
-        /// - Nested attributes created with NLA_F_NESTED flag
-        /// - Address attribute uses NLA_F_NET_BYTEORDER for proper byte order
-        /// - Message type: (IPSET_CMD_ADD|DEL) | (NFNL_SUBSYS_IPSET << 8)
+        /// - All lengths must be `NL_ALIGN`'d (4-byte boundary)
+        /// - Nested attributes created with `NLA_F_NESTED` flag
+        /// - Address attribute uses `NLA_F_NET_BYTEORDER` for proper byte order
+        /// - Message type: (`IPSET_CMD_ADD|DEL`) | (`NFNL_SUBSYS_IPSET` << 8)
         fn modern_add_to_ipset(
             setname: &str,
             addr: IpAddr,
@@ -487,16 +487,20 @@ mod linux_impl {
             let mut msg_buf = Vec::with_capacity(256);
 
             // Determine address family and size
+            // SAFETY: AF_INET (2) and AF_INET6 (10) are small constants that fit in u8
+            #[allow(clippy::cast_possible_truncation)]
             let (af, addr_bytes): (u8, Vec<u8>) = match addr {
                 IpAddr::V4(ipv4) => (libc::AF_INET as u8, ipv4.octets().to_vec()),
                 IpAddr::V6(ipv6) => (libc::AF_INET6 as u8, ipv6.octets().to_vec()),
             };
 
             // Build Netlink message header
+            // SAFETY: size_of returns bounded values, NLM_F_REQUEST is a small constant
+            #[allow(clippy::cast_possible_truncation)]
             let nlh = NlMsgHdr {
                 nlmsg_len: nl_align(size_of::<NlMsgHdr>()) as u32,
                 nlmsg_type: (if remove { IPSET_CMD_DEL } else { IPSET_CMD_ADD })
-                    | ((NFNL_SUBSYS_IPSET as u16) << 8),
+                    | (u16::from(NFNL_SUBSYS_IPSET) << 8),
                 nlmsg_flags: libc::NLM_F_REQUEST as u16,
                 nlmsg_seq: 0,
                 nlmsg_pid: 0,
@@ -555,6 +559,8 @@ mod linux_impl {
 
             // Calculate and fill nested IPSET_ATTR_IP length
             let ip_attr_len = msg_buf.len() - ip_attr_start;
+            // SAFETY: Netlink attribute length is bounded by message size (max ~64KB)
+            #[allow(clippy::cast_possible_truncation)]
             let ip_attr_hdr = NlAttr {
                 nla_len: ip_attr_len as u16,
                 nla_type: NLA_F_NESTED | IPSET_ATTR_IP,
@@ -571,6 +577,8 @@ mod linux_impl {
 
             // Calculate and fill nested IPSET_ATTR_DATA length
             let data_attr_len = msg_buf.len() - data_attr_start;
+            // SAFETY: Netlink attribute length is bounded by message size (max ~64KB)
+            #[allow(clippy::cast_possible_truncation)]
             let data_attr_hdr = NlAttr {
                 nla_len: data_attr_len as u16,
                 nla_type: NLA_F_NESTED | IPSET_ATTR_DATA,
@@ -581,6 +589,8 @@ mod linux_impl {
                 .copy_from_slice(&data_attr_hdr.nla_type.to_ne_bytes());
 
             // Update total message length in header
+            // SAFETY: Netlink message length is bounded by kernel buffer size (max ~64KB)
+            #[allow(clippy::cast_possible_truncation)]
             let total_len = msg_buf.len() as u32;
             msg_buf[0..4].copy_from_slice(&total_len.to_ne_bytes());
 
@@ -610,6 +620,8 @@ mod linux_impl {
         /// * `attr_type` - Attribute type identifier
         /// * `data` - Attribute payload bytes
         fn add_netlink_attr(buf: &mut Vec<u8>, attr_type: u16, data: &[u8]) {
+            // SAFETY: Netlink attribute length is bounded by message size (max ~64KB)
+            #[allow(clippy::cast_possible_truncation)]
             let attr_hdr = NlAttr {
                 nla_len: (nl_align(size_of::<NlAttr>()) + data.len()) as u16,
                 nla_type: attr_type,
@@ -630,13 +642,13 @@ mod linux_impl {
 
         /// Legacy raw socket ipset operation (kernel < 2.6.32)
         ///
-        /// Uses SOL_IP getsockopt/setsockopt with option 83 for ipset manipulation.
+        /// Uses `SOL_IP` getsockopt/setsockopt with option 83 for ipset manipulation.
         /// This is the legacy protocol that predates Netlink IPSET subsystem.
         ///
         /// # Protocol
         ///
-        /// 1. getsockopt(SOL_IP, 83, &req_adt_get) - Query ipset index by name
-        /// 2. setsockopt(SOL_IP, 83, &req_adt) - Add/remove address using index
+        /// 1. `getsockopt(SOL_IP`, 83, &`req_adt_get`) - Query ipset index by name
+        /// 2. `setsockopt(SOL_IP`, 83, &`req_adt`) - Add/remove address using index
         ///
         /// # Limitations
         ///
@@ -657,10 +669,10 @@ mod linux_impl {
         /// # Safety
         ///
         /// Uses unsafe blocks for:
-        /// - socket() syscall to create AF_INET SOCK_RAW IPPROTO_RAW socket
-        /// - getsockopt() to query ipset index
-        /// - setsockopt() to add/remove address
-        /// - close() to cleanup socket
+        /// - `socket()` syscall to create `AF_INET` `SOCK_RAW` `IPPROTO_RAW` socket
+        /// - `getsockopt()` to query ipset index
+        /// - `setsockopt()` to add/remove address
+        /// - `close()` to cleanup socket
         ///
         /// All unsafe operations have validated inputs and documented invariants.
         #[allow(clippy::cast_possible_truncation)]
@@ -669,6 +681,31 @@ mod linux_impl {
             addr: IpAddr,
             remove: bool,
         ) -> Result<(), IpsetError> {
+            // RAII guard for socket cleanup
+            struct SocketGuard(i32);
+            impl Drop for SocketGuard {
+                fn drop(&mut self) {
+                    unsafe { libc::close(self.0); }
+                }
+            }
+
+            // Step 1: Query ipset index by name
+            #[repr(C)]
+            struct IpSetReqAdtGet {
+                op: u32,
+                version: u32,
+                set_union: [u8; IPSET_MAXNAMELEN], // union { name, index }
+                typename: [u8; IPSET_MAXNAMELEN],
+            }
+
+            // Step 2: Add/remove address using ipset index
+            #[repr(C)]
+            struct IpSetReqAdt {
+                op: u32,
+                index: u16,
+                ip: u32,
+            }
+
             // Legacy protocol only supports IPv4
             let ipv4_addr = match addr {
                 IpAddr::V4(a) => a,
@@ -688,23 +725,7 @@ mod linux_impl {
                 ));
             }
 
-            // RAII guard for socket cleanup
-            struct SocketGuard(i32);
-            impl Drop for SocketGuard {
-                fn drop(&mut self) {
-                    unsafe { libc::close(self.0); }
-                }
-            }
             let _guard = SocketGuard(sock_fd);
-
-            // Step 1: Query ipset index by name
-            #[repr(C)]
-            struct IpSetReqAdtGet {
-                op: u32,
-                version: u32,
-                set_union: [u8; IPSET_MAXNAMELEN], // union { name, index }
-                typename: [u8; IPSET_MAXNAMELEN],
-            }
 
             let mut req_adt_get = IpSetReqAdtGet {
                 op: 0x10, // Query operation
@@ -735,15 +756,6 @@ mod linux_impl {
                 return Err(IpsetError::LegacyOperationFailed(
                     IoError::last_os_error(),
                 ));
-            }
-
-            // Step 2: Add/remove address using ipset index
-            // After getsockopt, set_union now contains index (u16) instead of name
-            #[repr(C)]
-            struct IpSetReqAdt {
-                op: u32,
-                index: u16,
-                ip: u32,
             }
 
             // Extract index from set_union (first 2 bytes as u16)

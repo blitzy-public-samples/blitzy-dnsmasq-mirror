@@ -13,9 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! DHCPv4 Option Parsing and Building
+//! `DHCPv4` Option Parsing and Building
 //!
-//! This module provides memory-safe utilities for parsing and building DHCPv4 options
+//! This module provides memory-safe utilities for parsing and building `DHCPv4` options
 //! from wire-format packets per RFC 2131 and RFC 2132. It replaces C's unsafe pointer
 //! arithmetic with Rust's bounds-checked slice operations, eliminating buffer overflows,
 //! use-after-free bugs, and null pointer dereferences.
@@ -96,47 +96,65 @@ use crate::dhcp::v4::protocol::MIN_PACKETSZ;
 pub enum OptionError {
     /// Option code or value is invalid or malformed
     InvalidOption {
+        /// DHCP option code that failed validation
         code: u8,
+        /// Human-readable explanation of why the option is invalid
         reason: String,
     },
     /// Buffer space insufficient for option
     BufferTooSmall {
+        /// Number of bytes required for the operation
         required: usize,
+        /// Number of bytes available in the buffer
         available: usize,
     },
     /// String option contains invalid UTF-8 sequences
     InvalidUtf8 {
+        /// DHCP option code containing invalid UTF-8
         code: u8,
+        /// Raw bytes that failed UTF-8 validation
         bytes: Vec<u8>,
     },
     /// Parser failed to decode option structure
     ParseError {
+        /// DHCP option code that failed to parse
         code: u8,
+        /// Byte offset in the packet where parsing failed
         offset: usize,
+        /// Type of parsing error that occurred
         kind: String,
     },
     /// DHCP magic cookie (0x63825363) missing or incorrect
     MagicCookieMismatch {
+        /// Expected magic cookie value (0x63825363)
         expected: u32,
+        /// Actual value found in the packet
         found: u32,
     },
     /// Option structure violates RFC format
     MalformedOption {
+        /// DHCP option code that is malformed
         code: u8,
+        /// Explanation of the RFC violation
         reason: String,
     },
     /// Option length field exceeds available data
     InvalidLength {
+        /// DHCP option code with invalid length
         code: u8,
+        /// Length value declared in the option header
         declared: usize,
+        /// Actual number of bytes available
         available: usize,
     },
     /// Requested option not found in packet
     OptionNotFound {
+        /// DHCP option code that was not present in the packet
         code: u8,
     },
     /// Attempt to write beyond buffer capacity
     BufferOverflow {
+        /// Description of the operation that caused the overflow
         operation: String,
     },
 }
@@ -145,43 +163,40 @@ impl fmt::Display for OptionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OptionError::InvalidOption { code, reason } => {
-                write!(f, "Invalid option {}: {}", code, reason)
+                write!(f, "Invalid option {code}: {reason}")
             }
             OptionError::BufferTooSmall { required, available } => {
                 write!(
                     f,
-                    "Buffer too small: need {} bytes, have {} bytes",
-                    required, available
+                    "Buffer too small: need {required} bytes, have {available} bytes"
                 )
             }
             OptionError::InvalidUtf8 { code, bytes } => {
-                write!(f, "Invalid UTF-8 in option {}: {:?}", code, bytes)
+                write!(f, "Invalid UTF-8 in option {code}: {bytes:?}")
             }
             OptionError::ParseError { code, offset, kind } => {
-                write!(f, "Parse error at offset {}, option {}: {}", offset, code, kind)
+                write!(f, "Parse error at offset {offset}, option {code}: {kind}")
             }
             OptionError::MagicCookieMismatch { expected, found } => {
                 write!(
                     f,
-                    "DHCP magic cookie mismatch: expected 0x{:08x}, found 0x{:08x}",
-                    expected, found
+                    "DHCP magic cookie mismatch: expected 0x{expected:08x}, found 0x{found:08x}"
                 )
             }
             OptionError::MalformedOption { code, reason } => {
-                write!(f, "Malformed option {}: {}", code, reason)
+                write!(f, "Malformed option {code}: {reason}")
             }
             OptionError::InvalidLength { code, declared, available } => {
                 write!(
                     f,
-                    "Invalid length for option {}: declared {}, available {}",
-                    code, declared, available
+                    "Invalid length for option {code}: declared {declared}, available {available}"
                 )
             }
             OptionError::OptionNotFound { code } => {
-                write!(f, "Option {} not found", code)
+                write!(f, "Option {code} not found")
             }
             OptionError::BufferOverflow { operation } => {
-                write!(f, "Buffer overflow during {}", operation)
+                write!(f, "Buffer overflow during {operation}")
             }
         }
     }
@@ -204,7 +219,7 @@ impl std::error::Error for OptionError {}
 ///
 /// - Uses `HashMap<u8, Vec<u8>>` for O(1) option lookup
 /// - Validates DHCP magic cookie (0x63825363) before parsing
-/// - Handles OPTION_PAD (0) and OPTION_END (255) markers
+/// - Handles `OPTION_PAD` (0) and `OPTION_END` (255) markers
 /// - Supports parsing from three regions: options, file, sname (with overload)
 /// - Returns `OptionError` for all error conditions with detailed context
 ///
@@ -215,7 +230,7 @@ impl std::error::Error for OptionError {}
 pub struct OptionParser {
     /// Parsed options stored as map from option code to option data
     options: HashMap<u8, Vec<u8>>,
-    /// Set of requested options from OPTION_REQUESTED_OPTIONS (55)
+    /// Set of requested options from `OPTION_REQUESTED_OPTIONS` (55)
     requested_options: HashSet<u8>,
     /// Whether option overload is present (Option 52)
     overload_flags: u8,
@@ -274,6 +289,8 @@ impl OptionParser {
     /// }
     /// ```
     pub fn parse(&mut self, packet: &[u8]) -> Result<(), OptionError> {
+        const DHCP_COOKIE: u32 = 0x6382_5363;
+        
         // Validate minimum packet size
         if packet.len() < MIN_PACKETSZ {
             error!(
@@ -306,8 +323,6 @@ impl OptionParser {
             packet[238],
             packet[239],
         ]);
-
-        const DHCP_COOKIE: u32 = 0x6382_5363;
         if magic_cookie != DHCP_COOKIE {
             error!(
                 "Invalid DHCP magic cookie: expected 0x{:08x}, found 0x{:08x}",
@@ -374,8 +389,8 @@ impl OptionParser {
 
     /// Parses options from a single option region (options field, file field, or sname field).
     ///
-    /// Handles OPTION_PAD (0) padding bytes and OPTION_END (255) terminator.
-    /// Stores parsed options in internal HashMap.
+    /// Handles `OPTION_PAD` (0) padding bytes and `OPTION_END` (255) terminator.
+    /// Stores parsed options in internal `HashMap`.
     ///
     /// # Arguments
     ///
@@ -463,7 +478,7 @@ impl OptionParser {
     /// ```
     #[must_use]
     pub fn get_option(&self, code: u8) -> Option<&[u8]> {
-        self.options.get(&code).map(|v| v.as_slice())
+        self.options.get(&code).map(std::vec::Vec::as_slice)
     }
 
     /// Checks if option is present in parsed packet.
@@ -498,7 +513,10 @@ impl OptionParser {
     ///
     /// * `Ok(Some(u8))` - Successfully extracted u8 value
     /// * `Ok(None)` - Option not present
-    /// * `Err(OptionError)` - Option present but invalid length
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::InvalidOption` if option present but not exactly 1 byte
     ///
     /// # Examples
     ///
@@ -528,7 +546,10 @@ impl OptionParser {
     ///
     /// * `Ok(Some(u16))` - Successfully extracted u16 value
     /// * `Ok(None)` - Option not present
-    /// * `Err(OptionError)` - Option present but invalid length
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::InvalidOption` if option present but not exactly 2 bytes
     ///
     /// # Examples
     ///
@@ -558,7 +579,10 @@ impl OptionParser {
     ///
     /// * `Ok(Some(u32))` - Successfully extracted u32 value
     /// * `Ok(None)` - Option not present
-    /// * `Err(OptionError)` - Option present but invalid length
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::InvalidOption` if option present but not exactly 4 bytes
     ///
     /// # Examples
     ///
@@ -590,7 +614,10 @@ impl OptionParser {
     ///
     /// * `Ok(Some(Ipv4Addr))` - Successfully extracted IPv4 address
     /// * `Ok(None)` - Option not present
-    /// * `Err(OptionError)` - Option present but invalid length
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::InvalidOption` if option present but not exactly 4 bytes for IPv4
     ///
     /// # Examples
     ///
@@ -620,7 +647,10 @@ impl OptionParser {
     ///
     /// * `Ok(Some(String))` - Successfully extracted and validated string
     /// * `Ok(None)` - Option not present
-    /// * `Err(OptionError::InvalidUtf8)` - Option contains invalid UTF-8
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::InvalidUtf8` if option contains invalid UTF-8 bytes
     ///
     /// # Examples
     ///
@@ -632,15 +662,12 @@ impl OptionParser {
     pub fn get_option_string(&self, code: u8) -> Result<Option<String>, OptionError> {
         match self.options.get(&code) {
             None => Ok(None),
-            Some(data) => match std::str::from_utf8(data) {
-                Ok(s) => Ok(Some(s.to_string())),
-                Err(_) => {
-                    warn!("Option {} contains invalid UTF-8: {:?}", code, data);
-                    Err(OptionError::InvalidUtf8 {
-                        code,
-                        bytes: data.clone(),
-                    })
-                }
+            Some(data) => if let Ok(s) = std::str::from_utf8(data) { Ok(Some(s.to_string())) } else {
+                warn!("Option {} contains invalid UTF-8: {:?}", code, data);
+                Err(OptionError::InvalidUtf8 {
+                    code,
+                    bytes: data.clone(),
+                })
             },
         }
     }
@@ -649,7 +676,7 @@ impl OptionParser {
     ///
     /// # Returns
     ///
-    /// Reference to HashSet containing requested option codes.
+    /// Reference to `HashSet` containing requested option codes.
     ///
     /// # Examples
     ///
@@ -684,7 +711,7 @@ impl Default for OptionParser {
 ///
 /// - Builds options into `Vec<u8>` with automatic capacity expansion
 /// - Tracks remaining space and enables overload when needed
-/// - Automatically adds OPTION_END (255) terminator
+/// - Automatically adds `OPTION_END` (255) terminator
 /// - Maintains network byte order (big-endian) for multi-byte values
 ///
 /// # Thread Safety
@@ -725,7 +752,7 @@ impl OptionBuilder {
     /// Enables option overload mechanism for extended option space.
     ///
     /// When enabled, builder can expand into file and sname fields if primary
-    /// options field is exhausted. Automatically adds OPTION_OVERLOAD (52).
+    /// options field is exhausted. Automatically adds `OPTION_OVERLOAD` (52).
     ///
     /// # Arguments
     ///
@@ -789,12 +816,14 @@ impl OptionBuilder {
         let required_space = 2 + data.len(); // code + length + data
         if !self.overload_enabled && self.buffer.len() + required_space > self.max_primary_size {
             return Err(OptionError::BufferOverflow {
-                operation: format!("add_option code {}", code),
+                operation: format!("add_option code {code}"),
             });
         }
 
         // Write option: code, length, data
         self.buffer.push(code);
+        // SAFETY: We validated data.len() <= 255 above, so cast to u8 is safe
+        #[allow(clippy::cast_possible_truncation)]
         self.buffer.push(data.len() as u8);
         self.buffer.extend_from_slice(data);
 
@@ -812,7 +841,10 @@ impl OptionBuilder {
     /// # Returns
     ///
     /// * `Ok(())` - Option successfully added
-    /// * `Err(OptionError)` - Buffer overflow
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::BufferOverflow` if adding option exceeds buffer capacity
     ///
     /// # Examples
     ///
@@ -833,7 +865,10 @@ impl OptionBuilder {
     /// # Returns
     ///
     /// * `Ok(())` - Option successfully added
-    /// * `Err(OptionError)` - Buffer overflow
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::BufferOverflow` if adding option exceeds buffer capacity
     ///
     /// # Examples
     ///
@@ -854,7 +889,10 @@ impl OptionBuilder {
     /// # Returns
     ///
     /// * `Ok(())` - Option successfully added
-    /// * `Err(OptionError)` - Buffer overflow
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::BufferOverflow` if adding option exceeds buffer capacity
     ///
     /// # Examples
     ///
@@ -875,7 +913,10 @@ impl OptionBuilder {
     /// # Returns
     ///
     /// * `Ok(())` - Option successfully added
-    /// * `Err(OptionError)` - Buffer overflow
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::BufferOverflow` if adding option exceeds buffer capacity
     ///
     /// # Examples
     ///
@@ -896,7 +937,11 @@ impl OptionBuilder {
     /// # Returns
     ///
     /// * `Ok(())` - Option successfully added
-    /// * `Err(OptionError)` - Buffer overflow or string too long
+    ///
+    /// # Errors
+    ///
+    /// Returns `OptionError::BufferOverflow` if adding option exceeds buffer capacity,
+    /// or `OptionError::InvalidOption` if string is too long (>255 bytes)
     ///
     /// # Examples
     ///
@@ -930,15 +975,18 @@ impl OptionBuilder {
         }
     }
 
-    /// Builds final option byte sequence with OPTION_END terminator.
+    /// Builds final option byte sequence with `OPTION_END` terminator.
     ///
-    /// Adds OPTION_END (255) marker and returns complete option sequence
+    /// Adds `OPTION_END` (255) marker and returns complete option sequence
     /// ready for insertion into DHCP packet.
     ///
     /// # Returns
     ///
     /// * `Ok(Vec<u8>)` - Complete option byte sequence
-    /// * `Err(OptionError)` - Buffer overflow
+    ///
+    /// # Errors
+    ///
+    /// Currently does not return errors, but signature maintained for future extensibility
     ///
     /// # Examples
     ///
@@ -980,7 +1028,10 @@ impl Default for OptionBuilder {
 ///
 /// * `Ok(Some(Vec<u8>))` - Option data if found (owned)
 /// * `Ok(None)` - Option not found
-/// * `Err(OptionError)` - Invalid packet format
+///
+/// # Errors
+///
+/// Returns `OptionError` if packet format is invalid (via `OptionParser::parse`)
 ///
 /// # Examples
 ///
@@ -992,7 +1043,7 @@ impl Default for OptionBuilder {
 pub fn option_find(packet: &[u8], option_code: u8) -> Result<Option<Vec<u8>>, OptionError> {
     let mut parser = OptionParser::new();
     parser.parse(packet)?;
-    Ok(parser.get_option(option_code).map(|data| data.to_vec()))
+    Ok(parser.get_option(option_code).map(<[u8]>::to_vec))
 }
 
 /// Extracts IPv4 address from option data.
@@ -1004,7 +1055,10 @@ pub fn option_find(packet: &[u8], option_code: u8) -> Result<Option<Vec<u8>>, Op
 /// # Returns
 ///
 /// * `Ok(Ipv4Addr)` - Successfully extracted address
-/// * `Err(OptionError)` - Invalid data length
+///
+/// # Errors
+///
+/// Returns `OptionError::InvalidOption` if data is not exactly 4 bytes
 ///
 /// # Examples
 ///
@@ -1035,6 +1089,10 @@ pub fn extract_ipv4_addr(data: &[u8]) -> Result<Ipv4Addr, OptionError> {
 /// * `Ok(u32)` - Successfully extracted value
 /// * `Err(OptionError)` - Invalid data length
 ///
+/// # Errors
+///
+/// Returns `OptionError::InvalidOption` if data length is not exactly 4 bytes
+///
 /// # Examples
 ///
 /// ```
@@ -1064,6 +1122,10 @@ pub fn extract_u32(data: &[u8]) -> Result<u32, OptionError> {
 /// * `Ok(String)` - Successfully validated string
 /// * `Err(OptionError::InvalidUtf8)` - Invalid UTF-8 sequence
 ///
+/// # Errors
+///
+/// Returns `OptionError::InvalidUtf8` if data contains invalid UTF-8 sequences
+///
 /// # Examples
 ///
 /// ```
@@ -1084,7 +1146,7 @@ pub fn extract_string(data: &[u8]) -> Result<String, OptionError> {
 
 /// High-level function to parse all options from DHCP packet.
 ///
-/// Convenience wrapper around `OptionParser::parse()` returning HashMap.
+/// Convenience wrapper around `OptionParser::parse()` returning `HashMap`.
 ///
 /// # Arguments
 ///
@@ -1094,6 +1156,10 @@ pub fn extract_string(data: &[u8]) -> Result<String, OptionError> {
 ///
 /// * `Ok(HashMap<u8, Vec<u8>>)` - Map of option code to option data
 /// * `Err(OptionError)` - Parse failure
+///
+/// # Errors
+///
+/// Returns `OptionError` if packet parsing fails (invalid format, truncated data, etc.)
 ///
 /// # Examples
 ///
@@ -1115,12 +1181,16 @@ pub fn parse_options(packet: &[u8]) -> Result<HashMap<u8, Vec<u8>>, OptionError>
 ///
 /// # Arguments
 ///
-/// * `options` - Iterator of (option_code, option_data) tuples
+/// * `options` - Iterator of (`option_code`, `option_data`) tuples
 ///
 /// # Returns
 ///
 /// * `Ok(Vec<u8>)` - Complete options byte sequence with END marker
 /// * `Err(OptionError)` - Build failure
+///
+/// # Errors
+///
+/// Returns `OptionError` if any option fails validation (option data too long, buffer overflow, etc.)
 ///
 /// # Examples
 ///

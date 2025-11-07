@@ -702,7 +702,7 @@ mod tests {
         packet.op = BOOTREQUEST;
         packet.htype = 1;
         packet.hlen = 6;
-        packet.xid = 0x12345678;
+        packet.xid = 0x1234_5678;
         packet.ciaddr = Ipv4Addr::new(192, 168, 1, 100);
 
         let bytes = packet.to_bytes();
@@ -724,14 +724,14 @@ mod tests {
         bytes[0] = BOOTREPLY;
         bytes[1] = 1; // htype
         bytes[2] = 6; // hlen
-        bytes[4..8].copy_from_slice(&0x87654321u32.to_be_bytes());
+        bytes[4..8].copy_from_slice(&0x8765_4321_u32.to_be_bytes());
         bytes[16..20].copy_from_slice(&[192, 168, 1, 50]);
 
         let packet = DhcpPacket::from_bytes(&bytes).unwrap();
         assert_eq!(packet.op, BOOTREPLY);
         assert_eq!(packet.htype, 1);
         assert_eq!(packet.hlen, 6);
-        assert_eq!(packet.xid, 0x87654321);
+        assert_eq!(packet.xid, 0x8765_4321);
         assert_eq!(packet.yiaddr, Ipv4Addr::new(192, 168, 1, 50));
     }
 
@@ -739,7 +739,7 @@ mod tests {
     fn test_dhcp_packet_roundtrip() {
         let mut original = DhcpPacket::new();
         original.op = BOOTREQUEST;
-        original.xid = 0xAABBCCDD;
+        original.xid = 0xAABB_CCDD;
         original.ciaddr = Ipv4Addr::new(10, 0, 0, 1);
         original.chaddr[0..6].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
 
@@ -765,7 +765,7 @@ mod tests {
         assert_eq!(DHCP_SERVER_PORT, 67);
         assert_eq!(DHCP_CLIENT_PORT, 68);
         assert_eq!(PXE_PORT, 4011);
-        assert_eq!(DHCP_COOKIE, 0x63825363);
+        assert_eq!(DHCP_COOKIE, 0x6382_5363);
         assert_eq!(MIN_PACKETSZ, 300);
         assert_eq!(BOOTREQUEST, 1);
         assert_eq!(BOOTREPLY, 2);

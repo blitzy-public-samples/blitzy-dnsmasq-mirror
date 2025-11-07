@@ -145,8 +145,7 @@ impl LogLevel {
     #[must_use] 
     pub fn to_tracing_level(&self) -> Level {
         match self {
-            LogLevel::Emergency | LogLevel::Alert | LogLevel::Critical => Level::ERROR,
-            LogLevel::Error => Level::ERROR,
+            LogLevel::Emergency | LogLevel::Alert | LogLevel::Critical | LogLevel::Error => Level::ERROR,
             LogLevel::Warning => Level::WARN,
             LogLevel::Notice | LogLevel::Info => Level::INFO,
             LogLevel::Debug => Level::DEBUG,
@@ -240,6 +239,8 @@ pub struct LogEntry {
 impl LogEntry {
     /// Create new log entry with formatted message
     fn new(priority: i32, facility: i32, tag: &str, message: &str, include_timestamp: bool) -> Self {
+        use chrono::{DateTime, Local, Utc};
+        
         let mut payload = Vec::with_capacity(MAX_MESSAGE);
         let pid = getpid().as_raw();
 
@@ -252,12 +253,13 @@ impl LogEntry {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default();
+            // SAFETY: Unix timestamps are well within i64 range (valid until year 2262)
+            #[allow(clippy::cast_possible_wrap)]
             let secs = now.as_secs() as i64;
             
             // Format as ctime-style: "Jan  1 12:34:56 " (matching C's ctime(&time_now) + 4)
-            use chrono::{DateTime, Local, Utc};
             let dt: DateTime<Local> = DateTime::from_timestamp(secs, 0)
-                .unwrap_or_else(|| Utc::now())
+                .unwrap_or_else(Utc::now)
                 .into();
             let _ = write!(payload, "{} ", dt.format("%b %e %H:%M:%S"));
         }
@@ -355,6 +357,11 @@ impl Logger {
     /// Closes current destination and opens a new connection. Used for log file
     /// rotation (SIGUSR2) and automatic syslog reconnection after connection failures.
     ///
+    /// # Errors
+    ///
+    /// Returns `LogError::SyslogConnectionFailed` if syslog socket cannot be opened
+    /// Returns `LogError::FileOpenFailed` if log file cannot be opened/created
+    ///
     /// # Returns
     ///
     /// Ok(()) on success, `LogError` on failure
@@ -407,6 +414,7 @@ impl Logger {
     }
 
     /// Attempt to connect to syslog with specific socket type
+    #[allow(clippy::unused_async)]
     async fn try_connect_syslog(&self, sock_type: SockType) -> IoResult<UnixDatagram> {
         // Create socket using nix for proper type safety
         let fd = socket(
@@ -415,7 +423,7 @@ impl Logger {
             nix::sys::socket::SockFlag::SOCK_NONBLOCK,
             None,
         )
-        .map_err(|e| IoError::other(e))?;
+        .map_err(IoError::other)?;
 
         // Convert to tokio UnixDatagram
         let std_socket = unsafe { std::os::unix::net::UnixDatagram::from_raw_fd(fd.as_raw_fd()) };
@@ -626,6 +634,7 @@ impl Logger {
     /// # Arguments
     ///
     /// * `level` - New minimum log level
+    #[allow(clippy::unused_async)]
     pub async fn set_level(&self, _level: LogLevel) {
         // Note: This is a simplified implementation. In a full implementation,
         // we would update the tracing subscriber's filter dynamically.
@@ -645,6 +654,12 @@ impl Logger {
 /// * `log_level` - Minimum severity level to log
 /// * `max_logs` - Maximum queue depth (0 uses default)
 /// * `facility` - Syslog facility code (e.g., `libc::LOG_DAEMON`)
+///
+/// # Errors
+///
+/// Returns `LogError::SyslogConnectionFailed` if syslog socket cannot be opened
+/// Returns `LogError::FileOpenFailed` if log file cannot be opened/created
+/// Returns `LogError::InvalidConfiguration` if `log_file` is `None` when destination is `File`
 ///
 /// # Returns
 ///

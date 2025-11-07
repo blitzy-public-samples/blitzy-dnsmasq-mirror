@@ -1007,7 +1007,7 @@ mod tests {
     fn test_dns_header_new() {
         let header = DnsHeader::new();
         assert_eq!(header.id(), 0);
-        assert_eq!(header.qr(), false);
+        assert!(!header.qr());
         assert_eq!(header.opcode(), 0);
         assert_eq!(header.rcode(), 0);
         assert_eq!(header.qdcount(), 0);
@@ -1022,33 +1022,33 @@ mod tests {
 
         // Test QR flag
         header.set_qr(true);
-        assert_eq!(header.qr(), true);
+        assert!(header.qr());
         header.set_qr(false);
-        assert_eq!(header.qr(), false);
+        assert!(!header.qr());
 
         // Test AA flag
         header.set_aa(true);
-        assert_eq!(header.aa(), true);
+        assert!(header.aa());
 
         // Test TC flag
         header.set_tc(true);
-        assert_eq!(header.tc(), true);
+        assert!(header.tc());
 
         // Test RD flag
         header.set_rd(true);
-        assert_eq!(header.rd(), true);
+        assert!(header.rd());
 
         // Test RA flag
         header.set_ra(true);
-        assert_eq!(header.ra(), true);
+        assert!(header.ra());
 
         // Test AD flag
         header.set_ad(true);
-        assert_eq!(header.ad(), true);
+        assert!(header.ad());
 
         // Test CD flag
         header.set_cd(true);
-        assert_eq!(header.cd(), true);
+        assert!(header.cd());
     }
 
     #[test]

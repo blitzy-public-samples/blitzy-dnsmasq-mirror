@@ -16,7 +16,7 @@
 //! Configuration validation logic refactored from option.c
 //!
 //! This module implements comprehensive configuration validation extracted from the C implementation's
-//! validation functions and conflict detection scattered throughout the one_opt() switch statement
+//! validation functions and conflict detection scattered throughout the `one_opt()` switch statement
 //! (option.c lines 2721-5947). It provides centralized validation with composable error handling using
 //! Rust's Result types, preventing invalid configurations from reaching daemon initialization.
 //!
@@ -26,7 +26,7 @@
 //! - `atoi()` / `strtoul()` → `str::FromStr` trait with checked conversions (no overflow)
 //! - `inet_pton()` → `IpAddr::from_str()` with built-in format validation
 //! - Manual string bounds checking → Safe slice operations with automatic bounds checks
-//! - `access()` syscall → `nix::unistd::access()` with type-safe AccessFlags enum
+//! - `access()` syscall → `nix::unistd::access()` with type-safe `AccessFlags` enum
 //! - `NULL` checks → `Option<T>` with type-safe null handling
 //!
 //! # Validation Coverage
@@ -45,13 +45,13 @@
 //!
 //! # Original C Functions Replaced
 //!
-//! - `numeric_check()` (option.c:1061) → Rust's `str::parse::<T>()` with FromStr
+//! - `numeric_check()` (option.c:1061) → Rust's `str::parse::<T>()` with `FromStr`
 //! - `atoi_check()` (option.c:1104) → `validate_port_range()` with checked conversion
 //! - `atoi_check16()` (option.c:1182) → `validate_port_range()` with u16 bounds
 //! - `strtoul_check()` (option.c:1139) → `str::parse::<u32>()` with overflow checks
-//! - `parse_mysockaddr()` (option.c:1375) → `validate_socket_address()` with IpAddr
+//! - `parse_mysockaddr()` (option.c:1375) → `validate_socket_address()` with `IpAddr`
 //! - `parse_server()` (option.c:1439) → `validate_socket_address()` for upstream servers
-//! - Inline validation in one_opt() → Centralized functions in this module
+//! - Inline validation in `one_opt()` → Centralized functions in this module
 
 use super::types::Config;
 use nix::unistd::{access, AccessFlags};
@@ -72,7 +72,7 @@ pub enum ValidationError {
     ///
     /// Corresponds to `atoi_check16()` validation in option.c:1182
     InvalidPort {
-        /// Configuration field name (e.g., "dns.port", "dhcp.server_port")
+        /// Configuration field name (e.g., "dns.port", "`dhcp.server_port`")
         option: String,
         /// The invalid port number
         port: u16,
@@ -106,7 +106,7 @@ pub enum ValidationError {
 
     /// Invalid time duration specification
     ///
-    /// Corresponds to time parsing in one_opt() for lease times, TTLs, etc.
+    /// Corresponds to time parsing in `one_opt()` for lease times, TTLs, etc.
     InvalidDuration {
         /// Configuration field name
         option: String,
@@ -118,7 +118,7 @@ pub enum ValidationError {
 
     /// File not found at specified path
     ///
-    /// Corresponds to file existence checks throughout one_opt()
+    /// Corresponds to file existence checks throughout `one_opt()`
     FileNotFound {
         /// Configuration field name
         option: String,
@@ -128,7 +128,7 @@ pub enum ValidationError {
 
     /// File exists but is not readable
     ///
-    /// Corresponds to access() checks in C implementation
+    /// Corresponds to `access()` checks in C implementation
     FileNotReadable {
         /// Configuration field name
         option: String,
@@ -158,7 +158,7 @@ pub enum ValidationError {
 
     /// DHCP address ranges overlap
     ///
-    /// Corresponds to range overlap detection in one_opt() DHCP range handling
+    /// Corresponds to range overlap detection in `one_opt()` DHCP range handling
     DhcpRangeOverlap {
         /// First overlapping range (e.g., "192.168.1.10-192.168.1.100")
         range1: String,
@@ -170,7 +170,7 @@ pub enum ValidationError {
 
     /// Option specified multiple times (duplicate)
     ///
-    /// Corresponds to duplicate detection in one_opt() switch statement
+    /// Corresponds to duplicate detection in `one_opt()` switch statement
     DuplicateOption {
         /// Option name that was duplicated
         option: String,
@@ -182,7 +182,7 @@ pub enum ValidationError {
 
     /// Mutually exclusive options both specified
     ///
-    /// Corresponds to option conflict checks throughout one_opt()
+    /// Corresponds to option conflict checks throughout `one_opt()`
     MutuallyExclusiveOptions {
         /// First option name
         option1: String,
@@ -206,7 +206,7 @@ pub enum ValidationError {
 
     /// Numeric value out of valid range
     ///
-    /// Corresponds to range checks throughout one_opt()
+    /// Corresponds to range checks throughout `one_opt()`
     InvalidRange {
         /// Configuration field name
         option: String,
@@ -220,7 +220,7 @@ pub enum ValidationError {
 
     /// Invalid value for option
     ///
-    /// Corresponds to format/type validation in one_opt()
+    /// Corresponds to format/type validation in `one_opt()`
     InvalidValue {
         /// Configuration field name
         option: String,
@@ -314,6 +314,12 @@ impl std::error::Error for ValidationError {}
 ///
 /// `Ok(())` if port is valid, `Err(ValidationError::InvalidPort)` otherwise
 ///
+/// # Errors
+///
+/// Returns `ValidationError::InvalidPort` if:
+/// - Port is 0 when `allow_zero` is false
+/// - Port is <1024 when `require_unprivileged` is true
+///
 /// # Example
 ///
 /// ```
@@ -369,6 +375,10 @@ pub fn validate_port_range(
 ///
 /// `Ok(IpAddr)` if address is valid, `Err(ValidationError::InvalidIpAddress)` otherwise
 ///
+/// # Errors
+///
+/// Returns `ValidationError::InvalidIpAddress` if the address is not a valid IPv4 or IPv6 address
+///
 /// # Example
 ///
 /// ```
@@ -405,6 +415,11 @@ pub fn validate_ip_address(address: &str, option_name: &str) -> Result<IpAddr, V
 /// # Returns
 ///
 /// `Ok(SocketAddr)` if valid, `Err(ValidationError::InvalidSocketAddress)` otherwise
+///
+/// # Errors
+///
+/// Returns `ValidationError::InvalidSocketAddress` if the address cannot be parsed as
+/// either a complete socket address or an IP address
 ///
 /// # Example
 ///
@@ -444,7 +459,7 @@ pub fn validate_socket_address(
 
 /// Parse a time duration string with suffix (s, m, h, d, w)
 ///
-/// Replaces inline duration parsing in C's one_opt() for lease times, TTLs, timeouts, etc.
+/// Replaces inline duration parsing in C's `one_opt()` for lease times, TTLs, timeouts, etc.
 /// Supports suffixes: s (seconds), m (minutes), h (hours), d (days), w (weeks).
 /// No suffix defaults to seconds for backward compatibility with C implementation.
 ///
@@ -456,6 +471,12 @@ pub fn validate_socket_address(
 /// # Returns
 ///
 /// `Ok(Duration)` if valid, `Err(ValidationError::InvalidDuration)` otherwise
+///
+/// # Errors
+///
+/// Returns `ValidationError::InvalidDuration` if:
+/// - The value cannot be parsed as a valid number
+/// - The duration value causes overflow when multiplied by the suffix multiplier
 ///
 /// # Example
 ///
@@ -508,9 +529,9 @@ pub fn parse_duration(value: &str, option_name: &str) -> Result<Duration, Valida
 
 /// Validate a file path exists and has required permissions
 ///
-/// Replaces C's `access()` syscall validation scattered throughout one_opt() with
+/// Replaces C's `access()` syscall validation scattered throughout `one_opt()` with
 /// safe Rust wrapper from nix crate. Uses type-safe `AccessFlags` enum instead of
-/// raw POSIX constants (R_OK, W_OK, X_OK).
+/// raw POSIX constants (`R_OK`, `W_OK`, `X_OK`).
 ///
 /// # Arguments
 ///
@@ -523,6 +544,14 @@ pub fn parse_duration(value: &str, option_name: &str) -> Result<Duration, Valida
 /// # Returns
 ///
 /// `Ok(())` if file exists with required permissions, appropriate `ValidationError` otherwise
+///
+/// # Errors
+///
+/// Returns a `ValidationError` variant if:
+/// - `ValidationError::FileNotFound` - The file or directory does not exist
+/// - `ValidationError::FileNotReadable` - Read permission required but not available
+/// - `ValidationError::FileNotWritable` - Write permission required but not available
+/// - `ValidationError::FileNotExecutable` - Execute permission required but not available
 ///
 /// # Example
 ///
@@ -606,7 +635,7 @@ pub fn validate_file_path(
 ///
 /// Main entry point for configuration validation. Performs comprehensive validation of
 /// all configuration subsystems, detecting conflicts, invalid values, and missing required
-/// options. This function replaces validation logic scattered throughout C's one_opt()
+/// options. This function replaces validation logic scattered throughout C's `one_opt()`
 /// switch statement (option.c:2721-5947) with centralized, composable validation.
 ///
 /// # Validation Performed
@@ -717,7 +746,7 @@ fn validate_dns_config(config: &Config) -> Result<(), ValidationError> {
     for (idx, server) in config.dns.upstream_servers.iter().enumerate() {
         validate_socket_address(
             &server.addr.to_string(),
-            &format!("server[{}]", idx),
+            &format!("server[{idx}]"),
             53, // Default DNS port
         )?;
     }
@@ -769,7 +798,7 @@ fn validate_dhcp_config(config: &Config) -> Result<(), ValidationError> {
                     range.lease_time.as_secs(),
                     config.dhcp.min_lease_time.as_secs()
                 ),
-                option1: format!("dhcp-range[{}]", idx),
+                option1: format!("dhcp-range[{idx}]"),
                 option2: "dhcp-lease-min".to_string(),
             });
         }
@@ -781,7 +810,7 @@ fn validate_dhcp_config(config: &Config) -> Result<(), ValidationError> {
 /// Validate DHCP address ranges don't overlap
 ///
 /// Sorts ranges by start address and checks for overlaps within same interface/context.
-/// Implements overlap detection from C's one_opt() DHCP range handling.
+/// Implements overlap detection from C's `one_opt()` DHCP range handling.
 ///
 /// # Arguments
 ///
@@ -857,9 +886,9 @@ fn validate_tftp_config(config: &Config) -> Result<(), ValidationError> {
             if start_port > end_port {
                 return Err(ValidationError::InvalidRange {
                     option: "tftp-port-range".to_string(),
-                    value: format!("{}-{}", start_port, end_port),
-                    min: format!("{}-{}", start_port, start_port),
-                    max: format!("{}-65535", start_port),
+                    value: format!("{start_port}-{end_port}"),
+                    min: format!("{start_port}-{start_port}"),
+                    max: format!("{start_port}-65535"),
                 });
             }
             
@@ -867,7 +896,7 @@ fn validate_tftp_config(config: &Config) -> Result<(), ValidationError> {
             if end_port - start_port < 10 {
                 return Err(ValidationError::InvalidValue {
                     option: "tftp-port-range".to_string(),
-                    value: format!("{}-{}", start_port, end_port),
+                    value: format!("{start_port}-{end_port}"),
                     expected: "range of at least 10 ports for concurrent transfers".to_string(),
                 });
             }

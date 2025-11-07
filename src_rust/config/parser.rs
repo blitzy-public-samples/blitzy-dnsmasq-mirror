@@ -203,7 +203,7 @@ mod tests {
     }
     
     #[test]
-    #[ignore] // Parser placeholder doesn't implement dhcp-range parsing yet
+    #[ignore = "Parser placeholder doesn't implement dhcp-range parsing yet"]
     fn test_parse_dhcp_range_enables_dhcp() {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "dhcp-range=192.168.1.50,192.168.1.150,12h").unwrap();
@@ -235,7 +235,7 @@ mod tests {
     fn test_parse_comments_and_blank_lines() {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "# This is a comment").unwrap();
-        writeln!(temp_file, "").unwrap();
+        writeln!(temp_file).unwrap();
         writeln!(temp_file, "port=8053").unwrap();
         writeln!(temp_file, "# Another comment").unwrap();
         temp_file.flush().unwrap();

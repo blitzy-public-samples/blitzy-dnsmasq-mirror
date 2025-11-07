@@ -1098,7 +1098,7 @@ mod tests {
     #[test]
     fn test_integration_manager_debug() {
         let manager = IntegrationManager::new();
-        let debug_output = format!("{:?}", manager);
+        let debug_output = format!("{manager:?}");
         assert!(debug_output.contains("IntegrationManager"));
     }
 

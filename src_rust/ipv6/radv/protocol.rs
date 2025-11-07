@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn test_prefix_option_creation() {
         let prefix: Ipv6Addr = "2001:db8::".parse().unwrap();
-        let prefix_opt = PrefixOption::new(prefix, 64, 2592000, 604800);
+        let prefix_opt = PrefixOption::new(prefix, 64, 2_592_000, 604_800);
 
         assert_eq!(prefix_opt.option_type, ICMP6_OPT_PREFIX);
         assert_eq!(prefix_opt.len, 4);
@@ -798,7 +798,7 @@ mod tests {
     #[test]
     fn test_prefix_option_flags() {
         let prefix: Ipv6Addr = "fd00::".parse().unwrap();
-        let prefix_opt = PrefixOption::new(prefix, 64, 2592000, 604800)
+        let prefix_opt = PrefixOption::new(prefix, 64, 2_592_000, 604_800)
             .with_onlink(false)
             .with_auto(true);
 
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     fn test_prefix_option_flag_checks() {
         let prefix: Ipv6Addr = "fd00::".parse().unwrap();
-        let prefix_opt = PrefixOption::new(prefix, 64, 2592000, 604800)
+        let prefix_opt = PrefixOption::new(prefix, 64, 2_592_000, 604_800)
             .with_auto(true)
             .with_onlink(true);
         
@@ -891,7 +891,7 @@ mod tests {
     fn test_prefix_option_invalid_lifetimes() {
         let prefix: Ipv6Addr = "2001:db8::".parse().unwrap();
         // This should panic because preferred > valid
-        let _ = PrefixOption::new(prefix, 64, 604800, 2592000);
+        let _ = PrefixOption::new(prefix, 64, 604_800, 2_592_000);
     }
     
     #[test]
@@ -951,7 +951,7 @@ mod tests {
     
     #[test]
     fn test_infinite_lifetime_constant() {
-        assert_eq!(INFINITE_LIFETIME, 0xFFFFFFFF);
+        assert_eq!(INFINITE_LIFETIME, 0xFFFF_FFFF);
     }
     
     #[test]

@@ -276,10 +276,10 @@ mod tests {
         // This is a compile-time test - if these types are not available,
         // the code won't compile. The test body can be empty.
         
-        // Ensure types are re-exported
-        let _helper_error_type: Option<HelperError> = None;
-        let _privilege_error_type: Option<PrivilegeError> = None;
-        let _script_data_type: Option<ScriptData> = None;
+        // Ensure types are re-exported (checked by using them in size_of)
+        assert!(std::mem::size_of::<HelperError>() > 0);
+        assert!(std::mem::size_of::<PrivilegeError>() > 0);
+        assert!(std::mem::size_of::<ScriptData>() > 0);
         
         // Function existence is verified by compilation
         let _ = create_helper;
@@ -316,7 +316,7 @@ mod tests {
         // 6. Privilege dropping is irreversible (no CAP_SETUID retained)
     }
 
-    /// Verify that the module provides all members_exposed per schema
+    /// Verify that the module provides all `members_exposed` per schema
     #[test]
     fn test_schema_compliance() {
         // According to exports schema, these items must be exported:
@@ -335,10 +335,10 @@ mod tests {
         let _: fn(_, _, _) -> _ = write_pidfile;
         let _: fn(_) -> _ = remove_pidfile;
         
-        // Type availability
-        let _helper_handle_type: Option<HelperHandle> = None;
-        let _script_data_type: Option<ScriptData> = None;
-        let _helper_error_type: Option<HelperError> = None;
-        let _privilege_error_type: Option<PrivilegeError> = None;
+        // Type availability (checked by using them in size_of)
+        assert!(std::mem::size_of::<HelperHandle>() > 0);
+        assert!(std::mem::size_of::<ScriptData>() > 0);
+        assert!(std::mem::size_of::<HelperError>() > 0);
+        assert!(std::mem::size_of::<PrivilegeError>() > 0);
     }
 }

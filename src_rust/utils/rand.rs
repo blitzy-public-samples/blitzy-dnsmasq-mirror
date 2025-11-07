@@ -312,10 +312,10 @@ mod tests {
 
     #[test]
     fn test_rand16_range() {
-        // Verify rand16 returns valid u16 values
+        // Verify rand16 can be called successfully and returns u16 values
         for _ in 0..1000 {
-            let value = rand16();
-            assert!(value <= u16::MAX);
+            let _value = rand16();
+            // By definition, all u16 values are valid
         }
     }
 
@@ -330,10 +330,10 @@ mod tests {
 
     #[test]
     fn test_rand32_range() {
-        // Verify rand32 returns valid u32 values
+        // Verify rand32 can be called successfully and returns u32 values
         for _ in 0..1000 {
-            let value = rand32();
-            assert!(value <= u32::MAX);
+            let _value = rand32();
+            // By definition, all u32 values are valid
         }
     }
 
@@ -348,10 +348,10 @@ mod tests {
 
     #[test]
     fn test_rand64_range() {
-        // Verify rand64 returns valid u64 values
+        // Verify rand64 can be called successfully and returns u64 values
         for _ in 0..1000 {
-            let value = rand64();
-            assert!(value <= u64::MAX);
+            let _value = rand64();
+            // By definition, all u64 values are valid
         }
     }
 
@@ -371,8 +371,8 @@ mod tests {
         rand_init(); // Should be safe to call multiple times
 
         // RNG should work after rand_init
-        let value = rand32();
-        assert!(value <= u32::MAX);
+        let _value = rand32();
+        // By definition, all u32 values are valid
     }
 
     #[test]
@@ -418,7 +418,7 @@ mod tests {
         for _ in 0..1000 {
             let rand_val = rand32();
             let src_port = 1024 + (rand_val % (65535 - 1024));
-            assert!(src_port >= 1024 && src_port < 65535);
+            assert!((1024..65535).contains(&src_port));
             ports.insert(src_port);
         }
         // Should have generated many unique ports

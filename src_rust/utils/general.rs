@@ -1120,8 +1120,8 @@ mod tests {
     fn test_netmask_length() {
         assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 0)), 24);
         assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 0, 0)), 16);
-        assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 255)), 32);
-        assert_eq!(netmask_length(Ipv4Addr::new(0, 0, 0, 0)), 0);
+        assert_eq!(netmask_length(Ipv4Addr::BROADCAST), 32);
+        assert_eq!(netmask_length(Ipv4Addr::UNSPECIFIED), 0);
         assert_eq!(netmask_length(Ipv4Addr::new(255, 255, 255, 128)), 25);
         // Non-contiguous netmask - just counts leading ones
         assert_eq!(netmask_length(Ipv4Addr::new(255, 0, 255, 0)), 8);

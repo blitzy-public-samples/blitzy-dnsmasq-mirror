@@ -40,7 +40,7 @@
 //!
 //! # RFC Compliance
 //!
-//! - **RFC 952**: DoD Internet Host Table Specification (hostname syntax)
+//! - **RFC 952**: `DoD` Internet Host Table Specification (hostname syntax)
 //! - **RFC 1035**: Domain Names - Implementation and Specification (wire format, Section 3.1)
 //! - **RFC 1123**: Requirements for Internet Hosts (relaxed hostname rules, allows leading digit)
 //! - **RFC 5890**: Internationalized Domain Names for Applications (IDNA2008)
@@ -62,7 +62,7 @@ use std::str;
 #[cfg(feature = "idn")]
 use idna::domain_to_ascii;
 
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 /// Result of internal domain name validation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,7 +156,7 @@ impl std::error::Error for Rfc1035Error {}
 ///
 /// # Performance
 ///
-/// O(n) where n = min(src.len(), max_size). Allocates new String on heap.
+/// O(n) where n = `min(src.len()`, `max_size`). Allocates new String on heap.
 ///
 /// # C Equivalence
 ///
@@ -342,7 +342,7 @@ fn check_name(name: &mut String) -> CheckNameResult {
 /// # Returns
 ///
 /// * `true` - Valid hostname per RFC 952/1123 rules
-/// * `false` - Invalid hostname (fails check_name or invalid first label characters)
+/// * `false` - Invalid hostname (fails `check_name` or invalid first label characters)
 ///
 /// # Examples
 ///
@@ -360,7 +360,7 @@ fn check_name(name: &mut String) -> CheckNameResult {
 ///
 /// # RFC Compliance
 ///
-/// - RFC 952: DoD Internet Host Table Specification
+/// - RFC 952: `DoD` Internet Host Table Specification
 /// - RFC 1123: Requirements for Internet Hosts (allows leading digit)
 ///
 /// # C Equivalence
@@ -452,9 +452,12 @@ pub fn legal_hostname(name: &str) -> bool {
 /// # Returns
 ///
 /// * `Ok(String)` - Canonical domain name (ASCII form, suitable for DNS queries)
-/// * `Err(CanonicaliseError::InvalidName)` - Invalid domain name format
-/// * `Err(CanonicaliseError::MemoryAllocation)` - Memory allocation failed during conversion
-/// * `Err(CanonicaliseError::IdnEncodingFailed)` - IDN encoding failed (non-memory error)
+///
+/// # Errors
+///
+/// * `CanonicaliseError::InvalidName` - Invalid domain name format
+/// * `CanonicaliseError::MemoryAllocation` - Memory allocation failed during conversion
+/// * `CanonicaliseError::IdnEncodingFailed` - IDN encoding failed (non-memory error)
 ///
 /// # Examples
 ///
@@ -489,7 +492,6 @@ pub fn legal_hostname(name: &str) -> bool {
 ///     // Sets *nomem = 1 if memory allocation failed
 /// }
 /// ```
-#[must_use]
 pub fn canonicalise(input: &str) -> Result<String, CanonicaliseError> {
     let mut name = String::from(input);
 
@@ -542,13 +544,16 @@ pub fn canonicalise(input: &str) -> Result<String, CanonicaliseError> {
 ///
 /// * `sval` - Input domain name string (dot-separated labels)
 /// * `buffer` - Output buffer slice to write encoded name
-/// * `limit` - Optional maximum buffer size (defaults to buffer.len() if None)
+/// * `limit` - Optional maximum buffer size (defaults to `buffer.len()` if None)
 ///
 /// # Returns
 ///
 /// * `Ok(usize)` - Number of bytes written to buffer (includes terminating zero)
-/// * `Err(Rfc1035Error::BufferLimitExceeded)` - Buffer too small for encoded name
-/// * `Err(Rfc1035Error::LabelTooLong)` - Label exceeds 63 byte maximum
+///
+/// # Errors
+///
+/// * `Rfc1035Error::BufferLimitExceeded` - Buffer too small for encoded name
+/// * `Rfc1035Error::LabelTooLong` - Label exceeds 63 byte maximum
 ///
 /// # Examples
 ///
@@ -577,7 +582,6 @@ pub fn canonicalise(input: &str) -> Result<String, CanonicaliseError> {
 ///     // Returns updated pointer or NULL if limit exceeded
 /// }
 /// ```
-#[must_use]
 pub fn do_rfc1035_name(
     sval: &str,
     buffer: &mut [u8],
@@ -945,7 +949,10 @@ mod tests {
         assert!(result.is_ok());
         let bytes = result.unwrap();
         assert_eq!(bytes, MAXLABEL + 2); // length byte + label + terminating zero
-        assert_eq!(buffer[0], MAXLABEL as u8);
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            assert_eq!(buffer[0], MAXLABEL as u8);
+        }
     }
 
     #[test]

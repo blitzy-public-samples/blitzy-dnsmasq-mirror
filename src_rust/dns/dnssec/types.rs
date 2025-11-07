@@ -87,7 +87,7 @@ pub enum DnssecAlgorithm {
 }
 
 impl DnssecAlgorithm {
-    /// Convert wire format u8 value to DnssecAlgorithm enum
+    /// Convert wire format u8 value to `DnssecAlgorithm` enum
     ///
     /// # Arguments
     ///
@@ -97,6 +97,7 @@ impl DnssecAlgorithm {
     ///
     /// * `Some(DnssecAlgorithm)` - Valid supported algorithm
     /// * `None` - Unsupported or invalid algorithm number
+    #[must_use]
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             5 => Some(DnssecAlgorithm::RsaSha1),
@@ -112,11 +113,12 @@ impl DnssecAlgorithm {
         }
     }
 
-    /// Convert DnssecAlgorithm enum to wire format u8 value
+    /// Convert `DnssecAlgorithm` enum to wire format u8 value
     ///
     /// # Returns
     ///
     /// Algorithm number for encoding in DNS packets
+    #[must_use]
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -129,6 +131,7 @@ impl DnssecAlgorithm {
     /// # Returns
     ///
     /// Hash algorithm name string (e.g., "sha256", "sha512")
+    #[must_use]
     pub fn digest_name(self) -> &'static str {
         match self {
             DnssecAlgorithm::RsaSha1 | DnssecAlgorithm::RsaSha1Nsec3 => "sha1",
@@ -154,7 +157,7 @@ impl fmt::Display for DnssecAlgorithm {
             DnssecAlgorithm::Ed25519 => "ED25519",
             DnssecAlgorithm::Ed448 => "ED448",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 
@@ -181,7 +184,7 @@ pub enum DigestType {
 }
 
 impl DigestType {
-    /// Convert wire format u8 value to DigestType enum
+    /// Convert wire format u8 value to `DigestType` enum
     ///
     /// # Arguments
     ///
@@ -191,6 +194,7 @@ impl DigestType {
     ///
     /// * `Some(DigestType)` - Valid supported digest type
     /// * `None` - Unsupported or invalid digest type number
+    #[must_use]
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(DigestType::SHA1),
@@ -201,11 +205,12 @@ impl DigestType {
         }
     }
 
-    /// Convert DigestType enum to wire format u8 value
+    /// Convert `DigestType` enum to wire format u8 value
     ///
     /// # Returns
     ///
     /// Digest type number for encoding in DNS packets
+    #[must_use]
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -218,6 +223,7 @@ impl DigestType {
     /// # Returns
     ///
     /// Hash algorithm name string (e.g., "sha256", "sha384")
+    #[must_use]
     pub fn digest_name(self) -> &'static str {
         match self {
             DigestType::SHA1 => "sha1",
@@ -236,7 +242,7 @@ impl fmt::Display for DigestType {
             DigestType::GOST => "GOST R 34.11-94",
             DigestType::SHA384 => "SHA-384",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 
@@ -247,7 +253,7 @@ impl fmt::Display for DigestType {
 /// DNSSEC validation status for DNS responses
 ///
 /// Represents the outcome of DNSSEC validation with type-safe variants
-/// replacing C's integer status codes (STAT_SECURE, STAT_INSECURE, etc.).
+/// replacing C's integer status codes (`STAT_SECURE`, `STAT_INSECURE`, etc.).
 ///
 /// # Validation States
 ///
@@ -288,6 +294,7 @@ impl ValidationStatus {
     /// # Returns
     ///
     /// `true` if status is `Secure` or `SecureWildcard`
+    #[must_use]
     pub fn is_secure(&self) -> bool {
         matches!(self, ValidationStatus::Secure | ValidationStatus::SecureWildcard)
     }
@@ -297,6 +304,7 @@ impl ValidationStatus {
     /// # Returns
     ///
     /// `true` if status is `Bogus`
+    #[must_use]
     pub fn is_bogus(&self) -> bool {
         matches!(self, ValidationStatus::Bogus(_))
     }
@@ -316,7 +324,7 @@ impl fmt::Display for ValidationStatus {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}", failure)?;
+                        write!(f, "{failure}")?;
                     }
                     write!(f, ")")?;
                 }
@@ -338,7 +346,7 @@ impl fmt::Display for ValidationStatus {
 /// Specific reasons for DNSSEC validation failures
 ///
 /// Provides detailed error information when validation fails, replacing
-/// C's bit flags (DNSSEC_FAIL_NYV, DNSSEC_FAIL_EXP, etc.) with type-safe
+/// C's bit flags (`DNSSEC_FAIL_NYV`, `DNSSEC_FAIL_EXP`, etc.) with type-safe
 /// enum variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DnssecFailure {
@@ -375,7 +383,7 @@ impl fmt::Display for DnssecFailure {
             DnssecFailure::NoSupportedDsAlgorithm => "no supported DS algorithm",
             DnssecFailure::NoKey => "no key",
         };
-        write!(f, "{}", desc)
+        write!(f, "{desc}")
     }
 }
 
@@ -430,7 +438,8 @@ impl DnsKey {
     ///
     /// # Returns
     ///
-    /// New DnsKey instance
+    /// New `DnsKey` instance
+    #[must_use]
     pub fn new(flags: u16, protocol: u8, algorithm: DnssecAlgorithm, public_key: Vec<u8>) -> Self {
         DnsKey {
             flags,
@@ -441,21 +450,25 @@ impl DnsKey {
     }
 
     /// Get DNSKEY flags field
+    #[must_use]
     pub fn flags(&self) -> u16 {
         self.flags
     }
 
     /// Get protocol field
+    #[must_use]
     pub fn protocol(&self) -> u8 {
         self.protocol
     }
 
     /// Get cryptographic algorithm
+    #[must_use]
     pub fn algorithm(&self) -> DnssecAlgorithm {
         self.algorithm
     }
 
     /// Get public key data
+    #[must_use]
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
     }
@@ -469,6 +482,7 @@ impl DnsKey {
     /// # Returns
     ///
     /// Key tag value (0-65535)
+    #[must_use]
     pub fn keytag(&self) -> u16 {
         // RFC 4034 Appendix B.1: Key tag calculation
         let mut rdata = Vec::with_capacity(4 + self.public_key.len());
@@ -481,9 +495,9 @@ impl DnsKey {
         let mut ac: u32 = 0;
         for (i, &byte) in rdata.iter().enumerate() {
             if i % 2 == 0 {
-                ac += (byte as u32) << 8;
+                ac += u32::from(byte) << 8;
             } else {
-                ac += byte as u32;
+                ac += u32::from(byte);
             }
         }
         ac += (ac >> 16) & 0xFFFF;
@@ -494,14 +508,14 @@ impl DnsKey {
     ///
     /// This method provides the interface for DNSKEY signature verification.
     /// The actual cryptographic operations are delegated to the crypto module
-    /// (src_rust/dns/dnssec/crypto.rs) which uses ring or rustls for secure
+    /// (`src_rust/dns/dnssec/crypto.rs`) which uses ring or rustls for secure
     /// algorithm-specific verification.
     ///
     /// # Architecture Note
     ///
     /// This types module defines data structures and their basic operations.
     /// Cryptographic verification requires integration with the crypto module
-    /// which will implement algorithm-specific logic for RSA, ECDSA, and EdDSA.
+    /// which will implement algorithm-specific logic for RSA, ECDSA, and `EdDSA`.
     ///
     /// # Arguments
     ///
@@ -513,6 +527,15 @@ impl DnsKey {
     /// * `Ok(true)` - Signature verifies successfully
     /// * `Ok(false)` - Signature verification failed
     /// * `Err(...)` - Malformed key, empty parameters, or unsupported algorithm
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Digest is empty
+    /// - Signature is empty
+    /// - Public key is empty
+    /// - Protocol field is not 3
+    /// - Crypto module integration not yet implemented for the algorithm
     ///
     /// # Example
     ///
@@ -544,7 +567,8 @@ impl DnsKey {
 
         // Protocol field must be 3 per RFC 4034
         if self.protocol != 3 {
-            return Err(format!("Invalid protocol field: {} (must be 3)", self.protocol));
+            let protocol = self.protocol;
+            return Err(format!("Invalid protocol field: {protocol} (must be 3)"));
         }
 
         // Interface for crypto module integration
@@ -568,6 +592,7 @@ impl DnsKey {
     /// # Returns
     ///
     /// Wire format bytes (flags + protocol + algorithm + public key)
+    #[must_use]
     pub fn to_wire(&self) -> Vec<u8> {
         let mut wire = Vec::with_capacity(4 + self.public_key.len());
         wire.extend_from_slice(&self.flags.to_be_bytes());
@@ -583,10 +608,9 @@ impl DnsKey {
     ///
     /// * `data` - Wire format bytes
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// * `Ok(DnsKey)` - Successfully parsed DNSKEY
-    /// * `Err(String)` - Parse error with description
+    /// Returns error if RDATA is too short or contains invalid algorithm
     pub fn from_wire(data: &[u8]) -> Result<Self, String> {
         if data.len() < 4 {
             return Err("DNSKEY RDATA too short (minimum 4 bytes)".to_string());
@@ -597,7 +621,7 @@ impl DnsKey {
         let algo_byte = data[3];
         
         let algorithm = DnssecAlgorithm::from_u8(algo_byte)
-            .ok_or_else(|| format!("Unsupported DNSSEC algorithm: {}", algo_byte))?;
+            .ok_or_else(|| format!("Unsupported DNSSEC algorithm: {algo_byte}"))?;
         
         let public_key = data[4..].to_vec();
         
@@ -615,7 +639,7 @@ impl DnsKey {
 
 /// RRSIG resource record per RFC 4034 Section 3
 ///
-/// Contains a cryptographic signature over an RRset (set of resource records
+/// Contains a cryptographic signature over an `RRset` (set of resource records
 /// with same owner name, class, and type). RRSIG records enable validation
 /// of DNS data integrity and authenticity.
 ///
@@ -624,7 +648,7 @@ impl DnsKey {
 /// - `type_covered`: RR type covered by this signature
 /// - `algorithm`: Cryptographic algorithm used for signing
 /// - `labels`: Number of labels in original name (for wildcard detection)
-/// - `original_ttl`: Original TTL of the covered RRset
+/// - `original_ttl`: Original TTL of the covered `RRset`
 /// - `signature_expiration`: Signature expiration time (seconds since epoch)
 /// - `signature_inception`: Signature inception time (seconds since epoch)
 /// - `key_tag`: Key tag of DNSKEY used to generate signature
@@ -658,7 +682,7 @@ pub struct RRSig {
     algorithm: DnssecAlgorithm,
     /// Number of labels in original owner name
     labels: u8,
-    /// Original TTL of RRset
+    /// Original TTL of `RRset`
     original_ttl: u32,
     /// Signature expiration time (Unix timestamp)
     signature_expiration: u32,
@@ -680,7 +704,7 @@ impl RRSig {
     /// * `type_covered` - RR type covered by signature
     /// * `algorithm` - Cryptographic algorithm
     /// * `labels` - Number of labels in original name
-    /// * `original_ttl` - Original TTL of RRset
+    /// * `original_ttl` - Original TTL of `RRset`
     /// * `signature_expiration` - Expiration time (Unix timestamp)
     /// * `signature_inception` - Inception time (Unix timestamp)
     /// * `key_tag` - Key tag of signing DNSKEY
@@ -689,8 +713,9 @@ impl RRSig {
     ///
     /// # Returns
     ///
-    /// New RRSig instance
+    /// New `RRSig` instance
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         type_covered: u16,
         algorithm: DnssecAlgorithm,
@@ -716,46 +741,55 @@ impl RRSig {
     }
 
     /// Get RR type covered by this signature
+    #[must_use]
     pub fn type_covered(&self) -> u16 {
         self.type_covered
     }
 
     /// Get cryptographic algorithm
+    #[must_use]
     pub fn algorithm(&self) -> DnssecAlgorithm {
         self.algorithm
     }
 
     /// Get number of labels in original owner name
+    #[must_use]
     pub fn labels(&self) -> u8 {
         self.labels
     }
 
-    /// Get original TTL of covered RRset
+    /// Get original TTL of covered `RRset`
+    #[must_use]
     pub fn original_ttl(&self) -> u32 {
         self.original_ttl
     }
 
     /// Get signature expiration time (Unix timestamp)
+    #[must_use]
     pub fn signature_expiration(&self) -> u32 {
         self.signature_expiration
     }
 
     /// Get signature inception time (Unix timestamp)
+    #[must_use]
     pub fn signature_inception(&self) -> u32 {
         self.signature_inception
     }
 
     /// Get key tag of signing DNSKEY
+    #[must_use]
     pub fn key_tag(&self) -> u16 {
         self.key_tag
     }
 
     /// Get signer's domain name
+    #[must_use]
     pub fn signer_name(&self) -> &str {
         &self.signer_name
     }
 
     /// Get signature bytes
+    #[must_use]
     pub fn signature(&self) -> &[u8] {
         &self.signature
     }
@@ -766,12 +800,15 @@ impl RRSig {
     ///
     /// * `true` - Signature has expired
     /// * `false` - Signature is still valid (not expired)
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
-            .as_secs() as u32;
-        now > self.signature_expiration
+            .as_secs();
+        // DNSSEC uses 32-bit timestamps; values beyond 2106 are treated as max
+        let now_u32 = u32::try_from(now).unwrap_or(u32::MAX);
+        now_u32 > self.signature_expiration
     }
 
     /// Check if signature is not yet valid relative to current system time
@@ -780,12 +817,15 @@ impl RRSig {
     ///
     /// * `true` - Signature is not yet valid (before inception)
     /// * `false` - Signature inception time has passed
+    #[must_use]
     pub fn is_not_yet_valid(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
-            .as_secs() as u32;
-        now < self.signature_inception
+            .as_secs();
+        // DNSSEC uses 32-bit timestamps; values beyond 2106 are treated as max
+        let now_u32 = u32::try_from(now).unwrap_or(u32::MAX);
+        now_u32 < self.signature_inception
     }
 
     /// Serialize RRSIG to DNS wire format
@@ -793,6 +833,7 @@ impl RRSig {
     /// # Returns
     ///
     /// Wire format bytes
+    #[must_use]
     pub fn to_wire(&self) -> Vec<u8> {
         let mut wire = Vec::new();
         wire.extend_from_slice(&self.type_covered.to_be_bytes());
@@ -806,7 +847,7 @@ impl RRSig {
         // Encode signer name in wire format (length-prefixed labels)
         for label in self.signer_name.split('.') {
             if !label.is_empty() {
-                wire.push(label.len() as u8);
+                wire.push(u8::try_from(label.len()).unwrap_or(63)); // DNS label max is 63
                 wire.extend_from_slice(label.as_bytes());
             }
         }
@@ -822,10 +863,9 @@ impl RRSig {
     ///
     /// * `data` - Wire format bytes
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// * `Ok(RRSig)` - Successfully parsed RRSIG
-    /// * `Err(String)` - Parse error with description
+    /// Returns error if RDATA is too short, contains invalid algorithm, or has malformed signer name
     pub fn from_wire(data: &[u8]) -> Result<Self, String> {
         if data.len() < 18 {
             return Err("RRSIG RDATA too short (minimum 18 bytes before signer name)".to_string());
@@ -840,7 +880,7 @@ impl RRSig {
         let key_tag = u16::from_be_bytes([data[16], data[17]]);
 
         let algorithm = DnssecAlgorithm::from_u8(algo_byte)
-            .ok_or_else(|| format!("Unsupported DNSSEC algorithm: {}", algo_byte))?;
+            .ok_or_else(|| format!("Unsupported DNSSEC algorithm: {algo_byte}"))?;
 
         // Parse signer name from wire format
         let mut pos = 18;
@@ -932,7 +972,8 @@ impl DsRecord {
     ///
     /// # Returns
     ///
-    /// New DsRecord instance
+    /// New `DsRecord` instance
+    #[must_use]
     pub fn new(
         key_tag: u16,
         algorithm: DnssecAlgorithm,
@@ -948,21 +989,25 @@ impl DsRecord {
     }
 
     /// Get key tag
+    #[must_use]
     pub fn key_tag(&self) -> u16 {
         self.key_tag
     }
 
     /// Get algorithm
+    #[must_use]
     pub fn algorithm(&self) -> DnssecAlgorithm {
         self.algorithm
     }
 
     /// Get digest type
+    #[must_use]
     pub fn digest_type(&self) -> DigestType {
         self.digest_type
     }
 
     /// Get digest bytes
+    #[must_use]
     pub fn digest(&self) -> &[u8] {
         &self.digest
     }
@@ -972,6 +1017,7 @@ impl DsRecord {
     /// # Returns
     ///
     /// Wire format bytes
+    #[must_use]
     pub fn to_wire(&self) -> Vec<u8> {
         let mut wire = Vec::with_capacity(4 + self.digest.len());
         wire.extend_from_slice(&self.key_tag.to_be_bytes());
@@ -987,10 +1033,9 @@ impl DsRecord {
     ///
     /// * `data` - Wire format bytes
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// * `Ok(DsRecord)` - Successfully parsed DS
-    /// * `Err(String)` - Parse error with description
+    /// Returns error if RDATA is too short or contains unsupported algorithm or digest type
     pub fn from_wire(data: &[u8]) -> Result<Self, String> {
         if data.len() < 4 {
             return Err("DS RDATA too short (minimum 4 bytes)".to_string());
@@ -1001,10 +1046,10 @@ impl DsRecord {
         let digest_type_byte = data[3];
 
         let algorithm = DnssecAlgorithm::from_u8(algo_byte)
-            .ok_or_else(|| format!("Unsupported DNSSEC algorithm: {}", algo_byte))?;
+            .ok_or_else(|| format!("Unsupported DNSSEC algorithm: {algo_byte}"))?;
 
         let digest_type = DigestType::from_u8(digest_type_byte)
-            .ok_or_else(|| format!("Unsupported digest type: {}", digest_type_byte))?;
+            .ok_or_else(|| format!("Unsupported digest type: {digest_type_byte}"))?;
 
         let digest = data[4..].to_vec();
 
@@ -1058,7 +1103,8 @@ impl NsecRecord {
     ///
     /// # Returns
     ///
-    /// New NsecRecord instance
+    /// New `NsecRecord` instance
+    #[must_use]
     pub fn new(next_domain: String, type_bitmap: Vec<u8>) -> Self {
         NsecRecord {
             next_domain,
@@ -1067,11 +1113,13 @@ impl NsecRecord {
     }
 
     /// Get next domain name
+    #[must_use]
     pub fn next_domain(&self) -> &str {
         &self.next_domain
     }
 
     /// Get type bitmap
+    #[must_use]
     pub fn type_bitmap(&self) -> &[u8] {
         &self.type_bitmap
     }
@@ -1080,13 +1128,16 @@ impl NsecRecord {
     ///
     /// # Arguments
     ///
-    /// * `rrtype` - RR type to check (e.g., T_A, T_AAAA)
+    /// * `rrtype` - RR type to check (e.g., `T_A`, `T_AAAA`)
     ///
     /// # Returns
     ///
     /// `true` if type is present in bitmap
+    #[must_use]
     pub fn covers_type(&self, rrtype: u16) -> bool {
+        #[allow(clippy::cast_possible_truncation)] // rrtype / 256 is always <= 255
         let window = (rrtype / 256) as u8;
+        #[allow(clippy::cast_possible_truncation)] // rrtype % 256 is always < 256
         let bit_in_window = (rrtype % 256) as u8;
         
         let mut pos = 0;
@@ -1116,13 +1167,14 @@ impl NsecRecord {
     /// # Returns
     ///
     /// Wire format bytes
+    #[must_use]
     pub fn to_wire(&self) -> Vec<u8> {
         let mut wire = Vec::new();
         
         // Encode next domain name
         for label in self.next_domain.split('.') {
             if !label.is_empty() {
-                wire.push(label.len() as u8);
+                wire.push(u8::try_from(label.len()).unwrap_or(63)); // DNS label max is 63
                 wire.extend_from_slice(label.as_bytes());
             }
         }
@@ -1138,10 +1190,9 @@ impl NsecRecord {
     ///
     /// * `data` - Wire format bytes
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// * `Ok(NsecRecord)` - Successfully parsed NSEC
-    /// * `Err(String)` - Parse error with description
+    /// Returns error if RDATA is empty, next domain name is invalid, or type bitmap is malformed
     pub fn from_wire(data: &[u8]) -> Result<Self, String> {
         if data.is_empty() {
             return Err("NSEC RDATA is empty".to_string());
@@ -1236,7 +1287,9 @@ impl Nsec3Record {
     ///
     /// # Returns
     ///
-    /// New Nsec3Record instance
+    /// New `Nsec3Record` instance
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         hash_algorithm: u8,
         flags: u8,
@@ -1256,31 +1309,37 @@ impl Nsec3Record {
     }
 
     /// Get hash algorithm
+    #[must_use]
     pub fn hash_algorithm(&self) -> u8 {
         self.hash_algorithm
     }
 
     /// Get flags
+    #[must_use]
     pub fn flags(&self) -> u8 {
         self.flags
     }
 
     /// Get iterations
+    #[must_use]
     pub fn iterations(&self) -> u16 {
         self.iterations
     }
 
     /// Get salt
+    #[must_use]
     pub fn salt(&self) -> &[u8] {
         &self.salt
     }
 
     /// Get next hashed owner name
+    #[must_use]
     pub fn next_hashed_owner(&self) -> &[u8] {
         &self.next_hashed_owner
     }
 
     /// Get type bitmap
+    #[must_use]
     pub fn type_bitmap(&self) -> &[u8] {
         &self.type_bitmap
     }
@@ -1294,9 +1353,12 @@ impl Nsec3Record {
     /// # Returns
     ///
     /// `true` if type is present in bitmap
+    #[must_use]
     pub fn covers_type(&self, rrtype: u16) -> bool {
         // Same bitmap logic as NSEC
+        #[allow(clippy::cast_possible_truncation)] // rrtype / 256 is always <= 255
         let window = (rrtype / 256) as u8;
+        #[allow(clippy::cast_possible_truncation)] // rrtype % 256 is always < 256
         let bit_in_window = (rrtype % 256) as u8;
         
         let mut pos = 0;
@@ -1326,14 +1388,15 @@ impl Nsec3Record {
     /// # Returns
     ///
     /// Wire format bytes
+    #[must_use]
     pub fn to_wire(&self) -> Vec<u8> {
         let mut wire = Vec::new();
         wire.push(self.hash_algorithm);
         wire.push(self.flags);
         wire.extend_from_slice(&self.iterations.to_be_bytes());
-        wire.push(self.salt.len() as u8);
+        wire.push(u8::try_from(self.salt.len()).unwrap_or(255));
         wire.extend_from_slice(&self.salt);
-        wire.push(self.next_hashed_owner.len() as u8);
+        wire.push(u8::try_from(self.next_hashed_owner.len()).unwrap_or(255));
         wire.extend_from_slice(&self.next_hashed_owner);
         wire.extend_from_slice(&self.type_bitmap);
         wire
@@ -1345,10 +1408,9 @@ impl Nsec3Record {
     ///
     /// * `data` - Wire format bytes
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// * `Ok(Nsec3Record)` - Successfully parsed NSEC3
-    /// * `Err(String)` - Parse error with description
+    /// Returns error if RDATA is too short, salt/hash fields extend beyond data, or type bitmap is malformed
     pub fn from_wire(data: &[u8]) -> Result<Self, String> {
         if data.len() < 5 {
             return Err("NSEC3 RDATA too short (minimum 5 bytes)".to_string());
@@ -1443,15 +1505,18 @@ mod tests {
             vec![1, 2, 3, 4], // public key
         );
         let tag = key.keytag();
-        assert!(tag <= 65535); // Valid range
+        // Expected keytag for this specific test data (RFC 4034 Appendix B.1 algorithm)
+        assert_eq!(tag, 2062);
     }
 
     #[test]
     fn test_rrsig_time_validation() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as u32;
+        let now = u32::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        ).unwrap_or(u32::MAX);
         
         let rrsig = RRSig::new(
             1, // A record

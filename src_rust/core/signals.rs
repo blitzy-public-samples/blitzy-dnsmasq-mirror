@@ -619,7 +619,7 @@ mod tests {
                 // Timeout expected - no signals sent yet
             }
             Ok(Some(event)) => {
-                panic!("Unexpected signal event received: {:?}", event);
+                panic!("Unexpected signal event received: {event:?}");
             }
             Ok(None) => {
                 panic!("Signal channel closed unexpectedly");
@@ -672,7 +672,7 @@ mod tests {
     fn test_signal_event_clone() {
         // Test Clone implementation
         let event = SignalEvent::Reload;
-        let cloned = event.clone();
+        let cloned = event;
         assert_eq!(event, cloned);
     }
 

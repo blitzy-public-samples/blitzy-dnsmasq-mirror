@@ -1681,13 +1681,13 @@ mod tests {
 
     #[test]
     fn test_socket_addr_conversion() {
-        let ipv4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
+        let ipv4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080));
         match ipv4 {
             SocketAddr::V4(addr) => {
                 assert_eq!(addr.ip().octets(), [127, 0, 0, 1]);
                 assert_eq!(addr.port(), 8080);
             }
-            _ => panic!("Expected IPv4"),
+            SocketAddr::V6(_) => panic!("Expected IPv4"),
         }
     }
 
@@ -1807,7 +1807,7 @@ mod tests {
                 assert_eq!(v4_addr.ip().octets(), [192, 168, 1, 100]);
                 assert_eq!(v4_addr.port(), 53);
             }
-            _ => panic!("Expected IPv4 socket address"),
+            SocketAddr::V6(_) => panic!("Expected IPv4 socket address"),
         }
     }
 
@@ -1827,7 +1827,7 @@ mod tests {
                 assert_eq!(v6_addr.flowinfo(), 0);
                 assert_eq!(v6_addr.scope_id(), 0);
             }
-            _ => panic!("Expected IPv6 socket address"),
+            SocketAddr::V4(_) => panic!("Expected IPv6 socket address"),
         }
     }
 
@@ -1842,7 +1842,7 @@ mod tests {
         let not_found_err = IoError::new(ErrorKind::NotFound, "resource not found");
         assert_eq!(not_found_err.kind(), ErrorKind::NotFound);
         
-        let other_err = IoError::new(ErrorKind::Other, "platform error");
+        let other_err = IoError::other("platform error");
         assert_eq!(other_err.kind(), ErrorKind::Other);
     }
 
@@ -1869,8 +1869,7 @@ mod tests {
             let _ = std::mem::size_of::<PfrAddr>();
         }
         
-        // This test verifies correct compilation
-        assert!(true, "Module organization is correct");
+        // This test verifies correct compilation - if it compiles, it passes
     }
 
     #[cfg(target_os = "solaris")]
@@ -1916,7 +1915,7 @@ mod tests {
         //
         // These are compile-time guarantees enforced by Rust's type system
         // and documented throughout the module implementation.
-        
-        assert!(true, "Safety invariants are documented and enforced");
+        //
+        // This test verifies correct compilation and documentation - if it compiles, it passes
     }
 }

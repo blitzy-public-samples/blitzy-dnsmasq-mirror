@@ -131,7 +131,7 @@ pub enum NftsetError {
     /// - Set doesn't exist in the specified table
     /// - Table doesn't exist
     /// - Invalid command syntax
-    /// - Permission denied (CAP_NET_ADMIN required)
+    /// - Permission denied (`CAP_NET_ADMIN` required)
     /// - Kernel netfilter module not loaded
     /// - Address already exists in set (for add operations)
     /// - Address doesn't exist in set (for delete operations)
@@ -183,15 +183,15 @@ pub enum NftsetError {
 ///
 /// Distinguishes between IPv4 and IPv6 addresses to determine:
 /// - Which union member to access in C's `union all_addr`
-/// - Which address family to pass to `inet_ntop()` (AF_INET vs AF_INET6)
+/// - Which address family to pass to `inet_ntop()` (`AF_INET` vs `AF_INET6`)
 /// - Whether address family filter prefixes match
 ///
 /// Replaces C's flag-based detection: `(flags & F_IPV4) ? AF_INET : AF_INET6`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressFamily {
-    /// IPv4 address family (AF_INET, F_IPV4 flag in C)
+    /// IPv4 address family (`AF_INET`, `F_IPV4` flag in C)
     V4,
-    /// IPv6 address family (AF_INET6, absence of F_IPV4 in C)
+    /// IPv6 address family (`AF_INET6`, absence of `F_IPV4` in C)
     V6,
 }
 
@@ -205,7 +205,7 @@ impl fmt::Display for AddressFamily {
 }
 
 impl AddressFamily {
-    /// Determine address family from IpAddr
+    /// Determine address family from `IpAddr`
     ///
     /// Automatically detects whether an IP address is IPv4 or IPv6 without
     /// requiring explicit flag passing
@@ -545,7 +545,7 @@ impl NftsetManager {
 
         // Safe string formatting - no buffer overflow possible
         // Replaces C's static templates and manual buffer management (lines 99-100, 263-275)
-        let command = format!("{} {} {{ {} }}", cmd_template, filtered_setname, addr_str);
+        let command = format!("{cmd_template} {filtered_setname} {{ {addr_str} }}");
 
         trace!(command = %command, "Constructed nftables command");
 
@@ -557,7 +557,7 @@ impl NftsetManager {
             command
         })
         .await
-        .map_err(|e| NftsetError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        .map_err(|e| NftsetError::IoError(std::io::Error::other(e)))?;
 
         // Execute nftables command via FFI
         // Equivalent to nft_run_cmd_from_buffer(ctx, cmd_buf) (line 277)

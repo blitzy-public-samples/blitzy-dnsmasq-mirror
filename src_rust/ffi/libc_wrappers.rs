@@ -1194,7 +1194,7 @@ mod tests {
         let err = FfiError::UserNotFound {
             username: "testuser".to_string(),
         };
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("testuser"));
         assert!(msg.contains("not found"));
     }

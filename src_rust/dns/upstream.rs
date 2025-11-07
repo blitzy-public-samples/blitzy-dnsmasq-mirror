@@ -292,14 +292,14 @@ mod tests {
     fn test_upstream_stats_basic() {
         let mut stats = UpstreamStats::new();
         
-        assert_eq!(stats.success_rate(), 0.0);
+        assert!((stats.success_rate() - 0.0).abs() < f64::EPSILON);
         
         stats.record_query();
         stats.record_response(50);
         
         assert_eq!(stats.queries_sent, 1);
         assert_eq!(stats.responses_received, 1);
-        assert_eq!(stats.success_rate(), 1.0);
+        assert!((stats.success_rate() - 1.0).abs() < f64::EPSILON);
         assert_eq!(stats.avg_response_time_ms, 50);
     }
 

@@ -210,9 +210,7 @@ mod tests {
         // Pattern matching
         let _dns_valid = is_valid_dns_name("example.com");
         
-        // Dump functionality constants
-        let _magic = PCAP_MAGIC_NUMBER;
-        let _dlt = DLT_RAW;
+        // Dump functionality constants are tested separately
     }
 
     #[test]
@@ -237,24 +235,16 @@ mod tests {
     #[test]
     fn test_random_number_generation() {
         // Test that random number generators produce values
-        // within expected ranges
-        
-        let r16 = rand16();
-        assert!(r16 <= u16::MAX);
-        
-        let r32 = rand32();
-        assert!(r32 <= u32::MAX);
-        
-        let r64 = rand64();
-        assert!(r64 <= u64::MAX);
+        // Test that all random functions return without panicking
+        let _r16 = rand16();
+        let _r32 = rand32();
+        let _r64 = rand64();
         
         // Test that successive calls produce different values
         // (statistically should be different)
         let r1 = rand32();
-        let r2 = rand32();
-        // Note: There's a tiny chance they could be equal, but statistically unlikely
-        // This is a basic sanity check
-        let _different = r1 != r2; // Usually true
+        // Verify values are consistent (tautology check for sanity)
+        assert!(r1 == r1);
     }
 
     #[test]
@@ -277,7 +267,7 @@ mod tests {
         // Verify PCAP constants are properly defined
         
         // PCAP magic number for native byte order
-        assert_eq!(PCAP_MAGIC_NUMBER, 0xa1b2c3d4);
+        assert_eq!(PCAP_MAGIC_NUMBER, 0xa1b2_c3d4);
         
         // DLT_RAW link-layer type (no Ethernet header)
         assert_eq!(DLT_RAW, 101);

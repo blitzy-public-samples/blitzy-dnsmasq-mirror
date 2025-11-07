@@ -160,6 +160,7 @@ pub enum SynthDomainResult {
 /// assert!(is_valid_dns_name_pattern("host1.example.com"));
 /// assert!(!is_valid_dns_name_pattern("invalid_name.com")); // underscore not allowed in DNS
 /// ```
+#[must_use] 
 pub fn is_valid_dns_name_pattern(name: &str) -> bool {
     if name.is_empty() || name.len() > MAXDNAME {
         return false;
@@ -172,15 +173,18 @@ pub fn is_valid_dns_name_pattern(name: &str) -> bool {
 
         // Check each character in the label
         for (i, c) in label.chars().enumerate() {
-            match c {
+            let is_valid = match c {
                 // Letters and digits always allowed
-                'a'..='z' | 'A'..='Z' | '0'..='9' => continue,
+                'a'..='z' | 'A'..='Z' | '0'..='9' => true,
                 // Hyphens allowed but not at start or end
-                '-' if i > 0 && i < label.len() - 1 => continue,
+                '-' if i > 0 && i < label.len() - 1 => true,
                 // Asterisk allowed for wildcards (only at start of label)
-                '*' if i == 0 => continue,
+                '*' if i == 0 => true,
                 // Everything else is invalid
-                _ => return false,
+                _ => false,
+            };
+            if !is_valid {
+                return false;
             }
         }
     }
@@ -258,7 +262,7 @@ fn match_domain(addr: Ipv4Addr, c: &CondDomain) -> bool {
 ///
 /// * `Some(domain)` - Reference to first matching domain configuration
 /// * `None` - No match found
-fn search_domain<'a>(addr: Ipv4Addr, domains: &'a [CondDomain]) -> Option<&'a CondDomain> {
+fn search_domain(addr: Ipv4Addr, domains: &[CondDomain]) -> Option<&CondDomain> {
     domains.iter().find(|c| match_domain(addr, c))
 }
 
@@ -357,7 +361,7 @@ fn search_domain6<'a>(addr: &Ipv6Addr, domains: &'a [CondDomain]) -> Option<&'a 
 /// the configured IP range. Supports indexed numeric format (host42.example.com) and
 /// direct IP encoding (192-168-1-100.example.com).
 ///
-/// This is a memory-safe replacement for C's is_name_synthetic which temporarily modifies
+/// This is a memory-safe replacement for C's `is_name_synthetic` which temporarily modifies
 /// the input string. The Rust version uses immutable String operations (replace, split)
 /// eliminating buffer overflow and use-after-free vulnerabilities.
 ///
@@ -411,9 +415,9 @@ fn search_domain6<'a>(addr: &Ipv6Addr, domains: &'a [CondDomain]) -> Option<&'a 
 ///
 /// Unlike C version which modifies input string in-place, this function uses immutable
 /// operations:
-/// - String::replace instead of character-by-character modification
-/// - str::split instead of manual tokenization
-/// - IpAddr::from_str with safe parsing instead of inet_pton
+/// - `String::replace` instead of character-by-character modification
+/// - `str::split` instead of manual tokenization
+/// - `IpAddr::from_str` with safe parsing instead of `inet_pton`
 pub fn is_name_synthetic(
     flags: QueryFlags,
     name: &str,
@@ -437,9 +441,8 @@ pub fn is_name_synthetic(
             // Example: host42.example.com
             
             // Find the numeric part
-            let dot_pos = match tail.find('.') {
-                Some(pos) => pos,
-                None => continue,
+            let Some(dot_pos) = tail.find('.') else {
+                continue;
             };
 
             let number_part = &tail[..dot_pos];
@@ -457,9 +460,8 @@ pub fn is_name_synthetic(
                     continue;
                 }
 
-                let index = match number_part.parse::<u64>() {
-                    Ok(idx) => idx,
-                    Err(_) => continue,
+                let Ok(index) = number_part.parse::<u64>() else {
+                    continue;
                 };
 
                 let start_part = addr6part(&c.start6);
@@ -481,9 +483,8 @@ pub fn is_name_synthetic(
                     continue;
                 }
 
-                let index = match number_part.parse::<u32>() {
-                    Ok(idx) => idx,
-                    Err(_) => continue,
+                let Ok(index) = number_part.parse::<u32>() else {
+                    continue;
                 };
 
                 let start_u32 = u32::from(c.start);
@@ -524,9 +525,8 @@ pub fn is_name_synthetic(
                 }
             }
             
-            let dot_pos = match dot_pos {
-                Some(pos) => pos,
-                None => continue,
+            let Some(dot_pos) = dot_pos else {
+                continue;
             };
 
             let ip_part = &tail[..dot_pos];
@@ -540,9 +540,9 @@ pub fn is_name_synthetic(
             // Decode the IP address
             let decoded_ip = if is_ipv6 {
                 // IPv6: Handle IPv4-mapped addresses (--ffff- prefix)
-                if ip_part.starts_with("--ffff-") {
+                if let Some(ipv4_part) = ip_part.strip_prefix("--ffff-") {
                     // Convert --ffff-192-168-1-1 to ::ffff:192.168.1.1
-                    let ipv4_part = &ip_part[7..]; // Skip --ffff-
+                    // Skip --ffff-
                     let ipv4_str = ipv4_part.replace('-', ".");
                     
                     match Ipv4Addr::from_str(&ipv4_str) {
@@ -558,7 +558,7 @@ pub fn is_name_synthetic(
                     
                     // Handle case where IPv6 starts with colon (prepend 0)
                     let ipv6_str = if ipv6_str.starts_with(':') {
-                        format!("0{}", ipv6_str)
+                        format!("0{ipv6_str}")
                     } else {
                         ipv6_str
                     };
@@ -595,12 +595,12 @@ pub fn is_name_synthetic(
 
 /// Generate synthetic domain name from IP address (reverse synthesis)
 ///
-/// Performs the reverse operation of is_name_synthetic by generating a synthetic DNS
+/// Performs the reverse operation of `is_name_synthetic` by generating a synthetic DNS
 /// hostname from an IP address if the address falls within a configured synthetic domain
 /// range. Supports indexed format (prefix + index + domain) and direct IP encoding
 /// (prefix + encoded-IP + domain).
 ///
-/// This is a memory-safe replacement for C's is_rev_synth which uses unsafe buffer
+/// This is a memory-safe replacement for C's `is_rev_synth` which uses unsafe buffer
 /// operations. The Rust version uses String formatting and safe arithmetic.
 ///
 /// # Arguments
@@ -646,7 +646,7 @@ pub fn is_name_synthetic(
 /// # Memory Safety
 ///
 /// Uses safe String formatting instead of C's strncat with MAXDNAME buffer management:
-/// - String::with_capacity for efficient allocation
+/// - `String::with_capacity` for efficient allocation
 /// - write! macro for safe formatting
 /// - No manual buffer size tracking or null terminator management
 pub fn is_rev_synth(
@@ -666,9 +666,9 @@ pub fn is_rev_synth(
                 let index = u32::from(v4_addr).saturating_sub(u32::from(c.start));
                 
                 if let Some(ref prefix) = c.prefix {
-                    write!(&mut name, "{}{}", prefix, index).ok()?;
+                    write!(&mut name, "{prefix}{index}").ok()?;
                 } else {
-                    write!(&mut name, "{}", index).ok()?;
+                    write!(&mut name, "{index}").ok()?;
                 }
             } else {
                 // Direct IP encoding: prefix + encoded-IP + "." + domain
@@ -699,9 +699,9 @@ pub fn is_rev_synth(
                 let index = addr6part(&v6_addr).saturating_sub(addr6part(&c.start6));
                 
                 if let Some(ref prefix) = c.prefix {
-                    write!(&mut name, "{}{}", prefix, index).ok()?;
+                    write!(&mut name, "{prefix}{index}").ok()?;
                 } else {
-                    write!(&mut name, "{}", index).ok()?;
+                    write!(&mut name, "{index}").ok()?;
                 }
             } else {
                 // Direct IP encoding: prefix + encoded-IP + "." + domain
@@ -717,10 +717,10 @@ pub fn is_rev_synth(
                 if c.prefix.is_none() && ip_str.starts_with(':') {
                     name.push('0');
                     let modified = ip_str.replacen(':', "", 1);
-                    name.push_str(&modified.replace(':', "-").replace('.', "-"));
+                    name.push_str(&modified.replace([':', '.'], "-"));
                 } else {
                     // Replace colons and dots with dashes
-                    name.push_str(&ip_str.replace(':', "-").replace('.', "-"));
+                    name.push_str(&ip_str.replace([':', '.'], "-"));
                 }
             }
 
@@ -782,14 +782,14 @@ pub fn is_rev_synth(
 /// let domain2 = get_domain(addr2, &cond_domains, "example.com");
 /// assert_eq!(domain2, "example.com"); // Falls back to default
 /// ```
+#[must_use] 
 pub fn get_domain<'a>(
     addr: Ipv4Addr,
     cond_domains: &'a [CondDomain],
     default_domain: &'a str,
 ) -> &'a str {
     search_domain(addr, cond_domains)
-        .map(|c| c.domain.as_str())
-        .unwrap_or(default_domain)
+        .map_or(default_domain, |c| c.domain.as_str())
 }
 
 /// Retrieve appropriate domain suffix for IPv6 address
@@ -839,14 +839,14 @@ pub fn get_domain<'a>(
 /// let default = get_domain6(None, &cond_domains, "example.com");
 /// assert_eq!(default, "example.com"); // No address, returns default
 /// ```
+#[must_use] 
 pub fn get_domain6<'a>(
     addr: Option<&Ipv6Addr>,
     cond_domains: &'a [CondDomain],
     default_domain: &'a str,
 ) -> &'a str {
     addr.and_then(|a| search_domain6(a, cond_domains))
-        .map(|c| c.domain.as_str())
-        .unwrap_or(default_domain)
+        .map_or(default_domain, |c| c.domain.as_str())
 }
 
 /// Canonicalise a DNS domain name
@@ -886,6 +886,7 @@ pub fn get_domain6<'a>(
 ///
 /// - RFC 4034 Section 6.2: Canonical DNS Name Order
 /// - RFC 1035 Section 2.3.3: Domain name case-insensitivity
+#[must_use] 
 pub fn canonicalise(name: &str) -> Option<String> {
     if name.is_empty() {
         return None;
@@ -914,10 +915,13 @@ pub fn canonicalise(name: &str) -> Option<String> {
 
         // Validate each character
         for (i, c) in label.chars().enumerate() {
-            match c {
-                'a'..='z' | '0'..='9' => continue,
-                '-' if i > 0 && i < label.len() - 1 => continue,
-                _ => return None,
+            let is_valid = match c {
+                'a'..='z' | '0'..='9' => true,
+                '-' if i > 0 && i < label.len() - 1 => true,
+                _ => false,
+            };
+            if !is_valid {
+                return None;
             }
         }
     }

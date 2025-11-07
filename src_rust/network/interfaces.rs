@@ -170,7 +170,7 @@ pub struct Interface {
     /// `IP_BOUND_IF` on BSD).
     pub index: u32,
 
-    /// Interface flags (IFF_UP, IFF_LOOPBACK, IFF_MULTICAST, etc.)
+    /// Interface flags (`IFF_UP`, `IFF_LOOPBACK`, `IFF_MULTICAST`, etc.)
     ///
     /// Corresponds to C's `irec->flags`. Standard Unix interface flags
     /// from `<net/if.h>` indicating interface capabilities and state.
@@ -184,13 +184,13 @@ pub struct Interface {
 
     /// Network prefix length (CIDR notation)
     ///
-    /// Derived from netmask, stored for convenience. Used in DHCPv6
+    /// Derived from netmask, stored for convenience. Used in `DHCPv6`
     /// prefix delegation and address validation.
     pub prefixlen: u8,
 }
 
 impl Interface {
-    /// Create a new Interface from platform-specific InterfaceInfo
+    /// Create a new Interface from platform-specific `InterfaceInfo`
     ///
     /// Converts the low-level platform representation (`InterfaceInfo`)
     /// to the high-level application interface (`Interface`). This
@@ -294,7 +294,7 @@ impl Interface {
     /// Check if interface supports multicast
     ///
     /// Corresponds to C's `ifr.ifr_flags & IFF_MULTICAST` check. Required
-    /// for IPv6 Router Advertisement and DHCPv6 which use link-local multicast.
+    /// for IPv6 Router Advertisement and `DHCPv6` which use link-local multicast.
     ///
     /// # Returns
     ///
@@ -348,8 +348,8 @@ impl Interface {
 
     /// Check if this is an IPv6 link-local address
     ///
-    /// IPv6 link-local addresses (fe80::/10) require special handling
-    /// for scope ID binding and are typically used for DHCPv6 and
+    /// IPv6 link-local addresses (`fe80::/10`) require special handling
+    /// for scope ID binding and are typically used for `DHCPv6` and
     /// Router Advertisement.
     ///
     /// # Returns
@@ -462,12 +462,12 @@ pub async fn enumerate_interfaces() -> IoResult<Vec<Interface>> {
 
     // Create platform-specific implementation via factory
     let platform = crate::network::platform::create_platform()
-        .map_err(|e| IoError::new(ErrorKind::Other, format!("Failed to create platform: {}", e)))?;
+        .map_err(|e| IoError::other(format!("Failed to create platform: {e}")))?;
     
     // Delegate to platform-specific implementation
     let interface_infos = platform.enumerate_interfaces()
         .await
-        .map_err(|e| IoError::new(ErrorKind::Other, format!("Platform enumeration failed: {}", e)))?;
+        .map_err(|e| IoError::other(format!("Platform enumeration failed: {e}")))?;
 
     // Convert platform-specific InterfaceInfo to application Interface
     // Default port 53 (DNS) - callers can override via Interface::addr modification
@@ -591,6 +591,12 @@ pub async fn enumerate_interfaces() -> IoResult<Vec<Interface>> {
 ///
 /// This function is immutable and can be called concurrently from multiple tasks.
 /// It does not modify the interface or configuration.
+///
+/// # Errors
+///
+/// Returns an error if the interface is excluded by configuration rules:
+/// - Interface is explicitly excluded by `--except-interface`
+/// - Interface is not included in `--interface` whitelist when whitelist is configured
 pub fn iface_check(interface: &Interface, config: &NetworkConfig) -> IoResult<()> {
     trace!(
         "Checking interface eligibility: {} ({})",
@@ -871,8 +877,10 @@ mod tests {
             prefixlen: 24,
         };
 
-        let mut config = NetworkConfig::default();
-        config.interfaces = vec![InterfaceName::new("eth0".to_string())];
+        let config = NetworkConfig {
+            interfaces: vec![InterfaceName::new("eth0".to_string())],
+            ..Default::default()
+        };
 
         assert!(iface_check(&interface, &config).is_ok());
 
@@ -899,8 +907,10 @@ mod tests {
             prefixlen: 24,
         };
 
-        let mut config = NetworkConfig::default();
-        config.except_interfaces = vec![InterfaceName::new("wlan*".to_string())];
+        let config = NetworkConfig {
+            except_interfaces: vec![InterfaceName::new("wlan*".to_string())],
+            ..Default::default()
+        };
 
         assert!(iface_check(&interface, &config).is_err());
 
@@ -927,9 +937,11 @@ mod tests {
             prefixlen: 24,
         };
 
-        let mut config = NetworkConfig::default();
-        config.except_interfaces = vec![InterfaceName::new("wlan*".to_string())];
-        config.listen_addresses = vec!["192.168.1.1".parse().unwrap()];
+        let config = NetworkConfig {
+            except_interfaces: vec![InterfaceName::new("wlan*".to_string())],
+            listen_addresses: vec!["192.168.1.1".parse().unwrap()],
+            ..Default::default()
+        };
 
         // Address match overrides except-interface
         assert!(iface_check(&interface, &config).is_ok());

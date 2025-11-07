@@ -923,8 +923,8 @@ mod tests {
             .prefix_len(64)
             .autonomous(true)
             .on_link(true)
-            .valid_lifetime(Duration::from_secs(2592000))
-            .preferred_lifetime(Duration::from_secs(604800))
+            .valid_lifetime(Duration::from_secs(2_592_000))
+            .preferred_lifetime(Duration::from_secs(604_800))
             .build()
             .unwrap();
 
@@ -995,7 +995,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(option[0], 31); // Type
-        assert!(option.len() % 8 == 0); // Must be padded to 8-byte boundary
+        assert!(option.len().is_multiple_of(8)); // Must be padded to 8-byte boundary
     }
 
     #[test]
@@ -1076,7 +1076,7 @@ mod tests {
 
         // Label too long
         let long_label = "a".repeat(64);
-        let result = encode_dns_name(&mut buf, &format!("{}.com", long_label));
+        let result = encode_dns_name(&mut buf, &format!("{long_label}.com"));
         assert!(result.is_err());
     }
 
@@ -1096,8 +1096,8 @@ mod tests {
                 let result = PrefixOption::new()
                     .prefix(prefix)
                     .prefix_len(64)
-                    .valid_lifetime(Duration::from_secs(valid as u64))
-                    .preferred_lifetime(Duration::from_secs(preferred as u64))
+                    .valid_lifetime(Duration::from_secs(u64::from(valid)))
+                    .preferred_lifetime(Duration::from_secs(u64::from(preferred)))
                     .build();
 
                 if preferred <= valid {

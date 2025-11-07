@@ -414,12 +414,9 @@ mod tests {
         // Runtime verification that module declarations are valid.
         
         // Verify protocol constants are accessible
-        let _opcode = protocol::DnsOpcode::Query;
-        let _rcode = protocol::DnsRcode::NoError;
-        let _rrtype = protocol::DnsRrType::A;
-        
-        // If this compiles, the module structure is correct
-        assert!(true, "All DNS submodules are properly declared");
+        assert_eq!(protocol::DnsOpcode::Query.to_code(), 0);
+        assert_eq!(protocol::ResponseCode::NoError.to_code(), 0);
+        assert_eq!(protocol::DnsRrType::A.to_code(), 1);
     }
 
     /// Documents the memory safety improvements over the C implementation.
@@ -433,7 +430,8 @@ mod tests {
         
         // 1. Buffer Overflows: Prevented by bounds-checked slice operations
         let buffer: Vec<u8> = vec![0; 512];
-        let _safe_slice = &buffer[0..512]; // Panics at runtime if out of bounds
+        let safe_slice = &buffer[0..512]; // Panics at runtime if out of bounds
+        assert_eq!(safe_slice.len(), 512);
         // No equivalent to C's unchecked buffer[513] access
         
         // 2. Use-After-Free: Prevented by ownership system
@@ -443,16 +441,11 @@ mod tests {
         
         // 3. Null Pointer Dereference: Prevented by Option<T>
         let maybe_server: Option<String> = None;
-        match maybe_server {
-            Some(server) => println!("Server: {}", server),
-            None => println!("No server configured"),
-        }
+        assert!(maybe_server.is_none());
         // No equivalent to C's: if (ptr) { *ptr } else { /* null */ }
         
         // 4. Data Races: Prevented by Send/Sync traits
         // Arc<RwLock<T>> enforces runtime locking for shared mutable state
-        
-        assert!(true, "Rust type system provides memory safety guarantees");
     }
 
     /// Verifies behavioral equivalence with C implementation.
@@ -473,6 +466,6 @@ mod tests {
         // Integration tests in tests/dns_tests.rs verify wire format equivalence
         // by comparing outputs with reference packets from C version
         
-        assert!(true, "Wire protocol behavior is preserved");
+        // This test serves as documentation; actual verification happens in integration tests
     }
 }

@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(record_a.rr_type(), DnsRrType::A);
 
         let record_aaaa = AuthRecord::Aaaa {
-            address: Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+            address: Ipv6Addr::LOCALHOST,
         };
         assert_eq!(record_aaaa.rr_type(), DnsRrType::AAAA);
     }
@@ -322,7 +322,7 @@ mod tests {
             address: Ipv4Addr::new(192, 168, 1, 1),
         });
         entry.add_record(AuthRecord::Aaaa {
-            address: Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1),
+            address: Ipv6Addr::LOCALHOST,
         });
         
         let a_records = entry.get_records(DnsRrType::A);

@@ -704,11 +704,11 @@ mod tests {
     fn test_label_length_limits() {
         // Valid: 63 character label
         let label_63 = "a".repeat(63);
-        assert!(is_valid_dns_name(&format!("{}.com", label_63)));
+        assert!(is_valid_dns_name(&format!("{label_63}.com")));
         
         // Invalid: 64 character label
         let label_64 = "a".repeat(64);
-        assert!(!is_valid_dns_name(&format!("{}.com", label_64)));
+        assert!(!is_valid_dns_name(&format!("{label_64}.com")));
     }
     
     #[test]

@@ -362,7 +362,7 @@ mod tests {
         let mut server = RadVServer::new("eth0".to_string());
         let prefix: Ipv6Addr = "2001:db8::".parse().unwrap();
 
-        server.add_prefix(prefix, 64, 2592000, 604800);
+        server.add_prefix(prefix, 64, 2_592_000, 604_800);
         assert_eq!(server.prefixes.len(), 1);
         assert!(server.prefixes.contains_key(&prefix));
 
@@ -377,7 +377,7 @@ mod tests {
             .with_managed_flag(true)
             .with_other_flag(false)
             .with_router_lifetime(3600)
-            .add_prefix(prefix, 64, 2592000, 604800)
+            .add_prefix(prefix, 64, 2_592_000, 604_800)
             .with_interval_range(300, 900)
             .build();
 
