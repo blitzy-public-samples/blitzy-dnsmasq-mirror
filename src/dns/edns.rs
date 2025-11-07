@@ -72,7 +72,7 @@ use crate::constants::DNS_PACKET_SIZE;
 use crate::dns::protocol::ResourceRecord;
 use crate::types::errors::{DnsmasqError, DnsError};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use thiserror::Error;
@@ -220,7 +220,7 @@ impl ClientSubnetInfo {
         let address = match family {
             1 => {
                 // IPv4
-                let addr_len = ((source_prefix + 7) / 8) as usize;
+                let addr_len = source_prefix.div_ceil(8) as usize;
                 if data.len() < 4 + addr_len {
                     return Err(EdnsError::PacketTooShort {
                         needed: 4 + addr_len,
@@ -233,7 +233,7 @@ impl ClientSubnetInfo {
             }
             2 => {
                 // IPv6
-                let addr_len = ((source_prefix + 7) / 8) as usize;
+                let addr_len = source_prefix.div_ceil(8) as usize;
                 if data.len() < 4 + addr_len {
                     return Err(EdnsError::PacketTooShort {
                         needed: 4 + addr_len,
@@ -268,7 +268,7 @@ impl ClientSubnetInfo {
         buf.put_u8(self.scope_prefix);
 
         // Truncate address to source_prefix bits
-        let addr_len = ((self.source_prefix + 7) / 8) as usize;
+        let addr_len = self.source_prefix.div_ceil(8) as usize;
         match self.address {
             IpAddr::V4(addr) => {
                 let bytes = addr.octets();
