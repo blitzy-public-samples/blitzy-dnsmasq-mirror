@@ -85,6 +85,7 @@
 //!
 //! **Rust Pattern (Safe)**:
 //! ```rust
+//! # let untrusted_input = "sample_input";
 //! let buffer = String::from(untrusted_input);  // Automatic capacity management
 //! ```
 //!
@@ -98,7 +99,7 @@
 //! ```
 //!
 //! **Rust Pattern (Safe)**:
-//! ```rust
+//! ```rust,ignore
 //! let user = User::from_name(username)?;  // Option<User> forces null check
 //! let uid = user.uid;  // Cannot access without handling None case
 //! ```
@@ -113,7 +114,7 @@
 //! ```
 //!
 //! **Rust Pattern (Safe)**:
-//! ```rust
+//! ```rust,ignore
 //! let socket = Socket::new(...)?;  // OwnedFd wrapper
 //! drop(socket);  // Automatic close via Drop trait
 //! // socket.send(...);  // Compile error: value moved in drop()
@@ -123,7 +124,7 @@
 //!
 //! ```rust,no_run
 //! use dnsmasq::ffi::{
-//!     libc_wrappers::{drop_root_privileges, set_linux_capabilities, LinuxCapability},
+//!     libc_wrappers::{drop_root_privileges, set_linux_capabilities, LinuxCapability, CapabilitySet},
 //!     FfiError,
 //! };
 //!
@@ -134,10 +135,10 @@
 //!     // Retain only necessary capabilities (Linux-specific)
 //!     #[cfg(target_os = "linux")]
 //!     {
-//!         set_linux_capabilities(&[
-//!             LinuxCapability::NetBindService,  // Bind to ports < 1024
-//!             LinuxCapability::NetRaw,          // DHCP raw sockets
-//!         ])?;
+//!         let mut caps = CapabilitySet::new();
+//!         caps.add(LinuxCapability::NetBindService);  // Bind to ports < 1024
+//!         caps.add(LinuxCapability::NetRaw);          // DHCP raw sockets
+//!         set_linux_capabilities(&caps, false)?;
 //!     }
 //!     
 //!     Ok(())
