@@ -538,6 +538,18 @@ pub struct Cli {
     #[arg(short = 'A', long = "address", value_name = "ADDRESS")]
     pub address: Vec<String>,
 
+    /// Specify host (A/AAAA and PTR) records
+    ///
+    /// Create DNS A/AAAA and reverse PTR records for hosts.
+    /// Format: <name>,<address>[,<ttl>]
+    /// Examples:
+    ///   --host-record=example.com,192.168.1.1
+    ///   --host-record=example.com,192.168.1.1,3600
+    ///   --host-record=example.com,192.168.1.1,fe80::1
+    /// Can specify multiple addresses by using option multiple times with same name.
+    #[arg(long = "host-record", value_name = "RECORD")]
+    pub host_record: Vec<String>,
+
     /// Specify local domain name(s) for DHCP
     ///
     /// Set domain suffix for DHCP clients and local name resolution.
@@ -906,6 +918,33 @@ pub struct Cli {
     /// useful when clients probe for multiple filenames.
     #[arg(long = "quiet-tftp")]
     pub quiet_tftp: bool,
+
+    #[cfg(feature = "tftp")]
+    /// Add client IP or MAC address as prefix to TFTP root directory
+    ///
+    /// Format: [ip|mac]
+    /// Creates per-client tftp-root subdirectories. Without argument defaults to 'ip'.
+    /// With 'ip', files served from <tftp-root>/<client-ip>/
+    /// With 'mac', files served from <tftp-root>/<client-mac>/
+    /// Enables per-machine PXE boot configurations.
+    #[arg(long = "tftp-unique-root", num_args = 0..=1, default_missing_value = "ip", value_name = "METHOD")]
+    pub tftp_unique_root: Option<String>,
+
+    #[cfg(feature = "tftp")]
+    /// Set TFTP MTU (Maximum Transmission Unit)
+    ///
+    /// Specify maximum packet size for TFTP transfers. Must be between 500 and 65535 bytes.
+    /// Default is network MTU. Lower values improve reliability on lossy networks.
+    #[arg(long = "tftp-mtu", value_name = "MTU")]
+    pub tftp_mtu: Option<u16>,
+
+    #[cfg(feature = "tftp")]
+    /// Disable TFTP blocksize extension
+    ///
+    /// Prevents negotiation of TFTP blocksize option (RFC 2348). Forces 512-byte blocks.
+    /// Use for compatibility with old TFTP clients that don't support extensions.
+    #[arg(long = "tftp-no-blocksize")]
+    pub tftp_no_blocksize: bool,
 
     // =========================================================================
     // DNSSEC OPTIONS (feature-gated)
