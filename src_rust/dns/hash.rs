@@ -1,281 +1,442 @@
-//! DNS question hashing
+// dnsmasq is Copyright (c) 2000-2022 Simon Kelley
+//
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; version 2 dated June, 1991, or
+// (at your option) version 3 dated 29 June, 2007.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+//! DNS question section SHA-256 hashing for cryptographic verification
 //!
-//! Provides efficient hashing for DNS questions to enable deduplication of
-//! concurrent queries. Replaces C implementation from hash-questions.c.
+//! This module implements SHA-256 hashing of DNS question sections to provide
+//! cryptographic verification of DNS responses, preventing cache poisoning attacks
+//! and detecting query retransmissions. The implementation computes a digest over
+//! the decoded question name (with case normalization per DNS rules), question type,
+//! and question class.
+//!
+//! By hashing the decoded name rather than raw bytes, the implementation correctly
+//! handles DNS name compression variations that may occur between queries and responses.
+//!
+//! # Key Responsibilities
+//!
+//! - `hash_questions_init()`: Initialize SHA-256 hashing context at daemon startup
+//! - `hash_questions()`: Compute SHA-256 digest of all questions in DNS packet
+//! - SHA-256 implementation: Uses sha2 crate for memory-safe cryptographic operations
+//!
+//! # Memory Safety
+//!
+//! This Rust implementation replaces C's manual SHA-256 context management with the
+//! sha2 crate's safe interface, eliminating:
+//! - Manual buffer management for SHA256_CTX structures
+//! - Manual bounds checking (CHECK_LEN macro) with nom parser validation
+//! - Pointer arithmetic with safe slice operations
+//! - Compile-time selection between Nettle and standalone implementations
+//!
+//! # RFC Compliance
+//!
+//! - DNS name canonicalization per RFC 1035 (case-insensitive comparison)
+//! - Cryptographic verification supports DNS security best practices
+//! - SHA-256 algorithm per FIPS PUB 180-4
+//!
+//! # Security Considerations
+//!
+//! This module is critical for DNS cache poisoning prevention. The SHA-256 hash
+//! provides collision resistance to detect unauthorized response substitution.
+//! Case normalization ensures hash consistency across different name encodings.
+//!
+//! # Example Usage
+//!
+//! ```rust
+//! use dnsmasq::dns::hash::{hash_questions_init, hash_questions};
+//! use dnsmasq::dns::protocol::MAXDNAME;
+//!
+//! // Initialize at daemon startup
+//! hash_questions_init();
+//!
+//! // Compute digest for DNS packet
+//! let packet: &[u8] = &[/* DNS packet bytes */];
+//! if let Some(digest) = hash_questions(packet) {
+//!     println!("Question section digest computed: {} bytes", digest.len());
+//!     // Compare with stored digest to verify response authenticity
+//! }
+//! ```
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use crate::dns::protocol::MAXDNAME;
+use crate::dns::parser::extract_name;
+use sha2::{Sha256, Digest};
 
-/// DNS question for hashing purposes
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// SHA-256 digest output size in bytes (32 bytes = 256 bits)
 ///
-/// Represents the key parts of a DNS query that uniquely identify it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DnsQuestion {
-    /// Domain name being queried
-    pub name: String,
-    
-    /// Query type (A, AAAA, MX, etc.)
-    pub qtype: u16,
-    
-    /// Query class (usually IN = 1)
-    pub qclass: u16,
-}
+/// SHA-256 always produces a 32-byte digest regardless of input size.
+/// This constant is used for digest buffer allocation and validation.
+pub const SHA256_DIGEST_SIZE: usize = 32;
 
-impl DnsQuestion {
-    /// Create a new DNS question
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Domain name (normalized to lowercase)
-    /// * `qtype` - Query type
-    /// * `qclass` - Query class (typically 1 for IN)
-    #[must_use] 
-    pub fn new(name: &str, qtype: u16, qclass: u16) -> Self {
-        Self {
-            name: name.to_lowercase(), // Normalize for case-insensitive matching
-            qtype,
-            qclass,
-        }
-    }
+/// Minimum DNS packet size (12-byte header)
+const DNS_HEADER_SIZE: usize = 12;
 
-    /// Compute hash value for this question
-    #[must_use] 
-    pub fn hash_value(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
-}
+// ============================================================================
+// DNS Header Structure (minimal representation for parsing)
+// ============================================================================
 
-/// DNS question hash table for deduplication
+/// DNS header flags offset for question count
+const QDCOUNT_OFFSET: usize = 4;
+
+// ============================================================================
+// Initialization Function
+// ============================================================================
+
+/// Initialize SHA-256 hashing context for DNS question verification
 ///
-/// Tracks pending queries to avoid sending duplicate requests for the same question.
-pub struct QuestionHashTable {
-    /// Map from question hash to list of pending query IDs
-    pending: std::collections::HashMap<u64, Vec<u16>>,
+/// In the C implementation, this function either initializes Nettle library context
+/// (allocating memory for hash context and digest buffer) or is a no-op for the
+/// standalone implementation. In Rust, using the sha2 crate eliminates the need for
+/// global context initialization, so this function is a compatibility no-op.
+///
+/// The Rust implementation creates fresh Sha256 instances on each call to
+/// `hash_questions()`, avoiding shared mutable state and improving thread safety.
+/// The sha2 crate handles all context management internally with safe RAII semantics.
+///
+/// # Example
+///
+/// ```rust
+/// use dnsmasq::dns::hash::hash_questions_init;
+///
+/// // Called during daemon initialization
+/// hash_questions_init();
+/// // No-op in Rust - context is created per hash_questions() call
+/// ```
+///
+/// # Thread Safety
+///
+/// Fully thread-safe (no-op). Unlike the C version with module-level static variables,
+/// the Rust implementation has no shared state requiring initialization.
+pub fn hash_questions_init() {
+    // No-op: sha2 crate handles context management internally.
+    // Each hash_questions() call creates its own Sha256 instance.
 }
 
-impl QuestionHashTable {
-    /// Create a new empty hash table
-    #[must_use] 
-    pub fn new() -> Self {
-        Self {
-            pending: std::collections::HashMap::new(),
+// ============================================================================
+// DNS Question Hashing Function
+// ============================================================================
+
+/// Compute SHA-256 digest of DNS question section for response verification
+///
+/// Computes a cryptographic SHA-256 hash over all questions in a DNS packet to
+/// enable detection of cache poisoning attacks and query retransmissions. The
+/// function iterates through all questions in the DNS header's question section,
+/// extracts and canonicalizes each question name (converting to lowercase per
+/// RFC 1035 case-insensitivity rules), and includes the question type and class
+/// in the hash computation.
+///
+/// This approach ensures the hash remains consistent despite DNS name compression
+/// variations between queries and responses. The function validates packet structure
+/// using safe Rust slice operations and the parser module's extract_name() function,
+/// eliminating manual bounds checking (C's CHECK_LEN macro).
+///
+/// # Arguments
+///
+/// * `packet` - Complete DNS packet bytes including 12-byte header and questions
+///
+/// # Returns
+///
+/// * `Some([u8; 32])` - 32-byte SHA-256 digest on success
+/// * `None` - Packet is malformed, truncated, or has invalid question format
+///
+/// # Memory Safety
+///
+/// This implementation replaces C's manual pointer arithmetic and bounds checking with:
+/// - Safe slice indexing for header field extraction
+/// - parser::extract_name() for validated name decompression
+/// - sha2::Digest trait for safe incremental hashing
+/// - Automatic cleanup via RAII (no manual free() needed)
+///
+/// # Case Normalization
+///
+/// Domain names are converted to lowercase (A-Z → a-z) per RFC 1035 Section 3.1
+/// for case-insensitive DNS name comparison. This ensures hash consistency across
+/// different name capitalizations in queries and responses.
+///
+/// # RFC Compliance
+///
+/// - RFC 1035 Section 3.1: Domain name case-insensitive comparison
+/// - DNS Security: Cryptographic verification of question section integrity
+/// - FIPS PUB 180-4: SHA-256 cryptographic hash algorithm
+///
+/// # Example
+///
+/// ```rust
+/// use dnsmasq::dns::hash::hash_questions;
+///
+/// let packet: &[u8] = &[/* DNS packet with questions */];
+/// 
+/// if let Some(digest) = hash_questions(packet) {
+///     // Compare digest with expected value for response verification
+///     println!("Computed digest: {:?}", digest);
+/// } else {
+///     eprintln!("Failed to hash questions - malformed packet");
+/// }
+/// ```
+///
+/// # Differences from C Implementation
+///
+/// - No global digest buffer (returns owned array, thread-safe)
+/// - No manual SHA256_CTX allocation (sha2 handles internally)
+/// - No compile-time Nettle vs standalone selection (always uses sha2 crate)
+/// - No pointer advancement (uses safe iterator pattern)
+/// - Automatic bounds validation (no CHECK_LEN macro)
+pub fn hash_questions(packet: &[u8]) -> Option<[u8; SHA256_DIGEST_SIZE]> {
+    // Validate minimum packet size (12-byte DNS header)
+    if packet.len() < DNS_HEADER_SIZE {
+        return None;
+    }
+
+    // Extract question count from DNS header (bytes 4-5, big-endian u16)
+    let qdcount = u16::from_be_bytes([packet[QDCOUNT_OFFSET], packet[QDCOUNT_OFFSET + 1]]);
+
+    // Initialize SHA-256 hasher
+    let mut hasher = Sha256::new();
+
+    // Start parsing after 12-byte DNS header
+    let mut position = DNS_HEADER_SIZE;
+
+    // Iterate through all questions in the question section
+    for _ in 0..qdcount {
+        // Extract question name using parser module (handles compression pointers)
+        let (remaining, name) = extract_name(packet, &packet[position..]).ok()?;
+
+        // Calculate how many bytes were consumed by name extraction
+        let name_bytes_consumed = packet.len() - position - remaining.len();
+        position += name_bytes_consumed;
+
+        // Normalize name to lowercase for case-insensitive hashing per RFC 1035
+        let normalized_name = name.to_ascii_lowercase();
+
+        // Hash the normalized question name
+        hasher.update(normalized_name.as_bytes());
+
+        // Ensure we have 4 bytes remaining for type (2 bytes) and class (2 bytes)
+        if position + 4 > packet.len() {
+            return None; // Truncated packet
         }
+
+        // Hash the question type and class (4 bytes total)
+        // These are in network byte order and hashed as-is
+        hasher.update(&packet[position..position + 4]);
+
+        // Advance position past type and class fields
+        position += 4;
     }
 
-    /// Check if a question is already pending
-    ///
-    /// # Arguments
-    ///
-    /// * `question` - DNS question to check
-    ///
-    /// # Returns
-    ///
-    /// Returns true if this question already has a pending query.
-    #[must_use] 
-    pub fn is_pending(&self, question: &DnsQuestion) -> bool {
-        let hash = question.hash_value();
-        self.pending.contains_key(&hash)
-    }
+    // Finalize hash and extract 32-byte digest
+    let result = hasher.finalize();
 
-    /// Add a pending query
-    ///
-    /// # Arguments
-    ///
-    /// * `question` - DNS question
-    /// * `query_id` - Query ID from DNS packet header
-    ///
-    /// # Returns
-    ///
-    /// Returns true if this is the first query for this question,
-    /// false if there were already pending queries.
-    pub fn add_pending(&mut self, question: &DnsQuestion, query_id: u16) -> bool {
-        let hash = question.hash_value();
-        let entry = self.pending.entry(hash).or_default();
-        
-        let is_first = entry.is_empty();
-        entry.push(query_id);
-        is_first
-    }
+    // Convert GenericArray to fixed-size array
+    let mut digest = [0u8; SHA256_DIGEST_SIZE];
+    digest.copy_from_slice(&result);
 
-    /// Remove a pending query and get all query IDs for that question
-    ///
-    /// # Arguments
-    ///
-    /// * `question` - DNS question
-    ///
-    /// # Returns
-    ///
-    /// Returns list of all query IDs that were waiting for this question.
-    pub fn remove_pending(&mut self, question: &DnsQuestion) -> Vec<u16> {
-        let hash = question.hash_value();
-        self.pending.remove(&hash).unwrap_or_default()
-    }
-
-    /// Get all pending query IDs for a question
-    ///
-    /// # Arguments
-    ///
-    /// * `question` - DNS question
-    ///
-    /// # Returns
-    ///
-    /// Returns reference to list of pending query IDs, or None if not pending.
-    #[must_use] 
-    pub fn get_pending(&self, question: &DnsQuestion) -> Option<&Vec<u16>> {
-        let hash = question.hash_value();
-        self.pending.get(&hash)
-    }
-
-    /// Get the number of unique pending questions
-    #[must_use] 
-    pub fn len(&self) -> usize {
-        self.pending.len()
-    }
-
-    /// Check if there are no pending questions
-    #[must_use] 
-    pub fn is_empty(&self) -> bool {
-        self.pending.is_empty()
-    }
-
-    /// Clear all pending questions
-    pub fn clear(&mut self) {
-        self.pending.clear();
-    }
-
-    /// Get total number of pending queries (across all questions)
-    #[must_use] 
-    pub fn total_pending_queries(&self) -> usize {
-        self.pending.values().map(std::vec::Vec::len).sum()
-    }
+    Some(digest)
 }
 
-impl Default for QuestionHashTable {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Test initialization function (no-op)
     #[test]
-    fn test_dns_question_basic() {
-        let q1 = DnsQuestion::new("example.com", 1, 1);
-        let q2 = DnsQuestion::new("example.com", 1, 1);
-        
-        assert_eq!(q1, q2);
-        assert_eq!(q1.hash_value(), q2.hash_value());
+    fn test_hash_questions_init() {
+        // Should not panic, just a no-op
+        hash_questions_init();
     }
 
+    /// Test SHA256_DIGEST_SIZE constant
     #[test]
-    fn test_dns_question_case_insensitive() {
-        let q1 = DnsQuestion::new("example.com", 1, 1);
-        let q2 = DnsQuestion::new("EXAMPLE.COM", 1, 1);
-        
-        // Names should be normalized to lowercase
-        assert_eq!(q1, q2);
-        assert_eq!(q1.hash_value(), q2.hash_value());
+    fn test_digest_size_constant() {
+        assert_eq!(SHA256_DIGEST_SIZE, 32);
     }
 
+    /// Test hash_questions with invalid packet (too short)
     #[test]
-    fn test_dns_question_different_types() {
-        let q1 = DnsQuestion::new("example.com", 1, 1); // A record
-        let q2 = DnsQuestion::new("example.com", 28, 1); // AAAA record
-        
-        assert_ne!(q1, q2);
-        assert_ne!(q1.hash_value(), q2.hash_value());
+    fn test_hash_questions_too_short() {
+        let short_packet = [0u8; 5]; // Less than 12-byte header
+        assert_eq!(hash_questions(&short_packet), None);
     }
 
+    /// Test hash_questions with zero questions
     #[test]
-    fn test_question_hash_table_empty() {
-        let table = QuestionHashTable::new();
+    fn test_hash_questions_zero_questions() {
+        // DNS header with qdcount = 0
+        let packet = [
+            0x12, 0x34, // Transaction ID
+            0x01, 0x00, // Flags (standard query)
+            0x00, 0x00, // QDCOUNT = 0
+            0x00, 0x00, // ANCOUNT
+            0x00, 0x00, // NSCOUNT
+            0x00, 0x00, // ARCOUNT
+        ];
         
-        assert!(table.is_empty());
-        assert_eq!(table.len(), 0);
-        assert_eq!(table.total_pending_queries(), 0);
+        // Should successfully hash empty question section
+        let digest = hash_questions(&packet);
+        assert!(digest.is_some());
+        assert_eq!(digest.unwrap().len(), SHA256_DIGEST_SIZE);
     }
 
+    /// Test hash_questions with single question
     #[test]
-    fn test_question_hash_table_add_pending() {
-        let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com", 1, 1);
+    fn test_hash_questions_single_question() {
+        // DNS header with qdcount = 1, followed by question for "example.com" A record
+        let packet = vec![
+            0x12, 0x34, // Transaction ID
+            0x01, 0x00, // Flags (standard query)
+            0x00, 0x01, // QDCOUNT = 1
+            0x00, 0x00, // ANCOUNT
+            0x00, 0x00, // NSCOUNT
+            0x00, 0x00, // ARCOUNT
+            // Question: example.com
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
+            0x03, b'c', b'o', b'm',
+            0x00, // End of name
+            0x00, 0x01, // QTYPE = A (1)
+            0x00, 0x01, // QCLASS = IN (1)
+        ];
         
-        assert!(!table.is_pending(&question));
-        
-        let is_first = table.add_pending(&question, 0x1234);
-        assert!(is_first);
-        assert!(table.is_pending(&question));
-        assert_eq!(table.len(), 1);
-        assert_eq!(table.total_pending_queries(), 1);
+        let digest = hash_questions(&packet);
+        assert!(digest.is_some());
+        assert_eq!(digest.unwrap().len(), SHA256_DIGEST_SIZE);
     }
 
+    /// Test hash_questions with multiple questions
     #[test]
-    fn test_question_hash_table_duplicate_queries() {
-        let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com", 1, 1);
+    fn test_hash_questions_multiple_questions() {
+        // DNS header with qdcount = 2
+        let packet = vec![
+            0x12, 0x34, // Transaction ID
+            0x01, 0x00, // Flags
+            0x00, 0x02, // QDCOUNT = 2
+            0x00, 0x00, // ANCOUNT
+            0x00, 0x00, // NSCOUNT
+            0x00, 0x00, // ARCOUNT
+            // Question 1: example.com A
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
+            0x03, b'c', b'o', b'm',
+            0x00,
+            0x00, 0x01, // QTYPE = A
+            0x00, 0x01, // QCLASS = IN
+            // Question 2: test.com AAAA
+            0x04, b't', b'e', b's', b't',
+            0x03, b'c', b'o', b'm',
+            0x00,
+            0x00, 0x1c, // QTYPE = AAAA (28)
+            0x00, 0x01, // QCLASS = IN
+        ];
         
-        let is_first = table.add_pending(&question, 0x1234);
-        assert!(is_first);
-        
-        let is_first = table.add_pending(&question, 0x5678);
-        assert!(!is_first);
-        
-        assert_eq!(table.len(), 1); // Still one unique question
-        assert_eq!(table.total_pending_queries(), 2); // But two queries
-        
-        let pending = table.get_pending(&question).unwrap();
-        assert_eq!(pending.len(), 2);
-        assert!(pending.contains(&0x1234));
-        assert!(pending.contains(&0x5678));
+        let digest = hash_questions(&packet);
+        assert!(digest.is_some());
+        assert_eq!(digest.unwrap().len(), SHA256_DIGEST_SIZE);
     }
 
+    /// Test case normalization: "EXAMPLE.COM" and "example.com" should produce same hash
     #[test]
-    fn test_question_hash_table_remove_pending() {
-        let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com", 1, 1);
+    fn test_case_normalization() {
+        // Packet 1: EXAMPLE.COM (uppercase)
+        let packet1 = vec![
+            0x12, 0x34, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, b'E', b'X', b'A', b'M', b'P', b'L', b'E',
+            0x03, b'C', b'O', b'M',
+            0x00,
+            0x00, 0x01, 0x00, 0x01,
+        ];
         
-        table.add_pending(&question, 0x1234);
-        table.add_pending(&question, 0x5678);
+        // Packet 2: example.com (lowercase)
+        let packet2 = vec![
+            0x12, 0x34, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
+            0x03, b'c', b'o', b'm',
+            0x00,
+            0x00, 0x01, 0x00, 0x01,
+        ];
         
-        let query_ids = table.remove_pending(&question);
-        assert_eq!(query_ids.len(), 2);
-        assert!(query_ids.contains(&0x1234));
-        assert!(query_ids.contains(&0x5678));
+        let digest1 = hash_questions(&packet1);
+        let digest2 = hash_questions(&packet2);
         
-        assert!(!table.is_pending(&question));
-        assert!(table.is_empty());
+        assert!(digest1.is_some());
+        assert!(digest2.is_some());
+        assert_eq!(digest1.unwrap(), digest2.unwrap(), "Case normalization failed");
     }
 
+    /// Test truncated packet (question incomplete)
     #[test]
-    fn test_question_hash_table_multiple_questions() {
-        let mut table = QuestionHashTable::new();
+    fn test_hash_questions_truncated() {
+        // Packet with qdcount=1 but incomplete question
+        let packet = vec![
+            0x12, 0x34, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
+            // Missing rest of name and type/class
+        ];
         
-        let q1 = DnsQuestion::new("example.com", 1, 1);
-        let q2 = DnsQuestion::new("example.org", 1, 1);
-        
-        table.add_pending(&q1, 0x1234);
-        table.add_pending(&q2, 0x5678);
-        
-        assert_eq!(table.len(), 2);
-        assert_eq!(table.total_pending_queries(), 2);
-        assert!(table.is_pending(&q1));
-        assert!(table.is_pending(&q2));
+        assert_eq!(hash_questions(&packet), None);
     }
 
+    /// Test that same question produces identical hashes
     #[test]
-    fn test_question_hash_table_clear() {
-        let mut table = QuestionHashTable::new();
-        let question = DnsQuestion::new("example.com", 1, 1);
+    fn test_hash_determinism() {
+        let packet = vec![
+            0x12, 0x34, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
+            0x03, b'c', b'o', b'm',
+            0x00,
+            0x00, 0x01, 0x00, 0x01,
+        ];
         
-        table.add_pending(&question, 0x1234);
-        assert!(!table.is_empty());
+        let digest1 = hash_questions(&packet);
+        let digest2 = hash_questions(&packet);
         
-        table.clear();
-        assert!(table.is_empty());
-        assert_eq!(table.len(), 0);
+        assert_eq!(digest1, digest2, "Hash function should be deterministic");
+    }
+
+    /// Test that different questions produce different hashes
+    #[test]
+    fn test_hash_uniqueness() {
+        let packet1 = vec![
+            0x12, 0x34, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
+            0x03, b'c', b'o', b'm',
+            0x00,
+            0x00, 0x01, 0x00, 0x01,
+        ];
+        
+        let packet2 = vec![
+            0x12, 0x34, 0x01, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x04, b't', b'e', b's', b't',
+            0x03, b'c', b'o', b'm',
+            0x00,
+            0x00, 0x01, 0x00, 0x01,
+        ];
+        
+        let digest1 = hash_questions(&packet1);
+        let digest2 = hash_questions(&packet2);
+        
+        assert_ne!(digest1.unwrap(), digest2.unwrap(), "Different questions should produce different hashes");
     }
 }
+
