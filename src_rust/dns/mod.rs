@@ -369,7 +369,8 @@ pub mod dnssec;
 // This maintains a clean public API while keeping implementation details
 // encapsulated in submodules.
 
-pub use self::auth::{AuthRecord, AuthServer, AuthZone, ZoneEntry};
+// Re-export AuthZone from config::types for convenience
+pub use crate::config::types::AuthZone;
 pub use self::blockdata::BlockData;
 pub use self::cache::{Cache, CacheConfig};
 pub use self::cache_types::{
