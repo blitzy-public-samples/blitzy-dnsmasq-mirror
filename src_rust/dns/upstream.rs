@@ -51,16 +51,14 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::net::{IpAddr, SocketAddr};
-use std::result::Result;
+use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use bitflags::bitflags;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::dns::domain::hostname_isequal;
-use crate::dns::protocol::NAMESERVER_PORT;
 
 // ============================================================================
 // Constants for server health tracking and testing
@@ -359,13 +357,29 @@ impl DomainPattern {
                 return true; // Catch-all pattern '*'
             }
             
-            // Check if query domain ends with pattern (case-insensitive)
-            hostname_isequal(query_domain, pattern_suffix)
-                || query_domain
-                    .to_lowercase()
-                    .ends_with(&pattern_suffix.to_lowercase())
+            // Pattern is "*.example.com", suffix is ".example.com"
+            // Should match:
+            // 1. "example.com" (base domain, strip the "*." prefix)
+            // 2. "www.example.com" (ends with ".example.com")
+            
+            // Strip leading dot if present to get base domain
+            let base_domain = if pattern_suffix.starts_with('.') {
+                &pattern_suffix[1..]
+            } else {
+                pattern_suffix
+            };
+            
+            // Check if query matches base domain exactly
+            if hostname_isequal(query_domain, base_domain) {
+                return true;
+            }
+            
+            // Check if query domain ends with pattern suffix (e.g., ends with ".example.com")
+            query_domain
+                .to_lowercase()
+                .ends_with(&pattern_suffix.to_lowercase())
         } else {
-            // Exact match (case-insensitive per RFC 1035)
+            // Exact match only for non-wildcard patterns (case-insensitive per RFC 1035)
             hostname_isequal(query_domain, &self.domain)
         }
     }
@@ -380,8 +394,8 @@ impl DomainPattern {
 /// Represents a single upstream DNS server with address, health tracking,
 /// and configuration flags. Replaces C's struct server with memory-safe
 /// Rust implementation using Arc for shared ownership.
-#[derive(Debug, Clone)]
-pub struct Server {
+#[derive(Debug)]
+pub struct UpstreamServer {
     /// Unique server identifier
     uid: ServerId,
     /// Server type and behavior flags
@@ -404,7 +418,7 @@ pub struct Server {
     health: RwLock<ServerHealth>,
 }
 
-impl Server {
+impl UpstreamServer {
     /// Create new upstream server
     ///
     /// # Arguments
@@ -538,7 +552,7 @@ impl Server {
 }
 
 // ============================================================================
-// Upstream Manager
+// Upstream Pool
 // ============================================================================
 
 /// Manages collection of upstream DNS servers with intelligent selection
@@ -546,17 +560,17 @@ impl Server {
 /// Provides server registration, domain-based routing, health tracking,
 /// and intelligent server selection based on health metrics. Replaces C's
 /// global server linked list with safe Vec and HashMap structures.
-pub struct UpstreamManager {
+pub struct UpstreamPool {
     /// All configured upstream servers
-    servers: Vec<Arc<Server>>,
+    servers: Vec<Arc<UpstreamServer>>,
     /// Domain-to-server routing map for O(1) lookup
     domain_map: HashMap<String, Vec<ServerId>>,
     /// Next server UID to assign
     next_uid: ServerId,
 }
 
-impl UpstreamManager {
-    /// Create new upstream manager
+impl UpstreamPool {
+    /// Create new upstream pool
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),
@@ -594,10 +608,21 @@ impl UpstreamManager {
         let uid = self.next_uid;
         self.next_uid += 1;
 
-        let server = Arc::new(Server::new(
+        // Convert domain-specific servers to wildcard patterns
+        // This matches dnsmasq behavior where server=/example.com/1.1.1.1
+        // handles queries for example.com and all subdomains
+        let wildcard_domain = domain.as_ref().map(|d| {
+            if d.starts_with('*') {
+                d.clone()
+            } else {
+                format!("*.{}", d)
+            }
+        });
+
+        let server = Arc::new(UpstreamServer::new(
             uid,
             flags,
-            domain.clone(),
+            wildcard_domain,
             addr,
             source_addr,
             interface,
@@ -666,8 +691,8 @@ impl UpstreamManager {
     ///
     /// # Returns
     ///
-    /// * Some(Arc<Server>) if suitable server found, None if no servers available
-    pub fn select_server(&self, query_domain: Option<&str>) -> Option<Arc<Server>> {
+    /// * Some(Arc<UpstreamServer>) if suitable server found, None if no servers available
+    pub fn select_server(&self, query_domain: Option<&str>) -> Option<Arc<UpstreamServer>> {
         let candidates = if let Some(domain) = query_domain {
             self.get_server_by_domain(domain)
         } else {
@@ -732,7 +757,7 @@ impl UpstreamManager {
     /// # Returns
     ///
     /// * Vec of matching servers (empty if no matches)
-    pub fn get_server_by_domain(&self, query_domain: &str) -> Vec<Arc<Server>> {
+    pub fn get_server_by_domain(&self, query_domain: &str) -> Vec<Arc<UpstreamServer>> {
         let mut matches = Vec::new();
 
         // Check domain map for exact/prefix matches
@@ -779,7 +804,7 @@ impl UpstreamManager {
     }
 
     /// Get all configured servers
-    pub fn get_all_servers(&self) -> &[Arc<Server>] {
+    pub fn get_all_servers(&self) -> &[Arc<UpstreamServer>] {
         &self.servers
     }
 
@@ -796,7 +821,7 @@ impl UpstreamManager {
     }
 }
 
-impl Default for UpstreamManager {
+impl Default for UpstreamPool {
     fn default() -> Self {
         Self::new()
     }
@@ -814,15 +839,15 @@ impl Default for UpstreamManager {
 ///
 /// # Arguments
 ///
-/// * `manager` - Upstream manager containing servers to check
+/// * `pool` - Upstream pool containing servers to check
 ///
 /// # Returns
 ///
 /// * Number of unhealthy servers detected
-pub fn check_servers(manager: &UpstreamManager) -> usize {
+pub fn check_servers(pool: &UpstreamPool) -> usize {
     let mut unhealthy_count = 0;
 
-    for server in manager.get_all_servers() {
+    for server in pool.get_all_servers() {
         let is_healthy = server.is_healthy();
 
         if !is_healthy {
@@ -852,7 +877,7 @@ pub fn check_servers(manager: &UpstreamManager) -> usize {
     if unhealthy_count > 0 {
         warn!(
             unhealthy_count = unhealthy_count,
-            total_servers = manager.get_all_servers().len(),
+            total_servers = pool.get_all_servers().len(),
             "Unhealthy servers detected in health check"
         );
     }
@@ -863,7 +888,10 @@ pub fn check_servers(manager: &UpstreamManager) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    // Define NAMESERVER_PORT for tests since we removed the import
+    const NAMESERVER_PORT: u16 = 53;
 
     #[test]
     fn test_domain_pattern_exact_match() {
@@ -913,11 +941,11 @@ mod tests {
     }
 
     #[test]
-    fn test_upstream_manager_add_remove() {
-        let mut manager = UpstreamManager::new();
+    fn test_upstream_pool_add_remove() {
+        let mut pool = UpstreamPool::new();
 
         let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), NAMESERVER_PORT);
-        let uid1 = manager.add_server(
+        let uid1 = pool.add_server(
             ServerFlags::USE_RESOLV,
             None,
             addr1,
@@ -927,22 +955,22 @@ mod tests {
             4096,
         );
 
-        assert_eq!(manager.get_all_servers().len(), 1);
+        assert_eq!(pool.get_all_servers().len(), 1);
 
-        let removed = manager.remove_server(uid1);
+        let removed = pool.remove_server(uid1);
         assert!(removed);
-        assert_eq!(manager.get_all_servers().len(), 0);
+        assert_eq!(pool.get_all_servers().len(), 0);
     }
 
     #[test]
     fn test_server_selection_by_domain() {
-        let mut manager = UpstreamManager::new();
+        let mut pool = UpstreamPool::new();
 
         let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), NAMESERVER_PORT);
         let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), NAMESERVER_PORT);
 
         // General server
-        manager.add_server(
+        pool.add_server(
             ServerFlags::USE_RESOLV,
             None,
             addr1,
@@ -953,7 +981,7 @@ mod tests {
         );
 
         // Domain-specific server
-        manager.add_server(
+        pool.add_server(
             ServerFlags::USE_RESOLV,
             Some("example.com".to_string()),
             addr2,
@@ -964,12 +992,12 @@ mod tests {
         );
 
         // Query for example.com should use domain-specific server
-        let selected = manager.select_server(Some("www.example.com"));
+        let selected = pool.select_server(Some("www.example.com"));
         assert!(selected.is_some());
         assert_eq!(selected.unwrap().addr(), addr2);
 
         // Query for other domain should use general server
-        let selected = manager.select_server(Some("google.com"));
+        let selected = pool.select_server(Some("google.com"));
         assert!(selected.is_some());
         assert_eq!(selected.unwrap().addr(), addr1);
     }
