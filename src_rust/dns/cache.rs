@@ -147,10 +147,6 @@ const MAX_CNAME_CHAIN: usize = 10;
 /// Original C implementation uses this 11-bit sequence for hash mixing:
 /// `unsigned int c1 = hash ^ (hash >> 16);`
 /// `unsigned int c2 = (c1 ^ (c1 >> 8)) & 0xff;`
-#[cfg(test)]
-const BARKER_CODE: [u32; 11] = [
-    0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00,
-];
 
 /// Configuration for DNS cache behavior
 ///
