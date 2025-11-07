@@ -62,16 +62,13 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::time::Duration;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 // Internal imports - all from depends_on_files whitelist
 use dnsmasq::config::types::DhcpConfig;
-use dnsmasq::dhcp::common::find_config;
 use dnsmasq::dhcp::lease::{Lease, LeaseType};
 use dnsmasq::dhcp::lease_store::{DuidEntry, LeaseDatabase, LeaseEntry, LeaseStore};
-use dnsmasq::types::addresses::AllAddr;
 
 // =============================================================================
 // TEST DATA GENERATION
@@ -227,7 +224,7 @@ fn create_test_dhcp_config() -> DhcpConfig {
     // Create basic DHCP configuration
     // Note: In production code, DhcpConfig would be constructed properly
     // For benchmarking, we use a simplified version
-    DhcpConfig::new()
+    DhcpConfig::default()
 }
 
 // =============================================================================
@@ -621,7 +618,7 @@ fn bench_lease_prune(c: &mut Criterion) {
 fn bench_static_host_application(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_update_from_configs");
     
-    let config = create_test_dhcp_config();
+    let _config = create_test_dhcp_config();
     
     for db_size in [100, 1000, 10000] {
         let leases = generate_test_leases_v4(db_size, Ipv4Addr::new(192, 168, 1, 100));
@@ -707,18 +704,18 @@ fn bench_lease_renewal_under_load(c: &mut Criterion) {
     
     // Test with different renewal batch sizes
     for batch_size in [10, 100, 1000] {
-        let mut leases = generate_test_leases_v4(batch_size, Ipv4Addr::new(192, 168, 1, 100));
-        
         group.bench_with_input(
             BenchmarkId::new("batch_size", batch_size),
             &batch_size,
-            |b, _| {
+            |b, &size| {
+                let mut leases = generate_test_leases_v4(size, Ipv4Addr::new(192, 168, 1, 100));
                 b.iter(|| {
                     // Simulate lease renewal by extending expiry time
                     for lease in leases.iter_mut() {
                         lease.expiry = now + 3600; // Extend by 1 hour
                     }
-                    black_box(&leases)
+                    // Use the count to ensure the loop isn't optimized away
+                    black_box(leases.len())
                 });
             },
         );
