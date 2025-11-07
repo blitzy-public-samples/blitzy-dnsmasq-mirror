@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 // Bitflags for daemon runtime options (replaces C's unsigned int options[OPTION_SIZE])
 bitflags::bitflags! {
@@ -866,6 +866,58 @@ impl Default for AuthConfig {
     }
 }
 
+/// Address list entry for subnet and exclusion lists
+///
+/// Replaces C's `struct addrlist` (dnsmasq.h line 1376).
+/// Used for:
+/// - Authoritative zone subnet specifications
+/// - Excluded address ranges
+/// - Interface address lists
+/// - DHCP address decline tracking
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddrList {
+    /// IP address (IPv4 or IPv6)
+    /// Original C field: `union all_addr addr` in struct addrlist
+    pub addr: IpAddr,
+    
+    /// Flags for address list entry
+    /// Original C field: `int flags` in struct addrlist
+    /// In C: Used for AUTH4 (1), AUTH6 (2) flags
+    pub flags: u32,
+    
+    /// Prefix length for CIDR notation
+    /// Original C field: `int prefixlen` in struct addrlist
+    /// Range: 0-32 for IPv4, 0-128 for IPv6
+    pub prefixlen: u32,
+    
+    /// Decline timestamp for DHCP address conflict tracking
+    /// Original C field: `time_t decline_time` in struct addrlist
+    /// None if address is not declined, Some(timestamp) if declined
+    pub decline_time: Option<SystemTime>,
+}
+
+impl AddrList {
+    /// Create a new address list entry
+    pub fn new(addr: IpAddr, prefixlen: u32) -> Self {
+        Self {
+            addr,
+            flags: 0,
+            prefixlen,
+            decline_time: None,
+        }
+    }
+    
+    /// Create with flags
+    pub fn with_flags(addr: IpAddr, prefixlen: u32, flags: u32) -> Self {
+        Self {
+            addr,
+            flags,
+            prefixlen,
+            decline_time: None,
+        }
+    }
+}
+
 /// Authoritative zone specification
 ///
 /// Replaces C's `struct auth_zone` (dnsmasq.h line 414)
@@ -875,13 +927,15 @@ pub struct AuthZone {
     /// Original C field: domain in struct `auth_zone`
     pub domain: String,
 
-    /// Subnet for this zone
-    /// Original C field: subnet in struct `auth_zone`
-    pub subnet: Option<String>,
+    /// Subnet list for this zone
+    /// Original C field: subnet in struct `auth_zone` (linked list pointer)
+    /// Rust: Safe Vec instead of linked list with manual memory management
+    pub subnet: Option<Vec<AddrList>>,
 
-    /// Excluded subnets
-    /// Original C field: exclude in struct `auth_zone`
-    pub exclude: Vec<String>,
+    /// Excluded subnet list
+    /// Original C field: exclude in struct `auth_zone` (linked list pointer)
+    /// Rust: Safe Vec instead of linked list with manual memory management
+    pub exclude: Vec<AddrList>,
 
     /// Interface for this zone
     /// Original C field: `interface_names` in struct `auth_zone`
