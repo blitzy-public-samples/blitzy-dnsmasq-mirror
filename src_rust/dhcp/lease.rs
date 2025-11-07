@@ -77,23 +77,19 @@
 use crate::config::types::DaemonOptions;
 use crate::core::config::LEASE_RETRY;
 use crate::dhcp::common::ARPHRD_ETHER;
-use crate::dns::cache::check_for_local_domain;
-use crate::dns::domain::get_domain;
-use crate::logging::logger::log_query;
 use crate::utils::general::parse_hex;
 
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{Error as IoError, ErrorKind};
+use std::io::Error as IoError;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::RwLock;
-use tokio::time::sleep;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Type alias for client identifiers (DHCPv4 client-id or DHCPv6 DUID)
 pub type ClientId = Vec<u8>;
@@ -504,7 +500,7 @@ impl LeaseManager {
         }
 
         // Parse MAC address
-        let hwaddr = parse_hex(fields[1]).map_err(|e| {
+        let (hwaddr, _, _) = parse_hex(fields[1], Some(6)).map_err(|e| {
             LeaseError::ParseError(format!("Line {}: invalid MAC address: {}", line_num, e))
         })?;
 
@@ -522,7 +518,9 @@ impl LeaseManager {
 
         // Parse client-id (optional)
         let clid = if fields.len() > 4 && fields[4] != "*" {
-            parse_hex(fields[4]).unwrap_or_else(|_| fields[4].as_bytes().to_vec())
+            parse_hex(fields[4], None)
+                .map(|(bytes, _, _)| bytes)
+                .unwrap_or_else(|_| fields[4].as_bytes().to_vec())
         } else {
             // Use MAC as client ID if no explicit client ID
             hwaddr.clone()
@@ -547,7 +545,7 @@ impl LeaseManager {
         }
 
         // Parse DUID (client identifier)
-        let duid = parse_hex(fields[1]).map_err(|e| {
+        let (duid, _, _) = parse_hex(fields[1], None).map_err(|e| {
             LeaseError::ParseError(format!("Line {}: invalid DUID: {}", line_num, e))
         })?;
 
@@ -1010,28 +1008,24 @@ impl LeaseManager {
     pub async fn update_from_configs(&self) {
         debug!("Applying static host reservations to leases");
         
+        // TODO: Implement full static host reservation logic
+        // This should:
+        // 1. Look up static DHCP configurations that match each lease's client ID/MAC
+        // 2. If found and has CONFIG_NAME flag, update lease hostname from config
+        // 3. Otherwise query DNS cache (host_from_dns equivalent) for hostname
+        // 4. Call lease_set_hostname to update the lease with discovered hostname
+        //
+        // Requires: 
+        // - Access to Config.dhcp.static_leases HashMap
+        // - Access to DNS Cache instance for host_from_dns lookups
+        // - Implementation of lease_set_hostname with conflict detection
+        //
+        // Original C implementation: lease_update_from_configs() in src/lease.c
+        
         let leases = self.leases.read().await;
         for lease_arc in leases.values() {
-            let lease = lease_arc.read().await;
-            
-            // Check if IP address has static hostname in hosts file
-            if let Some(addr) = lease.addr() {
-                let ip = IpAddr::V4(addr);
-                if check_for_local_domain(ip) {
-                    trace!(
-                        "Lease {} has static hostname configured in hosts file",
-                        addr
-                    );
-                }
-            } else if let Some(addr6) = lease.addr6() {
-                let ip = IpAddr::V6(addr6);
-                if check_for_local_domain(ip) {
-                    trace!(
-                        "Lease {} has static hostname configured in hosts file",
-                        addr6
-                    );
-                }
-            }
+            let _lease = lease_arc.read().await;
+            // Placeholder: actual implementation pending cache/config integration
         }
     }
 
@@ -1068,36 +1062,25 @@ impl LeaseManager {
         &mut self,
         client_id: &ClientId,
         hostname: Option<String>,
-        options: DaemonOptions,
-        ip_addr: IpAddr,
+        _options: DaemonOptions,
+        _ip_addr: IpAddr,
     ) -> Result<(), LeaseError> {
         let leases = self.leases.write().await;
         let lease_arc = leases
             .get(client_id)
-            .ok_or(LeaseError::InvalidLease)?;
+            .ok_or_else(|| LeaseError::InvalidLease(format!("Lease not found for client ID")))?;
         let mut lease = lease_arc.write().await;
 
-        let final_hostname = if let Some(name) = hostname {
-            // If FQDN mode, construct FQDN based on domain suffix for this IP
-            if options.contains(DaemonOptions::OPT_DHCP_FQDN) {
-                // Get domain suffix for this IP address
-                if let Some(domain) = get_domain(ip_addr) {
-                    if !name.contains('.') {
-                        // Bare hostname, append domain
-                        Some(format!("{}.{}", name, domain))
-                    } else {
-                        // Already FQDN
-                        Some(name)
-                    }
-                } else {
-                    Some(name)
-                }
-            } else {
-                Some(name)
-            }
-        } else {
-            None
-        };
+        // TODO: Implement FQDN construction with proper domain configuration
+        // This requires:
+        // 1. Access to Config.dns.conditional_domains (&[CondDomain])
+        // 2. Access to Config.dns.default_domain (&str)
+        // 3. Call get_domain(ipv4_addr, cond_domains, default_domain) for IPv4
+        // 4. Call get_domain6(Some(&ipv6_addr), cond_domains, default_domain) for IPv6
+        //
+        // Current limitation: LeaseManager doesn't have these config references
+        // Workaround: Just use the provided hostname as-is for now
+        let final_hostname = hostname;
 
         lease.set_hostname(final_hostname);
         Ok(())
@@ -1227,12 +1210,9 @@ impl LeaseManager {
         
         // Log the allocation
         if let Some(ref name) = hostname {
-            log_query(
-                format!("DHCPv4 allocation: {} -> {}", name, addr),
-                IpAddr::V4(addr),
-            );
+            info!("DHCPv4 allocation: {} -> {}", name, addr);
         } else {
-            log_query(format!("DHCPv4 allocation: {}", addr), IpAddr::V4(addr));
+            info!("DHCPv4 allocation: {}", addr);
         }
         
         debug!("Allocated DHCPv4 lease: {}", addr);
@@ -1289,12 +1269,9 @@ impl LeaseManager {
         
         // Log the allocation
         if let Some(ref name) = hostname {
-            log_query(
-                format!("DHCPv6 allocation: {} -> {}", name, addr6),
-                IpAddr::V6(addr6),
-            );
+            info!("DHCPv6 allocation: {} -> {}", name, addr6);
         } else {
-            log_query(format!("DHCPv6 allocation: {}", addr6), IpAddr::V6(addr6));
+            info!("DHCPv6 allocation: {}", addr6);
         }
         
         debug!("Allocated DHCPv6 lease: {}", addr6);
@@ -1312,20 +1289,28 @@ impl LeaseManager {
     pub async fn prune(&mut self) -> usize {
         let mut leases = self.leases.write().await;
         let now = SystemTime::now();
-        let mut count = 0;
+        let mut expired_ids = Vec::new();
         
-        leases.retain(|_, lease_arc| {
-            let lease = lease_arc.blocking_read();
-            let keep = now <= lease.expires;
-            if !keep {
-                count += 1;
-                debug!(
-                    "Pruning expired lease: {:?}",
-                    lease.addr.or(lease.addr6.map(|a| a.into()))
-                );
+        // First pass: identify expired leases
+        for (client_id, lease_arc) in leases.iter() {
+            let lease = lease_arc.read().await;
+            if now > lease.expires {
+                expired_ids.push(client_id.clone());
+                if let Some(addr) = lease.addr {
+                    debug!("Pruning expired DHCPv4 lease: {}", addr);
+                } else if let Some(addr6) = lease.addr6 {
+                    debug!("Pruning expired DHCPv6 lease: {}", addr6);
+                } else {
+                    debug!("Pruning expired lease with no address");
+                }
             }
-            keep
-        });
+        }
+        
+        // Second pass: remove expired leases
+        let count = expired_ids.len();
+        for id in expired_ids {
+            leases.remove(&id);
+        }
         
         if count > 0 {
             // Mark file as dirty
@@ -1335,5 +1320,156 @@ impl LeaseManager {
         }
         
         count
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    
+    #[tokio::test]
+    async fn test_dhcp_lease_creation() {
+        // Test creating a DHCPv4 lease
+        let addr = Ipv4Addr::new(192, 168, 1, 100);
+        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+        let clid = vec![0x01, 0x02, 0x03];
+        let hostname = Some("test-host".to_string());
+        let expires = SystemTime::now() + Duration::from_secs(3600);
+        
+        let lease = DhcpLease::new(
+            addr,
+            hwaddr.clone(),
+            1, // ARPHRD_ETHER
+            clid.clone(),
+            hostname.clone(),
+            expires,
+        );
+        
+        assert_eq!(lease.addr(), Some(addr));
+        assert_eq!(lease.hwaddr(), &hwaddr[..]);
+        assert_eq!(lease.clid(), &clid[..]);
+        assert_eq!(lease.hostname(), Some("test-host"));
+    }
+    
+    #[tokio::test]
+    async fn test_lease_manager_creation() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let lease_file = temp_dir.path().join("dnsmasq.leases");
+        
+        let options = DaemonOptions::default();
+        let _manager = LeaseManager::new(
+            lease_file.clone(),
+            1000, // max_leases
+            options,
+            false, // use_duration
+        );
+        
+        // Manager created successfully - no accessor for lease_file to test
+    }
+    
+    #[tokio::test]
+    async fn test_lease_flags() {
+        // Test flag operations
+        let mut flags = 0u32;
+        
+        // Set a flag
+        flags = LeaseFlags::set(flags, LeaseFlags::Static);
+        assert!(LeaseFlags::is_set(flags, LeaseFlags::Static));
+        
+        // Set another flag
+        flags = LeaseFlags::set(flags, LeaseFlags::HasName);
+        assert!(LeaseFlags::is_set(flags, LeaseFlags::HasName));
+        assert!(LeaseFlags::is_set(flags, LeaseFlags::Static));
+        
+        // Clear a flag
+        flags = LeaseFlags::clear(flags, LeaseFlags::Static);
+        assert!(!LeaseFlags::is_set(flags, LeaseFlags::Static));
+        assert!(LeaseFlags::is_set(flags, LeaseFlags::HasName));
+    }
+    
+    #[tokio::test]
+    async fn test_lease_file_write_basic() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let lease_file = temp_dir.path().join("dnsmasq.leases");
+        
+        let options = DaemonOptions::default();
+        let mut manager = LeaseManager::new(
+            lease_file.clone(),
+            1000,
+            options,
+            false, // use_duration
+        );
+        
+        // Add a lease using allocate_v4
+        let addr = Ipv4Addr::new(192, 168, 1, 100);
+        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+        let clid = vec![0x01, 0x02, 0x03];
+        let hostname = Some("test-host".to_string());
+        let expires = SystemTime::now() + Duration::from_secs(3600);
+        
+        let _lease_arc = manager.allocate_v4(
+            addr,
+            hwaddr,
+            1,
+            clid,
+            hostname,
+            expires,
+        ).await.expect("Failed to allocate lease");
+        
+        // Write leases to file using update_file
+        let result = manager.update_file().await;
+        assert!(result.is_ok(), "Failed to write lease file: {:?}", result);
+        
+        // Verify file was created
+        assert!(lease_file.exists(), "Lease file was not created");
+    }
+    
+    #[tokio::test]
+    async fn test_lease_expiry() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let lease_file = temp_dir.path().join("dnsmasq.leases");
+        
+        let options = DaemonOptions::default();
+        let mut manager = LeaseManager::new(
+            lease_file,
+            1000,
+            options,
+            false, // use_duration
+        );
+        
+        // Add an expired lease using allocate_v4
+        let addr = Ipv4Addr::new(192, 168, 1, 50);
+        let hwaddr = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x50];
+        let clid = vec![0x01, 0x02, 0x50];
+        let expires = SystemTime::now() - Duration::from_secs(3600); // Expired
+        
+        let _expired_lease = manager.allocate_v4(
+            addr,
+            hwaddr,
+            1,
+            clid.clone(),
+            Some("expired-host".to_string()),
+            expires,
+        ).await.expect("Failed to allocate expired lease");
+        
+        // Add a valid lease
+        let addr2 = Ipv4Addr::new(192, 168, 1, 51);
+        let hwaddr2 = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x51];
+        let clid2 = vec![0x01, 0x02, 0x51];
+        let expires2 = SystemTime::now() + Duration::from_secs(3600);
+        
+        let _valid_lease = manager.allocate_v4(
+            addr2,
+            hwaddr2,
+            1,
+            clid2.clone(),
+            Some("valid-host".to_string()),
+            expires2,
+        ).await.expect("Failed to allocate valid lease");
+        
+        // Prune expired leases
+        let pruned_count = manager.prune().await;
+        assert_eq!(pruned_count, 1, "Should have pruned 1 expired lease");
     }
 }
