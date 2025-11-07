@@ -103,13 +103,15 @@
 //! ```no_run
 //! use dnsmasq::runtime::event_loop::run_event_loop;
 //! use dnsmasq::runtime::signal::setup_signal_handlers;
+//! use dnsmasq::types::daemon_state::DaemonState;
+//! use dnsmasq::config::Config;
 //! use std::sync::Arc;
 //! use tokio::sync::RwLock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let config = Arc::new(load_config()?);
-//!     let state = Arc::new(RwLock::new(DaemonState::new(&config)?));
+//!     let config = Arc::new(Config::default());
+//!     let state = Arc::new(RwLock::new(DaemonState::new((*config).clone())));
 //!     let signals = setup_signal_handlers()?;
 //!     
 //!     run_event_loop(config, state, signals).await?;
@@ -305,7 +307,7 @@ impl EventLoopHandle {
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let config = Arc::new(Config::default());
-///     let state = Arc::new(RwLock::new(DaemonState::new(config.clone())?));
+///     let state = Arc::new(RwLock::new(DaemonState::new((*config).clone())));
 ///     let signals = setup_signal_handlers()?;
 ///     
 ///     run_event_loop(config, state, signals).await?;
@@ -414,9 +416,19 @@ pub async fn run_event_loop(
     let mut maintenance_timer = interval(MAINTENANCE_INTERVAL);
     maintenance_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     
-    // Allocate packet buffer for UDP reception (reused across iterations)
-    let mut packet_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
-    packet_buf.resize(PACKET_BUFFER_SIZE, 0);
+    // Allocate separate packet buffers for each socket type to avoid simultaneous mutable borrows
+    // in tokio::select! branches. Each buffer is reused across iterations for its respective socket.
+    let mut dns_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
+    dns_buf.resize(PACKET_BUFFER_SIZE, 0);
+    
+    let mut dhcp_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
+    dhcp_buf.resize(PACKET_BUFFER_SIZE, 0);
+    
+    let mut dhcp6_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
+    dhcp6_buf.resize(PACKET_BUFFER_SIZE, 0);
+    
+    let mut tftp_buf = BytesMut::with_capacity(PACKET_BUFFER_SIZE);
+    tftp_buf.resize(PACKET_BUFFER_SIZE, 0);
     
     info!("Event loop initialization complete, entering main select! loop");
     
@@ -433,7 +445,7 @@ pub async fn run_event_loop(
             // Replaces: poll_check(dns_fd, POLLIN) pattern for each DNS socket
             result = async {
                 if let Some(ref socket) = dns_socket {
-                    socket.recv_from(&mut packet_buf).await
+                    socket.recv_from(&mut dns_buf).await
                 } else {
                     // If no DNS socket, return pending future
                     std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
@@ -443,7 +455,7 @@ pub async fn run_event_loop(
                     Ok((len, peer_addr)) => {
                         debug!("Received DNS query: {} bytes from {}", len, peer_addr);
                         // Dispatch to DNS subsystem handler (implemented in dns/server.rs)
-                        handle_dns_query(&packet_buf[..len], peer_addr, Arc::clone(&state)).await;
+                        handle_dns_query(&dns_buf[..len], peer_addr, Arc::clone(&state)).await;
                     }
                     Err(e) => {
                         error!("DNS socket recv_from error: {}", e);
@@ -456,22 +468,33 @@ pub async fn run_event_loop(
             //
             // Replaces: dhcp_packet(now, 0) in dnsmasq.c line 1448
             // Replaces: poll_check(daemon->dhcpfd, POLLIN)
-            #[cfg(feature = "dhcp")]
+            // Note: cfg attribute removed as tokio::select! doesn't support it on branches
+            // Runtime check via Option<UdpSocket> provides same functionality
             result = async {
-                if let Some(ref socket) = dhcp_socket {
-                    socket.recv_from(&mut packet_buf).await
-                } else {
+                #[cfg(feature = "dhcp")]
+                {
+                    if let Some(ref socket) = dhcp_socket {
+                        socket.recv_from(&mut dhcp_buf).await
+                    } else {
+                        std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
+                    }
+                }
+                #[cfg(not(feature = "dhcp"))]
+                {
                     std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
                 }
             } => {
-                match result {
-                    Ok((len, peer_addr)) => {
-                        debug!("Received DHCPv4 packet: {} bytes from {}", len, peer_addr);
-                        // Dispatch to DHCP subsystem handler (implemented in dhcp/v4/server.rs)
-                        handle_dhcp_packet(&packet_buf[..len], peer_addr, Arc::clone(&state)).await;
-                    }
-                    Err(e) => {
-                        error!("DHCP socket recv_from error: {}", e);
+                #[cfg(feature = "dhcp")]
+                {
+                    match result {
+                        Ok((len, peer_addr)) => {
+                            debug!("Received DHCPv4 packet: {} bytes from {}", len, peer_addr);
+                            // Dispatch to DHCP subsystem handler (implemented in dhcp/v4/server.rs)
+                            handle_dhcp_packet(&dhcp_buf[..len], peer_addr, Arc::clone(&state)).await;
+                        }
+                        Err(e) => {
+                            error!("DHCP socket recv_from error: {}", e);
+                        }
                     }
                 }
             }
@@ -480,22 +503,32 @@ pub async fn run_event_loop(
             //
             // Replaces: dhcp6_packet(now) in dnsmasq.c line 1455
             // Replaces: poll_check(daemon->dhcp6fd, POLLIN)
-            #[cfg(feature = "dhcp-v6")]
+            // Note: cfg attribute moved inside async block for tokio::select! compatibility
             result = async {
-                if let Some(ref socket) = dhcp6_socket {
-                    socket.recv_from(&mut packet_buf).await
-                } else {
+                #[cfg(feature = "dhcp-v6")]
+                {
+                    if let Some(ref socket) = dhcp6_socket {
+                        socket.recv_from(&mut dhcp6_buf).await
+                    } else {
+                        std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
+                    }
+                }
+                #[cfg(not(feature = "dhcp-v6"))]
+                {
                     std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
                 }
             } => {
-                match result {
-                    Ok((len, peer_addr)) => {
-                        debug!("Received DHCPv6 packet: {} bytes from {}", len, peer_addr);
-                        // Dispatch to DHCPv6 subsystem handler (implemented in dhcp/v6/server.rs)
-                        handle_dhcp6_packet(&packet_buf[..len], peer_addr, Arc::clone(&state)).await;
-                    }
-                    Err(e) => {
-                        error!("DHCPv6 socket recv_from error: {}", e);
+                #[cfg(feature = "dhcp-v6")]
+                {
+                    match result {
+                        Ok((len, peer_addr)) => {
+                            debug!("Received DHCPv6 packet: {} bytes from {}", len, peer_addr);
+                            // Dispatch to DHCPv6 subsystem handler (implemented in dhcp/v6/server.rs)
+                            handle_dhcp6_packet(&dhcp6_buf[..len], peer_addr, Arc::clone(&state)).await;
+                        }
+                        Err(e) => {
+                            error!("DHCPv6 socket recv_from error: {}", e);
+                        }
                     }
                 }
             }
@@ -505,32 +538,42 @@ pub async fn run_event_loop(
             // Replaces: check_tftp_listeners(now) in dnsmasq.c line 1441
             // Replaces: poll_check(tftp_fd, POLLIN)
             // Spawns per-transfer async task with semaphore admission control
-            #[cfg(feature = "tftp")]
+            // Note: cfg attribute moved inside async block for tokio::select! compatibility
             result = async {
-                if let Some(ref socket) = tftp_socket {
-                    socket.recv_from(&mut packet_buf).await
-                } else {
+                #[cfg(feature = "tftp")]
+                {
+                    if let Some(ref socket) = tftp_socket {
+                        socket.recv_from(&mut tftp_buf).await
+                    } else {
+                        std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
+                    }
+                }
+                #[cfg(not(feature = "tftp"))]
+                {
                     std::future::pending::<Result<(usize, SocketAddr), std::io::Error>>().await
                 }
             } => {
-                match result {
-                    Ok((len, peer_addr)) => {
-                        debug!("Received TFTP request: {} bytes from {}", len, peer_addr);
-                        // Acquire semaphore permit before spawning task
-                        if let Ok(permit) = tcp_semaphore.clone().try_acquire_owned() {
-                            let packet_copy = packet_buf[..len].to_vec();
-                            let state_clone = Arc::clone(&state);
-                            tokio::spawn(async move {
-                                // Dispatch to TFTP subsystem handler (implemented in tftp/server.rs)
-                                handle_tftp_request(&packet_copy, peer_addr, state_clone).await;
-                                drop(permit); // Release semaphore permit
-                            });
-                        } else {
-                            warn!("TFTP transfer rejected: max concurrent transfers reached ({})", MAX_TCP_PROCESSES);
+                #[cfg(feature = "tftp")]
+                {
+                    match result {
+                        Ok((len, peer_addr)) => {
+                            debug!("Received TFTP request: {} bytes from {}", len, peer_addr);
+                            // Acquire semaphore permit before spawning task
+                            if let Ok(permit) = tcp_semaphore.clone().try_acquire_owned() {
+                                let packet_copy = tftp_buf[..len].to_vec();
+                                let state_clone = Arc::clone(&state);
+                                tokio::spawn(async move {
+                                    // Dispatch to TFTP subsystem handler (implemented in tftp/server.rs)
+                                    handle_tftp_request(&packet_copy, peer_addr, state_clone).await;
+                                    drop(permit); // Release semaphore permit
+                                });
+                            } else {
+                                warn!("TFTP transfer rejected: max concurrent transfers reached ({})", MAX_TCP_PROCESSES);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        error!("TFTP socket recv_from error: {}", e);
+                        Err(e) => {
+                            error!("TFTP socket recv_from error: {}", e);
+                        }
                     }
                 }
             }
