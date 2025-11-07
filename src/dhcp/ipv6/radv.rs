@@ -52,7 +52,7 @@
 //! - Result types for error handling (replaces die() calls and errno)
 
 use std::net::{Ipv6Addr, SocketAddr};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 // External imports
@@ -133,6 +133,45 @@ const RA_SHORT_PERIOD_MIN_INTERVAL: u64 = 5;
 
 /// Maximum interval during short period (20 seconds)
 const RA_SHORT_PERIOD_MAX_INTERVAL: u64 = 20;
+
+// =============================================================================
+// PLATFORM-SPECIFIC SOCKET OPTION CONSTANTS
+// =============================================================================
+
+/// IPv6 socket options for ICMPv6 filtering and hop limit configuration
+#[cfg(target_os = "linux")]
+mod libc_constants {
+    pub const IPPROTO_ICMPV6: i32 = libc::IPPROTO_ICMPV6;
+    pub const IPPROTO_IPV6: i32 = libc::IPPROTO_IPV6;
+    pub const IPV6_UNICAST_HOPS: i32 = libc::IPV6_UNICAST_HOPS;
+    pub const IPV6_MULTICAST_HOPS: i32 = libc::IPV6_MULTICAST_HOPS;
+    pub const IPV6_TCLASS: i32 = 67; // From linux/in6.h
+    pub const ICMP6_FILTER: i32 = 1; // From linux/icmpv6.h
+}
+
+/// ICMPv6 filter structure for controlling which ICMP types to receive
+/// Corresponds to struct icmp6_filter from netinet/icmp6.h
+#[repr(C)]
+struct Icmp6Filter {
+    icmp6_filt: [u32; 8],
+}
+
+impl Icmp6Filter {
+    /// Create a filter that blocks all ICMP6 types
+    fn new_block_all() -> Self {
+        Icmp6Filter {
+            icmp6_filt: [0xffffffff; 8],
+        }
+    }
+
+    /// Allow a specific ICMP6 type through the filter
+    /// Implements ICMP6_FILTER_SETPASS macro logic
+    fn set_pass(&mut self, icmp6_type: u8) {
+        let idx = (icmp6_type as usize) >> 5;
+        let bit = (icmp6_type as u32) & 31;
+        self.icmp6_filt[idx] &= !(1 << bit);
+    }
+}
 
 // =============================================================================
 // ERROR TYPES
@@ -491,24 +530,74 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
     let socket = Socket::new(Domain::IPV6, Type::RAW, Some(SocketProtocol::ICMPV6))
         .map_err(|e| RadVError::SocketCreation(e.to_string()))?;
 
-    // Set socket options
-    let hop_limit = 255; // RFC 4861 requires hop limit of 255
+    // Set socket options using raw libc calls
+    // These options are not fully supported in nix 0.29, so we use direct syscalls
+    // This is platform-specific FFI code which is permitted per Section 0.7.2
+    let hop_limit: i32 = 255; // RFC 4861 requires hop limit of 255
     
     #[cfg(target_os = "linux")]
     {
-        // Set traffic class for router-to-router priority
-        use nix::sys::socket::{setsockopt, sockopt};
+        use libc_constants::*;
         let fd = socket.as_raw_fd();
         
-        // Set hop limit
-        setsockopt(fd, sockopt::Ipv6UnicastHops, &hop_limit)
-            .map_err(|e| RadVError::SocketOption(e.to_string()))?;
-        setsockopt(fd, sockopt::Ipv6MulticastHops, &hop_limit)
-            .map_err(|e| RadVError::SocketOption(e.to_string()))?;
+        // Helper function for setting socket options with error handling
+        fn set_sockopt(fd: RawFd, level: i32, optname: i32, optval: &i32) -> Result<(), RadVError> {
+            // SAFETY: This is safe because:
+            // 1. fd is a valid file descriptor from a successfully created ICMPv6 socket
+            // 2. level and optname are valid constants from Linux kernel headers
+            // 3. optval is a valid i32 reference with correct size passed to setsockopt
+            // 4. This is platform-specific FFI code which is permitted per Section 0.7.2
+            let result = unsafe {
+                libc::setsockopt(
+                    fd,
+                    level,
+                    optname,
+                    optval as *const _ as *const libc::c_void,
+                    std::mem::size_of::<i32>() as libc::socklen_t,
+                )
+            };
+            
+            if result < 0 {
+                let err = std::io::Error::last_os_error();
+                Err(RadVError::SocketOption(err.to_string()))
+            } else {
+                Ok(())
+            }
+        }
         
-        // Set traffic class (CS6 for router-to-router)
-        setsockopt(fd, sockopt::Ipv6TClass, &IPTOS_CLASS_CS6)
-            .map_err(|e| RadVError::SocketOption(e.to_string()))?;
+        // Set unicast hop limit (RFC 4861 requires 255)
+        set_sockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hop_limit)?;
+        
+        // Set multicast hop limit (RFC 4861 requires 255)
+        set_sockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hop_limit)?;
+        
+        // Set traffic class (CS6 for router-to-router priority per RFC 4594)
+        set_sockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &IPTOS_CLASS_CS6)?;
+        
+        // Set up ICMP6 filter to only receive Router Solicitations and Echo Replies
+        let mut filter = Icmp6Filter::new_block_all();
+        filter.set_pass(ND_ROUTER_SOLICIT);
+        filter.set_pass(ICMP6_ECHO_REPLY);
+        
+        // SAFETY: This is safe because:
+        // 1. fd is a valid file descriptor from a successfully created ICMPv6 socket
+        // 2. IPPROTO_ICMPV6 and ICMP6_FILTER are valid constants
+        // 3. filter is a valid Icmp6Filter structure matching kernel expectations
+        // 4. This is platform-specific FFI code which is permitted per Section 0.7.2
+        let result = unsafe {
+            libc::setsockopt(
+                fd,
+                IPPROTO_ICMPV6,
+                ICMP6_FILTER,
+                &filter as *const _ as *const libc::c_void,
+                std::mem::size_of::<Icmp6Filter>() as libc::socklen_t,
+            )
+        };
+        
+        if result < 0 {
+            let err = std::io::Error::last_os_error();
+            return Err(RadVError::SocketOption(err.to_string()));
+        }
     }
 
     // Configure socket for non-blocking I/O
@@ -655,7 +744,7 @@ pub async fn icmp6_packet(
     }
 
     // Get interface name
-    let interface_name = index_to_name(if_index)
+    let interface_name = index_to_name(if_index).await
         .map_err(|_| RadVError::InterfaceError(format!("Invalid interface index: {}", if_index)))?;
 
     match icmp_type {
