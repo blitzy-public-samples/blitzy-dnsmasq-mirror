@@ -38,9 +38,9 @@
 //! ```
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
-use tracing::warn;
 use tracing_subscriber::FmtSubscriber;
 
 // Import configuration types and builders from dnsmasq
@@ -55,7 +55,11 @@ use dnsmasq::config::defaults::DEFAULT_LEASE_TIME_V4_SECS;
 
 // Feature-gated DHCP imports
 #[cfg(feature = "dhcp")]
-use dnsmasq::config::DhcpConfig;
+use dnsmasq::config::{DhcpConfig, DhcpOption};
+
+// Import DhcpOptionValue from types since it's not re-exported in mod.rs
+#[cfg(feature = "dhcp")]
+use dnsmasq::config::types::DhcpOptionValue;
 
 fn main() -> Result<()> {
     // Initialize structured logging with environment-based filtering
@@ -97,21 +101,12 @@ fn main() -> Result<()> {
         ],
         
         // TTL settings for cache management
-        min_ttl: Some(300),      // Minimum cache TTL: 5 minutes
-        max_ttl: Some(86400),    // Maximum cache TTL: 24 hours
-        negative_ttl: 3600,      // Negative response cache: 1 hour
+        min_ttl: Some(Duration::from_secs(300)),      // Minimum cache TTL: 5 minutes
+        max_ttl: Some(Duration::from_secs(86400)),    // Maximum cache TTL: 24 hours
+        negative_ttl: Duration::from_secs(3600),      // Negative response cache: 1 hour
         
         // EDNS0 packet size for large responses (DNSSEC-friendly)
         edns_packet_size: 4096,
-        
-        // Additional DNS settings
-        port: 53,
-        domain_needed: false,    // Forward plain names without dots
-        bogus_priv: false,       // Forward queries for private IP ranges
-        no_resolv: false,        // Read /etc/resolv.conf for upstream servers
-        no_poll: false,          // Poll resolv files for changes
-        strict_order: false,     // Try upstream servers in order vs. fastest
-        all_servers: false,      // Query all servers, not just first responding
         
         ..Default::default()
     };
@@ -128,8 +123,6 @@ fn main() -> Result<()> {
         bind_dynamic: false,         // Don't bind to dynamic interfaces
         interfaces: vec![],          // Empty = bind to all interfaces
         listen_addresses: vec![],    // Empty = listen on all addresses
-        except_interfaces: vec![],   // Interfaces to exclude
-        no_dhcp_interfaces: vec![],  // Interfaces with DNS-only (no DHCP)
         
         ..Default::default()
     };
@@ -147,10 +140,9 @@ fn main() -> Result<()> {
                 dnsmasq::config::DhcpRange {
                     start: "192.168.1.50".parse()?,
                     end: "192.168.1.150".parse()?,
-                    lease_time: std::time::Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS as u64),
+                    lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
                     netmask: Some("255.255.255.0".parse()?),
-                    broadcast: None,
-                    tags: vec![],
+                    tag: None,
                 },
             ],
             
@@ -160,27 +152,24 @@ fn main() -> Result<()> {
                     mac: "00:11:22:33:44:55".parse()?,
                     ip: "192.168.1.10".parse()?,
                     hostname: Some("server1".to_string()),
-                    lease_time: None,  // Use default lease time
-                    tags: vec![],
+                    client_id: None,
                 },
             ],
             
             // DHCP options to send to clients
             options: vec![
                 // Option 3: Router (default gateway)
-                dnsmasq::config::DhcpOption {
-                    tag: None,
+                DhcpOption {
                     code: 3,
-                    value: dnsmasq::config::DhcpOptionValue::IpAddress("192.168.1.1".parse()?),
+                    value: DhcpOptionValue::Ip("192.168.1.1".parse()?),
+                    tag: None,
                     force: false,
                 },
-                // Option 6: DNS servers
-                dnsmasq::config::DhcpOption {
-                    tag: None,
+                // Option 6: DNS servers (sending as binary data for list)
+                DhcpOption {
                     code: 6,
-                    value: dnsmasq::config::DhcpOptionValue::IpAddressList(vec![
-                        "192.168.1.1".parse()?,
-                    ]),
+                    value: DhcpOptionValue::Binary(vec![192, 168, 1, 1]),  // IP address as bytes
+                    tag: None,
                     force: false,
                 },
             ],
@@ -188,9 +177,11 @@ fn main() -> Result<()> {
             // Lease file path for persistence
             lease_file: Some(PathBuf::from("/var/lib/dnsmasq/dnsmasq.leases")),
             
+            // Default lease time for all ranges (can be overridden per-range)
+            lease_time: Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS),
+            
             // Additional DHCP settings
             authoritative: false,     // Not authoritative for subnet
-            rapid_commit: false,      // DHCPv4 rapid commit
             
             ..Default::default()
         };
@@ -199,7 +190,7 @@ fn main() -> Result<()> {
         println!("  ✓ DHCP range: 192.168.1.50 - 192.168.1.150");
         println!("  ✓ Default lease time: {} seconds ({})", 
                  DEFAULT_LEASE_TIME_V4_SECS,
-                 humanize_duration(std::time::Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS as u64)));
+                 humanize_duration(Duration::from_secs(DEFAULT_LEASE_TIME_V4_SECS)));
         println!("  ✓ Static host: 00:11:22:33:44:55 → 192.168.1.10 (server1)");
         println!("  ✓ Gateway: 192.168.1.1");
     }
@@ -207,7 +198,7 @@ fn main() -> Result<()> {
     #[cfg(not(feature = "dhcp"))]
     {
         println!("\nDHCP configuration skipped (feature 'dhcp' not enabled)");
-        warn!("To enable DHCP, rebuild with: cargo build --features dhcp");
+        println!("  ℹ To enable DHCP, rebuild with: cargo build --features dhcp");
     }
 
     // Validate and build the configuration
@@ -224,8 +215,10 @@ fn main() -> Result<()> {
     println!("  - Listen port: {}", config.network.port);
     #[cfg(feature = "dhcp")]
     {
-        println!("  - DHCP ranges: {}", config.dhcp.ranges.len());
-        println!("  - Static hosts: {}", config.dhcp.static_hosts.len());
+        if let Some(dhcp_config) = &config.dhcp {
+            println!("  - DHCP ranges: {}", dhcp_config.ranges.len());
+            println!("  - Static hosts: {}", dhcp_config.static_hosts.len());
+        }
     }
 
     // =========================================================================
@@ -242,8 +235,8 @@ fn main() -> Result<()> {
     match parse_config_file(&conf_file_path) {
         Ok(loaded_config) => {
             println!("  ✓ Configuration loaded successfully from file");
-            println!("  - DNS cache size: {}", loaded_config.dns.cache_size);
-            println!("  - Upstream servers: {}", loaded_config.dns.upstream_servers.len());
+            println!("  - DNS cache size: {}", loaded_config.cache_size.unwrap_or(150));
+            println!("  - Upstream servers: {}", loaded_config.servers.len());
         }
         Err(e) => {
             // This is expected if the file doesn't exist
@@ -282,7 +275,7 @@ fn main() -> Result<()> {
     println!("  ✓ CLI arguments parsed successfully");
     println!("  - Port: {:?}", simulated_cli.port);
     println!("  - Cache size: {:?}", simulated_cli.cache_size);
-    println!("  - Servers: {:?}", simulated_cli.servers);
+    println!("  - Servers: {:?}", simulated_cli.server);
     
     println!("\nMerging CLI arguments with config builder...");
     let mut cli_builder = ConfigBuilder::new();
@@ -292,11 +285,11 @@ fn main() -> Result<()> {
     if let Some(cache_size) = simulated_cli.cache_size {
         cli_dns_config.cache_size = cache_size;
     }
-    if let Some(port) = simulated_cli.port {
-        cli_dns_config.port = port;
-    }
+    // Note: Port is stored in NetworkConfig, not DnsConfig
+    let cli_port = simulated_cli.port;
+    
     // Add servers from CLI
-    for server_str in simulated_cli.servers.iter() {
+    for server_str in simulated_cli.server.iter() {
         if let Ok(addr) = server_str.parse() {
             cli_dns_config.upstream_servers.push(dnsmasq::config::UpstreamServer {
                 address: addr,
@@ -310,7 +303,7 @@ fn main() -> Result<()> {
     
     let cli_config = cli_builder.build()?;
     println!("  ✓ CLI configuration built successfully");
-    println!("  - Final DNS port: {}", cli_config.dns.port);
+    println!("  - Final DNS port: {}", cli_port);
     println!("  - Final cache size: {}", cli_config.dns.cache_size);
 
     // =========================================================================
