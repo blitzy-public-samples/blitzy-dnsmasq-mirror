@@ -645,7 +645,12 @@ pub trait FileWatcher {
 pub fn get_platform() -> Box<dyn NetworkPlatform> {
     #[cfg(target_os = "linux")]
     {
-        Box::new(linux::LinuxPlatform::new())
+        // Block on async initialization - this is acceptable for startup initialization
+        // The C version would die() on initialization failure anyway
+        Box::new(
+            futures::executor::block_on(linux::LinuxPlatform::new())
+                .expect("Failed to initialize Linux platform")
+        )
     }
 
     #[cfg(any(
