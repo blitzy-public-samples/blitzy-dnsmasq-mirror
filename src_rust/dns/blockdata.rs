@@ -76,13 +76,14 @@
 
 use crate::core::config::KEYBLOCK_LEN;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::io::{self, Read, Write};
 
 /// Internal node structure for block-chained storage
 ///
 /// Each node contains a fixed-size data array and a pointer to the next node.
 /// Forms a singly-linked list. Replaces C's `struct blockdata`.
+#[derive(Debug)]
 struct BlockDataNode {
     /// Fixed-size data storage array (40 bytes by default)
     data: Box<[u8; KEYBLOCK_LEN]>,
@@ -114,7 +115,7 @@ impl BlockDataNode {
 /// and tracking allocation statistics. Replaces C's global static variables.
 struct BlockAllocator {
     /// Freelist of available blocks for reuse
-    freelist: RefCell<Vec<Box<BlockDataNode>>>,
+    freelist: Mutex<Vec<Box<BlockDataNode>>>,
     /// Current number of blocks in use
     count: AtomicUsize,
     /// High water mark (maximum blocks ever in use)
@@ -127,7 +128,7 @@ impl BlockAllocator {
     /// Create a new block allocator with empty freelist
     const fn new() -> Self {
         Self {
-            freelist: RefCell::new(Vec::new()),
+            freelist: Mutex::new(Vec::new()),
             count: AtomicUsize::new(0),
             hwm: AtomicUsize::new(0),
             allocated: AtomicUsize::new(0),
@@ -140,7 +141,7 @@ impl BlockAllocator {
     /// malloc overhead compared to individual allocations. Typical expansion
     /// size is 50 blocks.
     fn expand(&self, n: usize) {
-        let mut freelist = self.freelist.borrow_mut();
+        let mut freelist = self.freelist.lock().unwrap();
         freelist.reserve(n);
         
         for _ in 0..n {
@@ -157,12 +158,12 @@ impl BlockAllocator {
     ///
     /// Returns None only if heap allocation fails (extremely rare).
     fn alloc_block(&self) -> Option<Box<BlockDataNode>> {
-        let mut freelist = self.freelist.borrow_mut();
+        let mut freelist = self.freelist.lock().unwrap();
         
         if freelist.is_empty() {
-            drop(freelist); // Release borrow before expansion
+            drop(freelist); // Release lock before expansion
             self.expand(50);
-            freelist = self.freelist.borrow_mut();
+            freelist = self.freelist.lock().unwrap();
         }
         
         if let Some(block) = freelist.pop() {
@@ -193,7 +194,7 @@ impl BlockAllocator {
     /// Traverses the chain to count blocks, decrements usage counter,
     /// then prepends the entire chain to the freelist. This bulk free
     /// operation is more efficient than freeing blocks individually.
-    fn free_chain(&self, mut head: Option<Box<BlockDataNode>>) {
+    fn free_chain(&self, head: Option<Box<BlockDataNode>>) {
         if head.is_none() {
             return;
         }
@@ -215,7 +216,7 @@ impl BlockAllocator {
         self.count.fetch_sub(count, Ordering::Relaxed);
 
         // Return all blocks to freelist
-        let mut freelist = self.freelist.borrow_mut();
+        let mut freelist = self.freelist.lock().unwrap();
         freelist.extend(chain_blocks);
     }
 
@@ -226,7 +227,7 @@ impl BlockAllocator {
     /// heap fragmentation during runtime.
     fn reset(&self, cache_size: usize, dnssec_enabled: bool) {
         // Clear freelist
-        self.freelist.borrow_mut().clear();
+        self.freelist.lock().unwrap().clear();
         
         // Reset all counters
         self.count.store(0, Ordering::Relaxed);
@@ -339,7 +340,7 @@ impl BlockData {
 
         let mut remaining = data;
         let mut head: Option<Box<BlockDataNode>> = None;
-        let mut tail: *mut Box<BlockDataNode> = &mut head;
+        let mut tail: *mut Option<Box<BlockDataNode>> = &mut head;
 
         while !remaining.is_empty() {
             // Allocate a block from freelist or heap
@@ -405,7 +406,7 @@ impl BlockData {
 
         let mut remaining = len;
         let mut head: Option<Box<BlockDataNode>> = None;
-        let mut tail: *mut Box<BlockDataNode> = &mut head;
+        let mut tail: *mut Option<Box<BlockDataNode>> = &mut head;
 
         while remaining > 0 {
             // Allocate a block from freelist or heap
@@ -413,7 +414,7 @@ impl BlockData {
                 Some(b) => b,
                 None => {
                     // Allocation failed - free partial chain
-                    if let Some(chain) = head {
+                    if let Some(chain) = head.take() {
                         BLOCK_ALLOCATOR.free_chain(Some(chain));
                     }
                     return Err(io::Error::new(
@@ -427,7 +428,7 @@ impl BlockData {
             let read_len = remaining.min(KEYBLOCK_LEN);
             reader.read_exact(&mut block.data[..read_len]).map_err(|e| {
                 // Free partial chain on read error
-                if let Some(chain) = head {
+                if let Some(chain) = head.take() {
                     BLOCK_ALLOCATOR.free_chain(Some(chain));
                 }
                 e
