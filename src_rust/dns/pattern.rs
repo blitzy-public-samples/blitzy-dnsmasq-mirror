@@ -68,20 +68,21 @@
 //! }
 //! ```
 
-use crate::dns::protocol::{T_A, T_AAAA, C_IN, HB3_TC, MAXDNAME};
-use crate::dns::domain::{hostname_isequal, hostname_order, canonicalise};
+use crate::dns::protocol::{T_A, T_AAAA, C_IN, DnsHeader};
+use crate::dns::domain::{hostname_isequal, hostname_order};
 use crate::dns::upstream::{
     UpstreamServer, ServerFlags,
     SERV_LITERAL_ADDRESS, SERV_USE_RESOLV, SERV_FOR_NODOTS, SERV_WILDCARD,
-    SERV_4ADDR, SERV_6ADDR, SERV_ALL_ZEROS, SERV_DO_DNSSEC, SERV_MARK, SERV_FROM_DBUS,
+    SERV_4ADDR, SERV_6ADDR, SERV_ALL_ZEROS, SERV_DO_DNSSEC, SERV_MARK,
 };
 use crate::dns::parser::skip_questions;
-use crate::dns::serializer::{setup_reply, add_resource_record};
+use crate::dns::serializer::{setup_reply, add_resource_record, ResponseType, ExtendedDnsError, RDataType};
 use crate::dns::cache::check_for_local_domain;
 
 use std::cmp::Ordering;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
+use bytes::BytesMut;
 use tracing::{debug, info, warn, error, trace};
 
 // ============================================================================
@@ -601,26 +602,66 @@ pub fn make_local_answer(
     // Start building response packet (copy query packet as base)
     let mut response = packet.to_vec();
 
-    // Setup response header
-    let rcode = if flags.contains(SERV_ALL_ZEROS) {
-        // Negative response: NXDOMAIN or NOERR
-        if check_for_local_domain(qdomain, local_domains) {
-            0 // NOERR: domain exists but wrong type
-        } else {
-            3 // NXDOMAIN: domain doesn't exist
-        }
-    } else {
-        0 // NOERR: we have an answer
-    };
+    // Ensure packet is at least large enough for DNS header
+    if response.len() < DnsHeader::SIZE {
+        error!(
+            domain = qdomain,
+            packet_len = response.len(),
+            "Packet too small for DNS header"
+        );
+        return None;
+    }
 
-    setup_reply(&mut response, rcode, false);
-
-    // Skip to answer section (past questions)
-    let answer_start = match skip_questions(&response) {
-        Some(pos) => pos,
-        None => {
+    // Parse header from packet
+    let mut header = match DnsHeader::from_bytes(&response[..DnsHeader::SIZE]) {
+        Ok(h) => h,
+        Err(e) => {
             error!(
                 domain = qdomain,
+                error = e,
+                "Failed to parse DNS header"
+            );
+            return None;
+        }
+    };
+
+    // Determine response type
+    let response_type = if flags.contains(SERV_ALL_ZEROS) {
+        // Negative response: NXDOMAIN or NOERR
+        if check_for_local_domain(qdomain, local_domains) {
+            ResponseType::NoError // domain exists but wrong type
+        } else {
+            ResponseType::NxDomain // domain doesn't exist
+        }
+    } else {
+        ResponseType::NoError // we have an answer
+    };
+
+    // Setup response header
+    if let Err(e) = setup_reply(&mut header, response_type, ExtendedDnsError::Unset) {
+        error!(
+            domain = qdomain,
+            error = ?e,
+            "Failed to setup reply header"
+        );
+        return None;
+    }
+
+    // Write modified header back to response packet
+    let header_bytes = header.to_bytes();
+    response[..DnsHeader::SIZE].copy_from_slice(&header_bytes);
+
+    // Skip to answer section (past questions)
+    let qdcount = header.qdcount();
+    let _answer_start = match skip_questions(&response, &response[DnsHeader::SIZE..], qdcount) {
+        Ok(remaining) => {
+            // Calculate offset from start of packet
+            response.len() - remaining.len()
+        }
+        Err(e) => {
+            error!(
+                domain = qdomain,
+                error = ?e,
                 "Failed to skip questions in make_local_answer"
             );
             return None;
@@ -631,59 +672,88 @@ pub fn make_local_answer(
     if !flags.contains(SERV_ALL_ZEROS) {
         let addr = server.addr();
         
+        // Convert response to BytesMut for add_resource_record
+        let mut response_buf = BytesMut::from(&response[..]);
+        let mut truncated = false;
+        let limit = 512; // Standard DNS UDP packet size limit
+        
         // Add A or AAAA record based on query type and server address type
         match (qtype, addr.ip()) {
             (T_A, IpAddr::V4(ipv4)) if flags.contains(SERV_4ADDR) => {
                 // Add A record
                 let ttl = 0; // Zero TTL for local answers
-                if !add_resource_record(
-                    &mut response,
-                    answer_start,
-                    qdomain,
-                    qtype,
-                    C_IN,
+                let rdata = RDataType::A(ipv4.octets());
+                
+                match add_resource_record(
+                    &mut response_buf,
+                    limit,
+                    &mut truncated,
+                    -1,  // No compression, use name string
+                    Some(qdomain),
                     ttl,
-                    &ipv4.octets(),
+                    T_A,
+                    C_IN,
+                    &rdata,
+                    None,  // No compression context
                 ) {
-                    error!(
-                        domain = qdomain,
-                        ipv4 = %ipv4,
-                        "Failed to add A record to response"
-                    );
-                    return None;
+                    Ok(_) => {
+                        debug!(
+                            domain = qdomain,
+                            ipv4 = %ipv4,
+                            "Generated local A record response"
+                        );
+                        
+                        // Update response with the modified buffer
+                        response = response_buf.to_vec();
+                    }
+                    Err(e) => {
+                        error!(
+                            domain = qdomain,
+                            ipv4 = %ipv4,
+                            error = ?e,
+                            "Failed to add A record to response"
+                        );
+                        return None;
+                    }
                 }
-
-                debug!(
-                    domain = qdomain,
-                    ipv4 = %ipv4,
-                    "Generated local A record response"
-                );
             }
             (T_AAAA, IpAddr::V6(ipv6)) if flags.contains(SERV_6ADDR) => {
                 // Add AAAA record
                 let ttl = 0; // Zero TTL for local answers
-                if !add_resource_record(
-                    &mut response,
-                    answer_start,
-                    qdomain,
-                    qtype,
-                    C_IN,
+                let rdata = RDataType::AAAA(ipv6.octets());
+                
+                match add_resource_record(
+                    &mut response_buf,
+                    limit,
+                    &mut truncated,
+                    -1,  // No compression, use name string
+                    Some(qdomain),
                     ttl,
-                    &ipv6.octets(),
+                    T_AAAA,
+                    C_IN,
+                    &rdata,
+                    None,  // No compression context
                 ) {
-                    error!(
-                        domain = qdomain,
-                        ipv6 = %ipv6,
-                        "Failed to add AAAA record to response"
-                    );
-                    return None;
+                    Ok(_) => {
+                        debug!(
+                            domain = qdomain,
+                            ipv6 = %ipv6,
+                            "Generated local AAAA record response"
+                        );
+                        
+                        // Update response with the modified buffer
+                        response = response_buf.to_vec();
+                    }
+                    Err(e) => {
+                        error!(
+                            domain = qdomain,
+                            ipv6 = %ipv6,
+                            error = ?e,
+                            "Failed to add AAAA record to response"
+                        );
+                        return None;
+                    }
                 }
-
-                debug!(
-                    domain = qdomain,
-                    ipv6 = %ipv6,
-                    "Generated local AAAA record response"
-                );
             }
             _ => {
                 // Type mismatch or ALL_ZEROS - no answer section
@@ -965,7 +1035,7 @@ fn order_servers(s1: &UpstreamServer, s2: &UpstreamServer) -> Ordering {
 /// # Returns
 ///
 /// * Ordering for binary search position
-fn order_comparison(qdomain: &str, qlen: usize, sdomain: &str, slen: usize) -> Ordering {
+fn order_comparison(qdomain: &str, _qlen: usize, sdomain: &str, _slen: usize) -> Ordering {
     // Use hostname_order for domain comparison
     hostname_order(qdomain, sdomain)
 }
