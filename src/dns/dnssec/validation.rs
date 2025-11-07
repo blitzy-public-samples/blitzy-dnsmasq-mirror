@@ -235,7 +235,7 @@ fn name_to_wire_format(name: &str) -> Vec<u8> {
                 }
             } else {
                 // Convert to lowercase for canonical form
-                let byte = if ch >= 'A' && ch <= 'Z' {
+                let byte = if ch.is_ascii_uppercase() {
                     (ch as u8) - b'A' + b'a'
                 } else {
                     ch as u8
@@ -979,7 +979,7 @@ async fn verify_rrset_signature(
     let mut sig_data = Vec::new();
     
     // Add RRSIG RDATA (without signature field)
-    sig_data.extend_from_slice(&(rrsig.type_covered as u16).to_be_bytes());
+    sig_data.extend_from_slice(&rrsig.type_covered.to_be_bytes());
     sig_data.push(rrsig.algorithm);
     sig_data.push(rrsig.labels);
     sig_data.extend_from_slice(&rrsig.original_ttl.to_be_bytes());
@@ -1554,7 +1554,7 @@ pub async fn validate_reply(
             if let Some(dnskey) = matching_dnskey {
                 // Verify signature
                 let verified = verify_rrset_signature(
-                    &[data_rr.clone()],
+                    std::slice::from_ref(data_rr),
                     &rrsig,
                     dnskey,
                     now,

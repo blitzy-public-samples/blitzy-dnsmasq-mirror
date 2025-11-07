@@ -236,8 +236,10 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
     // DHCP configuration (feature-gated)
     #[cfg(feature = "dhcp")]
     {
-        let mut dhcp_config = types::DhcpConfig::default();
-        dhcp_config.ranges = parsed.dhcp_ranges;
+        let mut dhcp_config = types::DhcpConfig {
+            ranges: parsed.dhcp_ranges,
+            ..Default::default()
+        };
         if let Some(lease_file) = parsed.dhcp_leasefile {
             dhcp_config.lease_file = Some(lease_file);
         }
@@ -269,8 +271,10 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
     #[cfg(feature = "dnssec")]
     {
         if parsed.dnssec {
-            let mut dnssec_config = types::DnssecConfig::default();
-            dnssec_config.check_unsigned = parsed.dnssec_check_unsigned;
+            let dnssec_config = types::DnssecConfig {
+                check_unsigned: parsed.dnssec_check_unsigned,
+                ..Default::default()
+            };
             config.dnssec = Some(dnssec_config);
         }
     }
