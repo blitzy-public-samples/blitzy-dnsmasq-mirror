@@ -80,13 +80,13 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Instant};
+use tokio::time::{Instant, interval};
 use tracing::{debug, error, info, warn};
 
 // Internal imports from dependency whitelist
 use crate::constants::TFTP_TIMEOUT;
-use crate::tftp::protocol::{ErrorPacket, TftpErrorCode, TftpOpcode, RequestPacket, TftpPacket};
-use crate::tftp::transfer::{Transfer, TftpFile, TransferOptions, TransferError};
+use crate::tftp::protocol::{ErrorPacket, RequestPacket, TftpErrorCode, TftpOpcode, TftpPacket};
+use crate::tftp::transfer::{TftpFile, Transfer, TransferError, TransferOptions};
 use crate::types::daemon_state::DaemonState;
 use crate::util::logging::LogConfig;
 
@@ -350,12 +350,12 @@ impl TftpServer {
         }
 
         // Bind to address
-        socket
-            .bind(&addr.into())
-            .map_err(ServerError::BindError)?;
+        socket.bind(&addr.into()).map_err(ServerError::BindError)?;
 
         // Convert to tokio UdpSocket
-        socket.set_nonblocking(true).map_err(ServerError::BindError)?;
+        socket
+            .set_nonblocking(true)
+            .map_err(ServerError::BindError)?;
         let std_socket: std::net::UdpSocket = socket.into();
         let tokio_socket = UdpSocket::from_std(std_socket).map_err(ServerError::BindError)?;
 
@@ -631,22 +631,26 @@ impl TftpServer {
         }
 
         // Create new transfer
-        let mode = packet.mode().clone();
-        
+        let mode = packet.mode();
+
         // Get source address (socket's local address)
         // If we can't get it, use the client's IP address family's unspecified address
         let source = match socket.local_addr() {
             Ok(addr) => addr.ip(),
             Err(_) => match client_addr {
-                std::net::SocketAddr::V4(_) => std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                std::net::SocketAddr::V6(_) => std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                std::net::SocketAddr::V4(_) => {
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+                }
+                std::net::SocketAddr::V6(_) => {
+                    std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)
+                }
             },
         };
-        
+
         // Interface index - set to 0 (unknown/any interface)
         // TODO: Extract actual interface index from socket control messages if needed
         let if_index = 0;
-        
+
         let mut transfer = Transfer::new(
             socket.clone(),
             client_addr,
@@ -661,8 +665,10 @@ impl TftpServer {
         // Send initial response (OACK or DATA block 1)
         let initial_block = transfer.get_block().await?;
         if !initial_block.is_empty() {
-            socket.send_to(&initial_block, client_addr).await
-                .map_err(|e| ServerError::NetworkError(e))?;
+            socket
+                .send_to(&initial_block, client_addr)
+                .await
+                .map_err(ServerError::NetworkError)?;
         }
 
         // Store transfer
@@ -742,22 +748,18 @@ impl TftpServer {
     /// Translates `check_tftp_fileperm()` from tftp.c (lines 721-801)
     pub async fn validate_file_access(&self, path: &Path) -> Result<TftpFile, ServerError> {
         // Canonicalize path to resolve symlinks and check for traversal
-        let canonical = tokio::fs::canonicalize(path)
-            .await
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    ServerError::FilePermissionError(format!("File not found: {}", path.display()))
-                } else {
-                    ServerError::FilePermissionError(format!("Cannot access file: {}", e))
-                }
-            })?;
+        let canonical = tokio::fs::canonicalize(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ServerError::FilePermissionError(format!("File not found: {}", path.display()))
+            } else {
+                ServerError::FilePermissionError(format!("Cannot access file: {}", e))
+            }
+        })?;
 
         // Ensure canonical path is still under root directory
         let canonical_root = tokio::fs::canonicalize(&self.config.root_dir)
             .await
-            .map_err(|e| {
-                ServerError::ConfigError(format!("Invalid TFTP root directory: {}", e))
-            })?;
+            .map_err(|e| ServerError::ConfigError(format!("Invalid TFTP root directory: {}", e)))?;
 
         if !canonical.starts_with(&canonical_root) {
             return Err(ServerError::PathTraversalError(format!(
