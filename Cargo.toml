@@ -132,6 +132,9 @@ rand = "0.8"
 # Atomic file operations for lease database persistence
 tempfile = "3.12"
 
+# LRU cache implementation for DNS response caching - replaces C's hash table + LRU linked list
+lru = "0.12"
+
 # Feature-gated dependencies (optional)
 # DNSSEC cryptography - replaces nettle + hogweed + gmp
 ring = { version = "0.17", optional = true }

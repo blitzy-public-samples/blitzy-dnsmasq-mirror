@@ -365,9 +365,17 @@ impl DnsCache {
     ///
     /// Replaces C's `cache_init()` function (cache.c:256-320)
     pub fn new(max_size: usize) -> Self {
+        // Handle max_size of 0 (caching disabled) by using minimum cache size of 1
+        // C implementation checks: if (daemon->cachesize > 0) before allocating
+        // We use NonZeroUsize which requires at least 1, so we ensure max_size >= 1
+        let effective_size = if max_size == 0 { 1 } else { max_size };
+        
         Self {
-            entries: LruCache::new(std::num::NonZeroUsize::new(max_size).unwrap()),
-            addr_index: HashMap::with_capacity(max_size / 4), // Estimate 25% have A/AAAA
+            entries: LruCache::new(
+                std::num::NonZeroUsize::new(effective_size)
+                    .expect("effective_size is guaranteed to be non-zero")
+            ),
+            addr_index: HashMap::with_capacity(effective_size / 4), // Estimate 25% have A/AAAA
             stats: CacheStatistics {
                 hits: 0,
                 misses: 0,
