@@ -63,7 +63,7 @@
 //!     ..Default::default()
 //! };
 //!
-//! let server = TftpServer::new(config);
+//! let mut server = TftpServer::new(config);
 //! server.bind().await?;
 //! server.run().await?;
 //! # Ok(())
@@ -86,7 +86,7 @@ use tracing::{debug, error, info, warn};
 // Internal imports from dependency whitelist
 use crate::constants::TFTP_TIMEOUT;
 use crate::tftp::protocol::{ErrorPacket, TftpErrorCode, TftpOpcode, RequestPacket, TftpPacket};
-use crate::tftp::transfer::{Transfer, TftpFile, TransferOptions};
+use crate::tftp::transfer::{Transfer, TftpFile, TransferOptions, TransferError};
 use crate::types::daemon_state::DaemonState;
 use crate::util::logging::LogConfig;
 
@@ -222,6 +222,12 @@ pub enum ServerError {
     /// Configuration error
     #[error("Configuration error: {0}")]
     ConfigError(String),
+}
+
+impl From<TransferError> for ServerError {
+    fn from(err: TransferError) -> Self {
+        ServerError::TransferError(err.to_string())
+    }
 }
 
 /// TFTP server managing listener and active transfers
@@ -515,20 +521,28 @@ impl TftpServer {
                     }
                 }
                 UniqueRootMode::MacAddress => {
-                    // MAC address lookup requires DHCP integration
+                    // MAC address lookup requires DHCP integration and ARP cache
+                    // TODO: Implement MAC address lookup when ARP cache is available in DaemonState
+                    // This would require adding an ARP cache to NetworkState and implementing
+                    // find_mac() method on DaemonState that queries the ARP cache.
+                    // C reference: find_mac() in src/arp.c (line 398)
+                    debug!("MAC address-based unique root not yet fully implemented");
                     #[cfg(feature = "dhcp")]
-                    if let Some(ref state_arc) = self.daemon_state {
-                        let state = state_arc.read().await;
-                        if let Some(mac) = state.find_mac(client_addr.ip()) {
-                            let mac_dir = format!(
-                                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
-                            );
-                            let candidate = file_path.join(&mac_dir);
-                            if tokio::fs::metadata(&candidate).await.is_ok() {
-                                file_path = candidate;
-                            }
-                        }
+                    {
+                        // Placeholder for future MAC address lookup implementation
+                        // if let Some(ref state_arc) = self.daemon_state {
+                        //     let state = state_arc.read().await;
+                        //     if let Some(mac) = state.find_mac(client_addr.ip()).await {
+                        //         let mac_dir = format!(
+                        //             "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                        //             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+                        //         );
+                        //         let candidate = file_path.join(&mac_dir);
+                        //         if tokio::fs::metadata(&candidate).await.is_ok() {
+                        //             file_path = candidate;
+                        //         }
+                        //     }
+                        // }
                     }
                 }
                 UniqueRootMode::Network => {
@@ -617,23 +631,38 @@ impl TftpServer {
         }
 
         // Create new transfer
-        let is_netascii = packet.mode() == crate::tftp::protocol::TransferMode::Netascii;
-        let transfer = Transfer::new(
-            tftp_file,
-            client_addr,
+        let mode = packet.mode().clone();
+        
+        // Get source address (socket's local address)
+        // If we can't get it, use the client's IP address family's unspecified address
+        let source = match socket.local_addr() {
+            Ok(addr) => addr.ip(),
+            Err(_) => match client_addr {
+                std::net::SocketAddr::V4(_) => std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                std::net::SocketAddr::V6(_) => std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            },
+        };
+        
+        // Interface index - set to 0 (unknown/any interface)
+        // TODO: Extract actual interface index from socket control messages if needed
+        let if_index = 0;
+        
+        let mut transfer = Transfer::new(
             socket.clone(),
+            client_addr,
+            source,
+            if_index,
+            tftp_file,
             blocksize,
-            is_netascii,
+            mode,
             transfer_opts,
-        );
+        )?;
 
         // Send initial response (OACK or DATA block 1)
-        if let Err(e) = transfer.send_initial_response(tsize_requested).await {
-            error!(
-                "Failed to send initial response to {}: {}",
-                client_addr, e
-            );
-            return Err(ServerError::TransferError(e.to_string()));
+        let initial_block = transfer.get_block().await?;
+        if !initial_block.is_empty() {
+            socket.send_to(&initial_block, client_addr).await
+                .map_err(|e| ServerError::NetworkError(e))?;
         }
 
         // Store transfer
@@ -668,7 +697,7 @@ impl TftpServer {
         let mut to_remove = Vec::new();
 
         for (addr, transfer) in transfers.iter_mut() {
-            if transfer.check_timeout().await {
+            if transfer.is_timed_out() {
                 debug!("Transfer to {} timed out", addr);
                 to_remove.push(*addr);
             }
