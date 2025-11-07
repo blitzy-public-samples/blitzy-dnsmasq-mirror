@@ -372,7 +372,11 @@ pub mod dnssec;
 pub use self::auth::{AuthRecord, AuthServer, AuthZone, ZoneEntry};
 pub use self::blockdata::BlockData;
 pub use self::cache::{Cache, CacheConfig};
-pub use self::cache_types::{CacheEntry, CacheEntryType};
+pub use self::cache_types::{
+    CacheRecord, CacheRecordData, CacheRecordId, CacheFlags, 
+    DomainKey, SrvData, DnsKeyData, DsData,
+    UID_NONE, SRC_CONFIG, SRC_HOSTS, SRC_AH
+};
 pub use self::domain::{
     is_valid_dns_name_pattern, is_name_synthetic, is_rev_synth, get_domain, get_domain6,
     canonicalise, CondDomain, Addrlist, AddrlistFlags, QueryFlags, SynthDomainResult,
