@@ -238,9 +238,8 @@ impl Server {
     /// Create server from address string (parses IP:port)
     pub fn from_address(address: &str) -> Result<Self, DnsmasqError> {
         let addr = address.parse::<SocketAddr>().map_err(|e| {
-            DnsmasqError::Dns(crate::types::errors::DnsError::InvalidAddress {
-                address: address.to_string(),
-                reason: e.to_string(),
+            DnsmasqError::Dns(crate::types::errors::DnsError::ForwardError {
+                message: format!("Invalid server address '{}': {}", address, e),
             })
         })?;
         Ok(Self::new(addr))
@@ -495,7 +494,7 @@ pub async fn handle_query(
     let query_name = query
         .questions
         .first()
-        .map(|q| q.name.clone())
+        .map(|q| q.qname.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
     debug!(
@@ -517,8 +516,8 @@ pub async fn handle_query(
 
     if selected_servers.is_empty() {
         warn!("No upstream servers available for domain: {}", query_name);
-        return Err(DnsmasqError::Dns(crate::types::errors::DnsError::NoServers {
-            domain: query_name,
+        return Err(DnsmasqError::Dns(crate::types::errors::DnsError::ForwardError {
+            message: format!("No upstream servers available for domain: {}", query_name),
         }));
     }
 
@@ -666,7 +665,7 @@ pub async fn forward_with_retry(
     // All retries exhausted
     Err(last_error.unwrap_or_else(|| {
         DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
-            duration: Duration::from_secs(DEFAULT_QUERY_TIMEOUT_SECS * max_retries as u64),
+            timeout_ms: (DEFAULT_QUERY_TIMEOUT_SECS * max_retries as u64) * 1000,
         })
     }))
 }
@@ -700,15 +699,15 @@ async fn send_udp_query(
     };
 
     let socket = UdpSocket::bind(local_addr).await.map_err(|e| {
-        DnsmasqError::Network(crate::types::errors::NetworkError::SocketError {
-            operation: "bind".to_string(),
+        DnsmasqError::Network(crate::types::errors::NetworkError::BindFailed {
+            address: local_addr.to_string(),
             source: e,
         })
     })?;
 
     // Send query
     socket.send_to(query_bytes, server_addr).await.map_err(|e| {
-        DnsmasqError::Network(crate::types::errors::NetworkError::SendError {
+        DnsmasqError::Network(crate::types::errors::NetworkError::SendFailed {
             destination: server_addr.to_string(),
             source: e,
         })
@@ -727,7 +726,7 @@ async fn send_udp_query(
             } else {
                 Err(DnsmasqError::Dns(
                     crate::types::errors::DnsError::InvalidResponse {
-                        reason: format!(
+                        message: format!(
                             "Response from unexpected server: {} (expected: {})",
                             response_addr, server_addr
                         ),
@@ -736,10 +735,10 @@ async fn send_udp_query(
             }
         }
         Ok(Err(e)) => Err(DnsmasqError::Network(
-            crate::types::errors::NetworkError::ReceiveError { source: e },
+            crate::types::errors::NetworkError::ReceiveFailed { source: e },
         )),
         Err(_) => Err(DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
-            duration: timeout_duration,
+            timeout_ms: timeout_duration.as_millis() as u64,
         })),
     }
 }
@@ -777,12 +776,15 @@ pub async fn forward_concurrent(
     servers: &[&Server],
 ) -> DnsmasqResult<DnsMessage> {
     if servers.is_empty() {
-        return Err(DnsmasqError::Dns(crate::types::errors::DnsError::NoServers {
-            domain: query
-                .questions
-                .first()
-                .map(|q| q.name.clone())
-                .unwrap_or_else(|| "unknown".to_string()),
+        return Err(DnsmasqError::Dns(crate::types::errors::DnsError::ForwardError {
+            message: format!(
+                "No upstream servers available for domain: {}",
+                query
+                    .questions
+                    .first()
+                    .map(|q| q.qname.clone())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ),
         }));
     }
 
@@ -811,17 +813,23 @@ pub async fn forward_concurrent(
         };
 
         let server_addr = server.addr;
-        let future = async move {
+        let future = Box::pin(async move {
             match send_udp_query(&query_bytes, server_addr, DEFAULT_QUERY_TIMEOUT_SECS).await {
                 Ok(response_bytes) => {
-                    DnsMessage::parse(&response_bytes).map(|mut resp| {
-                        resp.header.id = original_id;
-                        (server_addr, resp)
-                    })
+                    DnsMessage::parse(&response_bytes)
+                        .map(|mut resp| {
+                            resp.header.id = original_id;
+                            (server_addr, resp)
+                        })
+                        .map_err(|e| {
+                            DnsmasqError::Dns(crate::types::errors::DnsError::ProtocolError {
+                                message: format!("Failed to parse DNS response: {}", e),
+                            })
+                        })
                 }
                 Err(e) => Err(e),
             }
-        };
+        });
 
         query_futures.push(future);
     }
@@ -881,12 +889,12 @@ pub async fn forward_tcp(
     .await
     .map_err(|_| {
         DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
-            duration: Duration::from_secs(TCP_QUERY_TIMEOUT_SECS),
+            timeout_ms: TCP_QUERY_TIMEOUT_SECS * 1000,
         })
     })?
     .map_err(|e| {
         DnsmasqError::Network(crate::types::errors::NetworkError::ConnectionFailed {
-            address: server_addr.to_string(),
+            destination: server_addr.to_string(),
             source: e,
         })
     })?;
@@ -911,7 +919,7 @@ pub async fn forward_tcp(
         .write_all(&message_with_length)
         .await
         .map_err(|e| {
-            DnsmasqError::Network(crate::types::errors::NetworkError::SendError {
+            DnsmasqError::Network(crate::types::errors::NetworkError::SendFailed {
                 destination: server_addr.to_string(),
                 source: e,
             })
@@ -927,11 +935,11 @@ pub async fn forward_tcp(
     .await
     .map_err(|_| {
         DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
-            duration: Duration::from_secs(TCP_QUERY_TIMEOUT_SECS),
+            timeout_ms: TCP_QUERY_TIMEOUT_SECS * 1000,
         })
     })?
     .map_err(|e| {
-        DnsmasqError::Network(crate::types::errors::NetworkError::ReceiveError { source: e })
+        DnsmasqError::Network(crate::types::errors::NetworkError::ReceiveFailed { source: e })
     })?;
 
     let response_len = u16::from_be_bytes(length_buf) as usize;
@@ -945,11 +953,11 @@ pub async fn forward_tcp(
     .await
     .map_err(|_| {
         DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
-            duration: Duration::from_secs(TCP_QUERY_TIMEOUT_SECS),
+            timeout_ms: TCP_QUERY_TIMEOUT_SECS * 1000,
         })
     })?
     .map_err(|e| {
-        DnsmasqError::Network(crate::types::errors::NetworkError::ReceiveError { source: e })
+        DnsmasqError::Network(crate::types::errors::NetworkError::ReceiveFailed { source: e })
     })?;
 
     // Parse response
