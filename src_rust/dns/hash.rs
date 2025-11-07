@@ -140,8 +140,8 @@ pub fn hash_questions_init() {
 ///
 /// This approach ensures the hash remains consistent despite DNS name compression
 /// variations between queries and responses. The function validates packet structure
-/// using safe Rust slice operations and the parser module's extract_name() function,
-/// eliminating manual bounds checking (C's CHECK_LEN macro).
+/// using safe Rust slice operations and the parser module's `extract_name()` function,
+/// eliminating manual bounds checking (C's `CHECK_LEN` macro).
 ///
 /// # Arguments
 ///
@@ -156,9 +156,9 @@ pub fn hash_questions_init() {
 ///
 /// This implementation replaces C's manual pointer arithmetic and bounds checking with:
 /// - Safe slice indexing for header field extraction
-/// - parser::extract_name() for validated name decompression
-/// - sha2::Digest trait for safe incremental hashing
-/// - Automatic cleanup via RAII (no manual free() needed)
+/// - `parser::extract_name()` for validated name decompression
+/// - `sha2::Digest` trait for safe incremental hashing
+/// - Automatic cleanup via RAII (no manual `free()` needed)
 ///
 /// # Case Normalization
 ///
@@ -190,10 +190,11 @@ pub fn hash_questions_init() {
 /// # Differences from C Implementation
 ///
 /// - No global digest buffer (returns owned array, thread-safe)
-/// - No manual SHA256_CTX allocation (sha2 handles internally)
+/// - No manual `SHA256_CTX` allocation (sha2 handles internally)
 /// - No compile-time Nettle vs standalone selection (always uses sha2 crate)
 /// - No pointer advancement (uses safe iterator pattern)
-/// - Automatic bounds validation (no CHECK_LEN macro)
+/// - Automatic bounds validation (no `CHECK_LEN` macro)
+#[must_use]
 pub fn hash_questions(packet: &[u8]) -> Option<[u8; SHA256_DIGEST_SIZE]> {
     // Validate minimum packet size (12-byte DNS header)
     if packet.len() < DNS_HEADER_SIZE {
