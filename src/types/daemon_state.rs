@@ -265,7 +265,7 @@ struct DhcpState {
 /// network parameters and options.
 #[cfg(feature = "dhcp")]
 #[derive(Debug, Clone)]
-struct DhcpContext {
+pub struct DhcpContext {
     /// Start of address range
     range_start: IpAddr,
 
@@ -285,7 +285,7 @@ struct DhcpContext {
 /// Maps MAC addresses to fixed IP addresses and hostnames.
 #[cfg(feature = "dhcp")]
 #[derive(Debug, Clone)]
-struct StaticHost {
+pub struct StaticHost {
     /// MAC address (hardware address)
     mac_address: [u8; 6],
 
@@ -302,7 +302,7 @@ struct StaticHost {
 /// Replaces C's lease file management from lease.c.
 #[cfg(feature = "dhcp")]
 #[derive(Debug)]
-struct DhcpLeaseDatabase {
+pub struct DhcpLeaseDatabase {
     /// Active leases (MAC → lease info)
     active_leases: HashMap<[u8; 6], DhcpLease>,
 
@@ -369,42 +369,42 @@ struct NetworkState {
 ///
 /// All counters are cumulative since daemon start.
 #[derive(Debug, Default, Clone)]
-struct MetricsState {
+pub struct MetricsState {
     /// Total DNS queries received
-    dns_queries_received: u64,
+    pub dns_queries_received: u64,
 
     /// DNS cache hits (served from cache)
-    dns_cache_hits: u64,
+    pub dns_cache_hits: u64,
 
     /// DNS cache misses (forwarded to upstream)
-    dns_cache_misses: u64,
+    pub dns_cache_misses: u64,
 
     /// Total DNS queries forwarded to upstream servers
-    dns_queries_forwarded: u64,
+    pub dns_queries_forwarded: u64,
 
     /// DHCP DISCOVER messages received
     #[cfg(feature = "dhcp")]
-    dhcp_discovers: u64,
+    pub dhcp_discovers: u64,
 
     /// DHCP OFFER messages sent
     #[cfg(feature = "dhcp")]
-    dhcp_offers: u64,
+    pub dhcp_offers: u64,
 
     /// DHCP REQUEST messages received
     #[cfg(feature = "dhcp")]
-    dhcp_requests: u64,
+    pub dhcp_requests: u64,
 
     /// DHCP ACK messages sent
     #[cfg(feature = "dhcp")]
-    dhcp_acks: u64,
+    pub dhcp_acks: u64,
 
     /// DHCP NAK messages sent
     #[cfg(feature = "dhcp")]
-    dhcp_naks: u64,
+    pub dhcp_naks: u64,
 
     /// Total active DHCP leases
     #[cfg(feature = "dhcp")]
-    dhcp_leases_active: u64,
+    pub dhcp_leases_active: u64,
 }
 
 impl DaemonState {
@@ -735,7 +735,12 @@ impl DaemonState {
         // Validate that at least one interface is present
         if new_interfaces.is_empty() {
             return Err(DnsmasqError::Network(
-                crate::types::errors::NetworkError::NoInterfacesAvailable,
+                crate::types::errors::NetworkError::InterfaceEnumerationFailed {
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "No network interfaces available",
+                    ),
+                },
             ));
         }
 
@@ -1038,7 +1043,7 @@ impl DaemonStateBuilder {
         // Validate required configuration is present
         let config = self.config.ok_or_else(|| {
             DnsmasqError::Config(crate::types::errors::ConfigError::MissingRequired {
-                field: "config".to_string(),
+                option: "config".to_string(),
             })
         })?;
 

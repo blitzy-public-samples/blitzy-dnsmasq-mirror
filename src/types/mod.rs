@@ -4,6 +4,7 @@
 //! throughout the dnsmasq-rs codebase.
 
 pub mod addresses;
+pub mod daemon_state;
 pub mod errors;
 
 // Re-export commonly used error types and Result alias for convenience
@@ -12,8 +13,5 @@ pub use errors::{
     LogError, NetworkError, SystemError, TftpError,
 };
 
-/// Daemon state placeholder (will be fully implemented)
-pub struct DaemonState {
-    /// Configuration
-    pub config: String, // Placeholder
-}
+// Re-export DaemonState and builder for convenient access
+pub use daemon_state::{DaemonState, DaemonStateBuilder};
