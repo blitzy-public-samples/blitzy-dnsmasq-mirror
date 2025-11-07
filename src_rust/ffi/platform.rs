@@ -485,6 +485,8 @@ pub mod pf {
     use super::*;
     use libc::{c_char, c_int, ioctl};
     use std::fs::OpenOptions;
+    use std::net::IpAddr;
+    use std::ptr;
 
     /// PF device file descriptor wrapper
     pub struct PfDevice {
