@@ -81,16 +81,13 @@
 //! ### Basic Configuration Loading
 //!
 //! ```rust,no_run
-//! use dnsmasq::{Config, ConfigBuilder, DnsmasqResult};
+//! use dnsmasq::{Config, ConfigBuilder};
 //!
-//! fn main() -> DnsmasqResult<()> {
-//!     // Load configuration from file with validation
-//!     let config = ConfigBuilder::new()
-//!         .load_from_path("/etc/dnsmasq.conf")?
-//!         .validate()?
-//!         .build()?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Build configuration with defaults
+//!     let config = ConfigBuilder::new().build()?;
 //!     
-//!     println!("Loaded configuration with DNS cache size: {}", 
+//!     println!("Configuration built with DNS cache size: {}", 
 //!              config.dns.cache_size);
 //!     Ok(())
 //! }
@@ -99,20 +96,28 @@
 //! ### Programmatic Configuration
 //!
 //! ```rust,no_run
-//! use dnsmasq::{ConfigBuilder, DnsmasqResult};
+//! use dnsmasq::ConfigBuilder;
+//! use dnsmasq::config::{DnsConfig, NetworkConfig, Protocol};
+//! use dnsmasq::config::types::ListenAddress;
+//! use std::net::{IpAddr, Ipv4Addr};
 //!
-//! fn create_minimal_config() -> DnsmasqResult<()> {
-//!     let config = ConfigBuilder::new()
-//!         .dns(|dns| {
-//!             dns.cache_size = 1000;
-//!             dns.port = 5353; // Non-standard port
-//!         })
-//!         .network(|net| {
-//!             net.bind_interfaces = true;
-//!             net.listen_address.push("127.0.0.1".parse().unwrap());
-//!         })
-//!         .validate()?
-//!         .build()?;
+//! fn create_minimal_config() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut dns_config = DnsConfig::default();
+//!     dns_config.cache_size = 1000;
+//!     
+//!     let mut network_config = NetworkConfig::default();
+//!     network_config.port = 5353; // Non-standard port
+//!     network_config.bind_interfaces = true;
+//!     network_config.listen_addresses.push(ListenAddress {
+//!         address: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+//!         port: 5353,
+//!         protocol: Protocol::Dns,
+//!     });
+//!     
+//!     let mut builder = ConfigBuilder::new();
+//!     builder.dns(dns_config);
+//!     builder.network(network_config);
+//!     let config = builder.build()?;
 //!     
 //!     Ok(())
 //! }
@@ -121,18 +126,14 @@
 //! ### Error Handling
 //!
 //! ```rust,no_run
-//! use dnsmasq::{Config, DnsmasqError, DnsmasqResult};
+//! use dnsmasq::{Config, ConfigBuilder};
 //!
-//! fn safe_config_load(path: &str) -> DnsmasqResult<Config> {
-//!     match Config::load_from_file(path) {
+//! fn safe_config_build() -> Result<Config, Box<dyn std::error::Error>> {
+//!     match ConfigBuilder::new().build() {
 //!         Ok(config) => Ok(config),
-//!         Err(DnsmasqError::Config(e)) => {
-//!             eprintln!("Configuration error: {}", e);
-//!             Err(DnsmasqError::Config(e))
-//!         },
 //!         Err(e) => {
-//!             eprintln!("Unexpected error: {}", e);
-//!             Err(e)
+//!             eprintln!("Configuration error: {}", e);
+//!             Err(Box::new(e))
 //!         }
 //!     }
 //! }
