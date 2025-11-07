@@ -439,7 +439,7 @@ fn make_probe_query(uid: u32) -> Result<Vec<u8>, LoopDetectError> {
 
     // Get final packet length
     let packet_len = cursor.position() as usize;
-    drop(cursor); // Release borrow
+    // Cursor goes out of scope here, releasing the borrow
 
     packet.truncate(packet_len);
 
@@ -552,11 +552,7 @@ pub async fn send_probes(
 /// # Returns
 ///
 /// Some(uid) if query is a probe, None otherwise
-pub fn is_probe_query(
-    detector: &LoopDetector,
-    query_name: &str,
-    query_type: u16,
-) -> Option<u32> {
+pub fn is_probe_query(detector: &LoopDetector, query_name: &str, query_type: u16) -> Option<u32> {
     detector.is_probe_query(query_name, query_type)
 }
 
@@ -660,8 +656,7 @@ mod tests {
     fn test_serv_loop_flag_value() {
         // Ensure SERV_LOOP doesn't conflict with other server flags
         use crate::dns::forward::{
-            SERV_FROM_DBUS, SERV_HAS_DOMAIN, SERV_LITERAL_ADDRESS, SERV_NO_REBIND,
-            SERV_USE_RESOLV,
+            SERV_FROM_DBUS, SERV_HAS_DOMAIN, SERV_LITERAL_ADDRESS, SERV_NO_REBIND, SERV_USE_RESOLV,
         };
 
         assert_ne!(SERV_LOOP & SERV_FROM_DBUS, SERV_FROM_DBUS);
