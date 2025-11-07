@@ -662,17 +662,22 @@ impl Transfer {
     ///
     /// C reference: get_block() DATA construction (lines 1471-1523)
     async fn construct_data_block(&mut self) -> Result<Vec<u8>, TransferError> {
-        // Check if transfer complete
-        if self.offset >= self.file.size() {
-            return Ok(Vec::new());
-        }
-
-        // Calculate read size
-        let remaining = self.file.size() - self.offset;
+        // Calculate read size (may be 0 for final block of file that's exact multiple of blocksize)
+        // C reference: src/tftp.c lines 1478-1484
+        let remaining = if self.offset > self.file.size() {
+            // Transfer complete, should not be called
+            0
+        } else {
+            self.file.size() - self.offset
+        };
         let read_size = std::cmp::min(remaining, self.blocksize as u64) as usize;
 
-        // Read data from file
-        let mut data = self.file.read_block(self.offset, read_size).await?;
+        // Read data from file (may be 0 bytes for final block)
+        let mut data = if read_size > 0 {
+            self.file.read_block(self.offset, read_size).await?
+        } else {
+            Vec::new()
+        };
 
         // Reset expansion counter
         self.expansion = 0;
@@ -683,6 +688,9 @@ impl Transfer {
         }
 
         // Construct DATA packet
+        // C reference: src/tftp.c lines 1486-1491, 1521
+        // Even for zero-length data (final block of exact-multiple-of-blocksize file),
+        // we must construct a valid DATA packet with opcode + block number
         let mut packet = Vec::with_capacity(4 + data.len());
 
         // Opcode: DATA (3)
@@ -691,7 +699,7 @@ impl Transfer {
         // Block number
         packet.extend_from_slice(&self.block.to_be_bytes());
 
-        // Data
+        // Data (may be empty for final block)
         packet.extend_from_slice(&data);
 
         Ok(packet)
