@@ -68,29 +68,29 @@
 //! - `src/dnssec.c` - DNSSEC signature validation
 //! - `src/edns0.c` - EDNS0 extension handling
 
-use bytes::{Bytes, BytesMut, BufMut, Buf};
+// use bytes::{Bytes, BytesMut, BufMut, Buf}; // Unused imports
 use proptest::prelude::*;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
-use tempfile::TempDir;
-use tokio::net::UdpSocket;
-use tokio::time::{timeout, sleep};
+// use tempfile::TempDir;
+// use tokio::net::UdpSocket;
+use tokio::time::sleep;
 
 // Import DNS subsystem modules from depends_on_files
 use dnsmasq::dns::cache::{DnsCache, CacheKey, CacheSource};
 use dnsmasq::dns::compression::extract_name;
 use dnsmasq::dns::edns::OptRecord;
-use dnsmasq::dns::forward::handle_query;
+// use dnsmasq::dns::forward::handle_query;
 use dnsmasq::dns::protocol::{
-    DnsHeader, DnsMessage, DnsQuestion, RecordClass, RecordType, ResourceRecord,
+    RecordClass, RecordType, ResourceRecord,
 };
-use dnsmasq::dns::server::DnsServer;
+// use dnsmasq::dns::server::DnsServer;
 
 // Test constants
-const DNS_PORT: u16 = 53;
+// const DNS_PORT: u16 = 53;
 const MAX_UDP_PACKET: usize = 512;
 const MAX_EDNS_PACKET: usize = 4096;
-const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+// const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 // =============================================================================
 // RFC 1035 Wire Format Parsing Tests
@@ -148,7 +148,7 @@ fn test_dns_name_extraction_with_compression() {
     assert!(result.is_ok(), "Compression pointer following should succeed");
     let name = result.unwrap();
     assert_eq!(name.to_string(), "www.example.com");
-    assert_eq!(offset, 17, "Offset should be after the pointer");
+    assert_eq!(offset, 19, "Offset should be after the pointer (13 + 4 bytes for 'www' + 2 bytes for pointer)");
     assert!(name.compressed, "Name should be marked as compressed");
 }
 
@@ -242,9 +242,9 @@ fn test_malformed_packet_truncated_label() {
     let result = extract_name(&packet, &mut offset, 0);
 
     assert!(result.is_err(), "Truncated label should be rejected");
+    let error_msg = result.unwrap_err().to_string();
     assert!(
-        result.unwrap_err().to_string().contains("too short") ||
-        result.unwrap_err().to_string().contains("truncated"),
+        error_msg.contains("too short") || error_msg.contains("truncated"),
         "Error should indicate packet truncation"
     );
 }
@@ -264,9 +264,9 @@ fn test_invalid_label_type_rejection() {
     let result = extract_name(&packet, &mut offset, 0);
 
     assert!(result.is_err(), "Invalid label type should be rejected");
+    let error_msg = result.unwrap_err().to_string();
     assert!(
-        result.unwrap_err().to_string().contains("label type") ||
-        result.unwrap_err().to_string().contains("invalid"),
+        error_msg.contains("label type") || error_msg.contains("invalid"),
         "Error should indicate invalid label type"
     );
 }
@@ -280,7 +280,7 @@ fn test_invalid_label_type_rejection() {
 /// Validates that IPv4 A records are correctly parsed from wire format.
 #[tokio::test]
 async fn test_a_record_parsing() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create A record for example.com -> 192.0.2.1
     let records = vec![
@@ -295,18 +295,18 @@ async fn test_a_record_parsing() {
     let key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
     // Insert and lookup
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "A record should be found in cache");
-    let entry = lookup_result.unwrap();
-    assert_eq!(entry.records.len(), 1, "Should have one A record");
+    let records = lookup_result.unwrap();
+    assert_eq!(records.len(), 1, "Should have one A record");
     
-    match &entry.records[0] {
+    match &records[0] {
         ResourceRecord::A { address, .. } => {
             assert_eq!(*address, Ipv4Addr::new(192, 0, 2, 1));
         }
@@ -319,7 +319,7 @@ async fn test_a_record_parsing() {
 /// Validates that IPv6 AAAA records are correctly parsed from wire format.
 #[tokio::test]
 async fn test_aaaa_record_parsing() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create AAAA record for example.com -> 2001:db8::1
     let records = vec![
@@ -334,16 +334,16 @@ async fn test_aaaa_record_parsing() {
     let key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::AAAA,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "AAAA record should be found in cache");
-    let entry = lookup_result.unwrap();
+    let records = lookup_result.unwrap();
     
-    match &entry.records[0] {
+    match &records[0] {
         ResourceRecord::AAAA { address, .. } => {
             assert_eq!(*address, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
         }
@@ -357,7 +357,7 @@ async fn test_aaaa_record_parsing() {
 /// are resolved with loop detection.
 #[tokio::test]
 async fn test_cname_record_chain_resolution() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create CNAME chain: www.example.com -> example.com -> 192.0.2.1
     let cname_record = vec![
@@ -382,24 +382,30 @@ async fn test_cname_record_chain_resolution() {
     let cname_key = CacheKey {
         name: "www.example.com".to_string(),
         record_type: RecordType::CNAME,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
     
     let a_key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(cname_key, cname_record, 300, CacheSource::Upstream).unwrap();
-    cache.insert(a_key, a_record, 300, CacheSource::Upstream).unwrap();
+    cache.insert(cname_key, cname_record, 300, CacheSource::Upstream);
+    cache.insert(a_key, a_record, 300, CacheSource::Upstream);
 
     // Resolve CNAME chain
-    let chain_result = cache.resolve_cname_chain("www.example.com", 10);
+    let chain_result = cache.resolve_cname_chain("www.example.com");
     assert!(chain_result.is_ok(), "CNAME chain resolution should succeed");
     
-    let final_name = chain_result.unwrap();
-    assert_eq!(final_name, "example.com", "Should resolve to final target");
+    let final_records = chain_result.unwrap();
+    assert!(!final_records.is_empty(), "Should have resolved to A records");
+    match &final_records[0] {
+        ResourceRecord::A { address, .. } => {
+            assert_eq!(*address, Ipv4Addr::new(192, 0, 2, 1));
+        }
+        _ => panic!("Expected A record after CNAME resolution"),
+    }
 }
 
 /// Test MX record parsing
@@ -407,7 +413,7 @@ async fn test_cname_record_chain_resolution() {
 /// Validates that MX (Mail Exchange) records with priority are correctly parsed.
 #[tokio::test]
 async fn test_mx_record_parsing() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create MX record for example.com
     let records = vec![
@@ -423,14 +429,15 @@ async fn test_mx_record_parsing() {
     let key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::MX,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "MX record should be found");
-    match &lookup_result.unwrap().records[0] {
+    let records = lookup_result.unwrap();
+    match &records[0] {
         ResourceRecord::MX { preference, exchange, .. } => {
             assert_eq!(*preference, 10);
             assert_eq!(exchange, "mail.example.com");
@@ -445,7 +452,7 @@ async fn test_mx_record_parsing() {
 /// correctly parsed. Corresponds to reverse DNS handling in rfc1035.c line 28.
 #[tokio::test]
 async fn test_ptr_record_reverse_dns() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create PTR record for 192.0.2.1 (1.2.0.192.in-addr.arpa)
     let records = vec![
@@ -460,14 +467,15 @@ async fn test_ptr_record_reverse_dns() {
     let key = CacheKey {
         name: "1.2.0.192.in-addr.arpa".to_string(),
         record_type: RecordType::PTR,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "PTR record should be found");
-    match &lookup_result.unwrap().records[0] {
+    let records = lookup_result.unwrap();
+    match &records[0] {
         ResourceRecord::PTR { ptrdname, .. } => {
             assert_eq!(ptrdname, "example.com");
         }
@@ -480,7 +488,7 @@ async fn test_ptr_record_reverse_dns() {
 /// Validates that SOA (Start of Authority) records with all fields are correctly parsed.
 #[tokio::test]
 async fn test_soa_record_parsing() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create SOA record
     let records = vec![
@@ -501,14 +509,15 @@ async fn test_soa_record_parsing() {
     let key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::SOA,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 3600, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 3600, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "SOA record should be found");
-    match &lookup_result.unwrap().records[0] {
+    let records = lookup_result.unwrap();
+    match &records[0] {
         ResourceRecord::SOA { serial, mname, .. } => {
             assert_eq!(*serial, 2024010101);
             assert_eq!(mname, "ns1.example.com");
@@ -522,7 +531,7 @@ async fn test_soa_record_parsing() {
 /// Validates that SRV (Service) records with priority, weight, and port are correctly parsed.
 #[tokio::test]
 async fn test_srv_record_parsing() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create SRV record for _http._tcp.example.com
     let records = vec![
@@ -540,14 +549,15 @@ async fn test_srv_record_parsing() {
     let key = CacheKey {
         name: "_http._tcp.example.com".to_string(),
         record_type: RecordType::SRV,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "SRV record should be found");
-    match &lookup_result.unwrap().records[0] {
+    let records = lookup_result.unwrap();
+    match &records[0] {
         ResourceRecord::SRV { priority, weight, port, target, .. } => {
             assert_eq!(*priority, 10);
             assert_eq!(*weight, 60);
@@ -563,7 +573,7 @@ async fn test_srv_record_parsing() {
 /// Validates that TXT records with arbitrary text data are correctly parsed.
 #[tokio::test]
 async fn test_txt_record_parsing() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     // Create TXT record with multiple strings
     let records = vec![
@@ -571,24 +581,25 @@ async fn test_txt_record_parsing() {
             name: "example.com".to_string(),
             class: RecordClass::IN,
             ttl: 300,
-            text: vec!["v=spf1 mx -all".to_string()],
+            data: vec!["v=spf1 mx -all".to_string()],
         }
     ];
 
     let key = CacheKey {
         name: "example.com".to_string(),
         record_type: RecordType::TXT,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    let lookup_result = cache.lookup(&key).unwrap();
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    let lookup_result = cache.lookup(&key);
 
     assert!(lookup_result.is_some(), "TXT record should be found");
-    match &lookup_result.unwrap().records[0] {
-        ResourceRecord::TXT { text, .. } => {
-            assert_eq!(text.len(), 1);
-            assert_eq!(text[0], "v=spf1 mx -all");
+    let records = lookup_result.unwrap();
+    match &records[0] {
+        ResourceRecord::TXT { data, .. } => {
+            assert_eq!(data.len(), 1);
+            assert_eq!(data[0], "v=spf1 mx -all");
         }
         _ => panic!("Expected TXT record"),
     }
@@ -605,7 +616,7 @@ async fn test_txt_record_parsing() {
 /// C's cache.c functionality.
 #[tokio::test]
 async fn test_cache_insert_and_lookup() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     let records = vec![
         ResourceRecord::A {
@@ -619,17 +630,15 @@ async fn test_cache_insert_and_lookup() {
     let key = CacheKey {
         name: "test.example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
     // Insert record
-    let insert_result = cache.insert(key.clone(), records.clone(), 300, CacheSource::Upstream);
-    assert!(insert_result.is_ok(), "Cache insertion should succeed");
+    cache.insert(key.clone(), records.clone(), 300, CacheSource::Upstream);
 
     // Lookup record
     let lookup_result = cache.lookup(&key);
-    assert!(lookup_result.is_ok(), "Cache lookup should succeed");
-    assert!(lookup_result.unwrap().is_some(), "Record should be found in cache");
+    assert!(lookup_result.is_some(), "Record should be found in cache");
 }
 
 /// Test DNS cache TTL expiration
@@ -637,7 +646,7 @@ async fn test_cache_insert_and_lookup() {
 /// Validates that records are automatically expired based on TTL.
 #[tokio::test]
 async fn test_cache_ttl_expiration() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     let records = vec![
         ResourceRecord::A {
@@ -651,13 +660,13 @@ async fn test_cache_ttl_expiration() {
     let key = CacheKey {
         name: "short-ttl.example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
-    cache.insert(key.clone(), records, 1, CacheSource::Upstream).unwrap();
+    cache.insert(key.clone(), records, 1, CacheSource::Upstream);
     
     // Record should be present immediately
-    assert!(cache.lookup(&key).unwrap().is_some(), "Record should be in cache");
+    assert!(cache.lookup(&key).is_some(), "Record should be in cache");
 
     // Wait for TTL to expire
     sleep(Duration::from_secs(2)).await;
@@ -666,7 +675,7 @@ async fn test_cache_ttl_expiration() {
     cache.expire_old_entries();
 
     // Record should be gone
-    let lookup_result = cache.lookup(&key).unwrap();
+    let lookup_result = cache.lookup(&key);
     assert!(lookup_result.is_none(), "Expired record should not be in cache");
 }
 
@@ -677,7 +686,7 @@ async fn test_cache_ttl_expiration() {
 #[tokio::test]
 async fn test_cache_lru_eviction() {
     // Create small cache that can hold only 3 entries
-    let cache = DnsCache::new(3);
+    let mut cache = DnsCache::new(3);
     
     // Insert 4 records (should trigger eviction of oldest)
     for i in 1..=4 {
@@ -693,20 +702,20 @@ async fn test_cache_lru_eviction() {
         let key = CacheKey {
             name: format!("host{}.example.com", i),
             record_type: RecordType::A,
-            class: RecordClass::IN,
+            record_class: RecordClass::IN,
         };
 
-        cache.insert(key, records, 300, CacheSource::Upstream).unwrap();
+        cache.insert(key, records, 300, CacheSource::Upstream);
     }
 
     // First record should have been evicted
     let first_key = CacheKey {
         name: "host1.example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
     
-    let lookup_result = cache.lookup(&first_key).unwrap();
+    let lookup_result = cache.lookup(&first_key);
     assert!(lookup_result.is_none(), "Oldest entry should be evicted");
 
     // Most recent records should still be present
@@ -714,9 +723,9 @@ async fn test_cache_lru_eviction() {
         let key = CacheKey {
             name: format!("host{}.example.com", i),
             record_type: RecordType::A,
-            class: RecordClass::IN,
+            record_class: RecordClass::IN,
         };
-        assert!(cache.lookup(&key).unwrap().is_some(), "Recent entry should remain");
+        assert!(cache.lookup(&key).is_some(), "Recent entry should remain");
     }
 }
 
@@ -725,23 +734,23 @@ async fn test_cache_lru_eviction() {
 /// Validates that NXDOMAIN responses are cached per RFC 2308.
 #[tokio::test]
 async fn test_cache_negative_nxdomain() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     let key = CacheKey {
         name: "nonexistent.example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
     // Insert negative cache entry
-    cache.insert_negative(key.clone(), 300, CacheSource::Upstream).unwrap();
+    cache.insert_negative(key.clone(), 300);
 
     // Should be able to look up negative entry
-    let lookup_result = cache.lookup(&key).unwrap();
+    let lookup_result = cache.lookup(&key);
     assert!(lookup_result.is_some(), "Negative cache entry should be found");
     
-    let entry = lookup_result.unwrap();
-    assert!(entry.records.is_empty(), "Negative entry should have no records");
+    let records = lookup_result.unwrap();
+    assert!(records.is_empty(), "Negative entry should have no records");
 }
 
 /// Test cache statistics collection
@@ -749,7 +758,7 @@ async fn test_cache_negative_nxdomain() {
 /// Validates that cache hit/miss statistics are correctly tracked.
 #[tokio::test]
 async fn test_cache_statistics() {
-    let cache = DnsCache::new(100);
+    let mut cache = DnsCache::new(100);
     
     let records = vec![
         ResourceRecord::A {
@@ -763,24 +772,24 @@ async fn test_cache_statistics() {
     let key = CacheKey {
         name: "cached.example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
 
     // Insert and lookup to generate statistics
-    cache.insert(key.clone(), records, 300, CacheSource::Upstream).unwrap();
-    cache.lookup(&key).unwrap(); // Cache hit
+    cache.insert(key.clone(), records, 300, CacheSource::Upstream);
+    cache.lookup(&key); // Cache hit
     
     let uncached_key = CacheKey {
         name: "uncached.example.com".to_string(),
         record_type: RecordType::A,
-        class: RecordClass::IN,
+        record_class: RecordClass::IN,
     };
-    cache.lookup(&uncached_key).unwrap(); // Cache miss
+    cache.lookup(&uncached_key); // Cache miss
 
     let stats = cache.get_statistics();
     assert!(stats.hits > 0, "Should have cache hits");
     assert!(stats.misses > 0, "Should have cache misses");
-    assert!(stats.entries > 0, "Should have cached entries");
+    assert!(stats.current_size > 0, "Should have cached entries");
 }
 
 // =============================================================================
@@ -839,10 +848,10 @@ fn test_edns0_dnssec_ok_bit() {
 // Property-Based Tests (Proptest)
 // =============================================================================
 
-/// Property test: DNS name parsing round-trip
-///
-/// Validates that Parse(Serialize(name)) == name for all valid DNS names.
-/// Per Section 0.7.4, this ensures protocol correctness.
+// Property test: DNS name parsing round-trip
+//
+// Validates that Parse(Serialize(name)) == name for all valid DNS names.
+// Per Section 0.7.4, this ensures protocol correctness.
 proptest! {
     #[test]
     fn prop_dns_name_roundtrip(s in "[a-z]{1,10}(\\.[a-z]{1,10}){0,5}") {
@@ -864,10 +873,10 @@ proptest! {
     }
 }
 
-/// Property test: DNS packet parsing never panics
-///
-/// Validates that malformed packets of any kind are rejected gracefully without panics.
-/// Per Section 0.7.4, this ensures memory safety.
+// Property test: DNS packet parsing never panics
+//
+// Validates that malformed packets of any kind are rejected gracefully without panics.
+// Per Section 0.7.4, this ensures memory safety.
 proptest! {
     #[test]
     fn prop_dns_packet_no_panic(packet in prop::collection::vec(any::<u8>(), 0..1000)) {
@@ -903,20 +912,20 @@ async fn test_dns_server_integration() {
 // Test Utilities
 // =============================================================================
 
-/// Helper function to create a test DNS question
-fn create_test_question(name: &str, qtype: RecordType) -> DnsQuestion {
-    DnsQuestion {
-        name: name.to_string(),
-        record_type: qtype,
-        class: RecordClass::IN,
-    }
-}
-
-/// Helper function to create a test cache key
-fn create_test_cache_key(name: &str, qtype: RecordType) -> CacheKey {
-    CacheKey {
-        name: name.to_string(),
-        record_type: qtype,
-        class: RecordClass::IN,
-    }
-}
+// Helper function to create a test DNS question
+// fn create_test_question(name: &str, qtype: RecordType) -> DnsQuestion {
+//     DnsQuestion {
+//         qname: name.to_string(),
+//         qtype,
+//         qclass: RecordClass::IN,
+//     }
+// }
+// 
+// Helper function to create a test cache key
+// fn create_test_cache_key(name: &str, qtype: RecordType) -> CacheKey {
+//     CacheKey {
+//         name: name.to_string(),
+//         record_type: qtype,
+//         record_class: RecordClass::IN,
+//     }
+// }
