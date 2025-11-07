@@ -377,6 +377,11 @@ impl RequestPacket {
         buffer
     }
 
+    /// Get the opcode (RRQ or WRQ)
+    pub fn opcode(&self) -> TftpOpcode {
+        self.opcode
+    }
+
     /// Get the filename
     pub fn filename(&self) -> &str {
         &self.filename
