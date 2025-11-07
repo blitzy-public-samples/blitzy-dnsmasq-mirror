@@ -609,7 +609,7 @@ impl<'a> Dhcp6OptionParser<'a> {
         for result in self {
             match result {
                 Ok(opt) if opt.code() == code => return Some(opt),
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(_) => return None,
             }
         }
