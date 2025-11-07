@@ -41,10 +41,21 @@
 //! # Example Usage
 //!
 //! ```rust,no_run
-//! use dnsmasq::dns::auth::{AuthZone, answer_authoritative_query};
-//! use dnsmasq::dns::DnsMessage;
+//! use dnsmasq::dns::auth::{AuthZone, SoaRecord, answer_authoritative_query};
+//! use dnsmasq::dns::{DnsMessage, DnsHeader};
+//! use dnsmasq::dns::cache::DnsCache;
+//! use dnsmasq::config::types::Config;
+//! use std::net::SocketAddr;
+//! use std::sync::{Arc, RwLock};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # // Set up example context with dummy values
+//! # let query_packet = vec![0u8; 512]; // Dummy DNS query packet
+//! # let mut header = DnsHeader::default();
+//! # let peer_addr: SocketAddr = "127.0.0.1:53".parse()?;
+//! # let cache = Arc::new(RwLock::new(DnsCache::new(1000)));
+//! # let config = Config::default();
+//! #
 //! let zones = vec![
 //!     AuthZone {
 //!         domain: "local".to_string(),
