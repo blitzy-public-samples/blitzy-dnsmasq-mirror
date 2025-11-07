@@ -173,6 +173,7 @@ mockall = "0.13"
 criterion = "0.5"
 tempfile = "3.12"
 test-case = "3.3"
+hex = "0.4"
 
 # Build dependencies
 [build-dependencies]

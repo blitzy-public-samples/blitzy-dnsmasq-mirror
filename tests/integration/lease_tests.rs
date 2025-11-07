@@ -51,25 +51,15 @@
 //! | `test_filesystem_error_recovery()` | `lease_update_file()` | 536-540 | Error handling |
 //! | `test_round_trip_property()` | Parse+Serialize | Various | Format preservation |
 
-use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
-use hex::{decode as hex_decode, encode as hex_encode};
 use proptest::prelude::*;
-use tempfile::{tempdir, NamedTempFile, TempDir};
-use tokio::fs as tokio_fs;
+use tempfile::tempdir;
 
 // Internal imports from depends_on_files ONLY
-use dnsmasq_rs::dhcp::lease::{Lease, LeaseState, LeaseType, LeaseV4, LeaseV6};
-use dnsmasq_rs::dhcp::lease_store::{DuidEntry, LeaseDatabase, LeaseEntry, LeaseStore, ParsedLine};
-use dnsmasq_rs::dhcp::v6::options::Duid;
-use dnsmasq_rs::types::addresses::AllAddr;
-
-/// Test fixture directory for sample lease files
-const FIXTURES_DIR: &str = "tests/fixtures/leases";
+use dnsmasq::dhcp::lease_store::{DuidEntry, LeaseDatabase, LeaseEntry, LeaseStore, ParsedLine};
 
 // ============================================================================
 // DHCPv4 Lease Format Tests (src/lease.c:190-199)
@@ -318,7 +308,7 @@ async fn test_atomic_update_preserves_old_data() {
     database.save_to_file(&lease_file)
         .expect("Failed to save initial database");
     
-    let original_content = fs::read_to_string(&lease_file)
+    let _original_content = fs::read_to_string(&lease_file)
         .expect("Failed to read lease file");
     
     // Attempt to write to read-only directory (simulates filesystem error)
