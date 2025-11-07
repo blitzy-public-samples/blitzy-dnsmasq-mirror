@@ -621,7 +621,7 @@ proptest! {
     ) {
         // Simulate interface collection with unique indices
         // HashSet guarantees uniqueness, so we verify the count
-        prop_assert!(indices.len() > 0, "Should have at least one interface");
+        prop_assert!(!indices.is_empty(), "Should have at least one interface");
         prop_assert!(indices.len() < 10, "Should have less than 10 interfaces");
         
         // Verify all indices are in valid range
