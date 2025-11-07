@@ -253,14 +253,14 @@ pub mod metrics;
 
 // Re-export public API types and functions
 
-/// Re-export MetricId enum for public use
+/// Re-export `MetricId` enum for public use
 ///
 /// The `MetricId` enum is always available (even without prometheus-metrics feature)
 /// to allow compilation of code that references metric IDs. When metrics are disabled,
 /// the increment calls become no-ops at compile time.
 pub use types::MetricId;
 
-/// Re-export MetricsCollector when prometheus-metrics feature is enabled
+/// Re-export `MetricsCollector` when prometheus-metrics feature is enabled
 ///
 /// Provides the full-featured Prometheus metrics collector with atomic counters,
 /// thread-safe operations, and text format export.
