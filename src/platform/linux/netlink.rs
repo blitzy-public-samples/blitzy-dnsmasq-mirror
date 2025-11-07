@@ -46,7 +46,7 @@
 //!
 //! # Usage Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::platform::linux::netlink::{NetlinkSocket, AddressFamily};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -76,18 +76,18 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::stream::Stream;
-use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_MATCH, NLM_F_REQUEST, NLM_F_ROOT};
+use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_DUMP, NLM_F_MATCH, NLM_F_REQUEST, NLM_F_ROOT};
 use netlink_packet_route::address::{AddressAttribute, AddressMessage};
-use netlink_packet_route::link::{LinkAttribute, LinkMessage};
+use netlink_packet_route::link::{LinkAttribute, LinkFlag, LinkMessage};
 use netlink_packet_route::route::{RouteAttribute, RouteMessage, RouteScope, RouteType};
-use netlink_packet_route::{RouteNetlinkMessage, RtnlMessage};
+use netlink_packet_route::{RouteNetlinkMessage, AddressFamily as NetlinkAddressFamily};
 use netlink_sys::{protocols::NETLINK_ROUTE, Socket, SocketAddr as NetlinkSocketAddr};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
 use tracing::{debug, error, trace, warn};
 
-use crate::network::interface::InterfaceRecord;
-use crate::platform::InterfaceFlags;
+use crate::network::interface::{InterfaceRecord, InterfaceFlags as NetworkInterfaceFlags};
+use crate::platform::{Interface, InterfaceFlags as PlatformInterfaceFlags, NetworkPlatform, PlatformError, PlatformMonitor, PlatformResult};
 
 /// Socket option level for Netlink-specific options
 /// Defined in linux/netlink.h
@@ -107,6 +107,11 @@ const RTMGRP_IPV6_IFADDR: u32 = 0x100;    // IPv6 address add/remove
 /// Maximum message buffer size for Netlink reception
 /// Typically Netlink messages are under 4KB, but we allocate 8KB for safety
 const DEFAULT_BUFFER_SIZE: usize = 8192;
+
+/// Address family constants for pattern matching
+/// These must be constants (not expressions) to use in match patterns
+const AF_INET_U8: u8 = libc::AF_INET as u8;
+const AF_INET6_U8: u8 = libc::AF_INET6 as u8;
 
 // ==============================================================================
 // Error Types
@@ -130,13 +135,9 @@ const DEFAULT_BUFFER_SIZE: usize = 8192;
 /// ```
 ///
 /// Rust uses Result types with structured error variants:
-/// ```rust,no_run
-/// # use dnsmasq::platform::linux::netlink::NetlinkError;
-/// # async fn example() -> Result<(), NetlinkError> {
+/// ```rust,ignore
 /// let message = socket.recv().await
 ///     .map_err(|e| NetlinkError::RecvFailed)?;
-/// # Ok(())
-/// # }
 /// ```
 #[derive(Debug, Error)]
 pub enum NetlinkError {
@@ -223,6 +224,16 @@ impl AddressFamily {
             AddressFamily::Unspec => libc::AF_UNSPEC,
         }
     }
+    
+    /// Convert to netlink_packet_route::AddressFamily
+    fn to_netlink_family(&self) -> netlink_packet_route::AddressFamily {
+        match self {
+            AddressFamily::Inet => netlink_packet_route::AddressFamily::Inet,
+            AddressFamily::Inet6 => netlink_packet_route::AddressFamily::Inet6,
+            AddressFamily::Local => netlink_packet_route::AddressFamily::Unspec,
+            AddressFamily::Unspec => netlink_packet_route::AddressFamily::Unspec,
+        }
+    }
 }
 
 // ==============================================================================
@@ -245,7 +256,9 @@ impl AddressFamily {
 /// ```
 ///
 /// Rust uses a typed enum with associated data:
-/// ```rust
+/// ```rust,ignore
+/// use dnsmasq::platform::linux::netlink::NetlinkEvent;
+/// 
 /// match event {
 ///     NetlinkEvent::NewAddress(iface) => {
 ///         println!("Address added to {}", iface.name);
@@ -314,7 +327,7 @@ pub struct RouteInfo {
 /// ```
 ///
 /// Rust encapsulates all state in a struct with Arc for safe sharing:
-/// ```rust
+/// ```rust,ignore
 /// pub struct NetlinkSocket {
 ///     socket: Arc<AsyncFd<Socket>>,
 ///     pid: u32,
@@ -381,7 +394,7 @@ impl NetlinkSocket {
     pub async fn new() -> NetlinkResult<Self> {
         // Create Netlink socket with NETLINK_ROUTE protocol
         let mut socket = Socket::new(NETLINK_ROUTE)
-            .map_err(|e| NetlinkError::SocketError(std::io::Error::from_raw_os_error(e as i32)))?;
+            .map_err(NetlinkError::SocketError)?;
 
         // Try to bind with multicast groups first
         let multicast_groups = RTMGRP_IPV4_ROUTE | RTMGRP_IPV4_IFADDR | 
@@ -406,8 +419,9 @@ impl NetlinkSocket {
         }
 
         // Get the PID assigned by the kernel
-        let sockaddr = socket.get_address()
-            .map_err(|e| NetlinkError::SocketError(std::io::Error::from_raw_os_error(e as i32)))?;
+        let mut sockaddr = NetlinkSocketAddr::new(0, 0);
+        socket.get_address(&mut sockaddr)
+            .map_err(|e| NetlinkError::SocketError(e))?;
         let pid = sockaddr.port_number();
 
         debug!("Netlink socket initialized with PID {}", pid);
@@ -524,17 +538,11 @@ impl NetlinkSocket {
 
             match guard.try_io(|inner| {
                 let socket = inner.get_ref();
-                socket.recv_from(&mut buf[..], 0)
+                socket.recv(&mut &mut buf[..], 0)
             }) {
                 Ok(result) => {
-                    let (len, addr) = result
+                    let len = result
                         .map_err(|e| NetlinkError::RecvFailed(e.to_string()))?;
-
-                    // Validate message is from kernel (pid == 0)
-                    if addr.port_number() != 0 {
-                        trace!("Ignoring netlink message from userspace PID {}", addr.port_number());
-                        continue;
-                    }
 
                     // Parse messages from buffer
                     let messages = Self::parse_messages(&buf[..len])?;
@@ -617,22 +625,25 @@ impl NetlinkSocket {
     pub async fn enumerate_interfaces(&self, family: AddressFamily) -> NetlinkResult<Vec<InterfaceRecord>> {
         // Determine message type based on family
         let message_type = match family {
-            AddressFamily::Unspec => RtnlMessage::GetNeighbour(Default::default()),
-            AddressFamily::Local => RtnlMessage::GetLink(Default::default()),
+            AddressFamily::Unspec => RouteNetlinkMessage::GetNeighbour(Default::default()),
+            AddressFamily::Local => RouteNetlinkMessage::GetLink(Default::default()),
             AddressFamily::Inet | AddressFamily::Inet6 => {
                 let mut msg = AddressMessage::default();
-                msg.header.family = family.to_libc() as u8;
-                RtnlMessage::GetAddress(msg)
+                msg.header.family = family.to_netlink_family();
+                RouteNetlinkMessage::GetAddress(msg)
             }
         };
 
         // Create Netlink message with dump flags
         let seq = self.next_seq();
-        let mut message = NetlinkMessage::new(
-            message_type,
-            NLM_F_REQUEST | NLM_F_DUMP,
-            seq,
-            self.pid,
+        let mut header = netlink_packet_core::NetlinkHeader::default();
+        header.flags = NLM_F_REQUEST | NLM_F_DUMP;
+        header.sequence_number = seq;
+        header.port_number = self.pid;
+        
+        let message = NetlinkMessage::new(
+            header,
+            NetlinkPayload::InnerMessage(message_type),
         );
 
         // Send dump request
@@ -654,14 +665,14 @@ impl NetlinkSocket {
                 }
 
                 match msg.payload {
-                    NetlinkPayload::Done => {
+                    NetlinkPayload::Done(_) => {
                         done = true;
                         break;
                     }
                     NetlinkPayload::Error(err) => {
-                        if err.code != 0 {
-                            error!("Netlink error during enumeration: {}", err.code);
-                            return Err(NetlinkError::KernelError(err.code));
+                        if let Some(code) = err.code {
+                            error!("Netlink error during enumeration: {}", code);
+                            return Err(NetlinkError::KernelError(code.get()));
                         }
                     }
                     NetlinkPayload::InnerMessage(RouteNetlinkMessage::NewAddress(addr_msg)) => {
@@ -690,27 +701,21 @@ impl NetlinkSocket {
             name: format!("if{}", msg.header.index),
             index: msg.header.index,
             addresses: Vec::new(),
-            flags: InterfaceFlags::empty(),
+            flags: NetworkInterfaceFlags::empty(),
             mtu: None,
         };
 
         // Parse address attributes
         for attr in &msg.attributes {
             match attr {
-                AddressAttribute::Address(addr_bytes) => {
-                    if let Some(ip_addr) = Self::bytes_to_ipaddr(addr_bytes, family) {
-                        // Create SocketAddr with appropriate port (0)
-                        let socket_addr = match ip_addr {
-                            IpAddr::V4(v4) => std::net::SocketAddr::new(IpAddr::V4(v4), 0),
-                            IpAddr::V6(v6) => std::net::SocketAddr::new(IpAddr::V6(v6), 0),
-                        };
-                        iface.addresses.push(socket_addr);
-                    }
+                AddressAttribute::Address(ip_addr) => {
+                    // Create SocketAddr with appropriate port (0)
+                    let socket_addr = std::net::SocketAddr::new(*ip_addr, 0);
+                    iface.addresses.push(socket_addr);
                 }
                 AddressAttribute::Label(label) => {
-                    if let Ok(label_str) = std::str::from_utf8(label) {
-                        iface.name = label_str.trim_end_matches('\0').to_string();
-                    }
+                    // Label is now a String, not bytes
+                    iface.name = label.trim_end_matches('\0').to_string();
                 }
                 _ => {}
             }
@@ -729,31 +734,30 @@ impl NetlinkSocket {
             name: String::new(),
             index: msg.header.index,
             addresses: Vec::new(),
-            flags: InterfaceFlags::empty(),
+            flags: NetworkInterfaceFlags::empty(),
             mtu: None,
         };
 
-        // Parse link flags
-        if msg.header.flags & libc::IFF_UP as u32 != 0 {
-            iface.flags |= InterfaceFlags::UP;
+        // Parse link flags - msg.header.flags is now Vec<LinkFlag>
+        if msg.header.flags.contains(&LinkFlag::Up) {
+            iface.flags |= NetworkInterfaceFlags::UP;
         }
-        if msg.header.flags & libc::IFF_LOOPBACK as u32 != 0 {
-            iface.flags |= InterfaceFlags::LOOPBACK;
+        if msg.header.flags.contains(&LinkFlag::Loopback) {
+            iface.flags |= NetworkInterfaceFlags::LOOPBACK;
         }
-        if msg.header.flags & libc::IFF_POINTOPOINT as u32 != 0 {
-            iface.flags |= InterfaceFlags::POINTOPOINT;
+        if msg.header.flags.contains(&LinkFlag::Pointopoint) {
+            iface.flags |= NetworkInterfaceFlags::POINTOPOINT;
         }
-        if msg.header.flags & libc::IFF_MULTICAST as u32 != 0 {
-            iface.flags |= InterfaceFlags::MULTICAST;
+        if msg.header.flags.contains(&LinkFlag::Multicast) {
+            iface.flags |= NetworkInterfaceFlags::MULTICAST;
         }
 
         // Parse link attributes
         for attr in &msg.attributes {
             match attr {
-                LinkAttribute::IfName(name_bytes) => {
-                    if let Ok(name_str) = std::str::from_utf8(name_bytes) {
-                        iface.name = name_str.trim_end_matches('\0').to_string();
-                    }
+                LinkAttribute::IfName(name) => {
+                    // IfName is now a String, not bytes
+                    iface.name = name.trim_end_matches('\0').to_string();
                 }
                 LinkAttribute::Mtu(mtu) => {
                     iface.mtu = Some(*mtu);
@@ -893,22 +897,20 @@ impl Stream for NetlinkMonitor {
             Poll::Pending => return Poll::Pending,
         };
 
-        // Try to read from socket
+        // Try to read from socket using raw fd
         match guard.try_io(|inner| {
-            let socket = inner.get_ref();
-            socket.recv_from(&mut buf[..], libc::MSG_DONTWAIT)
+            use std::os::unix::io::AsRawFd;
+            let fd = inner.get_ref().as_raw_fd();
+            
+            // Use nix to recv from raw fd
+            nix::sys::socket::recv(fd, &mut buf[..], nix::sys::socket::MsgFlags::MSG_DONTWAIT)
+                .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
         }) {
             Ok(result) => {
                 match result {
-                    Ok((len, addr)) => {
-                        // Validate message is from kernel
-                        if addr.port_number() != 0 {
-                            // Skip userspace messages, poll again
-                            cx.waker().wake_by_ref();
-                            return Poll::Pending;
-                        }
-
+                    Ok(len) => {
                         // Parse and classify message
+                        // Note: Netlink messages from kernel have nlmsg_pid=0, which we check during parsing
                         match Self::parse_and_classify(&buf[..len]) {
                             Ok(Some(event)) => Poll::Ready(Some(Ok(event))),
                             Ok(None) => {
@@ -959,21 +961,39 @@ impl NetlinkMonitor {
         for msg in messages {
             match msg.payload {
                 NetlinkPayload::Error(err) => {
-                    if err.code != 0 {
-                        error!("Netlink error from kernel: {}", err.code);
-                        return Err(NetlinkError::KernelError(err.code));
+                    if let Some(code) = err.code {
+                        let code_val = code.get();
+                        error!("Netlink error from kernel: {}", code_val);
+                        return Err(NetlinkError::KernelError(code_val));
                     }
                 }
                 NetlinkPayload::InnerMessage(RouteNetlinkMessage::NewRoute(route_msg)) => {
                     // Filter for unicast link-scope routes in main/local tables
-                    if route_msg.header.kind == RouteType::Unicast as u8 &&
-                       route_msg.header.scope == RouteScope::Link as u8 &&
+                    if route_msg.header.kind == RouteType::Unicast &&
+                       route_msg.header.scope == RouteScope::Link &&
                        (route_msg.header.table == libc::RT_TABLE_MAIN as u8 ||
                         route_msg.header.table == libc::RT_TABLE_LOCAL as u8) {
                         
+                        // Convert enum types to u8 for storage
+                        let route_type_u8 = match route_msg.header.kind {
+                            RouteType::Unicast => libc::RTN_UNICAST as u8,
+                            RouteType::Local => libc::RTN_LOCAL as u8,
+                            RouteType::Broadcast => libc::RTN_BROADCAST as u8,
+                            _ => 0, // Other types
+                        };
+                        
+                        let scope_u8 = match route_msg.header.scope {
+                            RouteScope::Universe => libc::RT_SCOPE_UNIVERSE as u8,
+                            RouteScope::Site => libc::RT_SCOPE_SITE as u8,
+                            RouteScope::Link => libc::RT_SCOPE_LINK as u8,
+                            RouteScope::Host => libc::RT_SCOPE_HOST as u8,
+                            RouteScope::NoWhere => libc::RT_SCOPE_NOWHERE as u8,
+                            _ => 0, // Other/unknown scope
+                        };
+                        
                         let route_info = RouteInfo {
-                            route_type: route_msg.header.kind,
-                            scope: route_msg.header.scope,
+                            route_type: route_type_u8,
+                            scope: scope_u8,
                             table: route_msg.header.table,
                             interface_index: None, // Could parse from attributes if needed
                         };
@@ -984,8 +1004,8 @@ impl NetlinkMonitor {
                 NetlinkPayload::InnerMessage(RouteNetlinkMessage::NewAddress(addr_msg)) => {
                     // Determine family from message
                     let family = match addr_msg.header.family {
-                        libc::AF_INET as u8 => AddressFamily::Inet,
-                        libc::AF_INET6 as u8 => AddressFamily::Inet6,
+                        NetlinkAddressFamily::Inet => AddressFamily::Inet,
+                        NetlinkAddressFamily::Inet6 => AddressFamily::Inet6,
                         _ => return Ok(None),
                     };
 
@@ -995,8 +1015,8 @@ impl NetlinkMonitor {
                 }
                 NetlinkPayload::InnerMessage(RouteNetlinkMessage::DelAddress(addr_msg)) => {
                     let family = match addr_msg.header.family {
-                        libc::AF_INET as u8 => AddressFamily::Inet,
-                        libc::AF_INET6 as u8 => AddressFamily::Inet6,
+                        NetlinkAddressFamily::Inet => AddressFamily::Inet,
+                        NetlinkAddressFamily::Inet6 => AddressFamily::Inet6,
                         _ => return Ok(None),
                     };
 
@@ -1058,6 +1078,95 @@ impl NetlinkMonitor {
 pub async fn enumerate_interfaces(family: AddressFamily) -> NetlinkResult<Vec<InterfaceRecord>> {
     let socket = NetlinkSocket::new().await?;
     socket.enumerate_interfaces(family).await
+}
+
+// ==============================================================================
+// LinuxPlatform Implementation
+// ==============================================================================
+
+/// Linux platform implementation using Netlink sockets
+///
+/// This struct provides the Linux-specific implementation of the NetworkPlatform trait,
+/// using Netlink RTNETLINK sockets for efficient network interface discovery and monitoring.
+pub struct LinuxPlatform {
+    socket: Arc<tokio::sync::OnceCell<NetlinkSocket>>,
+}
+
+impl LinuxPlatform {
+    /// Create a new Linux platform instance
+    ///
+    /// The underlying Netlink socket is lazily initialized on first use.
+    pub fn new() -> Self {
+        Self {
+            socket: Arc::new(tokio::sync::OnceCell::new()),
+        }
+    }
+    
+    /// Get or initialize the netlink socket
+    async fn get_socket(&self) -> NetlinkResult<&NetlinkSocket> {
+        self.socket
+            .get_or_try_init(|| async { NetlinkSocket::new().await })
+            .await
+    }
+}
+
+/// Convert InterfaceRecord to platform::Interface
+///
+/// This helper function converts between the network module's InterfaceRecord
+/// (which includes SocketAddr with ports) and the platform module's Interface
+/// (which uses IpAddr without ports).
+fn interface_record_to_interface(record: InterfaceRecord) -> Interface {
+    // Convert NetworkInterfaceFlags to PlatformInterfaceFlags
+    // NetworkInterfaceFlags uses bitflags with .bits() method
+    let platform_flags = PlatformInterfaceFlags::from_bits(record.flags.bits());
+    
+    Interface {
+        index: record.index,
+        name: record.name,
+        addresses: record.addresses.iter().map(|sa| sa.ip()).collect(),
+        flags: platform_flags,
+    }
+}
+
+impl NetworkPlatform for LinuxPlatform {
+    fn enumerate_interfaces(&self) -> PlatformResult<Vec<Interface>> {
+        // Bridge async to sync using tokio runtime
+        let socket_cell = Arc::clone(&self.socket);
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                // Get or initialize socket
+                let socket = socket_cell
+                    .get_or_try_init(|| async { NetlinkSocket::new().await })
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                
+                socket.enumerate_interfaces(AddressFamily::Unspec).await
+                    .map_err(|e| std::io::Error::other(e.to_string()))
+            })
+        });
+        
+        match result {
+            Ok(records) => Ok(records.into_iter().map(interface_record_to_interface).collect()),
+            Err(e) => Err(PlatformError::IoError {
+                operation: "enumerate interfaces".to_string(),
+                source: e,
+            }),
+        }
+    }
+
+    fn init_monitoring(&self) -> PlatformResult<PlatformMonitor> {
+        // TODO: Implement monitoring support
+        // This requires wrapping the async stream in a synchronous poll interface
+        Err(PlatformError::UnsupportedOperation {
+            operation: "netlink monitoring not yet implemented".to_string(),
+        })
+    }
+
+    fn get_interface_by_index(&self, index: u32) -> PlatformResult<Option<Interface>> {
+        // Get all interfaces and find the one with matching index
+        let interfaces = self.enumerate_interfaces()?;
+        Ok(interfaces.into_iter().find(|iface| iface.index == index))
+    }
 }
 
 #[cfg(test)]

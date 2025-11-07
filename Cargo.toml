@@ -124,6 +124,7 @@ nix = { version = "0.29", features = ["user", "signal", "socket", "net", "fs", "
 bitflags = "2.6"
 once_cell = "1.20"
 tokio-stream = "0.1"
+futures = "0.3"
 
 # Random number generation for DNS IDs and port randomization
 rand = "0.8"
@@ -152,6 +153,7 @@ proptest = { version = "1.5", optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 netlink-sys = "0.8"
 netlink-packet-core = "0.7"
+netlink-packet-route = "0.19"
 inotify = "0.10"
 
 # Platform-specific dependencies (BSD family)
