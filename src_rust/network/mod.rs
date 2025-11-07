@@ -1,3 +1,4 @@
 //! Network layer
-pub mod sockets;
+pub mod interfaces;
 pub mod platform;
+pub mod sockets;

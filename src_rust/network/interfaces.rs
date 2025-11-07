@@ -94,15 +94,15 @@
 //! - `src/network.c` lines 629-900: `iface_check()` filtering implementation
 //! - `src/network.c` lines 351-412: Interface validation against configuration
 
-use crate::config::types::{InterfaceName, NetworkConfig};
+use crate::config::types::NetworkConfig;
 use crate::network::platform::InterfaceInfo;
-use nix::net::if_::if_indextoname;
-use std::collections::HashMap;
 use std::fmt;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::{Arc, RwLock};
-use tracing::{debug, error, info, trace, warn};
+use std::net::{IpAddr, SocketAddr};
+use tracing::{debug, info, trace, warn};
+
+#[cfg(test)]
+use crate::config::types::InterfaceName;
 
 /// Network interface representation with addressing configuration
 ///
@@ -460,46 +460,14 @@ impl fmt::Display for Interface {
 pub async fn enumerate_interfaces() -> IoResult<Vec<Interface>> {
     trace!("Starting network interface enumeration");
 
+    // Create platform-specific implementation via factory
+    let platform = crate::network::platform::create_platform()
+        .map_err(|e| IoError::new(ErrorKind::Other, format!("Failed to create platform: {}", e)))?;
+    
     // Delegate to platform-specific implementation
-    // Platform-specific code runs in spawn_blocking to avoid blocking tokio runtime
-    let interface_infos = tokio::task::spawn_blocking(|| {
-        #[cfg(target_os = "linux")]
-        {
-            crate::network::platform::linux::enumerate_interfaces()
-        }
-
-        #[cfg(any(
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "macos"
-        ))]
-        {
-            crate::network::platform::bsd::enumerate_interfaces()
-        }
-
-        #[cfg(target_os = "solaris")]
-        {
-            crate::network::platform::solaris::enumerate_interfaces()
-        }
-
-        #[cfg(not(any(
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "macos",
-            target_os = "solaris"
-        )))]
-        {
-            Err(IoError::new(
-                ErrorKind::Unsupported,
-                "Platform not supported for interface enumeration",
-            ))
-        }
-    })
-    .await
-    .map_err(|e| IoError::new(ErrorKind::Other, format!("Task join error: {}", e)))??;
+    let interface_infos = platform.enumerate_interfaces()
+        .await
+        .map_err(|e| IoError::new(ErrorKind::Other, format!("Platform enumeration failed: {}", e)))?;
 
     // Convert platform-specific InterfaceInfo to application Interface
     // Default port 53 (DNS) - callers can override via Interface::addr modification
