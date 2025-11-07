@@ -46,8 +46,10 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use tokio::sync::RwLock;
 
 use bytes::BytesMut;
 use tokio::net::{TcpStream, UdpSocket};
@@ -503,7 +505,8 @@ pub async fn handle_query(
     );
 
     // Check cache first
-    if let Ok(cache_guard) = cache.read() {
+    {
+        let cache_guard = cache.read().await;
         // Cache lookup would go here - simplified for now
         debug!("Cache lookup for: {}", query_name);
     }
@@ -525,7 +528,8 @@ pub async fn handle_query(
     match forward_with_retry(&query, &selected_servers, MAX_SERVER_TRIES).await {
         Ok(response) => {
             // Cache the response
-            if let Ok(mut cache_guard) = cache.write() {
+            {
+                let mut cache_guard = cache.write().await;
                 // Caching logic would go here
                 debug!("Caching response for: {}", query_name);
             }
