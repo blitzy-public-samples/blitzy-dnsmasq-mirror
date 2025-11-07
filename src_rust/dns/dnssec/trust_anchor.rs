@@ -129,16 +129,12 @@
 //! }
 //! ```
 
-use crate::dns::dnssec::crypto;
-use crate::dns::dnssec::types::{DigestType, DnsKey, DnssecAlgorithm, DsRecord};
-use crate::dns::domain::hostname_isequal;
-use crate::dns::parser::extract_name;
-use crate::dns::protocol::{MAXDNAME, T_DNSKEY, T_DS};
-use crate::logging::logger::{log_message, Logger};
+use crate::dns::dnssec::types::{DnsKey, DnssecAlgorithm};
+use crate::dns::protocol::MAXDNAME;
 use filetime::{set_file_mtime, FileTime};
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+use std::fs::{self, OpenOptions};
+use std::io::{Error as IoError, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1170,8 +1166,6 @@ pub fn is_check_date(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::TempDir;
 
     #[test]
     fn test_timestamp_validator_creation() {

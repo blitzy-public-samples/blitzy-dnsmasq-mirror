@@ -6,6 +6,9 @@ pub mod types;
 /// Cryptographic operations for DNSSEC validation
 pub mod crypto;
 
+/// Trust anchor management for DNSSEC chain of trust establishment
+pub mod trust_anchor;
+
 /// Configuration for DNSSEC validation
 #[derive(Debug, Clone)]
 #[derive(Default)]

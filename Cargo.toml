@@ -143,6 +143,13 @@ nix = { version = "0.29", features = ["net", "socket", "signal", "process", "fs"
 # - Usage: File descriptor operations, low-level system calls not wrapped by nix
 libc = "0.2"
 
+# filetime: Cross-platform file timestamp manipulation
+# - Replaces: C utime()/utimes() calls for timestamp management
+# - Provides: Safe mtime/atime setting with platform abstractions
+# - Usage: DNSSEC trust anchor timestamp file management in dns/dnssec/trust_anchor.rs
+# - Memory-safe: Eliminates manual stat() and errno checking
+filetime = "0.2"
+
 # netlink-packet-route: Type-safe netlink message parsing for RTNETLINK
 # - Replaces: Manual netlink message parsing in src/netlink.c
 # - Provides: Safe message builders and parsers for RTM_* messages
