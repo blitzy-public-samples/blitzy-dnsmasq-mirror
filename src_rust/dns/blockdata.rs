@@ -638,6 +638,43 @@ impl Clone for BlockData {
     }
 }
 
+impl PartialEq for BlockData {
+    /// Compare two `BlockData` instances for equality
+    ///
+    /// Two `BlockData` instances are equal if they contain the same byte sequence,
+    /// regardless of how the data is distributed across blocks. This implementation
+    /// compares the complete byte contents of both instances.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dnsmasq::dns::blockdata::BlockData;
+    ///
+    /// let data1 = BlockData::from_bytes(&[1, 2, 3]);
+    /// let data2 = BlockData::from_bytes(&[1, 2, 3]);
+    /// let data3 = BlockData::from_bytes(&[1, 2, 4]);
+    ///
+    /// assert_eq!(data1, data2);
+    /// assert_ne!(data1, data3);
+    /// ```
+    fn eq(&self, other: &Self) -> bool {
+        // Fast path: compare lengths first
+        if self.total_len != other.total_len {
+            return false;
+        }
+        
+        // Empty blocks are always equal
+        if self.total_len == 0 {
+            return true;
+        }
+        
+        // Compare byte contents
+        self.to_bytes() == other.to_bytes()
+    }
+}
+
+impl Eq for BlockData {}
+
 /// Initialize blockdata pool and preallocate blocks
 ///
 /// Initializes the blockdata memory pool system by resetting all counters
