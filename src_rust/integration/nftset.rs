@@ -98,7 +98,7 @@
 
 use crate::ffi::platform::nftables::NftContext;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use thiserror::Error;
 use tokio::task;
 use tracing::{debug, error, info, trace, warn};
@@ -561,7 +561,7 @@ impl NftsetManager {
 
         // Execute nftables command via FFI
         // Equivalent to nft_run_cmd_from_buffer(ctx, cmd_buf) (line 277)
-        if let Err(e) = self.ctx.run_command(&result) {
+        if let Err(_e) = self.ctx.run_command(&result) {
             // Command execution failed - retrieve error details
             // Equivalent to nft_ctx_get_error_buffer(ctx) (line 278)
             let error_details = self

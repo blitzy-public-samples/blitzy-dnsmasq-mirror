@@ -891,7 +891,7 @@ mod tests {
     fn test_prefix_option_invalid_lifetimes() {
         let prefix: Ipv6Addr = "2001:db8::".parse().unwrap();
         // This should panic because preferred > valid
-        PrefixOption::new(prefix, 64, 604800, 2592000);
+        let _ = PrefixOption::new(prefix, 64, 604800, 2592000);
     }
     
     #[test]
