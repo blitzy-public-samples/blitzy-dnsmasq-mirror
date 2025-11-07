@@ -87,7 +87,7 @@ use crate::ffi::platform::conntrack::{
 };
 
 use std::io::{Error as IoError, ErrorKind};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::task;
@@ -138,6 +138,22 @@ pub enum ConntrackError {
     /// Indicates severe memory pressure.
     #[error("Failed to allocate conntrack structures")]
     AllocationFailed,
+}
+
+impl From<IoError> for ConntrackError {
+    fn from(err: IoError) -> Self {
+        // Check for specific error codes to provide more specific error types
+        if let Some(errno) = err.raw_os_error() {
+            if errno == libc::EPERM || errno == libc::EACCES {
+                return ConntrackError::PermissionDenied;
+            }
+            if errno == libc::ENOENT {
+                return ConntrackError::NotFound;
+            }
+        }
+        // Default to QueryFailed for other IO errors
+        ConntrackError::QueryFailed(err)
+    }
 }
 
 /// Linux connection tracking manager for firewall mark propagation
@@ -585,7 +601,7 @@ unsafe extern "C" fn conntrack_callback(
 ) -> libc::c_int {
     // SAFETY: data pointer is Arc<Mutex<Option<u32>>> created by get_incoming_mark_blocking
     // We don't actually take ownership here (use Arc::from_raw + forget pattern)
-    let mark_result = Arc::from_raw(data.cast::<Mutex<Option<u32>>>());
+    let mark_result = unsafe { Arc::from_raw(data.cast::<Mutex<Option<u32>>>()) };
 
     // Extract mark from conntrack entry
     // SAFETY: ct pointer is valid nf_conntrack structure managed by libnetfilter_conntrack
@@ -615,6 +631,7 @@ unsafe extern "C" fn conntrack_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_conntrack_manager_creation() {
