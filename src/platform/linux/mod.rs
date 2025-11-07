@@ -514,7 +514,7 @@ impl NetworkPlatform for LinuxPlatform {
                         .map(|record| Interface {
                             index: record.index,
                             name: record.name,
-                            addresses: record.addresses,
+                            addresses: record.addresses.into_iter().map(|addr| addr.ip()).collect(),
                             flags: crate::platform::InterfaceFlags::from_bits(record.flags.bits()),
                         })
                         .collect()
