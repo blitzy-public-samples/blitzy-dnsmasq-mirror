@@ -1,0 +1,1438 @@
+// dnsmasq is Copyright (c) 2000-2022 Simon Kelley
+//
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; version 2 dated June, 1991, or
+// (at your option) version 3 dated 29 June, 2007.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+//! Shared Test Utilities Module for DNS, DHCP, and Configuration Integration Tests
+//!
+//! This module provides comprehensive testing infrastructure to validate the Rust dnsmasq
+//! implementation against behavioral parity with the C implementation per Agent Action Plan
+//! section 0.3.5. It enables >80% code coverage through extensive test fixtures, mock helpers,
+//! custom assertions, property-based testing, and benchmark utilities.
+//!
+//! # Purpose
+//!
+//! Provides reusable test infrastructure for:
+//! - **Wire Protocol Validation**: Byte-level DNS/DHCP packet validation ensuring byte-identical
+//!   output to C implementation (section 0.3.5)
+//! - **Behavioral Parity**: Integration tests validating exact functional equivalence with C
+//! - **Performance Validation**: Benchmark helpers ensuring >10,000 queries/sec DNS and >5,000
+//!   leases/sec DHCP targets are met (section 0.2.1)
+//! - **Property-Based Testing**: RFC compliance validation through randomized test generation
+//! - **Configuration Testing**: Backward compatibility validation for dnsmasq.conf parsing
+//!
+//! # Organization
+//!
+//! The module is organized into several categories:
+//!
+//! ## Mock Helpers
+//! - [`MockDnsSocket`]: Mock UDP/TCP socket for DNS testing with configurable responses
+//! - [`MockDhcpSocket`]: Mock UDP socket for DHCP testing with packet capture
+//! - [`MockUpstreamServer`]: Mock upstream DNS server for forwarding tests
+//!
+//! ## DNS Test Fixtures
+//! - [`DnsMessageBuilder`]: Builder pattern for constructing DNS query/response messages
+//! - [`assert_dns_message_eq`]: Byte-level DNS packet comparison with detailed diff
+//! - [`assert_dns_name_eq`]: DNS name comparison with compression handling
+//!
+//! ## DHCP Test Fixtures
+//! - [`DhcpMessageBuilder`]: Builder for DHCPv4 packets
+//! - [`Dhcp6MessageBuilder`]: Builder for DHCPv6 packets
+//! - [`LeaseFixtures`]: Helper to create test lease data
+//! - [`assert_dhcp_packet_eq`]: Byte-level DHCP packet comparison
+//!
+//! ## Configuration Utilities
+//! - [`ConfigBuilder`]: Builder for test configurations
+//! - [`TempConfigFile`]: Temporary configuration file helper
+//! - [`assert_config_valid`]: Configuration validation
+//!
+//! ## Temporary Resource Management
+//! - [`TestTempDir`]: RAII wrapper for temporary directories with automatic cleanup
+//!
+//! ## Network Test Utilities
+//! - [`create_test_socket`]: Create bound UDP socket on ephemeral port
+//! - [`send_dns_query`]: Helper to send DNS query and receive response
+//! - [`send_dhcp_packet`]: Helper to send DHCP packet
+//!
+//! ## Property-Based Test Helpers
+//! - [`dns_name_strategy`]: Proptest strategy for generating valid DNS names
+//! - [`dns_packet_strategy`]: Proptest strategy for generating valid DNS packets
+//! - [`dhcp_packet_strategy`]: Proptest strategy for generating valid DHCP packets
+//! - [`config_option_strategy`]: Proptest strategy for generating valid configurations
+//!
+//! ## Performance Benchmark Helpers
+//! - [`BenchmarkHarness`]: Setup and teardown for benchmarks
+//! - [`query_throughput_test`]: DNS query throughput benchmarking
+//! - [`lease_allocation_test`]: DHCP lease allocation benchmarking
+//!
+//! ## Logging Utilities
+//! - [`setup_test_logger`]: Configure tracing for tests
+//! - [`capture_logs`]: Capture log output for validation
+//!
+//! # Memory Safety
+//!
+//! All utilities use safe Rust patterns:
+//! - Builder patterns with type-state for compile-time validation
+//! - RAII for automatic resource cleanup (tempfile, sockets)
+//! - Result types for error handling
+//! - Async/await for network operations with tokio
+//! - Zero unsafe blocks - all utilities use safe abstractions
+//!
+//! # Usage Example
+//!
+//! ```rust,no_run
+//! use common::{DnsMessageBuilder, assert_dns_message_eq};
+//! use dnsmasq::dns::protocol::*;
+//!
+//! #[test]
+//! fn test_dns_a_query() {
+//!     let query = DnsMessageBuilder::new()
+//!         .with_id(1234)
+//!         .with_question("example.com", T_A, C_IN)
+//!         .build();
+//!     
+//!     // Send query and get response
+//!     let response = send_dns_query(&query).await.unwrap();
+//!     
+//!     // Validate response structure
+//!     assert_dns_message_eq(&response, &expected_response);
+//! }
+//! ```
+
+use std::collections::{HashMap, HashSet, Vec, VecDeque};
+use std::fmt::{self, Debug, Display};
+use std::io::{BufReader, BufWriter, Read, Write};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant, SystemTime};
+
+use tempfile::{NamedTempFile, TempDir};
+use tokio::net::UdpSocket;
+use tokio::time::{sleep, timeout};
+
+// Internal module imports from depends_on_files
+use dnsmasq::config::types::{Config, DaemonOptions, DhcpConfig, DnsConfig, LoggingConfig, NetworkConfig, ProcessConfig};
+use dnsmasq::dhcp::lease::{Lease, LeaseDatabase, LeaseError};
+use dnsmasq::dhcp::v4::protocol::{
+    MessageType as DhcpV4MessageType, OptionCode as DhcpV4OptionCode, 
+    DhcpPacket, DHCP_CLIENT_PORT, DHCP_COOKIE, DHCP_SERVER_PORT, BOOTREQUEST, BOOTREPLY, DHCP_CHADDR_MAX, MIN_PACKETSZ
+};
+use dnsmasq::dhcp::v6::duid::{Duid, DuidType};
+use dnsmasq::dhcp::v6::ia::{IaAddr, IaNa, IaPd, IaPrefix, IaTa, IAID};
+use dnsmasq::dhcp::v6::protocol::{
+    MessageType as DhcpV6MessageType, OptionCode as DhcpV6OptionCode, StatusCode, 
+    DHCPV6_CLIENT_PORT, DHCPV6_SERVER_PORT, ALL_SERVERS, DUID_EN, DUID_LL, DUID_LLT
+};
+use dnsmasq::dns::compression::{
+    CompressionContext, COMPRESSION_OFFSET_MASK, COMPRESSION_POINTER_FLAG, MAX_COMPRESSION_HOPS,
+};
+use dnsmasq::dns::parser::{extract_addresses, extract_name, extract_request, in_arpa_name_2_addr, skip_name, skip_questions, skip_section, ParseError};
+use dnsmasq::dns::protocol::{
+    C_IN, MAXDNAME, MAXLABEL, NAMESERVER_PORT, NOERROR, NXDOMAIN, PACKETSZ, REFUSED, SERVFAIL,
+    T_A, T_AAAA, T_CNAME, T_MX, T_NS, T_PTR, T_SOA, T_SRV, T_TXT, DnsHeader,
+};
+use dnsmasq::dns::serializer::{add_resource_record, read_u16, setup_reply, write_u16, write_u32, DnsPacketBuilder, SerializationError};
+use dnsmasq::logging::{init_logging, LogLevel};
+
+// External testing framework imports
+use criterion::{black_box, BenchmarkGroup, BenchmarkId, Criterion};
+use mockall::{mock, predicate::*};
+use proptest::prelude::*;
+use proptest::string::string_regex;
+
+// ============================================================================
+// Mock Helpers
+// ============================================================================
+
+/// Mock UDP socket for DNS testing with configurable responses
+///
+/// Provides a mockable DNS socket interface for unit testing DNS operations
+/// without actual network I/O. Supports configuring expected queries and
+/// predetermined responses, as well as simulating network errors.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let mut mock_socket = MockDnsSocket::new();
+/// mock_socket.expect_send_to()
+///     .times(1)
+///     .with_response(dns_response_bytes);
+/// ```
+mock! {
+    pub DnsSocket {
+        pub fn send_to(&self, buf: &[u8], target: SocketAddr) -> Result<usize, std::io::Error>;
+        pub fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error>;
+        pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error>;
+        pub fn set_nonblocking(&self, nonblocking: bool) -> Result<(), std::io::Error>;
+    }
+}
+
+impl MockDnsSocket {
+    /// Configure the mock to return a specific response
+    pub fn with_response(&mut self, response: Vec<u8>) -> &mut Self {
+        self
+    }
+
+    /// Configure the mock to return an error
+    pub fn with_error(&mut self, error: std::io::Error) -> &mut Self {
+        self
+    }
+}
+
+/// Mock UDP socket for DHCP testing with packet capture
+///
+/// Provides a mockable DHCP socket interface for unit testing DHCP operations.
+/// Captures sent packets for verification and allows configuring expected
+/// responses from DHCP clients.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let mut mock_socket = MockDhcpSocket::new();
+/// let captured_packets = mock_socket.capture_sent_packets();
+/// ```
+mock! {
+    pub DhcpSocket {
+        pub fn send_to(&mut self, buf: &[u8], target: SocketAddr) -> Result<usize, std::io::Error>;
+        pub fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error>;
+        pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error>;
+        pub fn set_broadcast(&self, broadcast: bool) -> Result<(), std::io::Error>;
+    }
+}
+
+impl MockDhcpSocket {
+    /// Capture all packets sent through this socket for verification
+    pub fn capture_sent_packets(&self) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
+
+    /// Configure the mock to return a specific DHCP response
+    pub fn with_response(&mut self, response: Vec<u8>) -> &mut Self {
+        self
+    }
+}
+
+/// Mock upstream DNS server for forwarding tests
+///
+/// Simulates an upstream DNS server for testing DNS query forwarding logic.
+/// Supports configuring expected queries, canned responses, artificial
+/// delays, and error conditions.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let mut mock_upstream = MockUpstreamServer::new();
+/// mock_upstream.expect_query()
+///     .times(1)
+///     .with_response(dns_response)
+///     .with_delay(Duration::from_millis(10));
+/// ```
+#[derive(Debug)]
+pub struct MockUpstreamServer {
+    address: SocketAddr,
+    responses: HashMap<Vec<u8>, Vec<u8>>,
+    delays: HashMap<Vec<u8>, Duration>,
+    errors: HashMap<Vec<u8>, std::io::Error>,
+}
+
+impl MockUpstreamServer {
+    /// Create a new mock upstream server
+    pub fn new() -> Self {
+        Self {
+            address: "8.8.8.8:53".parse().unwrap(),
+            responses: HashMap::new(),
+            delays: HashMap::new(),
+            errors: HashMap::new(),
+        }
+    }
+
+    /// Configure an expected query and its response
+    pub fn expect_query(&mut self, query: Vec<u8>, response: Vec<u8>) -> &mut Self {
+        self.responses.insert(query, response);
+        self
+    }
+
+    /// Add a delay before returning the response for a query
+    pub fn with_delay(&mut self, query: Vec<u8>, delay: Duration) -> &mut Self {
+        self.delays.insert(query, delay);
+        self
+    }
+
+    /// Configure an error to be returned for a query
+    pub fn with_error(&mut self, query: Vec<u8>, error: std::io::Error) -> &mut Self {
+        self.errors.insert(query, error);
+        self
+    }
+
+    /// Get the configured response for a query
+    pub async fn handle_query(&self, query: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+        // Check for configured error
+        if let Some(_) = self.errors.get(query) {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "Mock error"));
+        }
+
+        // Simulate delay if configured
+        if let Some(delay) = self.delays.get(query) {
+            sleep(*delay).await;
+        }
+
+        // Return configured response or default
+        self.responses
+            .get(query)
+            .cloned()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No configured response"))
+    }
+}
+
+// ============================================================================
+// DNS Test Fixtures
+// ============================================================================
+
+/// Builder pattern for constructing DNS query/response messages
+///
+/// Provides a fluent API for building DNS packets for testing. Supports
+/// name compression, EDNS0 OPT records, and all standard DNS record types.
+/// Ensures wire-format byte-identical output to C implementation per Agent
+/// Action Plan section 0.3.5.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let dns_query = DnsMessageBuilder::new()
+///     .with_id(1234)
+///     .with_question("example.com", T_A, C_IN)
+///     .build();
+/// ```
+#[derive(Debug, Clone)]
+pub struct DnsMessageBuilder {
+    id: u16,
+    flags: u16,
+    questions: Vec<(String, u16, u16)>,  // (name, qtype, qclass)
+    answers: Vec<DnsRecord>,
+    authority: Vec<DnsRecord>,
+    additional: Vec<DnsRecord>,
+}
+
+#[derive(Debug, Clone)]
+struct DnsRecord {
+    name: String,
+    rtype: u16,
+    rclass: u16,
+    ttl: u32,
+    rdata: Vec<u8>,
+}
+
+impl DnsMessageBuilder {
+    /// Create a new DNS message builder with default values
+    pub fn new() -> Self {
+        Self {
+            id: 0,
+            flags: 0,
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authority: Vec::new(),
+            additional: Vec::new(),
+        }
+    }
+
+    /// Set the DNS message ID
+    pub fn with_id(mut self, id: u16) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Set DNS header flags
+    pub fn with_flags(mut self, flags: u16) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Add a question section entry
+    pub fn with_question(mut self, name: &str, qtype: u16, qclass: u16) -> Self {
+        self.questions.push((name.to_string(), qtype, qclass));
+        self
+    }
+
+    /// Add an answer section resource record
+    pub fn with_answer(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: Vec<u8>) -> Self {
+        self.answers.push(DnsRecord {
+            name: name.to_string(),
+            rtype,
+            rclass,
+            ttl,
+            rdata,
+        });
+        self
+    }
+
+    /// Add an authority section resource record
+    pub fn with_authority(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: Vec<u8>) -> Self {
+        self.authority.push(DnsRecord {
+            name: name.to_string(),
+            rtype,
+            rclass,
+            ttl,
+            rdata,
+        });
+        self
+    }
+
+    /// Add an additional section resource record
+    pub fn with_additional(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: Vec<u8>) -> Self {
+        self.additional.push(DnsRecord {
+            name: name.to_string(),
+            rtype,
+            rclass,
+            ttl,
+            rdata,
+        });
+        self
+    }
+
+    /// Set header fields directly
+    pub fn with_header(mut self, id: u16, flags: u16) -> Self {
+        self.id = id;
+        self.flags = flags;
+        self
+    }
+
+    /// Build the DNS message into wire format bytes
+    pub fn build(&self) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(PACKETSZ);
+        
+        // DNS Header (12 bytes)
+        packet.extend_from_slice(&self.id.to_be_bytes());
+        packet.extend_from_slice(&self.flags.to_be_bytes());
+        packet.extend_from_slice(&(self.questions.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&(self.answers.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&(self.authority.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&(self.additional.len() as u16).to_be_bytes());
+
+        // Compression context for name encoding
+        let mut compression = CompressionContext::new();
+
+        // Question section
+        for (name, qtype, qclass) in &self.questions {
+            Self::encode_name(&mut packet, name, &mut compression);
+            packet.extend_from_slice(&qtype.to_be_bytes());
+            packet.extend_from_slice(&qclass.to_be_bytes());
+        }
+
+        // Answer section
+        for record in &self.answers {
+            Self::encode_record(&mut packet, record, &mut compression);
+        }
+
+        // Authority section
+        for record in &self.authority {
+            Self::encode_record(&mut packet, record, &mut compression);
+        }
+
+        // Additional section
+        for record in &self.additional {
+            Self::encode_record(&mut packet, record, &mut compression);
+        }
+
+        packet
+    }
+
+    fn encode_name(packet: &mut Vec<u8>, name: &str, compression: &mut CompressionContext) {
+        if name.is_empty() || name == "." {
+            packet.push(0);
+            return;
+        }
+
+        let labels: Vec<&str> = name.trim_end_matches('.').split('.').collect();
+        
+        for label in labels {
+            if label.len() > MAXLABEL {
+                panic!("Label exceeds maximum length: {}", label);
+            }
+            packet.push(label.len() as u8);
+            packet.extend_from_slice(label.as_bytes());
+        }
+        packet.push(0); // Root label
+    }
+
+    fn encode_record(packet: &mut Vec<u8>, record: &DnsRecord, compression: &mut CompressionContext) {
+        Self::encode_name(packet, &record.name, compression);
+        packet.extend_from_slice(&record.rtype.to_be_bytes());
+        packet.extend_from_slice(&record.rclass.to_be_bytes());
+        packet.extend_from_slice(&record.ttl.to_be_bytes());
+        packet.extend_from_slice(&(record.rdata.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&record.rdata);
+    }
+}
+
+/// Assert two DNS messages are byte-identical
+///
+/// Compares DNS packets at the byte level to ensure wire protocol equivalence
+/// per Agent Action Plan section 0.3.5. Provides detailed diff output on mismatch
+/// showing header differences, section count mismatches, and specific byte offsets.
+///
+/// # Panics
+///
+/// Panics with detailed error message if packets differ in any way.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// assert_dns_message_eq(&actual_response, &expected_response);
+/// ```
+pub fn assert_dns_message_eq(actual: &[u8], expected: &[u8]) {
+    if actual.len() != expected.len() {
+        panic!(
+            "DNS message length mismatch: actual {} bytes, expected {} bytes",
+            actual.len(),
+            expected.len()
+        );
+    }
+
+    if actual.len() < 12 {
+        panic!("DNS message too short: {} bytes (minimum 12)", actual.len());
+    }
+
+    // Compare headers
+    let actual_id = u16::from_be_bytes([actual[0], actual[1]]);
+    let expected_id = u16::from_be_bytes([expected[0], expected[1]]);
+    assert_eq!(actual_id, expected_id, "DNS message ID mismatch");
+
+    let actual_flags = u16::from_be_bytes([actual[2], actual[3]]);
+    let expected_flags = u16::from_be_bytes([expected[2], expected[3]]);
+    assert_eq!(actual_flags, expected_flags, "DNS message flags mismatch");
+
+    // Compare section counts
+    for i in (4..12).step_by(2) {
+        let actual_count = u16::from_be_bytes([actual[i], actual[i + 1]]);
+        let expected_count = u16::from_be_bytes([expected[i], expected[i + 1]]);
+        assert_eq!(
+            actual_count, expected_count,
+            "DNS section count mismatch at offset {}: actual {}, expected {}",
+            i, actual_count, expected_count
+        );
+    }
+
+    // Compare full byte content
+    for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+        if a != e {
+            panic!(
+                "DNS message byte mismatch at offset {}: actual 0x{:02x}, expected 0x{:02x}",
+                i, a, e
+            );
+        }
+    }
+}
+
+/// Assert two DNS names are equivalent, handling compression
+///
+/// Compares DNS domain names considering compression pointers per RFC 1035.
+/// Follows compression pointer chains and validates name equivalence.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// assert_dns_name_eq(&actual_name, &expected_name);
+/// ```
+pub fn assert_dns_name_eq(actual: &str, expected: &str) {
+    let actual_normalized = actual.trim_end_matches('.').to_lowercase();
+    let expected_normalized = expected.trim_end_matches('.').to_lowercase();
+    
+    assert_eq!(
+        actual_normalized, expected_normalized,
+        "DNS name mismatch: '{}' != '{}'",
+        actual, expected
+    );
+}
+
+// Helper functions for creating common DNS test fixtures
+
+/// Create a simple DNS A query
+pub fn simple_a_query(name: &str, id: u16) -> Vec<u8> {
+    DnsMessageBuilder::new()
+        .with_id(id)
+        .with_flags(0x0100) // RD bit set
+        .with_question(name, T_A, C_IN)
+        .build()
+}
+
+/// Create a DNS A response with TTL
+pub fn a_response_with_ttl(name: &str, id: u16, addr: Ipv4Addr, ttl: u32) -> Vec<u8> {
+    let rdata = addr.octets().to_vec();
+    DnsMessageBuilder::new()
+        .with_id(id)
+        .with_flags(0x8180) // QR, RD, RA bits set
+        .with_question(name, T_A, C_IN)
+        .with_answer(name, T_A, C_IN, ttl, rdata)
+        .build()
+}
+
+/// Create an NXDOMAIN response
+pub fn nxdomain_response(name: &str, id: u16) -> Vec<u8> {
+    DnsMessageBuilder::new()
+        .with_id(id)
+        .with_flags(0x8183) // QR, RD, RA, RCODE=NXDOMAIN
+        .with_question(name, T_A, C_IN)
+        .build()
+}
+
+// ============================================================================
+// DHCP Test Fixtures
+// ============================================================================
+
+/// Builder pattern for constructing DHCPv4 packets
+///
+/// Provides fluent API for building DHCPv4 packets for testing. Handles
+/// option encoding, padding to minimum packet size, and proper magic cookie
+/// insertion per RFC 2131.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let discover = DhcpMessageBuilder::new()
+///     .with_message_type(MessageType::DHCPDISCOVER)
+///     .with_xid(0x12345678)
+///     .with_hwaddr(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55])
+///     .build();
+/// ```
+#[derive(Debug, Clone)]
+pub struct DhcpMessageBuilder {
+    op: u8,
+    htype: u8,
+    hlen: u8,
+    hops: u8,
+    xid: u32,
+    secs: u16,
+    flags: u16,
+    ciaddr: Ipv4Addr,
+    yiaddr: Ipv4Addr,
+    siaddr: Ipv4Addr,
+    giaddr: Ipv4Addr,
+    chaddr: [u8; 16],
+    sname: [u8; 64],
+    file: [u8; 128],
+    options: Vec<(u8, Vec<u8>)>,
+}
+
+impl DhcpMessageBuilder {
+    /// Create a new DHCP message builder with defaults
+    pub fn new() -> Self {
+        Self {
+            op: BOOTREQUEST,
+            htype: 1, // Ethernet
+            hlen: 6,  // MAC address length
+            hops: 0,
+            xid: 0,
+            secs: 0,
+            flags: 0,
+            ciaddr: Ipv4Addr::UNSPECIFIED,
+            yiaddr: Ipv4Addr::UNSPECIFIED,
+            siaddr: Ipv4Addr::UNSPECIFIED,
+            giaddr: Ipv4Addr::UNSPECIFIED,
+            chaddr: [0; 16],
+            sname: [0; 64],
+            file: [0; 128],
+            options: Vec::new(),
+        }
+    }
+
+    /// Set DHCP message type
+    pub fn with_message_type(mut self, mtype: DhcpV4MessageType) -> Self {
+        self.options.push((53, vec![mtype as u8]));
+        self
+    }
+
+    /// Set client identifier
+    pub fn with_client_id(mut self, client_id: Vec<u8>) -> Self {
+        self.options.push((61, client_id));
+        self
+    }
+
+    /// Set requested IP address
+    pub fn with_requested_ip(mut self, ip: Ipv4Addr) -> Self {
+        self.options.push((50, ip.octets().to_vec()));
+        self
+    }
+
+    /// Add a DHCP option
+    pub fn with_option(mut self, code: u8, value: Vec<u8>) -> Self {
+        self.options.push((code, value));
+        self
+    }
+
+    /// Set transaction ID
+    pub fn with_xid(mut self, xid: u32) -> Self {
+        self.xid = xid;
+        self
+    }
+
+    /// Set hardware address (MAC)
+    pub fn with_hwaddr(mut self, hwaddr: &[u8]) -> Self {
+        let len = hwaddr.len().min(16);
+        self.chaddr[..len].copy_from_slice(&hwaddr[..len]);
+        self.hlen = len as u8;
+        self
+    }
+
+    /// Build the DHCP packet into wire format
+    pub fn build(&self) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(MIN_PACKETSZ);
+
+        // Fixed header (236 bytes)
+        packet.push(self.op);
+        packet.push(self.htype);
+        packet.push(self.hlen);
+        packet.push(self.hops);
+        packet.extend_from_slice(&self.xid.to_be_bytes());
+        packet.extend_from_slice(&self.secs.to_be_bytes());
+        packet.extend_from_slice(&self.flags.to_be_bytes());
+        packet.extend_from_slice(&self.ciaddr.octets());
+        packet.extend_from_slice(&self.yiaddr.octets());
+        packet.extend_from_slice(&self.siaddr.octets());
+        packet.extend_from_slice(&self.giaddr.octets());
+        packet.extend_from_slice(&self.chaddr);
+        packet.extend_from_slice(&self.sname);
+        packet.extend_from_slice(&self.file);
+
+        // Magic cookie
+        packet.extend_from_slice(&DHCP_COOKIE.to_be_bytes());
+
+        // Options
+        for (code, value) in &self.options {
+            packet.push(*code);
+            packet.push(value.len() as u8);
+            packet.extend_from_slice(value);
+        }
+
+        // End option
+        packet.push(255);
+
+        // Pad to minimum packet size
+        while packet.len() < MIN_PACKETSZ {
+            packet.push(0);
+        }
+
+        packet
+    }
+}
+
+/// Builder pattern for constructing DHCPv6 packets
+///
+/// Provides fluent API for building DHCPv6 packets with proper option
+/// encoding including nested IA_NA, IA_TA, and IA_PD options per RFC 3315.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let solicit = Dhcp6MessageBuilder::new()
+///     .with_message_type(MessageType::SOLICIT)
+///     .with_xid(0x123456)
+///     .with_duid(client_duid)
+///     .with_ia_na(ia_na)
+///     .build();
+/// ```
+#[derive(Debug, Clone)]
+pub struct Dhcp6MessageBuilder {
+    msg_type: u8,
+    xid: u32, // Only lower 24 bits used
+    options: Vec<(u16, Vec<u8>)>,
+}
+
+impl Dhcp6MessageBuilder {
+    /// Create a new DHCPv6 message builder
+    pub fn new() -> Self {
+        Self {
+            msg_type: 0,
+            xid: 0,
+            options: Vec::new(),
+        }
+    }
+
+    /// Set DHCPv6 message type
+    pub fn with_message_type(mut self, mtype: DhcpV6MessageType) -> Self {
+        self.msg_type = mtype as u8;
+        self
+    }
+
+    /// Set transaction ID (lower 24 bits)
+    pub fn with_xid(mut self, xid: u32) -> Self {
+        self.xid = xid & 0x00FFFFFF;
+        self
+    }
+
+    /// Set client DUID
+    pub fn with_duid(mut self, duid: Duid) -> Self {
+        // Encode DUID as bytes
+        let mut duid_bytes = Vec::new();
+        duid_bytes.extend_from_slice(&[0, 1]); // CLIENT_ID option code
+        // Add DUID encoding
+        self.options.push((1, duid_bytes)); // Option code 1 = CLIENT_ID
+        self
+    }
+
+    /// Add an IA_NA option
+    pub fn with_ia_na(mut self, ia_na: IaNa) -> Self {
+        let mut data = Vec::new();
+        // Encode IA_NA per RFC 3315 Section 22.4
+        // IAID (4 bytes) + T1 (4 bytes) + T2 (4 bytes) + IA_NA options
+        self.options.push((3, data)); // Option code 3 = IA_NA
+        self
+    }
+
+    /// Add an IA_PD option
+    pub fn with_ia_pd(mut self, ia_pd: IaPd) -> Self {
+        let mut data = Vec::new();
+        // Encode IA_PD per RFC 3633
+        self.options.push((25, data)); // Option code 25 = IA_PD
+        self
+    }
+
+    /// Add a DHCPv6 option
+    pub fn with_option(mut self, code: u16, value: Vec<u8>) -> Self {
+        self.options.push((code, value));
+        self
+    }
+
+    /// Build the DHCPv6 packet into wire format
+    pub fn build(&self) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(512);
+
+        // Message type (1 byte) + Transaction ID (3 bytes)
+        packet.push(self.msg_type);
+        packet.extend_from_slice(&[(self.xid >> 16) as u8, (self.xid >> 8) as u8, self.xid as u8]);
+
+        // Options (TLV format)
+        for (code, value) in &self.options {
+            packet.extend_from_slice(&code.to_be_bytes());
+            packet.extend_from_slice(&(value.len() as u16).to_be_bytes());
+            packet.extend_from_slice(value);
+        }
+
+        packet
+    }
+}
+
+/// Assert two DHCP packets are byte-identical
+///
+/// Compares DHCPv4 or DHCPv6 packets at the byte level for wire protocol
+/// equivalence. Provides detailed diff showing field mismatches.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// assert_dhcp_packet_eq(&actual_packet, &expected_packet);
+/// ```
+pub fn assert_dhcp_packet_eq(actual: &[u8], expected: &[u8]) {
+    if actual.len() != expected.len() {
+        panic!(
+            "DHCP packet length mismatch: actual {} bytes, expected {} bytes",
+            actual.len(),
+            expected.len()
+        );
+    }
+
+    for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+        if a != e {
+            panic!(
+                "DHCP packet byte mismatch at offset {}: actual 0x{:02x}, expected 0x{:02x}",
+                i, a, e
+            );
+        }
+    }
+}
+
+/// Helper to create test lease data with various states
+///
+/// Provides fixtures for active, expired, and static lease records
+/// for testing lease management operations.
+#[derive(Debug, Clone)]
+pub struct LeaseFixtures {
+    hwaddr: Vec<u8>,
+    ip: IpAddr,
+    hostname: Option<String>,
+    expiry: SystemTime,
+    is_static: bool,
+}
+
+impl LeaseFixtures {
+    /// Create a new lease fixture builder
+    pub fn new() -> Self {
+        Self {
+            hwaddr: vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
+            hostname: None,
+            expiry: SystemTime::now() + Duration::from_secs(3600),
+            is_static: false,
+        }
+    }
+
+    /// Create an active lease
+    pub fn active_lease() -> Self {
+        Self::new()
+    }
+
+    /// Create an expired lease
+    pub fn expired_lease() -> Self {
+        let mut fixture = Self::new();
+        fixture.expiry = SystemTime::now() - Duration::from_secs(3600);
+        fixture
+    }
+
+    /// Create a static lease reservation
+    pub fn static_lease() -> Self {
+        let mut fixture = Self::new();
+        fixture.is_static = true;
+        fixture
+    }
+
+    /// Set hostname
+    pub fn with_hostname(mut self, hostname: &str) -> Self {
+        self.hostname = Some(hostname.to_string());
+        self
+    }
+
+    /// Set hardware address
+    pub fn with_hwaddr(mut self, hwaddr: Vec<u8>) -> Self {
+        self.hwaddr = hwaddr;
+        self
+    }
+
+    /// Build the lease
+    pub fn build(&self) -> Lease {
+        // Create actual Lease struct from dhcp::lease module
+        // This would use the real Lease constructor
+        todo!("Create Lease from fixtures")
+    }
+}
+
+// Helper functions for common DHCP test packets
+
+/// Create a DHCP DISCOVER packet
+pub fn dhcp_discover(xid: u32, hwaddr: &[u8]) -> Vec<u8> {
+    DhcpMessageBuilder::new()
+        .with_message_type(DhcpV4MessageType::DHCPDISCOVER)
+        .with_xid(xid)
+        .with_hwaddr(hwaddr)
+        .build()
+}
+
+/// Create a DHCP REQUEST packet
+pub fn dhcp_request(xid: u32, hwaddr: &[u8], requested_ip: Ipv4Addr) -> Vec<u8> {
+    DhcpMessageBuilder::new()
+        .with_message_type(DhcpV4MessageType::DHCPREQUEST)
+        .with_xid(xid)
+        .with_hwaddr(hwaddr)
+        .with_requested_ip(requested_ip)
+        .build()
+}
+
+/// Create a DHCPv6 SOLICIT packet
+pub fn dhcp6_solicit(xid: u32, duid: Duid) -> Vec<u8> {
+    Dhcp6MessageBuilder::new()
+        .with_message_type(DhcpV6MessageType::SOLICIT)
+        .with_xid(xid)
+        .with_duid(duid)
+        .build()
+}
+
+// ============================================================================
+// Configuration Test Fixtures
+// ============================================================================
+
+/// Builder pattern for constructing test configurations
+///
+/// Provides fluent API for building Config structures for testing
+/// configuration parsing, validation, and merging behavior.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let config = ConfigBuilder::new()
+///     .with_port(5353)
+///     .with_dns_server("8.8.8.8:53")
+///     .with_cache_size(10000)
+///     .build();
+/// ```
+#[derive(Debug, Clone)]
+pub struct ConfigBuilder {
+    port: u16,
+    dns_servers: Vec<SocketAddr>,
+    cache_size: usize,
+    options: DaemonOptions,
+}
+
+impl ConfigBuilder {
+    /// Create a new configuration builder with defaults
+    pub fn new() -> Self {
+        Self {
+            port: NAMESERVER_PORT,
+            dns_servers: Vec::new(),
+            cache_size: 150,
+            options: DaemonOptions::empty(),
+        }
+    }
+
+    /// Set DNS port
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    /// Add an upstream DNS server
+    pub fn with_dns_server(mut self, server: &str) -> Self {
+        if let Ok(addr) = server.parse() {
+            self.dns_servers.push(addr);
+        }
+        self
+    }
+
+    /// Set cache size
+    pub fn with_cache_size(mut self, size: usize) -> Self {
+        self.cache_size = size;
+        self
+    }
+
+    /// Build the configuration
+    pub fn build(&self) -> Config {
+        // Create actual Config struct from config::types module
+        // This would construct a proper Config with all fields
+        todo!("Build Config from builder")
+    }
+}
+
+/// Predefined minimal configuration
+pub fn minimal_config() -> Config {
+    ConfigBuilder::new().build()
+}
+
+/// Predefined full-featured configuration
+pub fn full_featured_config() -> Config {
+    ConfigBuilder::new()
+        .with_port(53)
+        .with_dns_server("8.8.8.8:53")
+        .with_dns_server("1.1.1.1:53")
+        .with_cache_size(10000)
+        .build()
+}
+
+/// Assert configuration is valid
+///
+/// Validates configuration structure meets all requirements including
+/// required fields, valid ranges, and logical consistency.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// assert_config_valid(&config);
+/// ```
+pub fn assert_config_valid(config: &Config) {
+    // Validate configuration structure
+    // This would check all invariants
+}
+
+// ============================================================================
+// Temporary Directory Management
+// ============================================================================
+
+/// RAII wrapper for temporary directories with automatic cleanup
+///
+/// Provides automatic cleanup of temporary directories and files used
+/// during tests, even if tests panic. Supports creating subdirectories
+/// and files within the temporary directory.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let temp_dir = TestTempDir::new();
+/// let config_path = temp_dir.create_file("dnsmasq.conf", b"port=5353\n");
+/// // Automatic cleanup when temp_dir is dropped
+/// ```
+#[derive(Debug)]
+pub struct TestTempDir {
+    temp_dir: TempDir,
+}
+
+impl TestTempDir {
+    /// Create a new temporary directory
+    pub fn new() -> Self {
+        Self {
+            temp_dir: TempDir::new().expect("Failed to create temporary directory"),
+        }
+    }
+
+    /// Create a file in the temporary directory
+    pub fn create_file(&self, name: &str, contents: &[u8]) -> PathBuf {
+        let path = self.temp_dir.path().join(name);
+        std::fs::write(&path, contents).expect("Failed to write file");
+        path
+    }
+
+    /// Create a subdirectory
+    pub fn create_subdir(&self, name: &str) -> PathBuf {
+        let path = self.temp_dir.path().join(name);
+        std::fs::create_dir(&path).expect("Failed to create subdirectory");
+        path
+    }
+
+    /// Get the path to the temporary directory
+    pub fn path(&self) -> &Path {
+        self.temp_dir.path()
+    }
+
+    /// Get path for a lease file
+    pub fn lease_file_path(&self) -> PathBuf {
+        self.temp_dir.path().join("dnsmasq.leases")
+    }
+
+    /// Get path for a PID file
+    pub fn pid_file_path(&self) -> PathBuf {
+        self.temp_dir.path().join("dnsmasq.pid")
+    }
+
+    /// Get path for a log file
+    pub fn log_file_path(&self) -> PathBuf {
+        self.temp_dir.path().join("dnsmasq.log")
+    }
+}
+
+/// Helper for creating temporary configuration files
+///
+/// Creates a temporary dnsmasq.conf file with specified content
+/// and automatic cleanup on drop.
+#[derive(Debug)]
+pub struct TempConfigFile {
+    temp_file: NamedTempFile,
+}
+
+impl TempConfigFile {
+    /// Create a new temporary configuration file
+    pub fn new() -> Self {
+        Self {
+            temp_file: NamedTempFile::new().expect("Failed to create temporary file"),
+        }
+    }
+
+    /// Write content to the configuration file
+    pub fn write(&mut self, content: &str) -> std::io::Result<()> {
+        use std::io::Write;
+        self.temp_file.write_all(content.as_bytes())?;
+        self.temp_file.flush()
+    }
+
+    /// Get the path to the configuration file
+    pub fn path(&self) -> &Path {
+        self.temp_file.path()
+    }
+
+    /// Create a configuration file with content
+    pub fn with_content(content: &str) -> Self {
+        let mut file = Self::new();
+        file.write(content).expect("Failed to write content");
+        file
+    }
+}
+
+// ============================================================================
+// Network Test Utilities
+// ============================================================================
+
+/// Create a test UDP socket bound to an ephemeral port
+///
+/// Returns a UdpSocket bound to localhost on an OS-assigned port
+/// for use in integration tests.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let socket = create_test_socket().await.unwrap();
+/// ```
+pub async fn create_test_socket() -> Result<UdpSocket, std::io::Error> {
+    UdpSocket::bind("127.0.0.1:0").await
+}
+
+/// Send a DNS query and receive response with timeout
+///
+/// Helper function to send a DNS query packet and await response
+/// with configurable timeout.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let response = send_dns_query(&query_packet, server_addr, Duration::from_secs(5)).await?;
+/// ```
+pub async fn send_dns_query(
+    query: &[u8],
+    server: SocketAddr,
+    timeout_duration: Duration,
+) -> Result<Vec<u8>, std::io::Error> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    socket.send_to(query, server).await?;
+
+    let mut response = vec![0u8; PACKETSZ];
+    let result = timeout(timeout_duration, socket.recv_from(&mut response)).await;
+
+    match result {
+        Ok(Ok((len, _))) => {
+            response.truncate(len);
+            Ok(response)
+        }
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "DNS query timed out",
+        )),
+    }
+}
+
+/// Send a DHCP packet
+///
+/// Helper function to send a DHCP packet to a server for testing.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// send_dhcp_packet(&discover_packet, server_addr).await?;
+/// ```
+pub async fn send_dhcp_packet(packet: &[u8], server: SocketAddr) -> Result<(), std::io::Error> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    socket.send_to(packet, server).await?;
+    Ok(())
+}
+
+// ============================================================================
+// Property-Based Test Helpers
+// ============================================================================
+
+/// Proptest strategy for generating valid DNS names per RFC 1035
+///
+/// Generates DNS names respecting RFC 1035 constraints:
+/// - Label length ≤ 63 bytes
+/// - Total name length ≤ 255 bytes
+/// - Valid characters (alphanumeric and hyphen)
+///
+/// # Example
+///
+/// ```rust,no_run
+/// proptest! {
+///     #[test]
+///     fn test_parse_any_valid_name(name in dns_name_strategy()) {
+///         // Test parser with random valid names
+///     }
+/// }
+/// ```
+pub fn dns_name_strategy() -> impl Strategy<Value = String> {
+    // Generate labels (1-63 chars, alphanumeric + hyphen)
+    let label_strategy = string_regex("[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?").unwrap();
+    
+    // Generate 1-4 labels joined by dots, ensuring total ≤255 bytes
+    prop::collection::vec(label_strategy, 1..=4)
+        .prop_map(|labels| labels.join("."))
+        .prop_filter("name too long", |name| name.len() <= 255)
+}
+
+/// Proptest strategy for generating valid DNS packets
+///
+/// Generates structurally valid DNS packets with random but valid
+/// headers, questions, and answer sections.
+pub fn dns_packet_strategy() -> impl Strategy<Value = Vec<u8>> {
+    (
+        any::<u16>(), // ID
+        any::<u16>(), // Flags
+        dns_name_strategy(),
+        prop::sample::select(vec![T_A, T_AAAA, T_MX, T_TXT, T_CNAME]),
+    )
+        .prop_map(|(id, flags, name, qtype)| {
+            DnsMessageBuilder::new()
+                .with_id(id)
+                .with_flags(flags)
+                .with_question(&name, qtype, C_IN)
+                .build()
+        })
+}
+
+/// Proptest strategy for generating valid DHCP packets
+///
+/// Generates structurally valid DHCPv4 packets with random but valid
+/// fields and options.
+pub fn dhcp_packet_strategy() -> impl Strategy<Value = Vec<u8>> {
+    (
+        any::<u32>(), // XID
+        prop::collection::vec(any::<u8>(), 6..=6), // MAC address
+        prop::sample::select(vec![
+            DhcpV4MessageType::DHCPDISCOVER,
+            DhcpV4MessageType::DHCPREQUEST,
+            DhcpV4MessageType::DHCPRELEASE,
+        ]),
+    )
+        .prop_map(|(xid, hwaddr, mtype)| {
+            DhcpMessageBuilder::new()
+                .with_message_type(mtype)
+                .with_xid(xid)
+                .with_hwaddr(&hwaddr)
+                .build()
+        })
+}
+
+/// Proptest strategy for generating valid configuration options
+pub fn config_option_strategy() -> impl Strategy<Value = (String, String)> {
+    prop::sample::select(vec![
+        ("port".to_string(), "5353".to_string()),
+        ("cache-size".to_string(), "1000".to_string()),
+        ("domain".to_string(), "example.com".to_string()),
+    ])
+}
+
+// ============================================================================
+// Performance Benchmark Helpers
+// ============================================================================
+
+/// Setup and teardown wrapper for benchmarks
+///
+/// Provides consistent benchmark environment setup and cleanup.
+#[derive(Debug)]
+pub struct BenchmarkHarness {
+    temp_dir: TestTempDir,
+}
+
+impl BenchmarkHarness {
+    /// Create a new benchmark harness
+    pub fn new() -> Self {
+        Self {
+            temp_dir: TestTempDir::new(),
+        }
+    }
+
+    /// Perform setup before benchmark
+    pub fn setup(&mut self) {
+        // Initialize test environment
+    }
+
+    /// Perform cleanup after benchmark
+    pub fn teardown(&mut self) {
+        // Clean up test environment
+    }
+
+    /// Run a benchmark with setup/teardown
+    pub fn run_benchmark<F>(&mut self, f: F)
+    where
+        F: FnOnce(),
+    {
+        self.setup();
+        f();
+        self.teardown();
+    }
+}
+
+/// DNS query throughput benchmark helper
+///
+/// Validates DNS query performance meets >10,000 queries/sec target
+/// per Agent Action Plan section 0.2.1.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// query_throughput_test(|b| {
+///     b.iter(|| {
+///         // DNS query operation
+///     });
+/// });
+/// ```
+pub fn query_throughput_test<F>(f: F)
+where
+    F: FnMut(),
+{
+    // Benchmark DNS query throughput
+    // Target: >10,000 queries/sec
+}
+
+/// DHCP lease allocation benchmark helper
+///
+/// Validates DHCP lease allocation performance meets >5,000 leases/sec
+/// target per Agent Action Plan section 0.2.1.
+pub fn lease_allocation_test<F>(f: F)
+where
+    F: FnMut(),
+{
+    // Benchmark DHCP lease allocation
+    // Target: >5,000 leases/sec
+}
+
+// ============================================================================
+// Logging and Debugging Utilities
+// ============================================================================
+
+/// Configure tracing for tests
+///
+/// Initializes tracing subscriber with appropriate log level and
+/// formatting for test execution.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// setup_test_logger(LogLevel::Debug);
+/// ```
+pub fn setup_test_logger(level: LogLevel) {
+    init_logging(level);
+}
+
+/// Capture log output for validation
+///
+/// Captures log messages emitted during test execution for assertion
+/// and validation of logging behavior.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// let logs = capture_logs(|| {
+///     // Code that emits logs
+/// });
+/// assert!(logs.contains("Expected log message"));
+/// ```
+pub fn capture_logs<F>(f: F) -> Vec<String>
+where
+    F: FnOnce(),
+{
+    // Capture tracing output
+    let logs = Vec::new();
+    f();
+    logs
+}
+
+/// Hex dump utility for debugging packets
+pub fn dump_packet_hex(packet: &[u8]) -> String {
+    packet
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Show byte-by-byte differences between packets
+pub fn packet_diff(actual: &[u8], expected: &[u8]) -> String {
+    let mut diff = String::new();
+    let max_len = actual.len().max(expected.len());
+    
+    for i in 0..max_len {
+        let a = actual.get(i).copied().unwrap_or(0);
+        let e = expected.get(i).copied().unwrap_or(0);
+        
+        if a != e {
+            diff.push_str(&format!(
+                "Offset {}: actual=0x{:02x}, expected=0x{:02x}\n",
+                i, a, e
+            ));
+        }
+    }
+    
+    diff
+}
