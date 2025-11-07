@@ -437,6 +437,11 @@ impl NetlinkSocket {
     /// high-rate network changes.
     fn set_no_enobufs(fd: RawFd) -> NetlinkResult<()> {
         let optval: i32 = 1;
+        // SAFETY: This is safe because:
+        // 1. fd is a valid file descriptor from a successfully created Netlink socket
+        // 2. SOL_NETLINK and NETLINK_NO_ENOBUFS are valid constants from Linux kernel headers
+        // 3. optval is a valid i32 reference with correct size passed to setsockopt
+        // 4. This is platform-specific FFI code which is permitted per Section 0.7.2
         let result = unsafe {
             libc::setsockopt(
                 fd,
