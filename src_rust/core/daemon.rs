@@ -114,17 +114,14 @@
 //! | `int dhcpfd` | `UdpSocket` | Type-safe socket wrapper |
 //! | `pid_t tcp_pids[MAX_PROCS]` | `JoinHandle<()>` | Async task handles |
 
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::config::types::Config;
-use crate::core::config::LEASE_RETRY;
 use crate::dns::cache::Cache;
-use crate::dns::cache_types::CacheRecord;
 use crate::dns::upstream::UpstreamServer;
 use crate::dhcp::lease::LeaseManager;
 
@@ -196,7 +193,6 @@ pub struct Daemon {
     ///
     /// Synchronization: Mutex for exclusive write access during insertions/evictions
     /// Access: `get_cache()` returns Arc<Mutex<Cache>> for concurrent operations
-    #[cfg_attr(not(feature = "dns"), allow(dead_code))]
     cache: Arc<Mutex<Cache>>,
 
     /// Upstream DNS servers with health tracking
@@ -209,7 +205,6 @@ pub struct Daemon {
     ///
     /// Synchronization: Vec with Arc<RwLock<Server>> allows concurrent reads
     /// Access: `get_servers()` returns cloned Vec for iteration
-    #[cfg_attr(not(feature = "dns"), allow(dead_code))]
     servers: Vec<Arc<RwLock<UpstreamServer>>>,
 
     // ============================================================================
@@ -226,9 +221,9 @@ pub struct Daemon {
     /// - Implicit lease linked list managed in lease.c
     ///
     /// Synchronization: Mutex for exclusive access during lease allocations
-    /// Access: `get_lease_manager()` returns Arc<Mutex<LeaseManager>>
+    /// Access: `get_lease_manager()` returns Option<Arc<Mutex<LeaseManager>>>
     #[cfg(feature = "dhcp")]
-    lease_manager: Arc<Mutex<LeaseManager>>,
+    lease_manager: Option<Arc<Mutex<LeaseManager>>>,
 
     // ============================================================================
     // Network Interfaces & Listeners
@@ -488,7 +483,7 @@ impl Daemon {
     #[cfg(feature = "dhcp")]
     #[must_use]
     pub fn get_lease_manager(&self) -> Option<Arc<Mutex<LeaseManager>>> {
-        self.lease_manager.as_ref().map(Arc::clone)
+        self.lease_manager.as_ref().map(|lm| Arc::clone(lm))
     }
 
     /// Get upstream DNS server list
