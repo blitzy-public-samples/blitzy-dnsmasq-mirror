@@ -76,14 +76,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::Ipv4Addr;
 
-use nom::{
-    bytes::complete::tag,
-    combinator::map,
-    error::ErrorKind,
-    multi::{many0, many_till},
-    number::complete::{be_u8, be_u16, be_u32},
-    Err, IResult, Needed,
-};
+// Note: nom parser combinators are imported but not yet used in the current implementation.
+// They will be used for more complex option parsing (e.g., vendor-specific options, relay agent info).
+// For now, manual parsing with safe slice operations is sufficient for basic DHCP options.
 
 use tracing::{debug, error, info, trace, warn};
 
@@ -983,7 +978,7 @@ impl Default for OptionBuilder {
 ///
 /// # Returns
 ///
-/// * `Ok(Some(&[u8]))` - Option data if found
+/// * `Ok(Some(Vec<u8>))` - Option data if found (owned)
 /// * `Ok(None)` - Option not found
 /// * `Err(OptionError)` - Invalid packet format
 ///
@@ -994,10 +989,10 @@ impl Default for OptionBuilder {
 ///     println!("Found requested IP option: {:?}", data);
 /// }
 /// ```
-pub fn option_find(packet: &[u8], option_code: u8) -> Result<Option<&[u8]>, OptionError> {
+pub fn option_find(packet: &[u8], option_code: u8) -> Result<Option<Vec<u8>>, OptionError> {
     let mut parser = OptionParser::new();
     parser.parse(packet)?;
-    Ok(parser.get_option(option_code))
+    Ok(parser.get_option(option_code).map(|data| data.to_vec()))
 }
 
 /// Extracts IPv4 address from option data.

@@ -1,6 +1,7 @@
 //! `DHCPv4` server implementation
 
 pub mod protocol;
+pub mod options;
 
 /// `DHCPv4` server
 pub struct DhcpV4Server {}
