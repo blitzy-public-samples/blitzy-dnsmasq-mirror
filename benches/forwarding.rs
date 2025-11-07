@@ -59,7 +59,7 @@
 //! cargo bench --bench forwarding -- --save-baseline main
 //! ```
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -83,16 +83,16 @@ use dnsmasq::dns::protocol::{RecordClass, RecordType};
 fn bench_end_to_end_forwarding(c: &mut Criterion) {
     let _rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("forwarding_end_to_end");
-    
+
     // Setup: Create test upstream server address
     let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
     let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 12345);
-    
+
     // Create sample DNS query message
     let query_id = 0x1234u16;
     let query_name = "example.com".to_string();
     let query_type = RecordType::A;
-    
+
     group.bench_function("forward_single_query", |b| {
         b.iter(|| {
             // Simulate forward_query() from forward.c
@@ -105,14 +105,14 @@ fn bench_end_to_end_forwarding(c: &mut Criterion) {
                 black_box(compute_query_hash(&query_name, query_type)),
                 black_box(0), // No DNSSEC flags
             );
-            
+
             // Verify randomized ID was generated
             assert_ne!(record.randomized_id, record.original_id);
-            
+
             black_box(record)
         });
     });
-    
+
     group.finish();
 }
 
@@ -125,33 +125,27 @@ fn bench_end_to_end_forwarding(c: &mut Criterion) {
 /// Performance target: <100µs for server selection from 100 servers
 fn bench_server_selection(c: &mut Criterion) {
     let mut group = c.benchmark_group("server_selection");
-    
+
     // Create test server list with varying domains and health states
     let servers = create_test_servers(100);
     let query_domain = "www.example.com";
-    
+
     group.bench_function("select_from_100_servers", |b| {
         b.iter(|| {
             // Simulate server selection from forward.c
-            let selected = select_best_server(
-                black_box(&servers),
-                black_box(query_domain),
-            );
+            let selected = select_best_server(black_box(&servers), black_box(query_domain));
             black_box(selected)
         });
     });
-    
+
     group.bench_function("select_with_health_check", |b| {
         b.iter(|| {
             // Select server considering health metrics
-            let selected = select_healthy_server(
-                black_box(&servers),
-                black_box(query_domain),
-            );
+            let selected = select_healthy_server(black_box(&servers), black_box(query_domain));
             black_box(selected)
         });
     });
-    
+
     group.finish();
 }
 
@@ -164,10 +158,10 @@ fn bench_server_selection(c: &mut Criterion) {
 /// Performance target: <10µs per ID including collision detection
 fn bench_id_randomization(c: &mut Criterion) {
     let mut group = c.benchmark_group("id_randomization");
-    
+
     // Track existing IDs to simulate collision detection
     let mut existing_ids: HashSet<u16> = HashSet::new();
-    
+
     group.bench_function("generate_unique_id", |b| {
         b.iter(|| {
             // Simulate get_id() from forward.c:4042
@@ -180,17 +174,17 @@ fn bench_id_randomization(c: &mut Criterion) {
             black_box(id)
         });
     });
-    
+
     // Benchmark collision handling when ID space is crowded
     let crowded_ids: HashSet<u16> = (0..50000).map(|_| rand::random::<u16>()).collect();
-    
+
     group.bench_function("generate_id_with_collisions", |b| {
         b.iter(|| {
             let id = generate_unique_id(black_box(&crowded_ids));
             black_box(id)
         });
     });
-    
+
     group.finish();
 }
 
@@ -204,15 +198,14 @@ fn bench_id_randomization(c: &mut Criterion) {
 fn bench_port_randomization(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("port_randomization");
-    
+
     group.bench_function("select_random_port", |b| {
         b.iter(|| {
             // Simulate random port selection from randfd_list
-            let port = black_box(select_random_port(1024, 65535));
-            port
+            black_box(select_random_port(1024, 65535))
         });
     });
-    
+
     group.bench_function("bind_random_port_socket", |b| {
         b.iter(|| {
             rt.block_on(async {
@@ -224,7 +217,7 @@ fn bench_port_randomization(c: &mut Criterion) {
             })
         });
     });
-    
+
     group.finish();
 }
 
@@ -238,10 +231,10 @@ fn bench_port_randomization(c: &mut Criterion) {
 /// Performance target: <5µs per allocation (matching C freelist performance)
 fn bench_forward_record_allocation(c: &mut Criterion) {
     let mut group = c.benchmark_group("forward_record_allocation");
-    
+
     let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
     let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 12345);
-    
+
     group.bench_function("allocate_single_record", |b| {
         b.iter(|| {
             // Simulate get_new_frec() allocation from forward.c:3608
@@ -255,7 +248,7 @@ fn bench_forward_record_allocation(c: &mut Criterion) {
             black_box(record)
         });
     });
-    
+
     // Benchmark bulk allocation to measure memory allocation overhead
     group.throughput(Throughput::Elements(1000));
     group.bench_function("allocate_1000_records", |b| {
@@ -274,7 +267,7 @@ fn bench_forward_record_allocation(c: &mut Criterion) {
             black_box(records)
         });
     });
-    
+
     group.finish();
 }
 
@@ -286,9 +279,9 @@ fn bench_forward_record_allocation(c: &mut Criterion) {
 /// Performance target: <100µs per retry decision
 fn bench_retry_logic(c: &mut Criterion) {
     let mut group = c.benchmark_group("retry_logic");
-    
+
     let servers = create_test_servers(10);
-    
+
     group.bench_function("calculate_backoff_delay", |b| {
         b.iter(|| {
             // Simulate exponential backoff calculation
@@ -297,7 +290,7 @@ fn bench_retry_logic(c: &mut Criterion) {
             black_box(delay)
         });
     });
-    
+
     group.bench_function("select_next_server_on_retry", |b| {
         b.iter(|| {
             // Simulate server rotation on retry
@@ -306,7 +299,7 @@ fn bench_retry_logic(c: &mut Criterion) {
             black_box(next)
         });
     });
-    
+
     group.finish();
 }
 
@@ -319,7 +312,7 @@ fn bench_retry_logic(c: &mut Criterion) {
 fn bench_tcp_fallback(c: &mut Criterion) {
     let _rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("tcp_fallback");
-    
+
     group.bench_function("detect_truncation", |b| {
         b.iter(|| {
             // Simulate TC bit detection in DNS header
@@ -328,7 +321,7 @@ fn bench_tcp_fallback(c: &mut Criterion) {
             black_box(is_truncated)
         });
     });
-    
+
     // Note: Actual TCP connection benchmarking would require a test server
     // This benchmarks the decision logic only
     group.bench_function("tcp_retry_decision", |b| {
@@ -339,7 +332,7 @@ fn bench_tcp_fallback(c: &mut Criterion) {
             black_box(should_retry_tcp)
         });
     });
-    
+
     group.finish();
 }
 
@@ -352,7 +345,7 @@ fn bench_tcp_fallback(c: &mut Criterion) {
 /// Performance target: <50µs for EDNS0 processing
 fn bench_edns0_processing(c: &mut Criterion) {
     let mut group = c.benchmark_group("edns0_processing");
-    
+
     group.bench_function("find_opt_record", |b| {
         b.iter(|| {
             // Simulate finding OPT record in additional section
@@ -362,7 +355,7 @@ fn bench_edns0_processing(c: &mut Criterion) {
             black_box(udp_payload_size)
         });
     });
-    
+
     group.bench_function("add_opt_record", |b| {
         b.iter(|| {
             // Simulate adding OPT record to response
@@ -373,7 +366,7 @@ fn bench_edns0_processing(c: &mut Criterion) {
             black_box(opt)
         });
     });
-    
+
     group.finish();
 }
 
@@ -386,7 +379,7 @@ fn bench_edns0_processing(c: &mut Criterion) {
 #[cfg(feature = "dnssec")]
 fn bench_dnssec_propagation(c: &mut Criterion) {
     let mut group = c.benchmark_group("dnssec_propagation");
-    
+
     group.bench_function("set_do_bit", |b| {
         b.iter(|| {
             // Simulate setting DNSSEC OK bit in EDNS0
@@ -395,7 +388,7 @@ fn bench_dnssec_propagation(c: &mut Criterion) {
             black_box(flags)
         });
     });
-    
+
     group.bench_function("propagate_dnssec_flags", |b| {
         b.iter(|| {
             // Simulate DNSSEC flag propagation through forwarding
@@ -404,7 +397,7 @@ fn bench_dnssec_propagation(c: &mut Criterion) {
             black_box(upstream_flags)
         });
     });
-    
+
     group.finish();
 }
 
@@ -418,11 +411,11 @@ fn bench_dnssec_propagation(c: &mut Criterion) {
 fn bench_response_processing(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("response_processing");
-    
+
     let cache = Arc::new(RwLock::new(DnsCache::new(1000)));
     let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
     let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 12345);
-    
+
     group.bench_function("match_response_to_query", |b| {
         b.iter(|| {
             // Simulate response matching by randomized ID
@@ -433,13 +426,13 @@ fn bench_response_processing(c: &mut Criterion) {
                 black_box(12345678),
                 black_box(0),
             );
-            
+
             let response_id = black_box(forward_record.randomized_id);
             let matches = response_id == forward_record.randomized_id;
             black_box(matches)
         });
     });
-    
+
     group.bench_function("restore_original_id", |b| {
         b.iter(|| {
             // Simulate ID restoration for client response
@@ -450,23 +443,19 @@ fn bench_response_processing(c: &mut Criterion) {
                 black_box(12345678),
                 black_box(0),
             );
-            
+
             let original_id = forward_record.original_id;
             black_box(original_id)
         });
     });
-    
+
     group.bench_function("cache_response", |b| {
         b.iter(|| {
             let cache_clone = Arc::clone(&cache);
             rt.block_on(async move {
                 // Simulate cache insertion from response processing
-                let key = CacheKey::new(
-                    "example.com".to_string(),
-                    RecordType::A,
-                    RecordClass::IN,
-                );
-                
+                let key = CacheKey::new("example.com".to_string(), RecordType::A, RecordClass::IN);
+
                 let mut cache_write = cache_clone.write().await;
                 cache_write.insert(
                     black_box(key),
@@ -477,7 +466,7 @@ fn bench_response_processing(c: &mut Criterion) {
             })
         });
     });
-    
+
     group.finish();
 }
 
@@ -491,10 +480,10 @@ fn bench_response_processing(c: &mut Criterion) {
 fn bench_concurrent_queries(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("concurrent_queries");
-    
+
     let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
     let client_base = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
-    
+
     for num_queries in [10, 100, 1000].iter() {
         group.throughput(Throughput::Elements(*num_queries as u64));
         group.bench_with_input(
@@ -505,13 +494,10 @@ fn bench_concurrent_queries(c: &mut Criterion) {
                     rt.block_on(async move {
                         // Simulate concurrent query forwarding
                         let mut tasks = Vec::new();
-                        
+
                         for i in 0..num {
-                            let client_addr = SocketAddr::new(
-                                client_base,
-                                (20000 + i) as u16,
-                            );
-                            
+                            let client_addr = SocketAddr::new(client_base, (20000 + i) as u16);
+
                             let task = tokio::spawn(async move {
                                 let record = ForwardRecord::new(
                                     i as u16,
@@ -522,10 +508,10 @@ fn bench_concurrent_queries(c: &mut Criterion) {
                                 );
                                 black_box(record)
                             });
-                            
+
                             tasks.push(task);
                         }
-                        
+
                         // Wait for all queries to complete
                         for task in tasks {
                             let _ = task.await;
@@ -535,7 +521,7 @@ fn bench_concurrent_queries(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -548,10 +534,10 @@ fn bench_concurrent_queries(c: &mut Criterion) {
 /// Performance target: <1ms for scanning 1000 forward records
 fn bench_timeout_handling(c: &mut Criterion) {
     let mut group = c.benchmark_group("timeout_handling");
-    
+
     // Create a mix of active and expired forward records
     let records = create_test_forward_records(1000, 0.2); // 20% expired
-    
+
     group.throughput(Throughput::Elements(1000));
     group.bench_function("scan_for_expired_records", |b| {
         b.iter(|| {
@@ -563,7 +549,7 @@ fn bench_timeout_handling(c: &mut Criterion) {
             black_box(expired_count)
         });
     });
-    
+
     group.bench_function("cleanup_single_expired", |b| {
         b.iter(|| {
             // Simulate cleanup of single expired record
@@ -577,7 +563,7 @@ fn bench_timeout_handling(c: &mut Criterion) {
             }
         });
     });
-    
+
     group.finish();
 }
 
@@ -590,7 +576,7 @@ fn bench_timeout_handling(c: &mut Criterion) {
 fn compute_query_hash(name: &str, qtype: RecordType) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     let mut hasher = DefaultHasher::new();
     name.hash(&mut hasher);
     (qtype as u16).hash(&mut hasher);
@@ -699,28 +685,22 @@ fn create_opt_record(udp_size: u16, do_bit: bool) -> OptRecord {
 /// Create test forward records with some expired
 fn create_test_forward_records(count: usize, expired_ratio: f64) -> Vec<ForwardRecord> {
     use std::time::Duration;
-    
+
     let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
     let client_base = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
-    
+
     (0..count)
         .map(|i| {
             let client_addr = SocketAddr::new(client_base, (20000 + i) as u16);
-            let mut record = ForwardRecord::new(
-                i as u16,
-                client_addr,
-                upstream,
-                i as u64,
-                0,
-            );
-            
+            let mut record = ForwardRecord::new(i as u16, client_addr, upstream, i as u64, 0);
+
             // Make some records expired
             if (i as f64 / count as f64) < expired_ratio {
                 // Artificially age the record by modifying sent_at
                 // In production code, we'd use mock time
                 record.sent_at = std::time::Instant::now() - Duration::from_secs(120);
             }
-            
+
             record
         })
         .collect()
@@ -729,6 +709,7 @@ fn create_test_forward_records(count: usize, expired_ratio: f64) -> Vec<ForwardR
 /// Test server structure for benchmarking
 #[derive(Debug, Clone)]
 struct TestServer {
+    #[allow(dead_code)]
     addr: SocketAddr,
     domain: Option<String>,
     failed_queries: u32,
@@ -754,10 +735,7 @@ criterion_group!(
 
 // Add DNSSEC benchmark only when feature is enabled
 #[cfg(feature = "dnssec")]
-criterion_group!(
-    dnssec_benchmarks,
-    bench_dnssec_propagation,
-);
+criterion_group!(dnssec_benchmarks, bench_dnssec_propagation,);
 
 #[cfg(feature = "dnssec")]
 criterion_main!(forwarding_benchmarks, dnssec_benchmarks);
