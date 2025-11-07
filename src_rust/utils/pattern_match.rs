@@ -54,7 +54,10 @@
 //! Functions operate only on provided parameters without accessing global state (except
 //! for logging via tracing macros).
 
-use tracing::{debug, error};
+use tracing::debug;
+
+#[cfg(debug_assertions)]
+use tracing::error;
 
 /// Match string against glob pattern with wildcard support
 ///
