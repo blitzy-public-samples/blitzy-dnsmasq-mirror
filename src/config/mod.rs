@@ -14,6 +14,9 @@ pub mod types;
 /// Command-line argument parsing
 pub mod options;
 
+/// Configuration file parsing
+pub mod parser;
+
 /// Main configuration structure
 #[derive(Debug, Clone)]
 pub struct Config {
