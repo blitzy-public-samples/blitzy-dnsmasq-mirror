@@ -560,9 +560,17 @@ extern "C" fn ubus_subscribe_cb(
     _ctx: *mut ubus_ffi::ubus_context,
     obj: *mut ubus_ffi::ubus_object,
 ) {
-    trace!("ubus_subscribe_cb called");
-    // Update has_subscribers flag based on obj->has_subscribers
-    // For now, this is a placeholder
+    unsafe {
+        // Read has_subscribers flag from ubus_object struct
+        // The C struct has: int has_subscribers; as a field
+        // This is the 6th field (after id, path, type, methods, n_methods)
+        let has_subscribers = *(obj.add(1) as *const i32);
+        
+        debug!(
+            "ubus subscription callback: {} subscriber(s)",
+            if has_subscribers != 0 { "1" } else { "0" }
+        );
+    }
 }
 
 pub struct UbusManager {
