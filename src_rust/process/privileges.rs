@@ -58,12 +58,38 @@ use crate::ffi::platform::solaris_privileges::{
 
 #[cfg(target_os = "linux")]
 use libc::{
-    __user_cap_data_struct, __user_cap_header_struct, _LINUX_CAPABILITY_VERSION_3,
-    capget, capset, CAP_SETUID,
+    c_int, prctl, PR_SET_KEEPCAPS,
 };
 
+// Linux capabilities API types - defined manually as libc doesn't export consistently
 #[cfg(target_os = "linux")]
-use nix::sys::prctl::{prctl, PrctlOption};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct __user_cap_header_struct {
+    version: u32,
+    pid: c_int,
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct __user_cap_data_struct {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn capget(hdrp: *const __user_cap_header_struct, datap: *mut __user_cap_data_struct) -> c_int;
+    fn capset(hdrp: *const __user_cap_header_struct, datap: *const __user_cap_data_struct) -> c_int;
+}
+
+#[cfg(target_os = "linux")]
+const _LINUX_CAPABILITY_VERSION_3: u32 = 0x20080522;
+
+#[cfg(target_os = "linux")]
+const CAP_SETUID: u32 = 7;
 
 /// Errors that can occur during privilege dropping operations
 #[derive(Debug)]
@@ -309,7 +335,7 @@ fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
     use std::mem::MaybeUninit;
     
     // Read current capabilities
-    let mut header = __user_cap_header_struct {
+    let header = __user_cap_header_struct {
         version: _LINUX_CAPABILITY_VERSION_3,
         pid: 0, // 0 = current process
     };
@@ -320,7 +346,7 @@ fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
     // The kernel will fill in the data structure
     let result = unsafe {
         capget(
-            &mut header as *mut __user_cap_header_struct,
+            &header as *const __user_cap_header_struct,
             data.as_mut_ptr() as *mut __user_cap_data_struct,
         )
     };
@@ -366,15 +392,19 @@ fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
     
     // Enable PR_SET_KEEPCAPS to preserve capabilities across setuid()
     // Without this, all capabilities would be cleared by setuid()
-    prctl(PrctlOption::PR_SET_KEEPCAPS(1))
-        .map_err(|e| {
-            let err = IoError::from_raw_os_error(e as i32);
-            error!("Failed to set PR_SET_KEEPCAPS: {}", err);
-            PrivilegeError::CapabilityError(
-                "prctl PR_SET_KEEPCAPS".to_string(),
-                err,
-            )
-        })?;
+    // SAFETY: prctl is called with valid PR_SET_KEEPCAPS option
+    let result = unsafe {
+        prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        error!("Failed to set PR_SET_KEEPCAPS: {}", err);
+        return Err(PrivilegeError::CapabilityError(
+            "prctl PR_SET_KEEPCAPS".to_string(),
+            err,
+        ));
+    }
     
     debug!("Enabled PR_SET_KEEPCAPS");
     
@@ -392,7 +422,7 @@ fn linux_drop_setuid_capability() -> Result<(), PrivilegeError> {
     use std::mem::MaybeUninit;
     
     // Read current capabilities
-    let mut header = __user_cap_header_struct {
+    let header = __user_cap_header_struct {
         version: _LINUX_CAPABILITY_VERSION_3,
         pid: 0,
     };
@@ -402,7 +432,7 @@ fn linux_drop_setuid_capability() -> Result<(), PrivilegeError> {
     // SAFETY: capget is called with valid pointers
     let result = unsafe {
         capget(
-            &mut header as *mut __user_cap_header_struct,
+            &header as *const __user_cap_header_struct,
             data.as_mut_ptr() as *mut __user_cap_data_struct,
         )
     };
