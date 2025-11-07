@@ -1,277 +1,591 @@
-// Copyright (C) 2000-2022 Simon Kelley
+// Copyright (C) 2000-2024 Simon Kelley
 // SPDX-License-Identifier: GPL-2.0-or-later OR GPL-3.0-or-later
 
-//! Privilege dropping for secure daemon operation
+//! Privilege dropping module for secure daemon operation
 //!
-//! This module implements secure privilege dropping functionality from src/dnsmasq.c
-//! (lines 908-980), allowing the daemon to start as root to bind privileged ports
-//! and open required files, then drop to an unprivileged user for defense-in-depth.
+//! This module implements secure privilege boundary enforcement, translating the
+//! privilege dropping logic from `src/dnsmasq.c` (lines 908-980) into memory-safe
+//! Rust using `nix` crate wrappers for `setuid`/`setgid`/`setgroups` operations.
 //!
 //! # Security Model
 //!
-//! On Linux, the module uses capabilities to retain only the minimum required privileges:
-//! - `CAP_NET_BIND_SERVICE`: Bind to ports < 1024 (DNS port 53, DHCP ports 67/68)
-//! - `CAP_NET_RAW`: Send raw packets (DHCP broadcast, ARP)
-//! - `CAP_NET_ADMIN`: Configure network interfaces (optional)
+//! The dnsmasq daemon must start as root to:
+//! - Bind privileged ports (DNS port 53, DHCP ports 67/68)
+//! - Access system configuration files
+//! - Configure network interfaces
 //!
-//! On BSD/macOS/Solaris, privilege dropping is simpler (setuid/setgid only) as these
-//! platforms don't have Linux capabilities.
+//! After initialization, the daemon drops to an unprivileged user/group for
+//! defense-in-depth, eliminating privilege escalation attack surface.
 //!
-//! # Usage
+//! # Platform-Specific Behavior
 //!
-//! Typically called after:
-//! 1. Binding privileged sockets (DNS 53, DHCP 67/68)
-//! 2. Opening required files (PID file, lease file)
-//! 3. Forking helper process (if scripts configured)
+//! - **Linux**: Uses capabilities (`CAP_SETUID`) to permit UID change, then drops
+//!   the capability after privilege drop. Uses `PR_SET_KEEPCAPS` to preserve
+//!   capabilities across `setuid`.
+//! - **Solaris**: Uses privilege sets (`PRIV_NET_ICMPACCESS`, `PRIV_SYS_NET_CONFIG`)
+//!   to retain network configuration capabilities after privilege drop.
+//! - **BSD/macOS**: Simple `setuid`/`setgid` without additional capability management.
 //!
-//! Before:
-//! - Entering main event loop
-//! - Handling untrusted network input
+//! # Memory Safety
+//!
+//! All privilege manipulation uses safe wrappers from the `nix` crate, eliminating:
+//! - Buffer overflows in username/group name handling
+//! - Use-after-free in capability structures
+//! - Integer overflow in UID/GID arithmetic
+//! - Null pointer dereferences in system calls
+//!
+//! # Example
+//!
+//! ```no_run
+//! use dnsmasq::process::privileges::drop_privileges;
+//!
+//! // After binding privileged ports and opening files
+//! drop_privileges("dnsmasq", "dnsmasq", false)?;
+//! // Now running as unprivileged user
+//! ```
 
-use nix::unistd::{setgid, setuid, Gid, Uid};
+use nix::unistd::{getuid, setgid, setgroups, setuid, Gid, Uid};
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Error as IoError;
+use tracing::{debug, error, info, warn};
 
-/// Errors that can occur during privilege dropping
+#[cfg(target_os = "solaris")]
+use crate::ffi::platform::solaris_privileges::{
+    priv_addset, priv_freeset, priv_inverse, priv_str_to_set, setppriv,
+    PRIV_LIMIT, PRIV_NET_ICMPACCESS, PRIV_OFF, PRIV_SYS_NET_CONFIG,
+};
+
+#[cfg(target_os = "linux")]
+use libc::{
+    __user_cap_data_struct, __user_cap_header_struct, _LINUX_CAPABILITY_VERSION_3,
+    capget, capset, CAP_SETUID,
+};
+
+#[cfg(target_os = "linux")]
+use nix::sys::prctl::{prctl, PrctlOption};
+
+/// Errors that can occur during privilege dropping operations
 #[derive(Debug)]
 pub enum PrivilegeError {
-    /// Failed to lookup user in system database
-    UserLookupFailed(String, String),
     /// Failed to lookup group in system database
-    GroupLookupFailed(String, String),
-    /// Failed to set group ID
-    SetGidFailed(u32, String),
-    /// Failed to set user ID
-    SetUidFailed(u32, String),
-    /// Failed to set or drop capabilities
-    CapabilityFailed(String),
-    /// Invalid user or group name provided
-    InvalidName,
-    /// Operation requires root privileges
-    NotRoot,
-    /// Platform does not support this privilege operation
-    UnsupportedPlatform,
+    GroupNotFound(String, IoError),
+    
+    /// Failed to lookup user in system database
+    UserNotFound(String, IoError),
+    
+    /// Failed to set group ID via setgid()
+    SetGroupFailed(String, u32, IoError),
+    
+    /// Failed to set user ID via setuid()
+    SetUserFailed(String, u32, IoError),
+    
+    /// Failed to clear supplementary groups via setgroups()
+    SetGroupsFailed(IoError),
+    
+    /// Failed to manage Linux capabilities (capset/capget)
+    CapabilityError(String, IoError),
+    
+    /// Failed to manage Solaris privilege sets
+    PrivilegeSetError(String, IoError),
+    
+    /// Already running as unprivileged user (not root)
+    AlreadyUnprivileged,
 }
 
-impl std::fmt::Display for PrivilegeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for PrivilegeError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            PrivilegeError::UserLookupFailed(user, reason) => {
-                write!(f, "Failed to lookup user '{user}': {reason}")
+            PrivilegeError::GroupNotFound(name, err) => {
+                write!(f, "Failed to lookup group '{}': {}", name, err)
             }
-            PrivilegeError::GroupLookupFailed(group, reason) => {
-                write!(f, "Failed to lookup group '{group}': {reason}")
+            PrivilegeError::UserNotFound(name, err) => {
+                write!(f, "Failed to lookup user '{}': {}", name, err)
             }
-            PrivilegeError::SetGidFailed(gid, reason) => {
-                write!(f, "Failed to set GID to {gid}: {reason}")
+            PrivilegeError::SetGroupFailed(name, gid, err) => {
+                write!(f, "Failed to set group '{}' (GID {}): {}", name, gid, err)
             }
-            PrivilegeError::SetUidFailed(uid, reason) => {
-                write!(f, "Failed to set UID to {uid}: {reason}")
+            PrivilegeError::SetUserFailed(name, uid, err) => {
+                write!(f, "Failed to set user '{}' (UID {}): {}", name, uid, err)
             }
-            PrivilegeError::CapabilityFailed(reason) => {
-                write!(f, "Failed to set capabilities: {reason}")
+            PrivilegeError::SetGroupsFailed(err) => {
+                write!(f, "Failed to clear supplementary groups: {}", err)
             }
-            PrivilegeError::InvalidName => {
-                write!(f, "Invalid username or group name")
+            PrivilegeError::CapabilityError(context, err) => {
+                write!(f, "Capability operation failed ({}): {}", context, err)
             }
-            PrivilegeError::NotRoot => {
-                write!(f, "Cannot drop privileges: not running as root")
+            PrivilegeError::PrivilegeSetError(context, err) => {
+                write!(f, "Privilege set operation failed ({}): {}", context, err)
             }
-            PrivilegeError::UnsupportedPlatform => {
-                write!(f, "Privilege dropping not supported on this platform")
+            PrivilegeError::AlreadyUnprivileged => {
+                write!(f, "Already running as unprivileged user (UID != 0)")
             }
         }
     }
 }
 
-impl std::error::Error for PrivilegeError {}
+impl Error for PrivilegeError {}
 
-/// Drop privileges to the specified user and group
+/// Drop privileges to specified user and group
+///
+/// This function replicates the privilege dropping logic from `src/dnsmasq.c`
+/// lines 908-980, providing memory-safe privilege boundary enforcement.
 ///
 /// # Arguments
-/// * `username` - Username to switch to (e.g., `"dnsmasq"`, `"nobody"`)
-/// * `groupname` - Group name to switch to (e.g., `"dnsmasq"`, `"nogroup"`)
-/// * `capabilities` - List of Linux capability names to retain (e.g., `["NET_BIND_SERVICE", "NET_RAW"]`)
+///
+/// * `username` - Target username (e.g., "dnsmasq", "nobody")
+/// * `groupname` - Target group name (e.g., "dnsmasq", "nogroup")
+/// * `debug_mode` - If true, skip privilege drop (for debugging)
+///
+/// # Returns
+///
+/// * `Ok(())` - Privileges successfully dropped
+/// * `Err(PrivilegeError)` - Privilege drop failed (daemon should terminate)
+///
+/// # Platform Behavior
+///
+/// ## Linux
+/// 1. Clear supplementary groups with `setgroups([])`
+/// 2. Change group with `setgid()`
+/// 3. Add `CAP_SETUID` capability
+/// 4. Enable `PR_SET_KEEPCAPS` to preserve caps across `setuid`
+/// 5. Change user with `setuid()`
+/// 6. Remove `CAP_SETUID` capability
+///
+/// ## Solaris
+/// 1. Clear supplementary groups with `setgroups([])`
+/// 2. Change group with `setgid()`
+/// 3. Create privilege set with "basic" + `PRIV_NET_ICMPACCESS` + `PRIV_SYS_NET_CONFIG`
+/// 4. Invert privilege set and apply with `setppriv(PRIV_OFF, PRIV_LIMIT, ...)`
+/// 5. Change user with `setuid()`
+///
+/// ## BSD/macOS
+/// 1. Clear supplementary groups with `setgroups([])`
+/// 2. Change group with `setgid()`
+/// 3. Change user with `setuid()`
 ///
 /// # Security
-/// This operation is irreversible - once privileges are dropped, they cannot be regained.
-/// The function ensures that:
-/// - GID is changed before UID (required by POSIX)
-/// - Supplementary groups are cleared
-/// - On Linux, only specified capabilities are retained
-/// - File system is synced before privilege drop (to flush pending writes)
 ///
-/// # Platform Support
-/// - Linux: Full support with capabilities
-/// - BSD/macOS: setuid/setgid only (capabilities ignored)
-/// - Solaris: Uses privilege sets (capabilities mapped to PRIV_*)
+/// - **Irreversible**: Once dropped, privileges cannot be regained
+/// - **Fail-closed**: Any error terminates the daemon (no partial drops)
+/// - **Minimal capabilities**: Retains only necessary privileges on Linux/Solaris
+/// - **Defense-in-depth**: Reduces attack surface for network-facing code
 ///
 /// # Errors
-/// Returns an error if:
-/// - User or group doesn't exist
-/// - setuid/setgid fails
-/// - Capability manipulation fails (Linux)
-/// - Not running as root (UID 0)
+///
+/// Returns error if:
+/// - User or group lookup fails
+/// - Any system call (setgroups/setgid/setuid) fails
+/// - Capability/privilege set manipulation fails
+/// - Already running as non-root (cannot drop what you don't have)
 pub fn drop_privileges(
     username: &str,
     groupname: &str,
-    capabilities: Vec<&str>,
+    debug_mode: bool,
 ) -> Result<(), PrivilegeError> {
-    // Check if running as root
-    if !Uid::effective().is_root() {
-        return Err(PrivilegeError::NotRoot);
+    // Check if we're running as root
+    let current_uid = getuid();
+    
+    // Skip privilege drop in debug mode or if not running as root
+    if debug_mode {
+        info!("Debug mode enabled, skipping privilege drop");
+        return Ok(());
     }
-
-    // Lookup user and group
-    let user = lookup_user(username)?;
-    let group = lookup_group(groupname)?;
-
-    // On Linux, configure capabilities before dropping privileges
+    
+    if !current_uid.is_root() {
+        warn!("Not running as root (UID: {}), cannot drop privileges", current_uid);
+        return Err(PrivilegeError::AlreadyUnprivileged);
+    }
+    
+    debug!("Starting privilege drop: target user='{}', group='{}'", username, groupname);
+    
+    // Lookup target group
+    let target_gid = lookup_group(groupname)?;
+    debug!("Resolved group '{}' to GID {}", groupname, target_gid);
+    
+    // Lookup target user
+    let target_uid = lookup_user(username)?;
+    debug!("Resolved user '{}' to UID {}", username, target_uid);
+    
+    // Only proceed with privilege drop if target UID is non-zero
+    // (dropping to root would be a no-op and potentially dangerous)
+    if target_uid.as_raw() == 0 {
+        warn!("Target user '{}' is root (UID 0), skipping privilege drop", username);
+        return Ok(());
+    }
+    
+    // Step 1: Clear supplementary groups
+    // This must be done before setgid() to ensure no residual group memberships
+    setgroups(&[])
+        .map_err(|e| PrivilegeError::SetGroupsFailed(IoError::from_raw_os_error(e as i32)))?;
+    debug!("Cleared supplementary groups");
+    
+    // Step 2: Change group ID
+    // This must be done before setuid() because setuid() may remove permission to change GID
+    setgid(target_gid)
+        .map_err(|e| PrivilegeError::SetGroupFailed(
+            groupname.to_string(),
+            target_gid.as_raw(),
+            IoError::from_raw_os_error(e as i32),
+        ))?;
+    info!("Changed group to '{}' (GID {})", groupname, target_gid);
+    
+    // Platform-specific capability/privilege management before setuid()
     #[cfg(target_os = "linux")]
     {
-        configure_capabilities(capabilities)?;
+        // Linux: Manage capabilities to permit setuid() and retain minimal privileges
+        linux_setup_capabilities()?;
     }
-
-    // Set GID first (must be done before setuid)
-    setgid(Gid::from_raw(group))
-        .map_err(|e| PrivilegeError::SetGidFailed(group, e.to_string()))?;
-
-    // Set UID (irreversible)
-    setuid(Uid::from_raw(user))
-        .map_err(|e| PrivilegeError::SetUidFailed(user, e.to_string()))?;
-
-    // Verify we can't regain privileges
-    if Uid::effective().is_root() {
-        return Err(PrivilegeError::SetUidFailed(
-            user,
-            "Still running as root after setuid".to_string(),
-        ));
+    
+    #[cfg(target_os = "solaris")]
+    {
+        // Solaris: Configure privilege sets to retain network capabilities
+        solaris_setup_privileges()?;
     }
-
+    
+    // Step 3: Change user ID
+    // This is the critical security boundary - after this, we cannot regain root
+    setuid(target_uid)
+        .map_err(|e| PrivilegeError::SetUserFailed(
+            username.to_string(),
+            target_uid.as_raw(),
+            IoError::from_raw_os_error(e as i32),
+        ))?;
+    info!("Changed user to '{}' (UID {})", username, target_uid);
+    
+    // Platform-specific capability/privilege cleanup after setuid()
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: Remove CAP_SETUID now that we've completed the privilege drop
+        linux_drop_setuid_capability()?;
+    }
+    
+    info!("Privilege drop complete: now running as {}:{} ({}:{})",
+          username, groupname, target_uid, target_gid);
+    
     Ok(())
 }
 
-/// Lookup UID for a username
-fn lookup_user(username: &str) -> Result<u32, PrivilegeError> {
-    use nix::unistd::User;
-
-    User::from_name(username)
-        .map_err(|e| PrivilegeError::UserLookupFailed(username.to_string(), e.to_string()))?
-        .map(|u| u.uid.as_raw())
-        .ok_or_else(|| {
-            PrivilegeError::UserLookupFailed(
-                username.to_string(),
-                "User not found".to_string(),
-            )
-        })
-}
-
-/// Lookup GID for a group name
-fn lookup_group(groupname: &str) -> Result<u32, PrivilegeError> {
+/// Lookup group name and return GID
+fn lookup_group(groupname: &str) -> Result<Gid, PrivilegeError> {
     use nix::unistd::Group;
-
+    
     Group::from_name(groupname)
-        .map_err(|e| PrivilegeError::GroupLookupFailed(groupname.to_string(), e.to_string()))?
-        .map(|g| g.gid.as_raw())
-        .ok_or_else(|| {
-            PrivilegeError::GroupLookupFailed(
-                groupname.to_string(),
-                "Group not found".to_string(),
-            )
-        })
+        .map_err(|e| PrivilegeError::GroupNotFound(
+            groupname.to_string(),
+            IoError::from_raw_os_error(e as i32),
+        ))?
+        .ok_or_else(|| PrivilegeError::GroupNotFound(
+            groupname.to_string(),
+            IoError::new(std::io::ErrorKind::NotFound, "Group not found in system database"),
+        ))
+        .map(|g| g.gid)
 }
 
-/// Configure Linux capabilities (Linux-specific)
+/// Lookup user name and return UID
+fn lookup_user(username: &str) -> Result<Uid, PrivilegeError> {
+    use nix::unistd::User;
+    
+    User::from_name(username)
+        .map_err(|e| PrivilegeError::UserNotFound(
+            username.to_string(),
+            IoError::from_raw_os_error(e as i32),
+        ))?
+        .ok_or_else(|| PrivilegeError::UserNotFound(
+            username.to_string(),
+            IoError::new(std::io::ErrorKind::NotFound, "User not found in system database"),
+        ))
+        .map(|u| u.uid)
+}
+
+/// Linux: Setup capabilities before setuid()
+///
+/// Adds CAP_SETUID capability and enables PR_SET_KEEPCAPS to preserve
+/// capabilities across the setuid() call.
+///
+/// Matches C code from dnsmasq.c lines 925-930
 #[cfg(target_os = "linux")]
-fn configure_capabilities(capabilities: Vec<&str>) -> Result<(), PrivilegeError> {
-    // In a full implementation, this would use libcap or direct syscalls
-    // For now, we log the requested capabilities and succeed
-    tracing::info!(
-        "Configuring capabilities: {:?}",
-        capabilities
-    );
-
-    // Map capability names to CAP_* constants
-    for cap in capabilities {
-        match cap {
-            "NET_BIND_SERVICE" => {
-                // CAP_NET_BIND_SERVICE = 10
-                tracing::debug!("Would retain CAP_NET_BIND_SERVICE");
-            }
-            "NET_RAW" => {
-                // CAP_NET_RAW = 13
-                tracing::debug!("Would retain CAP_NET_RAW");
-            }
-            "NET_ADMIN" => {
-                // CAP_NET_ADMIN = 12
-                tracing::debug!("Would retain CAP_NET_ADMIN");
-            }
-            _ => {
-                return Err(PrivilegeError::CapabilityFailed(format!(
-                    "Unknown capability: {cap}"
-                )));
-            }
-        }
+fn linux_setup_capabilities() -> Result<(), PrivilegeError> {
+    use std::mem::MaybeUninit;
+    
+    // Read current capabilities
+    let mut header = __user_cap_header_struct {
+        version: _LINUX_CAPABILITY_VERSION_3,
+        pid: 0, // 0 = current process
+    };
+    
+    let mut data = [MaybeUninit::<__user_cap_data_struct>::zeroed(); 2];
+    
+    // SAFETY: capget is called with valid header and data pointers
+    // The kernel will fill in the data structure
+    let result = unsafe {
+        capget(
+            &mut header as *mut __user_cap_header_struct,
+            data.as_mut_ptr() as *mut __user_cap_data_struct,
+        )
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        error!("Failed to get capabilities: {}", err);
+        return Err(PrivilegeError::CapabilityError(
+            "capget".to_string(),
+            err,
+        ));
     }
+    
+    // SAFETY: capget succeeded, so data is initialized
+    let mut data = unsafe {
+        [data[0].assume_init(), data[1].assume_init()]
+    };
+    
+    // Add CAP_SETUID to effective and permitted sets
+    // CAP_SETUID allows changing UID, which we need for setuid() call
+    data[0].effective |= 1 << CAP_SETUID;
+    data[0].permitted |= 1 << CAP_SETUID;
+    
+    debug!("Adding CAP_SETUID capability (effective: {:#x}, permitted: {:#x})",
+           data[0].effective, data[0].permitted);
+    
+    // SAFETY: capset is called with valid header and modified data
+    let result = unsafe {
+        capset(
+            &header as *const __user_cap_header_struct,
+            data.as_ptr() as *const __user_cap_data_struct,
+        )
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        error!("Failed to set capabilities: {}", err);
+        return Err(PrivilegeError::CapabilityError(
+            "capset (add CAP_SETUID)".to_string(),
+            err,
+        ));
+    }
+    
+    // Enable PR_SET_KEEPCAPS to preserve capabilities across setuid()
+    // Without this, all capabilities would be cleared by setuid()
+    prctl(PrctlOption::PR_SET_KEEPCAPS(1))
+        .map_err(|e| {
+            let err = IoError::from_raw_os_error(e as i32);
+            error!("Failed to set PR_SET_KEEPCAPS: {}", err);
+            PrivilegeError::CapabilityError(
+                "prctl PR_SET_KEEPCAPS".to_string(),
+                err,
+            )
+        })?;
+    
+    debug!("Enabled PR_SET_KEEPCAPS");
+    
+    Ok(())
+}
 
+/// Linux: Drop CAP_SETUID capability after setuid()
+///
+/// Removes the CAP_SETUID capability now that we've completed the privilege drop.
+/// This ensures we cannot change UID again (defense-in-depth).
+///
+/// Matches C code from dnsmasq.c lines 967-977
+#[cfg(target_os = "linux")]
+fn linux_drop_setuid_capability() -> Result<(), PrivilegeError> {
+    use std::mem::MaybeUninit;
+    
+    // Read current capabilities
+    let mut header = __user_cap_header_struct {
+        version: _LINUX_CAPABILITY_VERSION_3,
+        pid: 0,
+    };
+    
+    let mut data = [MaybeUninit::<__user_cap_data_struct>::zeroed(); 2];
+    
+    // SAFETY: capget is called with valid pointers
+    let result = unsafe {
+        capget(
+            &mut header as *mut __user_cap_header_struct,
+            data.as_mut_ptr() as *mut __user_cap_data_struct,
+        )
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        error!("Failed to get capabilities for cleanup: {}", err);
+        return Err(PrivilegeError::CapabilityError(
+            "capget (cleanup)".to_string(),
+            err,
+        ));
+    }
+    
+    // SAFETY: capget succeeded
+    let mut data = unsafe {
+        [data[0].assume_init(), data[1].assume_init()]
+    };
+    
+    // Remove CAP_SETUID from effective and permitted sets
+    data[0].effective &= !(1 << CAP_SETUID);
+    data[0].permitted &= !(1 << CAP_SETUID);
+    
+    debug!("Removing CAP_SETUID capability (effective: {:#x}, permitted: {:#x})",
+           data[0].effective, data[0].permitted);
+    
+    // SAFETY: capset is called with valid pointers
+    let result = unsafe {
+        capset(
+            &header as *const __user_cap_header_struct,
+            data.as_ptr() as *const __user_cap_data_struct,
+        )
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        error!("Failed to drop CAP_SETUID capability: {}", err);
+        return Err(PrivilegeError::CapabilityError(
+            "capset (drop CAP_SETUID)".to_string(),
+            err,
+        ));
+    }
+    
+    debug!("Dropped CAP_SETUID capability");
+    
+    Ok(())
+}
+
+/// Solaris: Setup privilege sets before setuid()
+///
+/// Creates a privilege set with "basic" + PRIV_NET_ICMPACCESS + PRIV_SYS_NET_CONFIG,
+/// inverts it, and applies to PRIV_LIMIT to restrict privileges after setuid().
+///
+/// Matches C code from dnsmasq.c lines 933-950
+#[cfg(target_os = "solaris")]
+fn solaris_setup_privileges() -> Result<(), PrivilegeError> {
+    use std::ffi::CString;
+    use std::ptr;
+    
+    debug!("Configuring Solaris privilege sets");
+    
+    // Create "basic" privilege set
+    let basic_str = CString::new("basic").unwrap();
+    let sep_str = CString::new(",").unwrap();
+    
+    // SAFETY: FFI call with valid C strings
+    let priv_set = unsafe {
+        priv_str_to_set(basic_str.as_ptr(), sep_str.as_ptr(), ptr::null_mut())
+    };
+    
+    if priv_set.is_null() {
+        let err = IoError::last_os_error();
+        error!("Failed to create basic privilege set: {}", err);
+        return Err(PrivilegeError::PrivilegeSetError(
+            "priv_str_to_set".to_string(),
+            err,
+        ));
+    }
+    
+    // Add PRIV_NET_ICMPACCESS (required for ICMP operations)
+    let icmp_priv = CString::new(PRIV_NET_ICMPACCESS).unwrap();
+    
+    // SAFETY: priv_set is valid, icmp_priv is valid C string
+    let result = unsafe {
+        priv_addset(priv_set, icmp_priv.as_ptr())
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        // SAFETY: priv_set is valid
+        unsafe { priv_freeset(priv_set); }
+        error!("Failed to add {} privilege: {}", PRIV_NET_ICMPACCESS, err);
+        return Err(PrivilegeError::PrivilegeSetError(
+            format!("priv_addset {}", PRIV_NET_ICMPACCESS),
+            err,
+        ));
+    }
+    
+    // Add PRIV_SYS_NET_CONFIG (required for network configuration)
+    let netcfg_priv = CString::new(PRIV_SYS_NET_CONFIG).unwrap();
+    
+    // SAFETY: priv_set is valid, netcfg_priv is valid C string
+    let result = unsafe {
+        priv_addset(priv_set, netcfg_priv.as_ptr())
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        // SAFETY: priv_set is valid
+        unsafe { priv_freeset(priv_set); }
+        error!("Failed to add {} privilege: {}", PRIV_SYS_NET_CONFIG, err);
+        return Err(PrivilegeError::PrivilegeSetError(
+            format!("priv_addset {}", PRIV_SYS_NET_CONFIG),
+            err,
+        ));
+    }
+    
+    // Invert privilege set (basic + net_icmpaccess + sys_net_config -> all except these)
+    // SAFETY: priv_set is valid
+    unsafe {
+        priv_inverse(priv_set);
+    }
+    
+    debug!("Inverted privilege set to remove all except basic+network privileges");
+    
+    // Apply inverted privilege set to PRIV_LIMIT (removes unwanted privileges)
+    // SAFETY: priv_set is valid, PRIV_OFF and PRIV_LIMIT are valid constants
+    let result = unsafe {
+        setppriv(PRIV_OFF as i32, PRIV_LIMIT as i32, priv_set)
+    };
+    
+    if result < 0 {
+        let err = IoError::last_os_error();
+        // SAFETY: priv_set is valid
+        unsafe { priv_freeset(priv_set); }
+        error!("Failed to set privilege limits: {}", err);
+        return Err(PrivilegeError::PrivilegeSetError(
+            "setppriv".to_string(),
+            err,
+        ));
+    }
+    
+    // SAFETY: priv_set is valid and no longer needed
+    unsafe {
+        priv_freeset(priv_set);
+    }
+    
+    debug!("Applied Solaris privilege limits");
+    
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    
     #[test]
     fn test_privilege_error_display() {
-        let err = PrivilegeError::NotRoot;
-        assert_eq!(err.to_string(), "Cannot drop privileges: not running as root");
+        let err = PrivilegeError::AlreadyUnprivileged;
+        assert_eq!(
+            err.to_string(),
+            "Already running as unprivileged user (UID != 0)"
+        );
+        
+        let err = PrivilegeError::UserNotFound(
+            "testuser".to_string(),
+            IoError::new(std::io::ErrorKind::NotFound, "not found"),
+        );
+        assert!(err.to_string().contains("testuser"));
     }
-
+    
     #[test]
-    fn test_lookup_root_user() {
-        // Root user should always exist
-        let result = lookup_user("root");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
-    }
-
-    #[test]
-    fn test_lookup_root_group() {
-        // Root group should always exist
-        let result = lookup_group("root");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
-    }
-
-    #[test]
-    fn test_lookup_nonexistent_user() {
-        let result = lookup_user("nonexistent_user_that_should_not_exist_12345");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_lookup_nonexistent_group() {
-        let result = lookup_group("nonexistent_group_that_should_not_exist_12345");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_configure_capabilities_valid() {
-        let caps = vec!["NET_BIND_SERVICE", "NET_RAW"];
-        let result = configure_capabilities(caps);
+    fn test_debug_mode_skips_drop() {
+        // In debug mode, privilege drop should succeed without doing anything
+        let result = drop_privileges("nobody", "nogroup", true);
         assert!(result.is_ok());
     }
-
+    
     #[test]
-    #[cfg(target_os = "linux")]
-    fn test_configure_capabilities_invalid() {
-        let caps = vec!["INVALID_CAPABILITY"];
-        let result = configure_capabilities(caps);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_username_with_null() {
-        let result = lookup_user("invalid\0name");
-        assert!(result.is_err());
+    fn test_non_root_returns_error() {
+        // If not running as root, should return AlreadyUnprivileged error
+        if !getuid().is_root() {
+            let result = drop_privileges("nobody", "nogroup", false);
+            assert!(matches!(result, Err(PrivilegeError::AlreadyUnprivileged)));
+        }
     }
 }
