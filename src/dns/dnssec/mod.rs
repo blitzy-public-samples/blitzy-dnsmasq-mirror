@@ -7,6 +7,10 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated 29 June, 2007.
 
+// DNSSEC module is only included when the dnssec feature is enabled
+// Feature gate applied in parent module: src/dns/mod.rs at line 273
+// This matches C's HAVE_DNSSEC compile-time flag
+
 //! DNSSEC validation subsystem for dnsmasq-rs
 //!
 //! This module implements complete DNSSEC (DNS Security Extensions) validation
@@ -53,32 +57,35 @@
 //! # Usage Example
 //!
 //! ```rust,no_run
-//! use dnsmasq::dns::dnssec::{validate_reply, DnssecStatus, TrustAnchor};
+//! use dnsmasq::dns::dnssec::{validate_reply, DnssecStatus, TrustAnchor, ValidationResult};
+//! use dnsmasq::dns::dnssec::validation::DnsMessage;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let response = unimplemented!();
-//! # let trust_anchors = vec![];
+//! # let mut response = unimplemented!();
+//! # let trust_anchors: Vec<TrustAnchor> = vec![];
 //! # let query_name = String::new();
 //! # let keyname = String::new();
 //! async fn validate_dns_response(
-//!     response: &DnsMessage,
-//!     trust_anchors: &[TrustAnchor]
-//! ) -> DnssecResult<DnssecStatus> {
-//!     let status = validate_reply(
+//!     response: &mut DnsMessage,
+//!     trust_anchors: &[TrustAnchor],
+//!     query_name: &str,
+//!     keyname: &str,
+//! ) -> Result<DnssecStatus, Box<dyn std::error::Error>> {
+//!     let result = validate_reply(
 //!         response,
 //!         trust_anchors,
-//!         &query_name,
-//!         &keyname,
+//!         query_name,
+//!         keyname,
 //!     ).await?;
 //!     
-//!     match status {
+//!     match result.status {
 //!         DnssecStatus::Secure => println!("Response cryptographically verified"),
 //!         DnssecStatus::Insecure => println!("Response unsigned but provably insecure"),
 //!         DnssecStatus::Bogus => println!("Response failed validation"),
 //!         DnssecStatus::Indeterminate => println!("Unable to validate"),
 //!     }
 //!     
-//!     Ok(status)
+//!     Ok(result.status)
 //! }
 //! # Ok(())
 //! # }
