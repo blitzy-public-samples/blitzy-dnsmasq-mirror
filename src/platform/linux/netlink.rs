@@ -216,7 +216,7 @@ pub enum AddressFamily {
 
 impl AddressFamily {
     /// Convert to libc address family constant
-    fn to_libc(&self) -> i32 {
+    fn to_libc(self) -> i32 {
         match self {
             AddressFamily::Inet => libc::AF_INET,
             AddressFamily::Inet6 => libc::AF_INET6,
@@ -226,7 +226,7 @@ impl AddressFamily {
     }
     
     /// Convert to netlink_packet_route::AddressFamily
-    fn to_netlink_family(&self) -> netlink_packet_route::AddressFamily {
+    fn to_netlink_family(self) -> netlink_packet_route::AddressFamily {
         match self {
             AddressFamily::Inet => netlink_packet_route::AddressFamily::Inet,
             AddressFamily::Inet6 => netlink_packet_route::AddressFamily::Inet6,
@@ -421,7 +421,7 @@ impl NetlinkSocket {
         // Get the PID assigned by the kernel
         let mut sockaddr = NetlinkSocketAddr::new(0, 0);
         socket.get_address(&mut sockaddr)
-            .map_err(|e| NetlinkError::SocketError(e))?;
+            .map_err(NetlinkError::SocketError)?;
         let pid = sockaddr.port_number();
 
         debug!("Netlink socket initialized with PID {}", pid);
@@ -434,7 +434,7 @@ impl NetlinkSocket {
 
         // Wrap socket in AsyncFd for Tokio integration
         let async_fd = AsyncFd::new(socket)
-            .map_err(|e| NetlinkError::SocketError(e))?;
+            .map_err(NetlinkError::SocketError)?;
 
         Ok(NetlinkSocket {
             socket: Arc::new(async_fd),
@@ -971,23 +971,23 @@ impl NetlinkMonitor {
                     // Filter for unicast link-scope routes in main/local tables
                     if route_msg.header.kind == RouteType::Unicast &&
                        route_msg.header.scope == RouteScope::Link &&
-                       (route_msg.header.table == libc::RT_TABLE_MAIN as u8 ||
-                        route_msg.header.table == libc::RT_TABLE_LOCAL as u8) {
+                       (route_msg.header.table == libc::RT_TABLE_MAIN ||
+                        route_msg.header.table == libc::RT_TABLE_LOCAL) {
                         
                         // Convert enum types to u8 for storage
                         let route_type_u8 = match route_msg.header.kind {
-                            RouteType::Unicast => libc::RTN_UNICAST as u8,
-                            RouteType::Local => libc::RTN_LOCAL as u8,
-                            RouteType::Broadcast => libc::RTN_BROADCAST as u8,
+                            RouteType::Unicast => libc::RTN_UNICAST,
+                            RouteType::Local => libc::RTN_LOCAL,
+                            RouteType::Broadcast => libc::RTN_BROADCAST,
                             _ => 0, // Other types
                         };
                         
                         let scope_u8 = match route_msg.header.scope {
-                            RouteScope::Universe => libc::RT_SCOPE_UNIVERSE as u8,
-                            RouteScope::Site => libc::RT_SCOPE_SITE as u8,
-                            RouteScope::Link => libc::RT_SCOPE_LINK as u8,
-                            RouteScope::Host => libc::RT_SCOPE_HOST as u8,
-                            RouteScope::NoWhere => libc::RT_SCOPE_NOWHERE as u8,
+                            RouteScope::Universe => libc::RT_SCOPE_UNIVERSE,
+                            RouteScope::Site => libc::RT_SCOPE_SITE,
+                            RouteScope::Link => libc::RT_SCOPE_LINK,
+                            RouteScope::Host => libc::RT_SCOPE_HOST,
+                            RouteScope::NoWhere => libc::RT_SCOPE_NOWHERE,
                             _ => 0, // Other/unknown scope
                         };
                         
@@ -1090,6 +1090,12 @@ pub async fn enumerate_interfaces(family: AddressFamily) -> NetlinkResult<Vec<In
 /// using Netlink RTNETLINK sockets for efficient network interface discovery and monitoring.
 pub struct LinuxPlatform {
     socket: Arc<tokio::sync::OnceCell<NetlinkSocket>>,
+}
+
+impl Default for LinuxPlatform {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LinuxPlatform {
