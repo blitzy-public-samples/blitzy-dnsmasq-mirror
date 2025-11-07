@@ -146,30 +146,13 @@
 //! tasks via `Arc<UdpSocket>` or `Arc<TcpListener>`.
 
 use crate::config::types::Config;
-use crate::core::daemon::Daemon;
 use crate::network::interfaces::{enumerate_interfaces, Interface};
-use crate::network::platform::Platform;
-use crate::utils::general::sa_len;
 use socket2::{Domain, Protocol, Socket, Type as SocketType};
-use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::{TcpListener, UdpSocket};
-use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
-
-// Platform-specific imports for socket options
-#[cfg(target_os = "linux")]
-use nix::sys::socket::{setsockopt, sockopt};
-
-#[cfg(any(
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "macos"
-))]
-use nix::sys::socket::{setsockopt, sockopt};
 
 // TCP constants
 const TCP_BACKLOG: i32 = 32;
@@ -177,12 +160,6 @@ const TCP_BACKLOG: i32 = 32;
 // Interface flags (from <net/if.h>)
 const IFF_UP: u32 = 0x1;
 const IFF_LOOPBACK: u32 = 0x8;
-
-/// Re-export tokio UDP socket for consistent API
-pub use tokio::net::UdpSocket;
-
-/// Re-export tokio TCP listener for consistent API
-pub use tokio::net::TcpListener;
 
 /// Convert interface index to interface name
 ///
@@ -243,6 +220,11 @@ pub fn indextoname(index: u32) -> IoResult<String> {
         .map_err(|e| {
             warn!("Failed to convert interface index {} to name: {}", index, e);
             IoError::new(ErrorKind::NotFound, format!("Interface index {} not found", index))
+        })
+        .and_then(|cstring| {
+            cstring.into_string().map_err(|e| {
+                IoError::new(ErrorKind::InvalidData, format!("Interface name contains invalid UTF-8: {:?}", e))
+            })
         })
 }
 
