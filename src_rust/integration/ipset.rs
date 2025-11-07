@@ -67,10 +67,9 @@ mod linux_impl {
         IPSET_ATTR_IPADDR_IPV4, IPSET_ATTR_IPADDR_IPV6,
         NLA_F_NESTED, NLA_F_NET_BYTEORDER, NFNETLINK_V0,
     };
-    use nix::sys::socket::AddressFamily;
-    use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+    use std::io::Error as IoError;
     use std::mem::size_of;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::IpAddr;
     use std::string::String;
     use std::vec::Vec;
     use thiserror::Error;
@@ -149,7 +148,8 @@ mod linux_impl {
     /// Not thread-safe due to shared Netlink socket. Use within single async task
     /// or protect with Arc<Mutex<IpsetManager>> for multi-threaded access.
     pub struct IpsetManager {
-        socket: Option<NetlinkSocket>,
+        /// Netlink socket held for RAII cleanup (automatic close on drop)
+        _socket: Option<NetlinkSocket>,
         protocol: KernelProtocol,
     }
 
@@ -181,7 +181,7 @@ mod linux_impl {
             // Detect kernel version for protocol selection
             // For now, assume modern kernel (2.6.32+) and use Netlink protocol
             // In production, this would read /proc/version or use uname() syscall
-            let protocol = Self::detect_kernel_protocol()?;
+            let protocol = Self::detect_kernel_protocol();
 
             debug!("Detected ipset protocol: {:?}", protocol);
 
@@ -197,7 +197,7 @@ mod linux_impl {
                     info!("Initialized ipset manager with modern Netlink protocol");
 
                     Ok(Self {
-                        socket: Some(socket),
+                        _socket: Some(socket),
                         protocol,
                     })
                 }
@@ -207,10 +207,22 @@ mod linux_impl {
                     warn!("Using legacy ipset protocol (kernel < 2.6.32), IPv6 not supported");
 
                     Ok(Self {
-                        socket: None,
+                        _socket: None,
                         protocol,
                     })
                 }
+            }
+        }
+
+        /// Create IpsetManager with explicit protocol for testing (test-only)
+        ///
+        /// This allows tests to create IpsetManager instances without requiring
+        /// actual socket creation or root permissions.
+        #[cfg(test)]
+        pub(crate) fn new_with_protocol(protocol: KernelProtocol) -> Self {
+            Self {
+                _socket: None,
+                protocol,
             }
         }
 
@@ -228,27 +240,25 @@ mod linux_impl {
         ///
         /// # Returns
         ///
-        /// `KernelProtocol::Modern` or `KernelProtocol::Legacy`
-        ///
-        /// # Errors
-        ///
-        /// Returns `IpsetError::KernelVersionDetectionFailed` if detection fails
-        fn detect_kernel_protocol() -> Result<KernelProtocol, IpsetError> {
+        /// `KernelProtocol::Modern` or `KernelProtocol::Legacy`.
+        /// Never fails - always returns a protocol variant. On detection errors,
+        /// defaults to Modern and defers error handling to actual operations.
+        fn detect_kernel_protocol() -> KernelProtocol {
             // Try to create modern Netlink socket
             match create_netlink_socket(libc::NETLINK_NETFILTER, 0) {
                 Ok(_socket) => {
                     // Socket creation succeeded, kernel supports modern protocol
                     // Socket will be dropped here, we'll create new one in new()
-                    Ok(KernelProtocol::Modern)
+                    KernelProtocol::Modern
                 }
                 Err(e) if e.raw_os_error() == Some(libc::EPROTONOSUPPORT) => {
                     // Kernel doesn't support NETLINK_NETFILTER, use legacy protocol
-                    Ok(KernelProtocol::Legacy)
+                    KernelProtocol::Legacy
                 }
                 Err(_e) => {
                     // Other error (permission denied, etc.), assume modern and let
                     // new() handle the error with better context
-                    Ok(KernelProtocol::Modern)
+                    KernelProtocol::Modern
                 }
             }
         }
@@ -396,7 +406,7 @@ mod linux_impl {
             })
             .await
             .map_err(|e| {
-                IpsetError::MessageConstructionFailed(format!("Task join error: {}", e))
+                IpsetError::MessageConstructionFailed(format!("Task join error: {e}"))
             })?
         }
 
@@ -483,7 +493,7 @@ mod linux_impl {
             };
 
             // Build Netlink message header
-            let mut nlh = NlMsgHdr {
+            let nlh = NlMsgHdr {
                 nlmsg_len: nl_align(size_of::<NlMsgHdr>()) as u32,
                 nlmsg_type: (if remove { IPSET_CMD_DEL } else { IPSET_CMD_ADD })
                     | ((NFNL_SUBSYS_IPSET as u16) << 8),
@@ -778,11 +788,6 @@ mod linux_impl {
             Ok(())
         }
     }
-
-    // Re-export types at module level for non-Linux platforms to access
-    pub use IpsetError;
-    pub use IpsetManager;
-    pub use KernelProtocol;
 }
 
 // Platform-specific exports
@@ -936,16 +941,10 @@ mod tests {
         // Can't test actual socket creation without root, but can test logic
         #[cfg(target_os = "linux")]
         {
-            let manager_modern = IpsetManager {
-                socket: None,
-                protocol: KernelProtocol::Modern,
-            };
+            let manager_modern = IpsetManager::new_with_protocol(KernelProtocol::Modern);
             assert!(manager_modern.supports_ipv6());
 
-            let manager_legacy = IpsetManager {
-                socket: None,
-                protocol: KernelProtocol::Legacy,
-            };
+            let manager_legacy = IpsetManager::new_with_protocol(KernelProtocol::Legacy);
             assert!(!manager_legacy.supports_ipv6());
         }
     }
@@ -953,10 +952,7 @@ mod tests {
     #[tokio::test]
     #[cfg(target_os = "linux")]
     async fn test_setname_validation() {
-        let manager = IpsetManager {
-            socket: None,
-            protocol: KernelProtocol::Modern,
-        };
+        let manager = IpsetManager::new_with_protocol(KernelProtocol::Modern);
         
         // Name too long (>= 32 chars)
         let long_name = "a".repeat(32);
