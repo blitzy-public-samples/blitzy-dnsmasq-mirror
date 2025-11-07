@@ -52,7 +52,7 @@
 //!
 //! // Later, check if we can compress a reference to this label
 //! if let Some(offset) = ctx.find_suffix("example.com") {
-//!     let pointer_bytes = encode_compression_pointer(offset)?;
+//!     let pointer_bytes = encode_compression_pointer(offset).unwrap();
 //!     // pointer_bytes contains [0xC0, 0x0C] for offset 12
 //! }
 //! ```
@@ -233,7 +233,7 @@ impl LabelType {
 /// use dnsmasq::dns::compression::decode_compression_pointer;
 ///
 /// // Pointer to offset 12: [0xC0, 0x0C]
-/// let offset = decode_compression_pointer(0xC0, 0x0C)?;
+/// let offset = decode_compression_pointer(0xC0, 0x0C);
 /// assert_eq!(offset, 12);
 /// ```
 #[must_use]
@@ -264,7 +264,7 @@ pub fn decode_compression_pointer(byte1: u8, byte2: u8) -> u16 {
 /// ```rust
 /// use dnsmasq::dns::compression::encode_compression_pointer;
 ///
-/// let pointer_bytes = encode_compression_pointer(12)?;
+/// let pointer_bytes = encode_compression_pointer(12).unwrap();
 /// assert_eq!(pointer_bytes, [0xC0, 0x0C]);
 /// ```
 pub fn encode_compression_pointer(offset: u16) -> Result<[u8; 2], CompressionError> {
