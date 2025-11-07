@@ -20,4 +20,5 @@ mod integration {
     pub mod config_tests;
     pub mod dns_tests;
     pub mod platform_tests;
+    pub mod tftp_tests;
 }
