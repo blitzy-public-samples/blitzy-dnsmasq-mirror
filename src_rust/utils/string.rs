@@ -57,13 +57,12 @@
 //! mutable state. Safe for concurrent use in async tokio runtime.
 
 use crate::dns::protocol::{MAXDNAME, MAXLABEL};
-use std::fmt::Write as _;
 use std::str;
 
 #[cfg(feature = "idn")]
-use idna::{domain_to_ascii, Config as IdnaConfig};
+use idna::domain_to_ascii;
 
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 /// Result of internal domain name validation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +72,7 @@ enum CheckNameResult {
     /// Name is valid ASCII, no IDN encoding needed
     ValidAscii = 1,
     /// Name contains non-ASCII or uppercase characters requiring IDN encoding
+    #[cfg(feature = "idn")]
     NeedsIdnEncoding = 2,
 }
 
@@ -246,8 +246,8 @@ fn check_name(name: &mut String) -> CheckNameResult {
 
     let mut dotgap: usize = 0;
     let mut has_non_ascii = false;
+    #[cfg(feature = "idn")]
     let mut has_uppercase = false;
-    let mut has_underscore = false;
 
     // Validate each character (C version lines 367-399)
     for ch in name.chars() {
@@ -275,13 +275,8 @@ fn check_name(name: &mut String) -> CheckNameResult {
             if ch != ' ' {
                 nowhite = true;
 
-                // Check for underscore (C version lines 385-390)
-                // Older libidn2 strips underscores, need to track
-                if ch == '_' {
-                    has_underscore = true;
-                }
-
                 // Check for uppercase (C version lines 392-397)
+                #[cfg(feature = "idn")]
                 if ch.is_ascii_uppercase() {
                     has_uppercase = true;
                 }
