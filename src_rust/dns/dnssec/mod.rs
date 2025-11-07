@@ -398,3 +398,82 @@ pub(crate) mod prelude {
         dnssec_validate_by_ds, dnssec_validate_ds, dnssec_validate_reply,
     };
 }
+
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    /// Test that the module is properly structured and all exports are accessible
+    #[test]
+    fn test_module_structure() {
+        // This test verifies the module compiles and is properly organized
+        // No runtime checks needed - compilation success validates structure
+    }
+    
+    /// Test that types module exports are accessible via re-exports
+    #[test]
+    fn test_type_reexports() {
+        // Verify all type re-exports are accessible
+        let _status = ValidationStatus::Secure;
+        let _digest = DigestType::SHA256;
+        let _algo = DnssecAlgorithm::RsaSha256;
+        
+        // Verify types can be pattern matched
+        match ValidationStatus::Secure {
+            ValidationStatus::Secure => {},
+            ValidationStatus::SecureWildcard => {},
+            ValidationStatus::Insecure => {},
+            ValidationStatus::Bogus(_) => {},
+            ValidationStatus::NeedDs => {},
+            ValidationStatus::NeedKey => {},
+            ValidationStatus::Truncated => {},
+            ValidationStatus::Ok => {},
+            ValidationStatus::Abandoned => {},
+        }
+    }
+    
+    /// Test that trust anchor management types are properly exported
+    #[test]
+    fn test_trust_anchor_exports() {
+        // Verify we can create trust anchor types
+        let _store = TrustAnchorStore::new();
+        let _validator = TimestampValidator::new(None, false);
+    }
+    
+    /// Test that crypto function exports are accessible
+    #[test]
+    fn test_crypto_exports() {
+        // Verify crypto functions exist in namespace
+        // Actual testing of crypto functions is done in crypto module tests
+        let _f1 = algo_digest_name;
+        let _f2 = ds_digest_name;
+        let _f3 = nsec3_digest_name;
+    }
+    
+    /// Test that validator function exports are accessible
+    #[test]
+    fn test_validator_exports() {
+        // Verify validator functions exist in namespace
+        // Actual testing of validation logic is done in validator module tests
+        let _f1 = dnssec_validate_reply;
+        let _f2 = dnssec_validate_by_ds;
+        let _f3 = dnssec_validate_ds;
+    }
+    
+    /// Test that prelude module provides convenient internal imports
+    #[test]
+    fn test_prelude_module() {
+        use crate::dns::dnssec::prelude::*;
+        
+        // Verify prelude imports work
+        let _status = ValidationStatus::Secure;
+        let _store = TrustAnchorStore::new();
+        
+        // Verify function pointers
+        let _f = algo_digest_name;
+    }
+}
