@@ -62,32 +62,26 @@
 //! - `one_file()` (src/option.c lines 6160-6251): File loading with circular include detection
 //! - `option_read_dynfile()` (src/option.c lines 6377+): Directory scanning with file filtering
 
-use crate::config::types::{
-    AuthConfig, AuthZone, CnameRecord, Config, ConfigBuilder, DaemonOptions, DhcpConfig,
-    Dhcp6Option, Dhcp6Range, DhcpOption, DhcpRange, DnsConfig, HostRecord, IntegrationConfig,
-    IpsetConfig, LocalDomain, LoggingConfig, MxRecord, NetworkConfig, NftsetConfig, ProcessConfig,
-    StaticLease, TftpConfig, TxtRecord, UpstreamServer,
-};
+use crate::config::types::{Config, ConfigBuilder};
+use async_recursion::async_recursion;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_until, take_while, take_while1},
-    character::complete::{char, multispace0, space0},
+    bytes::complete::{take_while, take_while1},
+    character::complete::{char, space0},
     combinator::{map, opt, value},
-    error::{ErrorKind, ParseError as NomParseError},
-    multi::many0,
-    sequence::{delimited, preceded, tuple},
+    error::ErrorKind,
+    sequence::preceded,
     Err, IResult,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs::{metadata, Metadata};
-use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
-use tokio::fs::{read_dir, read_to_string, File};
-use tokio::io::AsyncReadExt;
-use tracing::{debug, error, info, trace, warn};
+use tokio::fs::{read_dir, read_to_string};
+use tracing::{debug, info, trace};
 
 /// Parse error types for configuration file processing
 ///
@@ -267,10 +261,14 @@ pub struct ParseContext {
     loaded_files: HashSet<(u64, u64)>,
 
     /// Current configuration builder being populated
-    builder: ConfigBuilder,
+    /// Reserved for future use when full option parsing is implemented
+    #[allow(dead_code)]
+    _builder: ConfigBuilder,
 
     /// Default configuration values
-    defaults: Config,
+    /// Reserved for future use when full option parsing is implemented
+    #[allow(dead_code)]
+    _defaults: Config,
 }
 
 impl ParseContext {
@@ -282,8 +280,8 @@ impl ParseContext {
     pub fn new() -> Self {
         Self {
             loaded_files: HashSet::new(),
-            builder: ConfigBuilder::new(),
-            defaults: Config::default(),
+            _builder: ConfigBuilder::new(),
+            _defaults: Config::default(),
         }
     }
 
@@ -552,7 +550,7 @@ fn parse_config_line(input: &str) -> IResult<&str, ConfigLine> {
 /// - Missing or invalid values
 /// - Missing quotes
 pub fn parse_config_string(content: &str) -> Result<Config, ParseError> {
-    let mut builder = ConfigBuilder::new();
+    let builder = ConfigBuilder::new();
     let mut line_num = 0;
 
     for line in content.lines() {
@@ -668,6 +666,7 @@ pub async fn parse_config_file(path: &Path) -> Result<Config, ParseError> {
 /// # Returns
 ///
 /// `Result<Config, ParseError>` - Parsed configuration or error
+#[async_recursion]
 async fn parse_config_file_recursive(
     path: &Path,
     context: &mut ParseContext,
@@ -706,7 +705,7 @@ async fn parse_config_file_recursive(
     })?;
 
     // Parse content
-    let mut builder = ConfigBuilder::new();
+    let builder = ConfigBuilder::new();
     let mut line_num = 0;
     let mut conf_files = Vec::new();
     let mut conf_dirs = Vec::new();
@@ -752,7 +751,7 @@ async fn parse_config_file_recursive(
     // Recursively load conf-file entries
     for conf_file in conf_files {
         debug!("Loading included file: {:?}", conf_file);
-        let included_config = parse_config_file_recursive(&conf_file, context).await?;
+        let _included_config = parse_config_file_recursive(&conf_file, context).await?;
         // In full implementation, would merge included_config into current builder
     }
 
@@ -761,7 +760,7 @@ async fn parse_config_file_recursive(
         debug!("Loading included directory: {:?}", conf_dir);
         let dir_files = parse_config_dir(&conf_dir).await?;
         for dir_file in dir_files {
-            let included_config = parse_config_file_recursive(&dir_file, context).await?;
+            let _included_config = parse_config_file_recursive(&dir_file, context).await?;
             // In full implementation, would merge included_config into current builder
         }
     }
@@ -988,7 +987,7 @@ no-dhcp-interface
 
     #[test]
     fn test_parse_context() {
-        let mut ctx = ParseContext::new();
+        let ctx = ParseContext::new();
         assert!(ctx.loaded_files.is_empty());
     }
 }
