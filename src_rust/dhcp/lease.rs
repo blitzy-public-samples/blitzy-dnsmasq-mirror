@@ -1009,8 +1009,30 @@ fn format_lease_line(lease: &DhcpLease, start_time: Option<Instant>) -> String {
 impl LeaseManager {
     pub async fn update_from_configs(&self) {
         debug!("Applying static host reservations to leases");
-        // Configuration integration would happen here
-        // For now, this is a placeholder
+        
+        let leases = self.leases.read().await;
+        for lease_arc in leases.values() {
+            let lease = lease_arc.read().await;
+            
+            // Check if IP address has static hostname in hosts file
+            if let Some(addr) = lease.addr() {
+                let ip = IpAddr::V4(addr);
+                if check_for_local_domain(ip) {
+                    trace!(
+                        "Lease {} has static hostname configured in hosts file",
+                        addr
+                    );
+                }
+            } else if let Some(addr6) = lease.addr6() {
+                let ip = IpAddr::V6(addr6);
+                if check_for_local_domain(ip) {
+                    trace!(
+                        "Lease {} has static hostname configured in hosts file",
+                        addr6
+                    );
+                }
+            }
+        }
     }
 
     /// Find DHCPv6 lease by IPv6 address
@@ -1195,13 +1217,23 @@ impl LeaseManager {
             return Err(LeaseError::NoAvailableAddress);
         }
         
-        let lease = DhcpLease::new(addr, hwaddr, hwaddr_type, clid.clone(), hostname, expires);
+        let lease = DhcpLease::new(addr, hwaddr, hwaddr_type, clid.clone(), hostname.clone(), expires);
         let lease_arc = Arc::new(RwLock::new(lease));
         leases.insert(clid, Arc::clone(&lease_arc));
         
         // Mark file as dirty for next update
         let mut dirty = self.file_dirty.write().await;
         *dirty = true;
+        
+        // Log the allocation
+        if let Some(ref name) = hostname {
+            log_query(
+                format!("DHCPv4 allocation: {} -> {}", name, addr),
+                IpAddr::V4(addr),
+            );
+        } else {
+            log_query(format!("DHCPv4 allocation: {}", addr), IpAddr::V4(addr));
+        }
         
         debug!("Allocated DHCPv4 lease: {}", addr);
         Ok(lease_arc)
@@ -1241,7 +1273,7 @@ impl LeaseManager {
             Vec::new(),
             0,
             clid.clone(),
-            hostname,
+            hostname.clone(),
             expires,
         );
         lease.addr = None;
@@ -1254,6 +1286,16 @@ impl LeaseManager {
         // Mark file as dirty for next update
         let mut dirty = self.file_dirty.write().await;
         *dirty = true;
+        
+        // Log the allocation
+        if let Some(ref name) = hostname {
+            log_query(
+                format!("DHCPv6 allocation: {} -> {}", name, addr6),
+                IpAddr::V6(addr6),
+            );
+        } else {
+            log_query(format!("DHCPv6 allocation: {}", addr6), IpAddr::V6(addr6));
+        }
         
         debug!("Allocated DHCPv6 lease: {}", addr6);
         Ok(lease_arc)
