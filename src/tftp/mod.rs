@@ -22,12 +22,17 @@
 //! the C implementation in tftp.c.
 
 pub mod protocol;
+pub mod server;
 pub mod transfer;
 
 // Re-export commonly used types for convenience
 pub use protocol::{
     AckPacket, DataPacket, ErrorPacket, OackPacket, ProtocolError, RequestPacket, TftpErrorCode,
     TftpOpcode, TftpPacket, TransferMode, sanitise_string,
+};
+
+pub use server::{
+    ServerError, TftpConfig, TftpServer, UniqueRootMode, handle_request,
 };
 
 pub use transfer::{
