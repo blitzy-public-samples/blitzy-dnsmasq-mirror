@@ -119,6 +119,11 @@ tokio-util = { version = "0.7", features = ["codec"] }
 # - Provides: #[async_trait] macro for trait and impl blocks
 async-trait = "0.1"
 
+# async-recursion: Enables recursive async functions by boxing futures
+# - Required for parse_config_file_recursive in config/parser.rs
+# - Provides: #[async_recursion] macro for recursive async functions
+async-recursion = "1.1"
+
 # -----------------------------------------------------------------------------
 # Networking Layer (Section 0.11.1) - Replaces C network.c, netlink.c, bpf.c
 # -----------------------------------------------------------------------------
