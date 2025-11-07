@@ -392,7 +392,17 @@ pub use self::serializer::{DnsPacketBuilder, SerializationError, ResponseType, E
 pub use self::upstream::{UpstreamServer, UpstreamPool, DomainPattern};
 
 #[cfg(feature = "dnssec")]
-pub use self::dnssec::{DnssecValidator, DnssecConfig, ValidationResult};
+pub use self::dnssec::{
+    // DNSSEC types
+    ValidationStatus, DnsKey, RRSig, DsRecord, NsecRecord, Nsec3Record, 
+    DigestType, DnssecAlgorithm,
+    // Validation functions
+    dnssec_validate_reply, dnssec_validate_by_ds, dnssec_validate_ds,
+    // Trust anchor management
+    TrustAnchorStore, TimestampValidator, setup_timestamp, is_check_date,
+    // Cryptographic verification
+    verify, algo_digest_name, ds_digest_name, nsec3_digest_name,
+};
 
 // ============================================================================
 // Module-Level Documentation Tests
