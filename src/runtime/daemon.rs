@@ -111,7 +111,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
-use crate::types::DnsmasqResult;
+use crate::types::{DnsmasqError, DnsmasqResult, SystemError};
 
 // =============================================================================
 // ERROR TYPES
@@ -412,13 +412,15 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
         return Ok(());
     }
 
-    // Determine if we should daemonize based on config
-    // In production use, this would check a specific daemonize flag
-    // For now, we daemonize unless explicitly in foreground mode
-    let should_daemonize = true; // This would come from CLI --no-daemon flag
+    // Determine if we should daemonize based on config or environment
+    // In production use, this would check a specific daemonize flag from CLI
+    // For safety in tests, we default to NOT daemonizing unless explicitly requested
+    let should_daemonize = std::env::var("DNSMASQ_DAEMONIZE")
+        .map(|v| v == "1" || v.to_lowercase() == "true")
+        .unwrap_or(false);
 
     if !should_daemonize {
-        info!("--no-daemon specified, staying in foreground");
+        info!("Not daemonizing (no --daemon flag or DNSMASQ_DAEMONIZE=1)");
         return Ok(());
     }
 
@@ -632,7 +634,7 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
         "Dropping privileges to user {} (uid={}) group {} (gid={})",
         target_user,
         user_entry.uid,
-        group.as_deref().unwrap_or("<user's primary group>"),
+        group.map(|s| s.as_str()).unwrap_or("<user's primary group>"),
         target_gid
     );
 
@@ -966,5 +968,64 @@ mod tests {
         // With debug mode, should not fork
         let result = daemonize(&config);
         assert!(result.is_ok());
+    }
+}
+
+// =============================================================================
+// ERROR CONVERSIONS
+// =============================================================================
+
+/// Convert DaemonError to SystemError for integration with top-level error handling
+///
+/// This implementation allows DaemonError to automatically convert to DnsmasqError
+/// via the SystemError intermediary, enabling the use of ? operator in functions
+/// that return DnsmasqResult.
+impl From<DaemonError> for SystemError {
+    fn from(err: DaemonError) -> Self {
+        match err {
+            DaemonError::ForkFailed(errno) => SystemError::DaemonizationFailed {
+                message: format!("fork() system call failed: {}", errno),
+                source: std::io::Error::from_raw_os_error(errno as i32),
+            },
+            DaemonError::PidFileError { path, source } => SystemError::PidFileError {
+                path: path.display().to_string(),
+                message: "Failed to create or write PID file".to_string(),
+                source: Some(source),
+            },
+            DaemonError::PrivilegeDropFailed { operation, source } => SystemError::DaemonizationFailed {
+                message: format!("Privilege drop failed during {}: {}", operation, source),
+                source: std::io::Error::from_raw_os_error(source as i32),
+            },
+            DaemonError::UserNotFound { username } => SystemError::DaemonizationFailed {
+                message: format!("User '{}' not found in system user database", username),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "user not found"),
+            },
+            DaemonError::GroupNotFound { groupname } => SystemError::DaemonizationFailed {
+                message: format!("Group '{}' not found in system group database", groupname),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "group not found"),
+            },
+            DaemonError::CapabilityError(errno) => SystemError::DaemonizationFailed {
+                message: format!("Linux capability operation failed: {}", errno),
+                source: std::io::Error::from_raw_os_error(errno as i32),
+            },
+            DaemonError::SessionCreationFailed(errno) => SystemError::DaemonizationFailed {
+                message: format!("setsid() failed to create new session: {}", errno),
+                source: std::io::Error::from_raw_os_error(errno as i32),
+            },
+            DaemonError::RedirectionFailed(errno) => SystemError::DaemonizationFailed {
+                message: format!("Failed to redirect standard file descriptors: {}", errno),
+                source: std::io::Error::from_raw_os_error(errno as i32),
+            },
+        }
+    }
+}
+
+/// Convert DaemonError directly to DnsmasqError
+///
+/// This enables the ? operator to work seamlessly in functions returning DnsmasqResult.
+/// The conversion goes through SystemError as an intermediary.
+impl From<DaemonError> for DnsmasqError {
+    fn from(err: DaemonError) -> Self {
+        DnsmasqError::System(SystemError::from(err))
     }
 }
