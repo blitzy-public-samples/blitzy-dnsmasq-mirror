@@ -39,7 +39,6 @@
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let config = TftpConfig {
 //!         root_dir: PathBuf::from("/var/tftp"),
-//!         port: 69,
 //!         secure_mode: true,
 //!         single_port: false,
 //!         ..Default::default()
@@ -230,13 +229,14 @@ pub(crate) mod test_utils {
     pub fn test_config() -> TftpConfig {
         TftpConfig {
             root_dir: PathBuf::from("/tmp/tftp-test"),
-            port: 6969, // Use non-privileged port for testing
             secure_mode: false,
             single_port: true,
             max_blocksize: 1468,
             port_range: None,
             lowercase_filenames: false,
             unique_root_mode: None,
+            mtu: None,
+            no_blocksize: false,
         }
     }
 
