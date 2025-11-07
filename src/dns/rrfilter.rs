@@ -340,7 +340,7 @@ pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
     let mut truncated = false;
     
     // First, try removing additional records (except OPT)
-    while current_size > max_size && message.additional.len() > 0 {
+    while current_size > max_size && !message.additional.is_empty() {
         // Find and remove last non-OPT record
         let mut removed = false;
         for i in (0..message.additional.len()).rev() {
@@ -361,7 +361,7 @@ pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
     }
     
     // If still too large, remove authority records
-    while current_size > max_size && message.authority.len() > 0 {
+    while current_size > max_size && !message.authority.is_empty() {
         message.authority.pop();
         truncated = true;
         current_size = estimated_message_size(message);
