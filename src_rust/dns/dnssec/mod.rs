@@ -1,5 +1,8 @@
 //! DNSSEC validation
 
+/// DNSSEC type definitions (keys, signatures, validation status)
+pub mod types;
+
 /// Configuration for DNSSEC validation
 #[derive(Debug, Clone)]
 #[derive(Default)]
