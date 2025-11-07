@@ -182,8 +182,6 @@ fn main() -> Result<()> {
             
             // Additional DHCP settings
             authoritative: false,     // Not authoritative for subnet
-            
-            ..Default::default()
         };
         builder.dhcp(dhcp_config);
         
@@ -265,7 +263,7 @@ fn main() -> Result<()> {
     // Here we simulate with hardcoded arguments
     println!("Simulating CLI arguments: dnsmasq --port=5353 --cache-size=2000");
     
-    let simulated_cli = Cli::parse_from(&[
+    let simulated_cli = Cli::parse_from([
         "dnsmasq",
         "--port=5353",
         "--cache-size=2000",
