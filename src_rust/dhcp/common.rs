@@ -53,8 +53,6 @@
 //!
 //! Refactored from `src/dhcp-common.c` (dnsmasq 2.90)
 
-use std::collections::HashMap;
-use std::fmt;
 use std::io::{Error as IoError, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -62,7 +60,7 @@ use tokio::net::UdpSocket;
 use tracing::{debug, error, info, trace, warn};
 
 #[cfg(target_os = "linux")]
-use socket2::{Domain, Socket, Type as SocketType};
+use socket2::Socket;
 
 // Internal imports from depends_on_files
 use crate::config::types::DaemonOptions;
@@ -532,12 +530,12 @@ fn iterate_hwaddr_list(head: &[HwaddrConfig]) -> impl Iterator<Item = &HwaddrCon
 ///
 /// `struct dhcp_config *find_config(...)` with CONFIG_HWADDR flag check
 /// in dhcp-common.c:917-960
-pub fn find_mac(
-    configs: &[DhcpConfig],
+pub fn find_mac<'a>(
+    configs: &'a [DhcpConfig],
     hwaddr: &[u8],
     len: usize,
     hwaddr_type: u16,
-) -> Option<&DhcpConfig> {
+) -> Option<&'a DhcpConfig> {
     for config in configs {
         if config_has_mac(config, hwaddr, len, hwaddr_type) {
             return Some(config);
@@ -798,25 +796,25 @@ pub fn dhcp_update_configs(configs: &mut [DhcpConfig], cache: &Cache) {
                 // Query DNS cache for hostname
                 let records = cache.find_by_name(hostname);
 
-                for record in records {
-                    // Extract IP address from cache record
-                    // For now, we'll just log that we found it
-                    // Full implementation would update config.addr or config.addr6
-                    debug!(
-                        "Found /etc/hosts entry for {}: {:?}",
-                        hostname, record
-                    );
-
-                    // Mark config as having address from hosts file
-                    // In real implementation, we'd set config.addr/addr6 here
-                    config.flags |= CONFIG_ADDR_HOSTS;
-                }
-
                 if records.is_empty() {
                     warn!(
                         "dhcp-host={}: hostname not found in /etc/hosts",
                         hostname
                     );
+                } else {
+                    for record in records {
+                        // Extract IP address from cache record
+                        // For now, we'll just log that we found it
+                        // Full implementation would update config.addr or config.addr6
+                        debug!(
+                            "Found /etc/hosts entry for {}: {:?}",
+                            hostname, record
+                        );
+
+                        // Mark config as having address from hosts file
+                        // In real implementation, we'd set config.addr/addr6 here
+                        config.flags |= CONFIG_ADDR_HOSTS;
+                    }
                 }
             }
         }
@@ -1199,7 +1197,7 @@ pub fn whichdevice(_socket: &UdpSocket) -> Option<String> {
 /// `int bindtodevice(int fd, char *device)` in dhcp-common.c:1181-1227
 #[cfg(target_os = "linux")]
 pub fn bindtodevice(socket: &UdpSocket, device: &str) -> Result<(), IoError> {
-    use std::os::unix::io::AsRawFd;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
 
     let raw_fd = socket.as_raw_fd();
     let sock = unsafe { Socket::from_raw_fd(raw_fd) };
