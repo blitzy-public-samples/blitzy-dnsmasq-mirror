@@ -120,7 +120,6 @@
 //! let packet = builder.build()?;
 //! ```
 
-use std::collections::Vec;
 use std::error::Error;
 use std::fmt;
 use std::io::Cursor;
@@ -1505,8 +1504,8 @@ mod tests {
         assert_eq!(ia_na.code(), OptionCode::IaNa);
 
         // IA_NA should contain: IAID(4) + T1(4) + T2(4) + IAADDR option(4+16+4+4=28)
-        // Total: 12 + 32 = 44 bytes
-        assert_eq!(ia_na.len(), 44);
+        // Total: 12 + 28 = 40 bytes
+        assert_eq!(ia_na.len(), 40);
     }
 
     /// Test find_option utility function
