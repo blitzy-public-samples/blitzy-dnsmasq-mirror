@@ -519,9 +519,11 @@ pub async fn handle_query(
 
     if selected_servers.is_empty() {
         warn!("No upstream servers available for domain: {}", query_name);
-        return Err(DnsmasqError::Dns(crate::types::errors::DnsError::ForwardError {
-            message: format!("No upstream servers available for domain: {}", query_name),
-        }));
+        return Err(DnsmasqError::Dns(
+            crate::types::errors::DnsError::ForwardError {
+                message: format!("No upstream servers available for domain: {}", query_name),
+            },
+        ));
     }
 
     // Forward with retry logic
@@ -710,12 +712,15 @@ async fn send_udp_query(
     })?;
 
     // Send query
-    socket.send_to(query_bytes, server_addr).await.map_err(|e| {
-        DnsmasqError::Network(crate::types::errors::NetworkError::SendFailed {
-            destination: server_addr.to_string(),
-            source: e,
-        })
-    })?;
+    socket
+        .send_to(query_bytes, server_addr)
+        .await
+        .map_err(|e| {
+            DnsmasqError::Network(crate::types::errors::NetworkError::SendFailed {
+                destination: server_addr.to_string(),
+                source: e,
+            })
+        })?;
 
     // Receive response with timeout
     let mut buf = vec![0u8; 4096]; // EDNS0 max size
@@ -780,16 +785,18 @@ pub async fn forward_concurrent(
     servers: &[&Server],
 ) -> DnsmasqResult<DnsMessage> {
     if servers.is_empty() {
-        return Err(DnsmasqError::Dns(crate::types::errors::DnsError::ForwardError {
-            message: format!(
-                "No upstream servers available for domain: {}",
-                query
-                    .questions
-                    .first()
-                    .map(|q| q.qname.clone())
-                    .unwrap_or_else(|| "unknown".to_string())
-            ),
-        }));
+        return Err(DnsmasqError::Dns(
+            crate::types::errors::DnsError::ForwardError {
+                message: format!(
+                    "No upstream servers available for domain: {}",
+                    query
+                        .questions
+                        .first()
+                        .map(|q| q.qname.clone())
+                        .unwrap_or_else(|| "unknown".to_string())
+                ),
+            },
+        ));
     }
 
     // Limit concurrent queries
@@ -819,18 +826,16 @@ pub async fn forward_concurrent(
         let server_addr = server.addr;
         let future = Box::pin(async move {
             match send_udp_query(&query_bytes, server_addr, DEFAULT_QUERY_TIMEOUT_SECS).await {
-                Ok(response_bytes) => {
-                    DnsMessage::parse(&response_bytes)
-                        .map(|mut resp| {
-                            resp.header.id = original_id;
-                            (server_addr, resp)
+                Ok(response_bytes) => DnsMessage::parse(&response_bytes)
+                    .map(|mut resp| {
+                        resp.header.id = original_id;
+                        (server_addr, resp)
+                    })
+                    .map_err(|e| {
+                        DnsmasqError::Dns(crate::types::errors::DnsError::ProtocolError {
+                            message: format!("Failed to parse DNS response: {}", e),
                         })
-                        .map_err(|e| {
-                            DnsmasqError::Dns(crate::types::errors::DnsError::ProtocolError {
-                                message: format!("Failed to parse DNS response: {}", e),
-                            })
-                        })
-                }
+                    }),
                 Err(e) => Err(e),
             }
         });
@@ -879,10 +884,7 @@ pub async fn forward_concurrent(
 ///
 /// Replaces C's `tcp_request()` function from forward.c
 #[instrument(skip(query))]
-pub async fn forward_tcp(
-    query: &DnsMessage,
-    server_addr: SocketAddr,
-) -> DnsmasqResult<DnsMessage> {
+pub async fn forward_tcp(query: &DnsMessage, server_addr: SocketAddr) -> DnsmasqResult<DnsMessage> {
     debug!("Forwarding query over TCP to {}", server_addr);
 
     // Connect to server with timeout
@@ -995,7 +997,8 @@ mod tests {
 
     #[test]
     fn test_server_domain_matching() {
-        let server = Server::new("8.8.8.8:53".parse().unwrap()).with_domains("example.com".to_string());
+        let server =
+            Server::new("8.8.8.8:53".parse().unwrap()).with_domains("example.com".to_string());
 
         assert!(server.matches_domain("example.com"));
         assert!(server.matches_domain("www.example.com"));
