@@ -193,9 +193,10 @@ mod tests {
         // This is a compile-time verification that all modules exist
 
         // Common module should always be available
-        use crate::dhcp::common::DhcpConfig;
+        use crate::config::types::DhcpConfig;
         let type_name = std::any::type_name::<DhcpConfig>();
-        assert!(type_name.contains("dhcp"));
+        // DhcpConfig is in config::types module
+        assert!(type_name.contains("config"));
         assert!(type_name.contains("DhcpConfig"));
     }
 
