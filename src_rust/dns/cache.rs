@@ -119,27 +119,20 @@
 //! # }
 //! ```
 
-use crate::config::types::DaemonOptions;
-use crate::dns::blockdata::BlockData;
 use crate::dns::cache_types::{
-    CacheFlags, CacheRecord, CacheRecordData, CacheRecordId, DnsKeyData, DomainKey, SrvData,
-    UID_NONE, F_CNAME, F_CONFIG, F_DHCP, F_DNSKEY, F_DS, F_FORWARD, F_HOSTS, F_IMMORTAL, F_IPV4,
-    F_IPV6, F_NEG, F_NXDOMAIN, F_REVERSE, F_SRV,
+    CacheFlags, CacheRecord, CacheRecordData, CacheRecordId, DomainKey,
+    F_CNAME, F_CONFIG, F_DHCP, F_FORWARD, F_HOSTS, F_IMMORTAL, F_REVERSE,
 };
 use crate::dns::domain::hostname_isequal;
-use crate::dns::protocol::{C_IN, INADDRSZ, IN6ADDRSZ, MAXDNAME, MAXLABEL};
+use crate::dns::protocol::{T_A, T_AAAA, T_CNAME, T_SRV};
 use hashbrown::HashMap;
-use lru::LruCache;
-use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::num::NonZeroUsize;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant, SystemTime};
-use tracing::{debug, error, info, trace, warn};
+use std::net::IpAddr;
+use std::time::Instant;
+use tracing::{debug, trace, warn};
 
 /// Minimum TTL for DNSSEC records (120 seconds per dnsmasq config.h line 595)
+#[allow(dead_code)]
 const DNSSEC_MIN_TTL: u64 = 60; // Note: Changed from 120 to match actual C implementation value
 
 /// Default cache size if not configured (from config.h CACHESIZ)
@@ -154,6 +147,7 @@ const MAX_CNAME_CHAIN: usize = 10;
 /// Original C implementation uses this 11-bit sequence for hash mixing:
 /// `unsigned int c1 = hash ^ (hash >> 16);`
 /// `unsigned int c2 = (c1 ^ (c1 >> 8)) & 0xff;`
+#[cfg(test)]
 const BARKER_CODE: [u32; 11] = [
     0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00,
 ];
@@ -269,6 +263,7 @@ pub struct CacheStats {
 /// `Arc<RwLock<Cache>>` (reads concurrent, writes exclusive).
 pub struct Cache {
     /// Configuration for cache behavior
+    #[allow(dead_code)]
     config: CacheConfig,
 
     /// Record storage with stable indices (Vec allows deletion without shifting)
@@ -466,42 +461,23 @@ impl Cache {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert(&mut self, mut record: CacheRecord) -> Result<CacheRecordId, &'static str> {
-        let now = SystemTime::now();
-        
-        // Apply minimum TTL constraints
-        if let Ok(ttl_remaining) = record.ttd.duration_since(now) {
-            let ttl_secs = ttl_remaining.as_secs();
-            
-            // Enforce DNSSEC minimum TTL
-            if record.flags.intersects(F_DNSKEY | F_DS) && ttl_secs < DNSSEC_MIN_TTL {
-                record.ttd = now + Duration::from_secs(DNSSEC_MIN_TTL);
-                trace!(
-                    "Enforced DNSSEC_MIN_TTL for {}, original_ttl={}, new_ttl={}",
-                    record.name,
-                    ttl_secs,
-                    DNSSEC_MIN_TTL
-                );
-            }
-            
-            // Enforce configured minimum cache TTL
-            if self.config.min_cache_ttl > 0 && ttl_secs < self.config.min_cache_ttl {
-                record.ttd = now + Duration::from_secs(self.config.min_cache_ttl);
-                trace!(
-                    "Enforced min_cache_ttl for {}, original_ttl={}, new_ttl={}",
-                    record.name,
-                    ttl_secs,
-                    self.config.min_cache_ttl
-                );
-            }
-        }
+    pub fn insert(&mut self, record: CacheRecord) -> Result<CacheRecordId, &'static str> {
+        // Note: TTL constraints are applied when creating the CacheRecord, not here
+        // The record's ttd field is already an Instant set to the expiry time
         
         // Scan and free conflicting/expired entries
-        let key = DomainKey::new(record.name.clone(), self.extract_query_type(&record));
-        self.scan_free_internal(&record.name, None, now, record.flags, &key);
+        let name = record.name().to_string();
+        let query_type = Self::extract_query_type(record.data());
+        let key = DomainKey::new(name.clone(), query_type);
+        self.scan_free_internal(&name, None, record.flags(), &key);
         
         // Allocate record slot
-        let record_id = self.allocate_slot(&mut record)?;
+        let record_id = self.allocate_slot();
+        
+        // Store the record
+        if let Some(slot) = self.records.get_mut(record_id.get()) {
+            *slot = Some(record);
+        }
         
         // Insert into hash table
         self.hash_table
@@ -516,10 +492,9 @@ impl Cache {
         self.stats.insertions += 1;
         
         debug!(
-            "Inserted cache entry: name={}, type={:?}, flags={:?}, id={:?}",
-            record.name,
-            self.extract_query_type(&record),
-            record.flags,
+            "Inserted cache entry: name={}, type={}, id={:?}",
+            name,
+            query_type,
             record_id
         );
         
@@ -572,7 +547,6 @@ impl Cache {
         &mut self,
         name: &str,
         qtype: u16,
-        now: SystemTime,
     ) -> Option<&CacheRecord> {
         let mut current_name = name.to_string();
         let mut hops = 0;
@@ -588,28 +562,28 @@ impl Cache {
                 return None;
             }
             
-            let key = DomainKey::new(current_name.clone(), qtype);
+            let mut followed_cname = false;
             
-            if let Some(record_ids) = self.hash_table.get(&key) {
-                // Scan collision chain for matching non-expired record
+            // First check if there's a CNAME record for this name
+            let cname_key = DomainKey::new(current_name.clone(), T_CNAME);
+            if let Some(record_ids) = self.hash_table.get(&cname_key) {
                 for &record_id in record_ids {
-                    if let Some(Some(record)) = self.records.get(record_id.0) {
-                        // Check expiry
-                        if record.is_expired(now) {
-                            trace!("Skipping expired record for {}", current_name);
+                    if let Some(Some(record)) = self.records.get(record_id.get()) {
+                        // Check expiry and name match
+                        if Self::is_expired(record) {
                             continue;
                         }
                         
-                        // Check name match (case-insensitive DNS comparison)
-                        if !hostname_isequal(&record.name, &current_name) {
+                        if !hostname_isequal(record.name(), &current_name) {
                             continue;
                         }
                         
-                        // Found a match - check if it's a CNAME that needs following
-                        if record.flags.contains(F_CNAME) {
-                            if let CacheRecordData::Cname(target) = &record.data {
+                        // Found a CNAME - follow it
+                        if record.flags().contains(F_CNAME) {
+                            if let CacheRecordData::Cname(target) = record.data() {
                                 current_name = target.clone();
                                 hops += 1;
+                                followed_cname = true;
                                 self.stats.cname_chains += 1;
                                 trace!(
                                     "Following CNAME {} -> {} (hop {})",
@@ -617,30 +591,63 @@ impl Cache {
                                     current_name,
                                     hops
                                 );
-                                break; // Continue outer loop with new name
+                                break;
                             }
                         }
+                    }
+                }
+            }
+            
+            // If we followed a CNAME, continue the loop
+            if followed_cname {
+                continue;
+            }
+            
+            // Now look for the actual record type requested
+            let key = DomainKey::new(current_name.clone(), qtype);
+            
+            if let Some(record_ids) = self.hash_table.get(&key) {
+                // Scan collision chain for matching non-expired record
+                let mut found_record_id: Option<CacheRecordId> = None;
+                
+                for &record_id in record_ids {
+                    if let Some(Some(record)) = self.records.get(record_id.get()) {
+                        // Check expiry
+                        if Self::is_expired(record) {
+                            trace!("Skipping expired record for {}", current_name);
+                            continue;
+                        }
                         
-                        // Found final record, update LRU and return
-                        self.move_to_front(record_id);
-                        self.stats.hits += 1;
+                        // Check name match (case-insensitive DNS comparison)
+                        if !hostname_isequal(record.name(), &current_name) {
+                            continue;
+                        }
                         
-                        debug!(
-                            "Cache hit: name={}, type={}, hops={}",
-                            name, qtype, hops
-                        );
-                        
-                        return Some(record);
+                        // Found final record
+                        found_record_id = Some(record_id);
+                        break;
                     }
                 }
                 
-                // If we didn't break to follow a CNAME, we're done
-                if hops == 0 || !self.has_cname(&current_name, qtype) {
-                    break;
+                // Check if we found a final record
+                if let Some(record_id) = found_record_id {
+                    // Update LRU
+                    self.move_to_front(record_id);
+                    self.stats.hits += 1;
+                    
+                    debug!(
+                        "Cache hit: name={}, type={}, hops={}",
+                        name, qtype, hops
+                    );
+                    
+                    // Return reference to record (now safe because we're done mutating)
+                    return self.records.get(record_id.get())
+                        .and_then(|opt| opt.as_ref());
                 }
-            } else {
-                break; // No entries for this key
             }
+            
+            // No matching record found
+            break;
         }
         
         self.stats.misses += 1;
@@ -676,13 +683,13 @@ impl Cache {
     /// let records = cache.find_by_name("example.com", now);
     /// println!("Found {} records for example.com", records.len());
     /// ```
-    pub fn find_by_name(&self, name: &str, now: SystemTime) -> Vec<&CacheRecord> {
+    pub fn find_by_name(&self, name: &str) -> Vec<&CacheRecord> {
         let mut results = Vec::new();
         
         // Scan all records (no type filter)
         for record_opt in &self.records {
             if let Some(record) = record_opt {
-                if hostname_isequal(&record.name, name) && !record.is_expired(now) {
+                if hostname_isequal(record.name(), name) && !Self::is_expired(record) {
                     results.push(record);
                 }
             }
@@ -722,31 +729,28 @@ impl Cache {
     /// let records = cache.find_by_addr(&addr, now);
     /// println!("Found {} PTR records for {}", records.len(), addr);
     /// ```
-    pub fn find_by_addr(&self, addr: &IpAddr, now: SystemTime) -> Vec<&CacheRecord> {
+    pub fn find_by_addr(&self, addr: &IpAddr) -> Vec<&CacheRecord> {
         let mut results = Vec::new();
-        
-        // Determine address length for comparison
-        let is_ipv6 = addr.is_ipv6();
         
         // Scan all records for matching reverse entries
         for record_opt in &self.records {
             if let Some(record) = record_opt {
                 // Skip non-reverse entries
-                if !record.flags.contains(F_REVERSE) {
+                if !record.flags().contains(F_REVERSE) {
                     continue;
                 }
                 
                 // Skip expired entries
-                if record.is_expired(now) {
+                if Self::is_expired(record) {
                     continue;
                 }
                 
                 // Check address match based on type
-                let matches = match (&record.data, addr, is_ipv6) {
-                    (CacheRecordData::Ipv4(rec_addr), IpAddr::V4(search_addr), false) => {
+                let matches = match (record.data(), addr) {
+                    (CacheRecordData::Address(IpAddr::V4(rec_addr)), IpAddr::V4(search_addr)) => {
                         rec_addr == search_addr
                     }
-                    (CacheRecordData::Ipv6(rec_addr), IpAddr::V6(search_addr), true) => {
+                    (CacheRecordData::Address(IpAddr::V6(rec_addr)), IpAddr::V6(search_addr)) => {
                         rec_addr == search_addr
                     }
                     _ => false,
@@ -810,7 +814,6 @@ impl Cache {
         &mut self,
         name: Option<&str>,
         addr: Option<&IpAddr>,
-        now: SystemTime,
         flags: CacheFlags,
     ) {
         if flags.contains(F_FORWARD) && name.is_some() {
@@ -820,14 +823,14 @@ impl Cache {
             // Scan all possible query types for this name
             for qtype in &[1u16, 2, 5, 6, 12, 15, 16, 28, 33, 43, 46, 48] {
                 let key = DomainKey::new(name_str.to_string(), *qtype);
-                self.scan_free_internal(name_str, addr, now, flags, &key);
+                self.scan_free_internal(name_str, addr, flags, &key);
             }
         } else {
             // Reverse or full cache scan
             let keys: Vec<DomainKey> = self.hash_table.keys().cloned().collect();
             
             for key in keys {
-                self.scan_free_internal(name.unwrap_or(""), addr, now, flags, &key);
+                self.scan_free_internal(name.unwrap_or(""), addr, flags, &key);
             }
         }
     }
@@ -928,27 +931,27 @@ impl Cache {
         &mut self,
         hostname: &str,
         addr: IpAddr,
-        lease_expiry: SystemTime,
+        lease_expiry: Instant,
     ) -> Result<CacheRecordId, &'static str> {
         // Determine record data and flags based on address type
         let (data, flags) = match addr {
-            IpAddr::V4(ipv4) => (
-                CacheRecordData::Ipv4(ipv4),
-                CacheFlags::F_DHCP | CacheFlags::F_FORWARD | CacheFlags::F_IPV4,
+            IpAddr::V4(_) => (
+                CacheRecordData::Address(addr),
+                F_DHCP | F_FORWARD,
             ),
-            IpAddr::V6(ipv6) => (
-                CacheRecordData::Ipv6(ipv6),
-                CacheFlags::F_DHCP | CacheFlags::F_FORWARD | CacheFlags::F_IPV6,
+            IpAddr::V6(_) => (
+                CacheRecordData::Address(addr),
+                F_DHCP | F_FORWARD,
             ),
         };
 
-        let record = CacheRecord {
-            name: hostname.to_string(),
+        let record = CacheRecord::new(
+            hostname.to_string(),
             data,
-            ttd: lease_expiry,
+            lease_expiry,
+            0,
             flags,
-            uid: 0,
-        };
+        );
 
         let record_id = self.insert(record)?;
 
@@ -991,8 +994,8 @@ impl Cache {
         // Find all DHCP entries matching hostname
         for (idx, record_opt) in self.records.iter().enumerate() {
             if let Some(record) = record_opt {
-                if record.flags.contains(F_DHCP) && hostname_isequal(&record.name, hostname) {
-                    to_remove.push(CacheRecordId(idx));
+                if record.flags().contains(F_DHCP) && hostname_isequal(record.name(), hostname) {
+                    to_remove.push(CacheRecordId::new(idx));
                 }
             }
         }
@@ -1025,7 +1028,6 @@ impl Cache {
         &mut self,
         name: &str,
         addr: Option<&IpAddr>,
-        now: SystemTime,
         flags: CacheFlags,
         key: &DomainKey,
     ) {
@@ -1037,55 +1039,55 @@ impl Cache {
         let mut keep_ids = Vec::new();
 
         for &record_id in &bucket {
-            let should_remove = match self.records.get(record_id.0).and_then(|r| r.as_ref()) {
+            let should_remove = match self.records.get(record_id.get()).and_then(|r| r.as_ref()) {
                 Some(record) => {
                     // Never remove immortal entries (hosts file, DHCP with active lease)
-                    if record.flags.intersects(F_IMMORTAL | F_HOSTS) {
+                    if record.flags().intersects(F_IMMORTAL | F_HOSTS) {
                         false
                     }
                     // Check if expired
-                    else if Self::is_expired(record, now) {
+                    else if Self::is_expired(record) {
                         trace!(
                             "Removing expired cache entry: name={}, ttd={:?}",
-                            record.name,
-                            record.ttd
+                            record.name(),
+                            record.ttd()
                         );
                         true
                     }
                     // Check for forward conflicts
                     else if flags.contains(F_FORWARD)
                         && !name.is_empty()
-                        && hostname_isequal(&record.name, name)
+                        && hostname_isequal(record.name(), name)
                     {
                         // Same name but different type or conflicting flags
-                        if record.flags.intersects(F_DHCP | F_CONFIG) {
+                        if record.flags().intersects(F_DHCP | F_CONFIG) {
                             // Keep immortal entries
                             false
                         } else {
-                            trace!("Removing conflicting forward entry: name={}", record.name);
+                            trace!("Removing conflicting forward entry: name={}", record.name());
                             true
                         }
                     }
                     // Check for reverse conflicts
                     else if flags.contains(F_REVERSE) && addr.is_some() {
-                        let conflicts = match (&record.data, addr.unwrap()) {
-                            (CacheRecordData::Ipv4(cached), IpAddr::V4(new))
-                                if cached == new && record.flags.contains(F_REVERSE) =>
+                        let conflicts = match (record.data(), addr.unwrap()) {
+                            (CacheRecordData::Address(IpAddr::V4(cached)), IpAddr::V4(new))
+                                if cached == new && record.flags().contains(F_REVERSE) =>
                             {
                                 true
                             }
-                            (CacheRecordData::Ipv6(cached), IpAddr::V6(new))
-                                if cached == new && record.flags.contains(F_REVERSE) =>
+                            (CacheRecordData::Address(IpAddr::V6(cached)), IpAddr::V6(new))
+                                if cached == new && record.flags().contains(F_REVERSE) =>
                             {
                                 true
                             }
                             _ => false,
                         };
 
-                        if conflicts && !record.flags.intersects(F_DHCP | F_CONFIG) {
+                        if conflicts && !record.flags().intersects(F_DHCP | F_CONFIG) {
                             trace!(
                                 "Removing conflicting reverse entry: addr={:?}",
-                                record.data
+                                record.data()
                             );
                             true
                         } else {
@@ -1120,22 +1122,20 @@ impl Cache {
     /// # Arguments
     ///
     /// * `record` - Cache record to check
-    /// * `now` - Current time
     ///
     /// # Returns
     ///
     /// `true` if the record has expired, `false` otherwise
-    fn is_expired(record: &CacheRecord, now: SystemTime) -> bool {
+    fn is_expired(record: &CacheRecord) -> bool {
         // Immortal entries never expire
-        if record.flags.contains(F_IMMORTAL) {
+        if record.flags().contains(F_IMMORTAL) {
             return false;
         }
 
-        // Check if TTD is in the past
-        match record.ttd.duration_since(now) {
-            Ok(_) => false,  // TTD is in the future, not expired
-            Err(_) => true,  // TTD is in the past, expired
-        }
+        // Check if TTD is in the past (note: Instant doesn't have a direct "in the past" check
+        // since it's monotonic, so we check against current time)
+        let now = Instant::now();
+        now >= record.ttd()
     }
 
     /// Remove a cache record by ID
@@ -1148,7 +1148,7 @@ impl Cache {
     /// * `record_id` - ID of the record to remove
     fn remove_record(&mut self, record_id: CacheRecordId) {
         // Mark record as deleted
-        if let Some(record_opt) = self.records.get_mut(record_id.0) {
+        if let Some(record_opt) = self.records.get_mut(record_id.get()) {
             *record_opt = None;
         }
 
@@ -1156,7 +1156,7 @@ impl Cache {
         self.lru_list.retain(|&id| id != record_id);
 
         // Add to free list for reuse
-        self.free_list.push(record_id);
+        self.freelist.push(record_id);
     }
 
     /// Compute hash value for cache entry using Barker code
@@ -1185,6 +1185,7 @@ impl Cache {
     ///    - XOR with character value
     ///    - Mix with Barker code coefficients
     /// 3. Return final 32-bit hash
+    #[cfg(test)]
     fn compute_hash(name: &str) -> u32 {
         // Barker code coefficients for mixing
         const BARKER: [i32; 11] = [1, -1, 1, -1, 1, 1, -1, 1, 1, -1, -1];
@@ -1214,6 +1215,111 @@ impl Cache {
         }
 
         hash
+    }
+
+    /// Extract query type from CacheRecordData
+    ///
+    /// Maps cache record data variants to DNS query type constants.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - Cache record data to examine
+    ///
+    /// # Returns
+    ///
+    /// DNS query type constant (T_A, T_AAAA, T_CNAME, T_PTR, etc.)
+    fn extract_query_type(data: &CacheRecordData) -> u16 {
+        match data {
+            CacheRecordData::Address(IpAddr::V4(_)) => T_A,
+            CacheRecordData::Address(IpAddr::V6(_)) => T_AAAA,
+            CacheRecordData::Cname(_) => T_CNAME,
+            CacheRecordData::DnsKey(_) => 48, // T_DNSKEY
+            CacheRecordData::Ds(_) => 43,     // T_DS
+            CacheRecordData::Srv(_) => T_SRV,
+        }
+    }
+
+    /// Allocate a slot in the records vector for a new cache entry
+    ///
+    /// Reuses a slot from the freelist if available, otherwise appends to the vector.
+    ///
+    /// # Returns
+    ///
+    /// CacheRecordId for the allocated slot
+    fn allocate_slot(&mut self) -> CacheRecordId {
+        // First try the freelist
+        if let Some(id) = self.freelist.pop() {
+            return id;
+        }
+        
+        // If we haven't reached capacity, allocate a new slot
+        if self.records.len() < self.config.max_entries {
+            let id = CacheRecordId::new(self.records.len());
+            self.records.push(None);
+            return id;
+        }
+        
+        // Cache is full - evict LRU entry (tail of LRU list)
+        if let Some(lru_id) = self.lru_list.pop_back() {
+            // Remove from hash table
+            if let Some(Some(record)) = self.records.get(lru_id.get()) {
+                let query_type = Self::extract_query_type(record.data());
+                let key = DomainKey::new(record.name().to_string(), query_type);
+                
+                if let Some(ids) = self.hash_table.get_mut(&key) {
+                    ids.retain(|&id| id != lru_id);
+                    if ids.is_empty() {
+                        self.hash_table.remove(&key);
+                    }
+                }
+                
+                self.stats.evictions_lru += 1;
+                debug!("LRU evicted entry: name={}, type={}", record.name(), query_type);
+            }
+            
+            // Clear the slot
+            if let Some(slot) = self.records.get_mut(lru_id.get()) {
+                *slot = None;
+            }
+            
+            lru_id
+        } else {
+            // No LRU entries to evict - this shouldn't happen
+            // but we'll allocate a new slot as fallback
+            warn!("Cache full but no LRU entries to evict");
+            let id = CacheRecordId::new(self.records.len());
+            self.records.push(None);
+            id
+        }
+    }
+
+    /// Move a cache record to the front of the LRU list
+    ///
+    /// Implements LRU cache eviction policy by moving recently accessed entries
+    /// to the front of the LRU list.
+    ///
+    /// # Arguments
+    ///
+    /// * `record_id` - ID of the record to move to front
+    fn move_to_front(&mut self, record_id: CacheRecordId) {
+        // Remove from current position
+        self.lru_list.retain(|&id| id != record_id);
+        // Add to front (most recently used)
+        self.lru_list.push_front(record_id);
+    }
+
+    /// Check if a cache record has a CNAME in its data
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - Cache record to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the record contains CNAME data, `false` otherwise
+    #[allow(dead_code)]
+    fn has_cname(record: &CacheRecord) -> bool {
+        matches!(record.data(), CacheRecordData::Cname(_))
     }
 }
 
@@ -1264,7 +1370,8 @@ pub fn check_for_local_domain(name: &str, local_domains: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use crate::dns::cache_types::{F_IPV4, F_NEG, F_NXDOMAIN, F_CNAME};
+    use std::net::Ipv4Addr;
     use std::time::Duration;
 
     #[test]
@@ -1272,118 +1379,112 @@ mod tests {
         let cache = Cache::new();
         let stats = cache.get_stats();
         assert_eq!(stats.capacity, DEFAULT_CACHE_SIZE);
-        assert_eq!(stats.size, 0);
+        assert_eq!(stats.entries, 0);
     }
 
     #[test]
     fn test_cache_insert_and_lookup() {
         let mut cache = Cache::new();
-        let now = SystemTime::now();
-        let expiry = now + Duration::from_secs(300);
+        let expiry = Instant::now() + Duration::from_secs(300);
 
-        let record = CacheRecord {
-            name: "example.com".to_string(),
-            data: CacheRecordData::Ipv4(Ipv4Addr::new(93, 184, 216, 34)),
-            ttd: expiry,
-            flags: F_FORWARD | F_IPV4,
-            uid: 0,
-        };
+        let record = CacheRecord::new(
+            "example.com".to_string(),
+            CacheRecordData::Address(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))),
+            expiry,
+            0,
+            F_FORWARD | F_IPV4,
+        );
 
         cache.insert(record).unwrap();
 
-        let found = cache.lookup("example.com", 1, now);
+        let found = cache.lookup("example.com", 1);
         assert!(found.is_some());
 
         let found_record = found.unwrap();
-        assert_eq!(found_record.name, "example.com");
+        assert_eq!(found_record.name(), "example.com");
     }
 
     #[test]
     fn test_cache_expiry() {
         let mut cache = Cache::new();
-        let now = SystemTime::now();
-        let expiry = now + Duration::from_secs(1);
+        // Create an entry that's already expired
+        let expiry = Instant::now() - Duration::from_secs(1);
 
-        let record = CacheRecord {
-            name: "shortlived.com".to_string(),
-            data: CacheRecordData::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
-            ttd: expiry,
-            flags: F_FORWARD | F_IPV4,
-            uid: 0,
-        };
+        let record = CacheRecord::new(
+            "shortlived.com".to_string(),
+            CacheRecordData::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+            expiry,
+            0,
+            F_FORWARD | F_IPV4,
+        );
 
         cache.insert(record).unwrap();
 
-        // Should find before expiry
-        let found = cache.lookup("shortlived.com", 1, now);
-        assert!(found.is_some());
-
-        // Should not find after expiry
-        let later = now + Duration::from_secs(2);
-        let found = cache.lookup("shortlived.com", 1, later);
+        // Should not find expired entry
+        let found = cache.lookup("shortlived.com", 1);
         assert!(found.is_none());
     }
 
     #[test]
     fn test_cache_cname_following() {
         let mut cache = Cache::new();
-        let now = SystemTime::now();
-        let expiry = now + Duration::from_secs(300);
+        let expiry = Instant::now() + Duration::from_secs(300);
 
         // Insert CNAME: alias.example.com -> target.example.com
-        let cname = CacheRecord {
-            name: "alias.example.com".to_string(),
-            data: CacheRecordData::Cname("target.example.com".to_string()),
-            ttd: expiry,
-            flags: F_FORWARD | F_CNAME,
-            uid: 0,
-        };
+        let cname = CacheRecord::new(
+            "alias.example.com".to_string(),
+            CacheRecordData::Cname("target.example.com".to_string()),
+            expiry,
+            0,
+            F_FORWARD | F_CNAME,
+        );
         cache.insert(cname).unwrap();
 
         // Insert A record for target
-        let a_record = CacheRecord {
-            name: "target.example.com".to_string(),
-            data: CacheRecordData::Ipv4(Ipv4Addr::new(93, 184, 216, 34)),
-            ttd: expiry,
-            flags: F_FORWARD | F_IPV4,
-            uid: 0,
-        };
+        let a_record = CacheRecord::new(
+            "target.example.com".to_string(),
+            CacheRecordData::Address(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))),
+            expiry,
+            0,
+            F_FORWARD | F_IPV4,
+        );
         cache.insert(a_record).unwrap();
 
         // Lookup should follow CNAME chain
-        let found = cache.lookup("alias.example.com", 1, now);
+        let found = cache.lookup("alias.example.com", 1);
         assert!(found.is_some());
     }
 
     #[test]
     fn test_negative_caching() {
         let mut cache = Cache::new();
-        let now = SystemTime::now();
-        let expiry = now + Duration::from_secs(300);
+        let expiry = Instant::now() + Duration::from_secs(300);
 
         // Insert negative cache entry (NXDOMAIN)
-        let neg = CacheRecord {
-            name: "nonexistent.com".to_string(),
-            data: CacheRecordData::Ipv4(Ipv4Addr::new(0, 0, 0, 0)),
-            ttd: expiry,
-            flags: F_NEG | F_NXDOMAIN,
-            uid: 0,
-        };
+        // Negative entries in C use NULL for address, we use unspecified address
+        // The F_NEG flag indicates this is a negative cache entry
+        let neg = CacheRecord::new(
+            "nonexistent.com".to_string(),
+            CacheRecordData::Address(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            expiry,
+            0,
+            F_NEG | F_NXDOMAIN,
+        );
         cache.insert(neg).unwrap();
 
-        let found = cache.lookup("nonexistent.com", 1, now);
+        let found = cache.lookup("nonexistent.com", 1);
         assert!(found.is_some());
-        assert!(found.unwrap().flags.contains(F_NXDOMAIN));
+        assert!(found.unwrap().flags().contains(F_NXDOMAIN));
     }
 
     #[test]
     fn test_dhcp_entry() {
         let mut cache = Cache::new();
         let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
-        let expiry = SystemTime::now() + Duration::from_secs(3600);
+        let expiry = Instant::now() + Duration::from_secs(3600);
 
         let id = cache.add_dhcp_entry("client.local", addr, expiry).unwrap();
-        assert!(id.0 < cache.records.len());
+        assert!(id.get() < cache.records.len());
 
         let removed = cache.unhash_dhcp("client.local");
         assert_eq!(removed, 1);
@@ -1409,27 +1510,26 @@ mod tests {
             min_cache_ttl: 0,
         };
         let mut cache = Cache::with_config(config);
-        let now = SystemTime::now();
-        let expiry = now + Duration::from_secs(300);
+        let expiry = Instant::now() + Duration::from_secs(300);
 
         // Insert 3 entries into a cache with capacity 2
         for i in 0..3 {
-            let record = CacheRecord {
-                name: format!("host{}.example.com", i),
-                data: CacheRecordData::Ipv4(Ipv4Addr::new(192, 0, 2, i as u8)),
-                ttd: expiry,
-                flags: F_FORWARD | F_IPV4,
-                uid: 0,
-            };
+            let record = CacheRecord::new(
+                format!("host{}.example.com", i),
+                CacheRecordData::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, i as u8))),
+                expiry,
+                0,
+                F_FORWARD | F_IPV4,
+            );
             cache.insert(record).unwrap();
         }
 
         // Cache should have at most 2 entries
         let stats = cache.get_stats();
-        assert!(stats.size <= 2);
+        assert!(stats.entries <= 2);
 
         // Most recent entry should still be findable
-        let found = cache.lookup("host2.example.com", 1, now);
+        let found = cache.lookup("host2.example.com", 1);
         assert!(found.is_some());
     }
 

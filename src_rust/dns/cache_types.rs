@@ -287,6 +287,103 @@ impl Default for CacheFlags {
 }
 
 // ============================================================================
+// Individual Flag Constants (C Compatibility)
+// ============================================================================
+//
+// These constants provide convenient access to individual flags matching the
+// C implementation's naming convention (F_IMMORTAL, F_FORWARD, etc.).
+// They are defined as public constants for compatibility with code that
+// uses the C-style flag names, while the bitflags struct provides type-safe
+// operations.
+
+/// Never expire (from /etc/hosts or static config)
+pub const F_IMMORTAL: CacheFlags = CacheFlags::IMMORTAL;
+
+/// Reverse lookup (PTR record: addr→name)
+pub const F_REVERSE: CacheFlags = CacheFlags::REVERSE;
+
+/// Forward lookup (A/AAAA record: name→addr)
+pub const F_FORWARD: CacheFlags = CacheFlags::FORWARD;
+
+/// Entry from DHCP lease (dynamic hostname)
+pub const F_DHCP: CacheFlags = CacheFlags::DHCP;
+
+/// Negative cache entry (NXDOMAIN or NODATA)
+pub const F_NEG: CacheFlags = CacheFlags::NEG;
+
+/// Entry from /etc/hosts file
+pub const F_HOSTS: CacheFlags = CacheFlags::HOSTS;
+
+/// IPv4 address
+pub const F_IPV4: CacheFlags = CacheFlags::IPV4;
+
+/// IPv6 address
+pub const F_IPV6: CacheFlags = CacheFlags::IPV6;
+
+/// Domain does not exist (NXDOMAIN)
+pub const F_NXDOMAIN: CacheFlags = CacheFlags::NXDOMAIN;
+
+/// CNAME record
+pub const F_CNAME: CacheFlags = CacheFlags::CNAME;
+
+/// DNSSEC DNSKEY record
+pub const F_DNSKEY: CacheFlags = CacheFlags::DNSKEY;
+
+/// Entry from config file (static configuration)
+pub const F_CONFIG: CacheFlags = CacheFlags::CONFIG;
+
+/// DNSSEC DS record
+pub const F_DS: CacheFlags = CacheFlags::DS;
+
+/// SRV record
+pub const F_SRV: CacheFlags = CacheFlags::SRV;
+
+/// DNSSEC validation succeeded (secure)
+pub const F_DNSSECOK: CacheFlags = CacheFlags::DNSSECOK;
+
+/// Cached from upstream server response
+pub const F_UPSTREAM: CacheFlags = CacheFlags::UPSTREAM;
+
+/// Resource record name (not address record)
+pub const F_RRNAME: CacheFlags = CacheFlags::RRNAME;
+
+/// Server record in cache
+pub const F_SERVER: CacheFlags = CacheFlags::SERVER;
+
+/// Active query in progress
+pub const F_QUERY: CacheFlags = CacheFlags::QUERY;
+
+/// Response was NOERROR (not NXDOMAIN/SERVFAIL)
+pub const F_NOERR: CacheFlags = CacheFlags::NOERR;
+
+/// From authoritative zone (local authority)
+pub const F_AUTH: CacheFlags = CacheFlags::AUTH;
+
+/// DNSSEC-related record (DNSKEY/DS/RRSIG)
+pub const F_DNSSEC: CacheFlags = CacheFlags::DNSSEC;
+
+/// DNSSEC key tag stored in uid field
+pub const F_KEYTAG: CacheFlags = CacheFlags::KEYTAG;
+
+/// DNSSEC security status indicator
+pub const F_SECSTAT: CacheFlags = CacheFlags::SECSTAT;
+
+/// No resource records found (NODATA response)
+pub const F_NO_RR: CacheFlags = CacheFlags::NO_RR;
+
+/// Add to ipset when resolved (Linux ipset integration)
+pub const F_IPSET: CacheFlags = CacheFlags::IPSET;
+
+/// Don't add to extra/additional section
+pub const F_NOEXTRA: CacheFlags = CacheFlags::NOEXTRA;
+
+/// Domain-specific server record
+pub const F_DOMAINSRV: CacheFlags = CacheFlags::DOMAINSRV;
+
+/// DNS response code stored
+pub const F_RCODE: CacheFlags = CacheFlags::RCODE;
+
+// ============================================================================
 // Specialized Record Data Types
 // ============================================================================
 
