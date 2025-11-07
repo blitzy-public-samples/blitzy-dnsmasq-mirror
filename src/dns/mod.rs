@@ -103,20 +103,19 @@
 //! Basic DNS server setup:
 //!
 //! ```rust,no_run
-//! use dnsmasq::dns::{DnsServer, ServerConfig, DnsCache};
-//! # use dnsmasq::dns::DnsResult;
+//! use dnsmasq::dns::{DnsServer, ServerConfig};
+//! use dnsmasq::config::Config;
+//! use std::sync::Arc;
 //!
-//! # async fn example() -> DnsResult<()> {
-//! // Create a DNS cache with capacity for 1000 records
-//! let cache = DnsCache::new(1000);
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Load global configuration
+//! let global_config = Arc::new(Config::default());
 //!
 //! // Configure DNS server to listen on port 53
-//! let config = ServerConfig::default()
-//!     .with_port(53)
-//!     .with_cache_size(1000);
+//! let server_config = ServerConfig::default();
 //!
 //! // Create and run the DNS server
-//! let mut server = DnsServer::new(config, cache)?;
+//! let mut server = DnsServer::new(server_config, global_config)?;
 //! server.run().await?;
 //! # Ok(())
 //! # }
