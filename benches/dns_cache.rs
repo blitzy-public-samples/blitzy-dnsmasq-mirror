@@ -341,7 +341,7 @@ fn benchmark_bulk_insertion(c: &mut Criterion) {
 fn benchmark_insertion_varied_ttl(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_insert/varied_ttl");
 
-    let ttl_values = vec![60, 300, 3600, 86400]; // 1min, 5min, 1hour, 1day
+    let ttl_values = [60, 300, 3600, 86400]; // 1min, 5min, 1hour, 1day
 
     for ttl in ttl_values.iter() {
         group.bench_with_input(BenchmarkId::from_parameter(ttl), ttl, |b, &ttl_val| {
@@ -357,7 +357,8 @@ fn benchmark_insertion_varied_ttl(c: &mut Criterion) {
                     ttl: ttl_val,
                     address: Ipv4Addr::new(192, 0, 2, (insert_idx % 255) as u8),
                 };
-                black_box(cache.insert(key, vec![record], ttl_val, CacheSource::Upstream));
+                cache.insert(key, vec![record], ttl_val, CacheSource::Upstream);
+                black_box(());
                 insert_idx += 1;
             });
         });
@@ -582,7 +583,7 @@ fn benchmark_cname_loop_detection(c: &mut Criterion) {
                 let mut cache = DnsCache::new(100);
 
                 // Create a CNAME loop: alias1 -> alias2 -> alias3 -> alias1
-                let names = vec!["alias1.example.com", "alias2.example.com", "alias3.example.com"];
+                let names = ["alias1.example.com", "alias2.example.com", "alias3.example.com"];
 
                 for (i, name) in names.iter().enumerate() {
                     let target = names[(i + 1) % names.len()];
@@ -629,7 +630,8 @@ fn benchmark_negative_caching_insert(c: &mut Criterion) {
                     RecordType::A,
                     RecordClass::IN,
                 );
-                black_box(cache.insert_negative(key, 3600)); // Negative cache with 1 hour TTL
+                cache.insert_negative(key, 3600);
+                black_box(()); // Negative cache with 1 hour TTL
                 insert_idx += 1;
             });
         });
@@ -690,8 +692,8 @@ fn benchmark_statistics_generation(c: &mut Criterion) {
         populate_cache_with_a_records(&mut cache, &domains, &addrs);
 
         // Perform some lookups to generate statistics
-        for i in 0..(*size / 2) {
-            let key = CacheKey::new(domains[i].clone(), RecordType::A, RecordClass::IN);
+        for domain in domains.iter().take(*size / 2) {
+            let key = CacheKey::new(domain.clone(), RecordType::A, RecordClass::IN);
             cache.lookup(&key);
         }
 
@@ -777,7 +779,8 @@ fn benchmark_dhcp_host_insert(c: &mut Criterion) {
                 let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, (insert_idx % 254 + 1) as u8));
                 let lease_time = Duration::from_secs(3600);
 
-                black_box(cache.insert_dhcp_host(hostname, addr, lease_time));
+                cache.insert_dhcp_host(hostname, addr, lease_time);
+                black_box(());
                 insert_idx += 1;
             });
         });
@@ -824,7 +827,7 @@ fn benchmark_dhcp_host_remove(c: &mut Criterion) {
 fn benchmark_domain_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("domain/comparison");
 
-    let test_cases = vec![
+    let test_cases = [
         ("example.com", "EXAMPLE.COM"),
         ("subdomain.example.org", "SubDomain.EXAMPLE.ORG"),
         ("very.long.subdomain.with.many.labels.example.net", 
