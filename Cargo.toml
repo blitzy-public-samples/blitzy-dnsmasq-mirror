@@ -169,6 +169,12 @@ trust-dns-proto = "0.23"
 # - Usage: DNS/DHCP packet parsing without memory safety risks
 nom = "7.1"
 
+# bytes: Efficient byte buffer manipulation
+# - Provides: BytesMut for dynamic buffer management with automatic bounds checking
+# - Replaces: C unsigned char* pointer arithmetic and manual realloc
+# - Usage: DNS packet serialization with safe memory management
+bytes = "1.9"
+
 # -----------------------------------------------------------------------------
 # Data Structures (Section 0.11.3) - Replaces C cache.c hash tables
 # -----------------------------------------------------------------------------

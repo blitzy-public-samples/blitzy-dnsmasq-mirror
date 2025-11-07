@@ -384,7 +384,7 @@ pub use self::parser::{extract_name, skip_name, skip_questions, skip_section, ex
 pub use self::pattern::{DomainPattern, DomainPatternMatcher};
 pub use self::protocol::{DnsOpcode, DnsRcode, DnsRrType, DnsHeader};
 pub use self::rrfilter::{RrFilter, FilterAction, FilterRule};
-pub use self::serializer::{DnsSerializer, SerializationError};
+pub use self::serializer::{DnsPacketBuilder, SerializationError, ResponseType, ExtendedDnsError, add_resource_record, setup_reply, resize_packet};
 pub use self::upstream::{UpstreamServer, UpstreamPool};
 
 #[cfg(feature = "dnssec")]

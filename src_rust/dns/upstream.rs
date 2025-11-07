@@ -13,6 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Suppress missing_docs for bitflags macro-generated internal constants
+#![allow(missing_docs)]
+
 //! Upstream DNS server selection and health tracking for query forwarding
 //!
 //! This module manages upstream DNS server configuration including addresses, query counters,

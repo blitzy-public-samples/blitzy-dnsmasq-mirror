@@ -74,30 +74,20 @@
 
 use crate::dns::protocol::{
     // Size constants
-    RRFIXEDSZ, PACKETSZ, MAXDNAME, INADDRSZ, IN6ADDRSZ,
+    RRFIXEDSZ, PACKETSZ, INADDRSZ, IN6ADDRSZ,
     // Header structure and accessor trait
     DnsHeader,
-    // Record types
-    T_A, T_AAAA, T_CNAME, T_MX, T_SOA, T_NS, T_PTR, T_TXT, T_SRV, T_NAPTR,
-    // Class constant
-    C_IN,
     // Response codes
-    NOERROR, NXDOMAIN, SERVFAIL, REFUSED,
-    // Flag constants
-    HB3_QR, HB3_AA, HB3_TC, HB4_RA, HB4_AD,
+    NOERROR, NXDOMAIN, REFUSED,
 };
 
 use crate::dns::compression::{
     CompressionContext,
-    encode_compression_pointer,
-    COMPRESSION_POINTER_FLAG,
-    COMPRESSION_OFFSET_MASK,
 };
 
 use bytes::BytesMut;
 use std::fmt;
-use std::io::Write;
-use tracing::{debug, warn, error, trace};
+use tracing::{debug, warn, trace};
 
 // ============================================================================
 // Error Types
@@ -487,7 +477,7 @@ pub fn add_resource_record(
     rr_type: u16,
     rr_class: u16,
     rdata: &RDataType,
-    compression_ctx: Option<&mut CompressionContext>,
+    _compression_ctx: Option<&mut CompressionContext>,
 ) -> Result<usize, SerializationError> {
     // If already truncated, don't add more records
     if *truncated {
@@ -498,7 +488,7 @@ pub fn add_resource_record(
     }
 
     // Save position before adding record (for rollback on truncation)
-    let start_pos = buffer.len();
+    let _start_pos = buffer.len();
 
     // Step 1: Write NAME field (either compression pointer or full name)
     if name_offset > 0 {
@@ -634,26 +624,39 @@ pub enum RDataType {
     NS(String),
     /// Mail exchange record
     MX {
+        /// MX preference value (lower values are higher priority)
         preference: u16,
+        /// Mail server hostname
         exchange: String,
     },
     /// Text record
     TXT(String),
     /// Start of authority
     SOA {
+        /// Primary name server for this zone
         mname: String,
+        /// Responsible party email address (@ replaced with .)
         rname: String,
+        /// Serial number of the zone
         serial: u32,
+        /// Refresh interval in seconds
         refresh: u32,
+        /// Retry interval in seconds
         retry: u32,
+        /// Expiry time in seconds
         expire: u32,
+        /// Minimum TTL in seconds
         minimum: u32,
     },
     /// Service locator
     SRV {
+        /// Priority (lower values are preferred)
         priority: u16,
+        /// Weight for load balancing among same priority
         weight: u16,
+        /// Port number of the service
         port: u16,
+        /// Target hostname providing the service
         target: String,
     },
     /// Raw RDATA bytes
@@ -1232,5 +1235,135 @@ mod tests {
         
         let packet = builder.build().unwrap();
         assert_eq!(packet.len(), DnsHeader::SIZE);
+    }
+
+    #[test]
+    fn test_read_u16_success() {
+        let buffer = vec![0x12, 0x34];
+        let result = read_u16(&buffer);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_read_u16_insufficient_data() {
+        let buffer = vec![0x12];
+        let result = read_u16(&buffer);
+        assert!(result.is_err());
+        match result {
+            Err(SerializationError::BufferTooSmall { .. }) => {},
+            _ => panic!("Expected BufferTooSmall error"),
+        }
+    }
+
+    #[test]
+    fn test_check_len_within_limits() {
+        let buffer = BytesMut::from(&[0u8; 100][..]);
+        let result = check_len(&buffer, 50, 200);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_len_exceeds_limit() {
+        let buffer = BytesMut::from(&[0u8; 150][..]);
+        let result = check_len(&buffer, 100, 200);
+        assert!(result.is_err());
+        match result {
+            Err(SerializationError::BufferTooSmall { .. }) => {},
+            _ => panic!("Expected BufferTooSmall error"),
+        }
+    }
+
+    #[test]
+    fn test_setup_reply_basic() {
+        let mut header = DnsHeader::new();
+        header.set_id(0x1234);
+        header.set_qr(false); // Query
+        header.set_qdcount(1);
+        
+        let result = setup_reply(&mut header, ResponseType::NoError, ExtendedDnsError::Unset);
+        assert!(result.is_ok());
+        
+        // Verify the response has QR bit set
+        assert!(header.qr());
+        // Verify AA is cleared
+        assert!(!header.aa());
+        // Verify TC is cleared
+        assert!(!header.tc());
+    }
+
+    #[test]
+    fn test_setup_reply_nxdomain() {
+        let mut header = DnsHeader::new();
+        header.set_id(0x1234);
+        
+        let result = setup_reply(&mut header, ResponseType::NxDomain, ExtendedDnsError::Unset);
+        assert!(result.is_ok());
+        
+        // Verify RCODE is set to NXDOMAIN (3)
+        assert_eq!(header.rcode(), 3);
+    }
+
+    #[test]
+    fn test_resize_packet_basic() {
+        use bytes::BufMut;
+        
+        let mut packet = BytesMut::with_capacity(512);
+        // Add a simple DNS header
+        for _ in 0..12 {
+            packet.put_u8(0);
+        }
+        
+        let mut header = DnsHeader::new();
+        header.set_qdcount(0);
+        header.set_ancount(0);
+        header.set_nscount(0);
+        header.set_arcount(0);
+        
+        let result = resize_packet(&mut packet, &header, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_dns_packet_builder_new() {
+        let builder = DnsPacketBuilder::new();
+        // Verify builder is created (can't check buffer directly as it's private)
+        assert!(!builder.is_truncated());
+    }
+
+    #[test]
+    fn test_dns_packet_builder_with_capacity() {
+        let builder = DnsPacketBuilder::with_capacity(1024);
+        // Verify builder is created with custom capacity
+        assert!(!builder.is_truncated());
+    }
+
+    #[test]
+    fn test_dns_packet_builder_set_header() {
+        let mut builder = DnsPacketBuilder::new();
+        let mut header = DnsHeader::new();
+        header.set_id(12345);
+        let result = builder.set_header(header);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_dns_packet_builder_build() {
+        let mut builder = DnsPacketBuilder::new();
+        let mut header = DnsHeader::new();
+        header.set_id(12345);
+        builder.set_header(header).unwrap();
+        
+        let packet = builder.build();
+        assert!(packet.is_ok());
+        let packet_bytes = packet.unwrap();
+        assert_eq!(packet_bytes.len(), DnsHeader::SIZE);
+    }
+
+    #[test]
+    fn test_dns_packet_builder_truncation_flag() {
+        let builder = DnsPacketBuilder::new();
+        // Initially should not be truncated
+        assert!(!builder.is_truncated());
     }
 }
