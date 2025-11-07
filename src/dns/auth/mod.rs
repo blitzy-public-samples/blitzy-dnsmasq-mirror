@@ -12,7 +12,7 @@
 
 pub mod zone;
 
-pub use zone::{AuthZone, ZoneRecord};
+pub use zone::AuthZone;
 
 use crate::dns::protocol::{DnsMessage, DnsQuestion, ResourceRecord};
 use crate::types::errors::DnsError;
@@ -81,7 +81,16 @@ mod tests {
     #[test]
     fn test_add_zone() {
         let mut server = AuthServer::new();
-        let zone = AuthZone::new("example.com".to_string());
+        let soa = zone::SoaRecord {
+            primary_ns: "ns1.example.com".to_string(),
+            admin_email: "admin.example.com".to_string(),
+            serial: 1,
+            refresh: 3600,
+            retry: 1800,
+            expire: 604800,
+            minimum: 86400,
+        };
+        let zone = AuthZone::new("example.com".to_string(), soa);
 
         server.add_zone(zone);
         assert_eq!(server.zone_count(), 1);
@@ -90,7 +99,16 @@ mod tests {
     #[test]
     fn test_is_authoritative() {
         let mut server = AuthServer::new();
-        let zone = AuthZone::new("example.com".to_string());
+        let soa = zone::SoaRecord {
+            primary_ns: "ns1.example.com".to_string(),
+            admin_email: "admin.example.com".to_string(),
+            serial: 1,
+            refresh: 3600,
+            retry: 1800,
+            expire: 604800,
+            minimum: 86400,
+        };
+        let zone = AuthZone::new("example.com".to_string(), soa);
         server.add_zone(zone);
 
         let question = DnsQuestion::new(
@@ -105,7 +123,16 @@ mod tests {
     #[test]
     fn test_not_authoritative() {
         let mut server = AuthServer::new();
-        let zone = AuthZone::new("example.com".to_string());
+        let soa = zone::SoaRecord {
+            primary_ns: "ns1.example.com".to_string(),
+            admin_email: "admin.example.com".to_string(),
+            serial: 1,
+            refresh: 3600,
+            retry: 1800,
+            expire: 604800,
+            minimum: 86400,
+        };
+        let zone = AuthZone::new("example.com".to_string(), soa);
         server.add_zone(zone);
 
         let question = DnsQuestion::new(
