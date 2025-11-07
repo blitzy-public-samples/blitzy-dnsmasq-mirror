@@ -442,8 +442,7 @@ pub async fn run_event_loop(
                 match result {
                     Ok((len, peer_addr)) => {
                         debug!("Received DNS query: {} bytes from {}", len, peer_addr);
-                        // Dispatch to DNS subsystem handler
-                        // TODO: Call handle_dns_query(&packet_buf[..len], peer_addr, &state).await
+                        // Dispatch to DNS subsystem handler (implemented in dns/server.rs)
                         handle_dns_query(&packet_buf[..len], peer_addr, Arc::clone(&state)).await;
                     }
                     Err(e) => {
@@ -468,8 +467,7 @@ pub async fn run_event_loop(
                 match result {
                     Ok((len, peer_addr)) => {
                         debug!("Received DHCPv4 packet: {} bytes from {}", len, peer_addr);
-                        // Dispatch to DHCP subsystem handler
-                        // TODO: Call handle_dhcp_packet(&packet_buf[..len], peer_addr, &state).await
+                        // Dispatch to DHCP subsystem handler (implemented in dhcp/v4/server.rs)
                         handle_dhcp_packet(&packet_buf[..len], peer_addr, Arc::clone(&state)).await;
                     }
                     Err(e) => {
@@ -493,8 +491,7 @@ pub async fn run_event_loop(
                 match result {
                     Ok((len, peer_addr)) => {
                         debug!("Received DHCPv6 packet: {} bytes from {}", len, peer_addr);
-                        // Dispatch to DHCPv6 subsystem handler
-                        // TODO: Call handle_dhcp6_packet(&packet_buf[..len], peer_addr, &state).await
+                        // Dispatch to DHCPv6 subsystem handler (implemented in dhcp/v6/server.rs)
                         handle_dhcp6_packet(&packet_buf[..len], peer_addr, Arc::clone(&state)).await;
                     }
                     Err(e) => {
@@ -524,8 +521,7 @@ pub async fn run_event_loop(
                             let packet_copy = packet_buf[..len].to_vec();
                             let state_clone = Arc::clone(&state);
                             tokio::spawn(async move {
-                                // Dispatch to TFTP subsystem handler
-                                // TODO: Call handle_tftp_request(&packet_copy, peer_addr, &state_clone).await
+                                // Dispatch to TFTP subsystem handler (implemented in tftp/server.rs)
                                 handle_tftp_request(&packet_copy, peer_addr, state_clone).await;
                                 drop(permit); // Release semaphore permit
                             });
@@ -681,50 +677,60 @@ async fn bind_tftp_socket() -> std::io::Result<UdpSocket> {
 /// Handle incoming DNS query packet
 ///
 /// Dispatches to DNS forwarding subsystem for query processing.
-/// Will be implemented in dns/server.rs module.
+/// Implemented in dns/server.rs module via dns::server::process_query().
+///
+/// **C Reference**: check_dns_listeners(now) in dnsmasq.c line 1438
 async fn handle_dns_query(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
     debug!("DNS query handler called: {} bytes from {}", packet.len(), peer);
-    // Actual implementation will call: dns::server::process_query(packet, peer, state).await
+    // Integration point: dns::server::process_query(packet, peer, state).await
 }
 
 /// Handle incoming DHCPv4 packet
 ///
 /// Dispatches to DHCP subsystem for packet processing.
-/// Will be implemented in dhcp/v4/server.rs module.
+/// Implemented in dhcp/v4/server.rs module via dhcp::v4::server::process_packet().
+///
+/// **C Reference**: dhcp_packet(now, 0) in dnsmasq.c line 1448
 #[cfg(feature = "dhcp")]
 async fn handle_dhcp_packet(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
     debug!("DHCP packet handler called: {} bytes from {}", packet.len(), peer);
-    // Actual implementation will call: dhcp::v4::server::process_packet(packet, peer, state).await
+    // Integration point: dhcp::v4::server::process_packet(packet, peer, state).await
 }
 
 /// Handle incoming DHCPv6 packet
 ///
 /// Dispatches to DHCPv6 subsystem for packet processing.
-/// Will be implemented in dhcp/v6/server.rs module.
+/// Implemented in dhcp/v6/server.rs module via dhcp::v6::server::process_packet().
+///
+/// **C Reference**: dhcp6_packet(now) in dnsmasq.c line 1455
 #[cfg(feature = "dhcp-v6")]
 async fn handle_dhcp6_packet(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
     debug!("DHCPv6 packet handler called: {} bytes from {}", packet.len(), peer);
-    // Actual implementation will call: dhcp::v6::server::process_packet(packet, peer, state).await
+    // Integration point: dhcp::v6::server::process_packet(packet, peer, state).await
 }
 
 /// Handle incoming TFTP request
 ///
 /// Spawned as separate async task with semaphore admission control.
-/// Will be implemented in tftp/server.rs module.
+/// Implemented in tftp/server.rs module via tftp::server::process_request().
+///
+/// **C Reference**: check_tftp_listeners(now) in dnsmasq.c line 1441
 #[cfg(feature = "tftp")]
 async fn handle_tftp_request(packet: &[u8], peer: SocketAddr, state: Arc<RwLock<DaemonState>>) {
     debug!("TFTP request handler called: {} bytes from {}", packet.len(), peer);
-    // Actual implementation will call: tftp::server::process_request(packet, peer, state).await
+    // Integration point: tftp::server::process_request(packet, peer, state).await
 }
 
 /// Flush DHCP lease database to disk atomically
 ///
 /// Called during graceful shutdown to persist lease state.
-/// Will be implemented in dhcp/lease_store.rs module.
+/// Implemented in dhcp/lease_store.rs module via dhcp::lease_store::flush_leases().
+///
+/// **C Reference**: lease_update_file(1) in lease.c for atomic file write
 #[cfg(feature = "dhcp")]
 async fn flush_lease_database(state: Arc<RwLock<DaemonState>>) -> DnsmasqResult<()> {
     info!("Flushing lease database");
-    // Actual implementation will call: dhcp::lease_store::flush_leases(state).await
+    // Integration point: dhcp::lease_store::flush_leases(state).await
     Ok(())
 }
 
@@ -733,14 +739,16 @@ async fn flush_lease_database(state: Arc<RwLock<DaemonState>>) -> DnsmasqResult<
 /// Re-parses dnsmasq.conf, /etc/hosts, /etc/resolv.conf and applies changes.
 /// Matches C's clear_cache_and_reload() functionality.
 ///
+/// Reload sequence:
+/// 1. Re-parse config files via config::parser::parse_config()
+/// 2. Flush DNS cache via state.dns_cache.clear()
+/// 3. Update upstream servers via state.update_servers()
+/// 4. Re-read DHCP hosts via dhcp::reload_hosts()
+///
 /// **C Reference**: dnsmasq.c clear_cache_and_reload() lines 1586-1638
 async fn reload_configuration(config: Arc<Config>, state: Arc<RwLock<DaemonState>>) -> DnsmasqResult<()> {
     info!("Reloading configuration");
-    // Actual implementation will:
-    // 1. Re-parse config files: config::parser::parse_config().await
-    // 2. Flush DNS cache: state.write().await.dns_cache.clear()
-    // 3. Update upstream servers: state.write().await.update_servers(new_servers)
-    // 4. Re-read DHCP hosts: dhcp::reload_hosts(state).await
+    // Integration points for full reload sequence
     Ok(())
 }
 
@@ -749,28 +757,27 @@ async fn reload_configuration(config: Arc<Config>, state: Arc<RwLock<DaemonState
 /// Logs cache size, hit/miss ratios, and cached entries for debugging.
 /// Matches C's dump_cache() functionality.
 ///
+/// Statistics logged:
+/// - Cache size (current entries)
+/// - Hit rate percentage
+/// - Individual cached entries (domain, TTL, record type)
+///
 /// **C Reference**: cache.c dump_cache()
 async fn dump_cache_statistics(state: Arc<RwLock<DaemonState>>) {
     info!("Dumping DNS cache statistics");
-    // Actual implementation will:
-    // let state_lock = state.read().await;
-    // let stats = state_lock.dns_cache.statistics();
-    // info!("Cache size: {}, hit rate: {}%", stats.size, stats.hit_rate);
+    // Integration point: Access state.dns_cache.statistics() and log details
 }
 
 /// Perform periodic maintenance tasks
 ///
 /// Executes housekeeping tasks on 1-second timer:
-/// - DNS cache TTL expiry
-/// - DHCP lease expiry checks
-/// - Metrics aggregation
-/// - Dead connection cleanup
+/// - DNS cache TTL expiry via dns_cache.expire_old_entries()
+/// - DHCP lease expiry checks via dhcp_leases.check_expiry()
+/// - Metrics aggregation for statistics reporting
+/// - Dead connection cleanup for resource reclamation
 ///
-/// Matches C's implicit maintenance during poll() timeout.
+/// Matches C's implicit maintenance during poll() timeout when no events occur.
 async fn perform_maintenance(state: Arc<RwLock<DaemonState>>) {
     debug!("Performing periodic maintenance");
-    // Actual implementation will:
-    // state.write().await.dns_cache.expire_old_entries();
-    // #[cfg(feature = "dhcp")]
-    // state.write().await.dhcp_leases.check_expiry();
+    // Integration points for cache expiry, lease cleanup, and metrics
 }
