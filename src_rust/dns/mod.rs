@@ -373,7 +373,10 @@ pub use self::auth::{AuthRecord, AuthServer, AuthZone, ZoneEntry};
 pub use self::blockdata::BlockData;
 pub use self::cache::{Cache, CacheConfig};
 pub use self::cache_types::{CacheEntry, CacheEntryType};
-pub use self::domain::{validate_domain_name, normalize_domain, is_subdomain, DomainError};
+pub use self::domain::{
+    is_valid_dns_name_pattern, is_name_synthetic, is_rev_synth, get_domain, get_domain6,
+    canonicalise, CondDomain, Addrlist, AddrlistFlags, QueryFlags, SynthDomainResult,
+};
 pub use self::edns0::{ClientSubnet, Edns0Option, Edns0OptionCode};
 pub use self::forwarder::{Forwarder, ForwardConfig, ForwardQuery};
 pub use self::hash::{QuestionHashTable, DnsQuestion as HashDnsQuestion};

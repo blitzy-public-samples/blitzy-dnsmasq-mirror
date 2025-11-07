@@ -51,18 +51,16 @@
 //! - Conditional domain assignment based on client subnet
 //! - Generated names comply with RFC 1035 DNS hostname syntax
 
-use std::cmp::Ordering;
 use std::fmt::Write as FmtWrite;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace};
 
 use crate::dns::protocol::MAXDNAME;
 use crate::utils::general::{
-    addr6part, hostname_isequal as util_hostname_isequal,
-    hostname_order as util_hostname_order, is_same_net6, is_same_net_prefix, setaddr6part,
+    addr6part, hostname_isequal as util_hostname_isequal, is_same_net6, is_same_net_prefix,
+    setaddr6part,
 };
 
 // Re-export hostname comparison functions from utils for backward compatibility
@@ -377,17 +375,34 @@ fn search_domain6<'a>(addr: &Ipv6Addr, domains: &'a [CondDomain]) -> Option<&'a 
 /// # Examples
 ///
 /// ```
-/// use dnsmasq::dns::domain::{is_name_synthetic, QueryFlags, SynthDomainResult};
-/// use std::net::Ipv4Addr;
+/// use dnsmasq::dns::domain::{is_name_synthetic, QueryFlags, SynthDomainResult, CondDomain};
+/// use std::net::{Ipv4Addr, IpAddr};
+///
+/// let synth_domains = vec![
+///     CondDomain {
+///         domain: "mydomain.com".to_string(),
+///         prefix: None,
+///         indexed: false,
+///         interface: false,
+///         is6: false,
+///         start: Ipv4Addr::new(192, 168, 1, 1),
+///         end: Ipv4Addr::new(192, 168, 1, 254),
+///         start6: "::".parse().unwrap(),
+///         end6: "::".parse().unwrap(),
+///         prefixlen: 0,
+///         al: vec![],
+///     }
+/// ];
 ///
 /// let name = "192-168-1-100.mydomain.com";
 /// let result = is_name_synthetic(QueryFlags::IPv4, name, &synth_domains);
 /// match result {
 ///     SynthDomainResult::Match(addr) => {
 ///         // addr contains 192.168.1.100
+///         assert!(matches!(addr, IpAddr::V4(_)));
 ///     }
 ///     SynthDomainResult::NoMatch => {
-///         // Not a synthetic domain
+///         panic!("Should have matched");
 ///     }
 /// }
 /// ```
@@ -489,8 +504,27 @@ pub fn is_name_synthetic(
             // Direct IP encoding: prefix + encoded-IP + "." + domain
             // Example: 192-168-1-100.example.com or 2001-db8--1.example.com
             
-            // Find where IP part ends (at the dot before domain)
-            let dot_pos = match tail.rfind('.') {
+            // Find where IP part ends by scanning for valid IP characters
+            // Match C implementation: find first character that's NOT part of IP encoding
+            let mut dot_pos = None;
+            for (idx, ch) in tail.chars().enumerate() {
+                let is_valid = match ch {
+                    '0'..='9' | '-' => true,
+                    'A'..='F' | 'a'..='f' if is_ipv6 => true,
+                    '.' => {
+                        // Found the separator dot
+                        dot_pos = Some(idx);
+                        break;
+                    }
+                    _ => false,
+                };
+                
+                if !is_valid {
+                    break;
+                }
+            }
+            
+            let dot_pos = match dot_pos {
                 Some(pos) => pos,
                 None => continue,
             };
@@ -583,12 +617,29 @@ pub fn is_name_synthetic(
 /// # Examples
 ///
 /// ```
-/// use dnsmasq::dns::domain::{is_rev_synth, QueryFlags};
-/// use std::net::Ipv4Addr;
+/// use dnsmasq::dns::domain::{is_rev_synth, QueryFlags, CondDomain};
+/// use std::net::{Ipv4Addr, IpAddr};
+///
+/// let synth_domains = vec![
+///     CondDomain {
+///         domain: "mydomain.com".to_string(),
+///         prefix: Some("host".to_string()),
+///         indexed: true,
+///         interface: false,
+///         is6: false,
+///         start: Ipv4Addr::new(192, 168, 1, 1),
+///         end: Ipv4Addr::new(192, 168, 1, 254),
+///         start6: "::".parse().unwrap(),
+///         end6: "::".parse().unwrap(),
+///         prefixlen: 0,
+///         al: vec![],
+///     }
+/// ];
 ///
 /// let addr = Ipv4Addr::new(192, 168, 1, 100);
 /// if let Some(name) = is_rev_synth(QueryFlags::IPv4, IpAddr::V4(addr), &synth_domains) {
-///     // name might be "host100.mydomain.com" or "192-168-1-100.mydomain.com"
+///     // name might be "host99.mydomain.com" (indexed, 0-based: 100-1=99)
+///     assert!(name.contains("mydomain.com"));
 /// }
 /// ```
 ///
@@ -704,12 +755,32 @@ pub fn is_rev_synth(
 /// # Examples
 ///
 /// ```
-/// use dnsmasq::dns::domain::get_domain;
+/// use dnsmasq::dns::domain::{get_domain, CondDomain};
 /// use std::net::Ipv4Addr;
+///
+/// let cond_domains = vec![
+///     CondDomain {
+///         domain: "internal.net".to_string(),
+///         prefix: None,
+///         indexed: false,
+///         interface: false,
+///         is6: false,
+///         start: Ipv4Addr::new(10, 0, 1, 1),
+///         end: Ipv4Addr::new(10, 0, 1, 254),
+///         start6: "::".parse().unwrap(),
+///         end6: "::".parse().unwrap(),
+///         prefixlen: 0,
+///         al: vec![],
+///     }
+/// ];
 ///
 /// let addr = Ipv4Addr::new(10, 0, 1, 50);
 /// let domain = get_domain(addr, &cond_domains, "example.com");
-/// // Returns appropriate domain for this subnet
+/// assert_eq!(domain, "internal.net"); // Matches conditional domain
+///
+/// let addr2 = Ipv4Addr::new(192, 168, 1, 1);
+/// let domain2 = get_domain(addr2, &cond_domains, "example.com");
+/// assert_eq!(domain2, "example.com"); // Falls back to default
 /// ```
 pub fn get_domain<'a>(
     addr: Ipv4Addr,
@@ -741,15 +812,32 @@ pub fn get_domain<'a>(
 /// # Examples
 ///
 /// ```
-/// use dnsmasq::dns::domain::get_domain6;
-/// use std::net::Ipv6Addr;
+/// use dnsmasq::dns::domain::{get_domain6, CondDomain};
+/// use std::net::{Ipv4Addr, Ipv6Addr};
+///
+/// let cond_domains = vec![
+///     CondDomain {
+///         domain: "ipv6.net".to_string(),
+///         prefix: None,
+///         indexed: false,
+///         interface: false,
+///         is6: true,
+///         start: Ipv4Addr::new(0, 0, 0, 0),
+///         end: Ipv4Addr::new(0, 0, 0, 0),
+///         start6: "2001:db8::1".parse().unwrap(),
+///         end6: "2001:db8::ffff".parse().unwrap(),
+///         prefixlen: 64,
+///         al: vec![],
+///     }
+/// ];
 ///
 /// let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x100);
 /// let domain = get_domain6(Some(&addr), &cond_domains, "example.com");
-/// // Returns appropriate domain for this subnet
+/// assert_eq!(domain, "ipv6.net"); // Matches conditional domain
 ///
 /// // Get default domain
 /// let default = get_domain6(None, &cond_domains, "example.com");
+/// assert_eq!(default, "example.com"); // No address, returns default
 /// ```
 pub fn get_domain6<'a>(
     addr: Option<&Ipv6Addr>,

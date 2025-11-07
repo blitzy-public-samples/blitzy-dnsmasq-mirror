@@ -189,6 +189,13 @@ bitflags = { version = "2.6", features = ["serde"] }
 # - Usage: Serializing protocol structures (DNS, DHCP, ICMPv6)
 byteorder = "1.5"
 
+# ipnetwork: IP network address parsing and manipulation
+# - Replaces: Manual CIDR netmask calculation (htonl(~0 << (32-prefix)))
+# - Provides: Type-safe Ipv4Network/Ipv6Network with contains() method
+# - Usage: Conditional domain subnet matching, IP range validation
+# - Memory-safe: Eliminates bitwise AND operations on raw addresses
+ipnetwork = "0.20"
+
 # rand: Cryptographically secure random number generation
 # - Replaces: SURF (Secure Universal Random Function) RNG in util.c
 # - Provides: ChaCha8Rng for thread-safe cryptographic randomness
