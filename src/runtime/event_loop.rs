@@ -12,7 +12,7 @@ use tokio::sync::{RwLock, Semaphore, broadcast};
 use tokio::time::{interval, sleep, timeout};
 use tracing::{error, info, warn};
 
-use crate::config::Config;
+use crate::config::{Config, types::Protocol};
 use crate::runtime::signal::{SignalEvent, SignalHandler};
 use crate::types::{DaemonState, DnsmasqError, DnsmasqResult, NetworkError};
 
@@ -65,8 +65,8 @@ pub async fn run_event_loop(
     // Create shutdown channel
     let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
 
-    // Bind DNS listener if enabled
-    let dns_socket = if config.enable_dns {
+    // Bind DNS listener if port is configured (port 0 means disabled)
+    let dns_socket = if config.network.port != 0 {
         match bind_dns_listener(&config).await {
             Ok(socket) => {
                 info!("DNS listener bound successfully");
@@ -81,8 +81,9 @@ pub async fn run_event_loop(
         None
     };
 
-    // Bind DHCP listener if enabled
-    let dhcp_socket = if config.enable_dhcp {
+    // Bind DHCP listener if enabled (DHCP config is present)
+    #[cfg(feature = "dhcp")]
+    let dhcp_socket = if config.dhcp.is_some() {
         match bind_dhcp_listener(&config).await {
             Ok(socket) => {
                 info!("DHCP listener bound successfully");
@@ -96,9 +97,13 @@ pub async fn run_event_loop(
     } else {
         None
     };
+    
+    #[cfg(not(feature = "dhcp"))]
+    let dhcp_socket: Option<UdpSocket> = None;
 
-    // Bind TFTP listener if enabled
-    let tftp_socket = if config.enable_tftp {
+    // Bind TFTP listener if enabled (TFTP config is present)
+    #[cfg(feature = "tftp")]
+    let tftp_socket = if config.tftp.is_some() {
         match bind_tftp_listener(&config).await {
             Ok(socket) => {
                 info!("TFTP listener bound successfully");
@@ -112,6 +117,9 @@ pub async fn run_event_loop(
     } else {
         None
     };
+    
+    #[cfg(not(feature = "tftp"))]
+    let tftp_socket: Option<UdpSocket> = None;
 
     // Create TCP connection semaphore
     let tcp_semaphore = Arc::new(Semaphore::new(MAX_TCP_PROCESSES));
@@ -281,11 +289,14 @@ pub async fn run_event_loop(
 
 /// Bind DNS listener socket
 async fn bind_dns_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
-    let bind_addr = format!(
-        "{}:{}",
-        config.listen_address.as_deref().unwrap_or("0.0.0.0"),
-        53
-    );
+    // Find DNS-specific listen address, or default to all interfaces
+    let ip_addr = config.network.listen_addresses
+        .iter()
+        .find(|la| la.protocol == Protocol::Dns)
+        .map(|la| la.address.to_string())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    
+    let bind_addr = format!("{}:{}", ip_addr, config.network.port);
     info!("Binding DNS listener to {}", bind_addr);
 
     let socket = UdpSocket::bind(&bind_addr)
@@ -300,11 +311,14 @@ async fn bind_dns_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
 
 /// Bind DHCP listener socket
 async fn bind_dhcp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
-    let bind_addr = format!(
-        "{}:{}",
-        config.listen_address.as_deref().unwrap_or("0.0.0.0"),
-        67
-    );
+    // Find DHCP-specific listen address, or default to all interfaces
+    let ip_addr = config.network.listen_addresses
+        .iter()
+        .find(|la| la.protocol == Protocol::Dhcp)
+        .map(|la| la.address.to_string())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    
+    let bind_addr = format!("{}:{}", ip_addr, 67);
     info!("Binding DHCP listener to {}", bind_addr);
 
     let socket = UdpSocket::bind(&bind_addr)
@@ -327,11 +341,14 @@ async fn bind_dhcp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
 
 /// Bind TFTP listener socket
 async fn bind_tftp_listener(config: &Config) -> DnsmasqResult<UdpSocket> {
-    let bind_addr = format!(
-        "{}:{}",
-        config.listen_address.as_deref().unwrap_or("0.0.0.0"),
-        69
-    );
+    // Find TFTP-specific listen address, or default to all interfaces
+    let ip_addr = config.network.listen_addresses
+        .iter()
+        .find(|la| la.protocol == Protocol::Tftp)
+        .map(|la| la.address.to_string())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    
+    let bind_addr = format!("{}:{}", ip_addr, 69);
     info!("Binding TFTP listener to {}", bind_addr);
 
     let socket = UdpSocket::bind(&bind_addr)

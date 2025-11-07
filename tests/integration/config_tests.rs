@@ -864,7 +864,9 @@ fn complex_trust_anchor_formats() {
     
     let trust_anchor = ".,19036,8,2,49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5";
     
-    let args = vec!["dnsmasq", &format!("--trust-anchor={}", trust_anchor)];
+    // Bind the formatted string to extend its lifetime
+    let trust_anchor_arg = format!("--trust-anchor={}", trust_anchor);
+    let args = vec!["dnsmasq", trust_anchor_arg.as_str()];
     let _cli = Cli::parse_from(args);
     
     // Trust anchor with domain, key tag, algorithm, digest type, and digest
