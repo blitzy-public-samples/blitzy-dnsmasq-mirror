@@ -278,17 +278,43 @@ const MAX_DOMAIN_NAME_LEN: usize = MAXDNAME;
 #[derive(Debug, Clone)]
 pub enum TrustAnchorError {
     /// File I/O error with context
-    IoError { path: String, message: String },
+    IoError { 
+        /// Path to the file that caused the error
+        path: String, 
+        /// Error message describing the I/O failure
+        message: String 
+    },
     /// Trust anchor validation failed
-    ValidationFailed { domain: String, reason: String },
+    ValidationFailed { 
+        /// Domain name being validated
+        domain: String, 
+        /// Reason for validation failure
+        reason: String 
+    },
     /// Trust anchor file parsing error
-    ParseError { path: String, line: usize, reason: String },
+    ParseError { 
+        /// Path to the file being parsed
+        path: String, 
+        /// Line number where parsing failed
+        line: usize, 
+        /// Reason for parse failure
+        reason: String 
+    },
     /// Invalid trust anchor configuration
-    InvalidConfig { reason: String },
+    InvalidConfig { 
+        /// Reason for invalid configuration
+        reason: String 
+    },
     /// Cryptographic verification failed
-    CryptoError { reason: String },
+    CryptoError { 
+        /// Reason for cryptographic failure
+        reason: String 
+    },
     /// Domain name too long or invalid
-    InvalidDomain { domain: String },
+    InvalidDomain { 
+        /// The invalid domain name
+        domain: String 
+    },
 }
 
 impl std::fmt::Display for TrustAnchorError {
