@@ -68,7 +68,6 @@
 //! }
 //! ```
 
-use crate::dns::protocol::MAXDNAME;
 use crate::dns::parser::extract_name;
 use sha2::{Sha256, Digest};
 

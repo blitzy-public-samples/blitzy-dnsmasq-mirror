@@ -228,6 +228,12 @@ ring = { version = "0.17", optional = true }
 # - Optional: Only compiled when 'dnssec' feature enabled
 rustls = { version = "0.23", optional = true }
 
+# sha2: SHA-256 hashing for DNS question verification
+# - Replaces: Nettle/standalone SHA-256 in hash-questions.c
+# - Memory-safe: No unsafe code in hash operations
+# - Usage: DNS question section hashing for cache poisoning prevention
+sha2 = "0.10"
+
 # -----------------------------------------------------------------------------
 # Configuration & Serialization (Section 0.11.5)
 # -----------------------------------------------------------------------------
