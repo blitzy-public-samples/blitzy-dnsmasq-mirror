@@ -109,24 +109,17 @@ pub mod launchd;
 // ==============================================================================
 
 // Re-export launchd types for external use
-pub use launchd::{
-    get_launchd_sockets, is_launchd_activated, LaunchdSockets, ServiceType,
-};
+pub use launchd::{LaunchdSockets, ServiceType, get_launchd_sockets, is_launchd_activated};
 
 // Re-export BSD types that macOS inherits
-pub use crate::platform::bsd::{
-    BpfSocket, KqueueWatcher, RoutingSocket,
-};
+pub use crate::platform::bsd::{BpfSocket, KqueueWatcher, RoutingSocket};
 
 // ==============================================================================
 // Imports
 // ==============================================================================
 
-use crate::platform::bsd::{
-    enumerate_interfaces as bsd_enumerate_interfaces,
-    FileEvent,
-};
-use crate::platform::{Interface};
+use crate::platform::Interface;
+use crate::platform::bsd::{FileEvent, enumerate_interfaces as bsd_enumerate_interfaces};
 use crate::types::errors::DnsmasqError;
 
 // External dependencies
@@ -134,9 +127,9 @@ use libc::c_int;
 use nix::sys;
 use std::os::unix::io::RawFd;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::io::unix::AsyncFd;
 use tokio::sync::RwLock;
-use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 // ==============================================================================
@@ -329,10 +322,7 @@ impl MacOsPlatform {
         let launchd_sockets = if is_launchd_activated() {
             match get_launchd_sockets().await {
                 Ok(Some(sockets)) => {
-                    info!(
-                        "Retrieved {} socket(s) from launchd",
-                        sockets.total_count()
-                    );
+                    info!("Retrieved {} socket(s) from launchd", sockets.total_count());
                     Some(sockets)
                 }
                 Ok(None) => {
@@ -389,7 +379,7 @@ impl MacOsPlatform {
                 None
             }
         };
-        
+
         #[cfg(not(feature = "dhcp"))]
         let bpf = None;
 
@@ -397,7 +387,7 @@ impl MacOsPlatform {
         let sc_store = None;
 
         info!("macOS platform initialized successfully");
-        
+
         Ok(Self {
             routing_socket,
             bpf,
@@ -454,13 +444,14 @@ impl MacOsPlatform {
 
         // Delegate to BSD implementation which uses getifaddrs()
         // This inherits the BSD interface enumeration logic from bpf.rs
-        let interfaces = bsd_enumerate_interfaces(
-            crate::platform::bsd::AddressFamily::Unspec
-        )
-        .await
-        .map_err(|e| MacOsError::IoError(
-            std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-        ))?;
+        let interfaces = bsd_enumerate_interfaces(crate::platform::bsd::AddressFamily::Unspec)
+            .await
+            .map_err(|e| {
+                MacOsError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            })?;
 
         debug!("Enumerated {} network interfaces", interfaces.len());
 
@@ -509,7 +500,7 @@ impl MacOsPlatform {
     pub async fn init_monitoring(&self) -> Result<(), MacOsError> {
         if self.routing_socket.is_none() {
             return Err(MacOsError::RoutingSocketError(
-                "Routing socket not initialized - cannot monitor interface changes".to_string()
+                "Routing socket not initialized - cannot monitor interface changes".to_string(),
             ));
         }
 
@@ -676,113 +667,113 @@ impl Default for MacOsPlatform {
 // Module Documentation and Integration Notes
 // ==============================================================================
 
-/// # Integration with Daemon Core
-///
-/// The MacOsPlatform integrates with the dnsmasq daemon core through several
-/// coordination points:
-///
-/// ## Privilege Dropping
-///
-/// Coordinates with `runtime::daemon` for privilege management:
-/// - If launchd sockets available: Already running as unprivileged user
-/// - If manual launch: Drop privileges after binding privileged ports
-///
-/// ## Socket Handoff
-///
-/// Provides sockets to DNS/DHCP/TFTP servers:
-/// - launchd sockets: Pre-bound, handed directly to servers
-/// - Manual sockets: Bind during initialization, then hand to servers
-///
-/// ## Dual-Mode Operation
-///
-/// Supports both service modes:
-/// - On-demand (launchd): Started when network requests arrive
-/// - Persistent daemon: Runs continuously after manual launch
-///
-/// # Future Enhancements
-///
-/// ## SystemConfiguration Framework Integration
-///
-/// The `sc_store` field is currently a placeholder for future integration
-/// with macOS's SystemConfiguration framework. When implemented, this will
-/// provide:
-///
-/// - Real-time network topology change notifications
-/// - Network location switch detection (e.g., home ↔ work ↔ mobile)
-/// - Integration with macOS Network preferences panel
-/// - IPv4/IPv6 configuration change events
-///
-/// Implementation would use system-configuration-sys crate:
-/// ```rust,ignore
-/// use system_configuration::dynamic_store::{SCDynamicStore, SCDynamicStoreBuilder};
-///
-/// let store = SCDynamicStoreBuilder::new("dnsmasq")
-///     .callback_context(/* ... */)
-///     .build();
-///     
-/// // Watch for network changes
-/// store.set_notification_keys(
-///     &["State:/Network/Global/IPv4", "State:/Network/Global/IPv6"],
-///     &[],
-/// );
-/// ```
-///
-/// ## IP_BOUND_IF Socket Option
-///
-/// macOS supports the IP_BOUND_IF socket option (equivalent to Linux's
-/// SO_BINDTODEVICE) for binding sockets to specific interfaces. This
-/// could be exposed through a future API:
-///
-/// ```rust,ignore
-/// impl MacOsPlatform {
-///     pub fn bind_socket_to_interface(
-///         &self,
-///         socket: &Socket,
-///         interface_index: u32,
-///     ) -> Result<(), MacOsError> {
-///         // Use IP_BOUND_IF setsockopt
-///     }
-/// }
-/// ```
-///
-/// # Testing Considerations
-///
-/// ## Unit Testing
-///
-/// Platform-specific code requires careful testing:
-/// - Mock launchd environment variables for activation testing
-/// - Use temporary directories for kqueue file watching tests
-/// - Test interface enumeration with loopback-only scenario
-///
-/// ## Integration Testing
-///
-/// Full platform testing requires:
-/// - Running tests as root for BPF device access
-/// - Network interfaces available for enumeration
-/// - launchd.plist configuration for activation testing
-///
-/// # Platform Detection
-///
-/// Runtime macOS version detection for feature availability:
-///
-/// ```rust,ignore
-/// use libc::utsname;
-///
-/// fn get_darwin_version() -> Result<(u32, u32), std::io::Error> {
-///     let mut uts: utsname = unsafe { std::mem::zeroed() };
-///     if unsafe { libc::uname(&mut uts) } == 0 {
-///         // Parse uts.release for Darwin kernel version
-///         // Darwin 20.x.x = macOS 11.x (Big Sur)
-///         // Darwin 21.x.x = macOS 12.x (Monterey)
-///         // Darwin 22.x.x = macOS 13.x (Ventura)
-///     }
-///     // ...
-/// }
-/// ```
-///
-/// Feature availability by macOS version:
-/// - macOS 10.4+ (Tiger): Basic networking, getifaddrs, routing sockets
-/// - macOS 10.5+ (Leopard): SystemConfiguration framework
-/// - macOS 10.6+ (Snow Leopard): Full IPv6 stack, kqueue
-/// - macOS 10.10+ (Yosemite): Modern launchd with socket activation
-/// - macOS 11+ (Big Sur): Unified architecture (ARM64 + x86_64)
+// Integration with Daemon Core
+//
+// The MacOsPlatform integrates with the dnsmasq daemon core through several
+// coordination points:
+//
+// ## Privilege Dropping
+//
+// Coordinates with `runtime::daemon` for privilege management:
+// - If launchd sockets available: Already running as unprivileged user
+// - If manual launch: Drop privileges after binding privileged ports
+//
+// ## Socket Handoff
+//
+// Provides sockets to DNS/DHCP/TFTP servers:
+// - launchd sockets: Pre-bound, handed directly to servers
+// - Manual sockets: Bind during initialization, then hand to servers
+//
+// ## Dual-Mode Operation
+//
+// Supports both service modes:
+// - On-demand (launchd): Started when network requests arrive
+// - Persistent daemon: Runs continuously after manual launch
+//
+// # Future Enhancements
+//
+// ## SystemConfiguration Framework Integration
+//
+// The `sc_store` field is currently a placeholder for future integration
+// with macOS's SystemConfiguration framework. When implemented, this will
+// provide:
+//
+// - Real-time network topology change notifications
+// - Network location switch detection (e.g., home ↔ work ↔ mobile)
+// - Integration with macOS Network preferences panel
+// - IPv4/IPv6 configuration change events
+//
+// Implementation would use system-configuration-sys crate:
+// ```rust,ignore
+// use system_configuration::dynamic_store::{SCDynamicStore, SCDynamicStoreBuilder};
+//
+// let store = SCDynamicStoreBuilder::new("dnsmasq")
+//     .callback_context(/* ... */)
+//     .build();
+//
+// // Watch for network changes
+// store.set_notification_keys(
+//     &["State:/Network/Global/IPv4", "State:/Network/Global/IPv6"],
+//     &[],
+// );
+// ```
+//
+// ## IP_BOUND_IF Socket Option
+//
+// macOS supports the IP_BOUND_IF socket option (equivalent to Linux's
+// SO_BINDTODEVICE) for binding sockets to specific interfaces. This
+// could be exposed through a future API:
+//
+// ```rust,ignore
+// impl MacOsPlatform {
+//     pub fn bind_socket_to_interface(
+//         &self,
+//         socket: &Socket,
+//         interface_index: u32,
+//     ) -> Result<(), MacOsError> {
+//         // Use IP_BOUND_IF setsockopt
+//     }
+// }
+// ```
+//
+// # Testing Considerations
+//
+// ## Unit Testing
+//
+// Platform-specific code requires careful testing:
+// - Mock launchd environment variables for activation testing
+// - Use temporary directories for kqueue file watching tests
+// - Test interface enumeration with loopback-only scenario
+//
+// ## Integration Testing
+//
+// Full platform testing requires:
+// - Running tests as root for BPF device access
+// - Network interfaces available for enumeration
+// - launchd.plist configuration for activation testing
+//
+// # Platform Detection
+//
+// Runtime macOS version detection for feature availability:
+//
+// ```rust,ignore
+// use libc::utsname;
+//
+// fn get_darwin_version() -> Result<(u32, u32), std::io::Error> {
+//     let mut uts: utsname = unsafe { std::mem::zeroed() };
+//     if unsafe { libc::uname(&mut uts) } == 0 {
+//         // Parse uts.release for Darwin kernel version
+//         // Darwin 20.x.x = macOS 11.x (Big Sur)
+//         // Darwin 21.x.x = macOS 12.x (Monterey)
+//         // Darwin 22.x.x = macOS 13.x (Ventura)
+//     }
+//     // ...
+// }
+// ```
+//
+// Feature availability by macOS version:
+// - macOS 10.4+ (Tiger): Basic networking, getifaddrs, routing sockets
+// - macOS 10.5+ (Leopard): SystemConfiguration framework
+// - macOS 10.6+ (Snow Leopard): Full IPv6 stack, kqueue
+// - macOS 10.10+ (Yosemite): Modern launchd with socket activation
+// - macOS 11+ (Big Sur): Unified architecture (ARM64 + x86_64)
