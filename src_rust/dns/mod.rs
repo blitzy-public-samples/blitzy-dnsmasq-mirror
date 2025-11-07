@@ -387,7 +387,7 @@ pub use self::hash::{hash_questions_init, hash_questions, SHA256_DIGEST_SIZE};
 pub use self::parser::{extract_name, skip_name, skip_questions, skip_section, extract_addresses, extract_request, in_arpa_name_2_addr, ParseError};
 pub use self::pattern::{DomainPattern, DomainPatternMatcher};
 pub use self::protocol::{DnsOpcode, DnsRcode, DnsRrType, DnsHeader};
-pub use self::rrfilter::{RrFilter, FilterAction, FilterRule};
+pub use self::rrfilter::{rrfilter, rrfilter_desc, RRFilterError, RRFILTER_EDNS0, RRFILTER_DNSSEC, RRFILTER_A, RRFILTER_AAAA};
 pub use self::serializer::{DnsPacketBuilder, SerializationError, ResponseType, ExtendedDnsError, add_resource_record, setup_reply, resize_packet};
 pub use self::upstream::{UpstreamServer, UpstreamPool};
 

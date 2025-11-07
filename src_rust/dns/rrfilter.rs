@@ -67,16 +67,15 @@
 
 use crate::dns::protocol::{
     T_A, T_AAAA, T_AFSDB, T_CNAME, T_DNAME, T_KX, T_MB, T_MD, T_MF, T_MG, T_MINFO, T_MR, T_MX,
-    T_NS, T_NSEC, T_NSEC3, T_NXT, T_OPT, T_PTR, T_RP, T_RRSIG, T_RT, T_SIG, T_SOA, T_SRV,
-    C_IN, MAXDNAME, RRFIXEDSZ,
+    T_NS, T_NSEC, T_NSEC3, T_NXT, T_OPT, T_PTR, T_PX, T_RP, T_RRSIG, T_RT, T_SIG, T_SOA, T_SRV,
+    C_IN,
 };
 use crate::dns::parser::skip_name;
 use crate::dns::compression::{
-    COMPRESSION_POINTER_FLAG, COMPRESSION_OFFSET_MASK, MAX_COMPRESSION_HOPS,
+    COMPRESSION_POINTER_FLAG, COMPRESSION_OFFSET_MASK,
 };
 use std::fmt;
-use std::convert::TryInto;
-use tracing::{debug, warn, error, trace};
+use tracing::{debug, warn, trace};
 
 // Note on unused imports:
 // - MAX_COMPRESSION_HOPS: Not applicable for this implementation since check_name()
@@ -116,22 +115,27 @@ const MAX_WORKSPACE_ENTRIES: usize = 100;
 pub enum RRFilterError {
     /// Packet length insufficient for parsing
     InvalidLength {
+        /// Expected minimum length in bytes
         expected: usize,
+        /// Actual packet length in bytes
         actual: usize,
     },
     
     /// Invalid compression pointer detected
     InvalidCompressionPointer {
+        /// Offset value from compression pointer
         offset: usize,
     },
     
     /// Compression pointer points into removed section
     PointerIntoRemovedSection {
+        /// Offset value that points into removed section
         offset: usize,
     },
     
     /// Invalid label type encountered
     InvalidLabelType {
+        /// Label type byte that was invalid
         label_type: u8,
     },
     
