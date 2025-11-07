@@ -62,7 +62,10 @@ use std::str;
 #[cfg(feature = "idn")]
 use idna::domain_to_ascii;
 
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
+
+#[cfg(feature = "idn")]
+use tracing::error;
 
 /// Result of internal domain name validation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
