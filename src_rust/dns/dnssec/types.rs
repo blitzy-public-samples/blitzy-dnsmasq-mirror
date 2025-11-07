@@ -494,8 +494,16 @@ impl DnsKey {
 
     /// Verify data using this DNSKEY with provided digest
     ///
-    /// This method encapsulates the algorithm-specific verification logic,
-    /// delegating to the appropriate crypto implementation based on algorithm.
+    /// This method provides the interface for DNSKEY signature verification.
+    /// The actual cryptographic operations are delegated to the crypto module
+    /// (src_rust/dns/dnssec/crypto.rs) which uses ring or rustls for secure
+    /// algorithm-specific verification.
+    ///
+    /// # Architecture Note
+    ///
+    /// This types module defines data structures and their basic operations.
+    /// Cryptographic verification requires integration with the crypto module
+    /// which will implement algorithm-specific logic for RSA, ECDSA, and EdDSA.
     ///
     /// # Arguments
     ///
@@ -506,25 +514,53 @@ impl DnsKey {
     ///
     /// * `Ok(true)` - Signature verifies successfully
     /// * `Ok(false)` - Signature verification failed
-    /// * `Err(...)` - Malformed key or unsupported algorithm
+    /// * `Err(...)` - Malformed key, empty parameters, or unsupported algorithm
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use dnsmasq::dns::dnssec::types::{DnsKey, DnssecAlgorithm};
+    /// let key = DnsKey::new(257, 3, DnssecAlgorithm::RSA_SHA256, vec![1,2,3,4]);
+    /// let result = key.verify_with_digest(&digest, &signature);
+    /// match result {
+    ///     Ok(true) => println!("Signature valid"),
+    ///     Ok(false) => println!("Signature invalid"),
+    ///     Err(e) => println!("Verification error: {}", e),
+    /// }
+    /// ```
     pub fn verify_with_digest(&self, digest: &[u8], signature: &[u8]) -> Result<bool, String> {
-        // This is a placeholder for the actual crypto verification logic
-        // In the full implementation, this would call into the crypto module
-        // which uses ring or rustls for the actual cryptographic operations
+        // Validate parameters before delegating to crypto module
+        if digest.is_empty() {
+            return Err("Digest cannot be empty".to_string());
+        }
         
-        // Validate basic parameters
-        if digest.is_empty() || signature.is_empty() {
-            return Err("Empty digest or signature".to_string());
+        if signature.is_empty() {
+            return Err("Signature cannot be empty".to_string());
         }
         
         if self.public_key.is_empty() {
-            return Err("Empty public key".to_string());
+            return Err("DNSKEY public key cannot be empty".to_string());
         }
 
-        // Algorithm-specific verification would be dispatched here
-        // For now, return Ok(false) to indicate verification logic is not yet implemented
-        // in this types-only module (crypto verification belongs in crypto.rs)
-        Ok(false)
+        // Protocol field must be 3 per RFC 4034
+        if self.protocol != 3 {
+            return Err(format!("Invalid protocol field: {} (must be 3)", self.protocol));
+        }
+
+        // Interface for crypto module integration
+        // When crypto.rs is implemented, this will dispatch to:
+        // - crypto::verify_rsa_signature() for RSA algorithms
+        // - crypto::verify_ecdsa_signature() for ECDSA algorithms  
+        // - crypto::verify_eddsa_signature() for EdDSA algorithms
+        //
+        // For now, return Err to indicate crypto module integration is required.
+        // This ensures callers know verification is not yet available rather than
+        // silently succeeding or failing.
+        Err(format!(
+            "Crypto verification not yet integrated for algorithm {}. \
+             Crypto module (crypto.rs) will implement algorithm-specific verification.",
+            self.algorithm
+        ))
     }
 
     /// Serialize DNSKEY to DNS wire format
