@@ -356,10 +356,10 @@ pub fn mac_to_eui64(mac: &[u8]) -> Option<Vec<u8>> {
 
     // Convert MAC-48 to EUI-64 by inserting FF:FE and flipping U/L bit
     let eui64 = vec![
-        mac[0] ^ 0x02,  // Flip bit 7 (Universal/Local bit)
+        mac[0] ^ 0x02, // Flip bit 7 (Universal/Local bit)
         mac[1],
         mac[2],
-        0xFF,           // Insert FF:FE
+        0xFF, // Insert FF:FE
         0xFE,
         mac[3],
         mac[4],

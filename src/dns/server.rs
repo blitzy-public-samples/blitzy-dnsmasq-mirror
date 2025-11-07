@@ -10,9 +10,9 @@
 //! Implements the DNS server listener that receives queries from clients,
 //! coordinates cache lookups and query forwarding, and returns responses.
 
-use std::net::SocketAddr;
 use crate::dns::cache::DnsCache;
 use crate::types::errors::DnsError;
+use std::net::SocketAddr;
 
 /// DNS server implementation
 #[derive(Debug)]

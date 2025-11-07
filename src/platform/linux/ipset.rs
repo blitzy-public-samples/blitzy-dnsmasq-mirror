@@ -56,10 +56,10 @@
 //! Protocol selection is automatic based on kernel version detection at initialization.
 
 use byteorder::{ByteOrder, NetworkEndian};
-use nix::sys::socket::{self, AddressFamily, SockProtocol, SockType, SockFlag};
+use nix::sys::socket::{self, AddressFamily, SockFlag, SockProtocol, SockType};
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::os::unix::io::{AsRawFd, RawFd, OwnedFd, IntoRawFd};
+use std::os::unix::io::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
 use thiserror::Error;
 use tracing::info;
 
@@ -159,9 +159,9 @@ struct NetlinkAttr {
 /// Specifies address family and protocol version.
 #[repr(C)]
 struct NfGenMsg {
-    nfgen_family: u8,  // AF_INET or AF_INET6
-    version: u8,       // Always NFNETLINK_V0
-    res_id: u16,       // Resource ID (unused, set to 0)
+    nfgen_family: u8, // AF_INET or AF_INET6
+    version: u8,      // Always NFNETLINK_V0
+    res_id: u16,      // Resource ID (unused, set to 0)
 }
 
 /// Netlink message header
@@ -322,12 +322,11 @@ impl IpsetManager {
     /// Returns tuple (major, minor, patch) for version comparison.
     fn detect_kernel_version() -> (u32, u32, u32) {
         let mut utsname: libc::utsname = unsafe { mem::zeroed() };
-        
+
         unsafe {
             if libc::uname(&mut utsname) == 0 {
-                let release = std::ffi::CStr::from_ptr(utsname.release.as_ptr())
-                    .to_string_lossy();
-                
+                let release = std::ffi::CStr::from_ptr(utsname.release.as_ptr()).to_string_lossy();
+
                 if let Some((major, minor, patch)) = Self::parse_kernel_version(&release) {
                     return (major, minor, patch);
                 }
@@ -341,7 +340,7 @@ impl IpsetManager {
     /// Parse kernel version string (e.g., "5.15.0-91-generic")
     fn parse_kernel_version(version_str: &str) -> Option<(u32, u32, u32)> {
         let parts: Vec<&str> = version_str.split(&['.', '-'][..]).collect();
-        
+
         if parts.len() >= 3 {
             let major = parts[0].parse().ok()?;
             let minor = parts[1].parse().ok()?;
@@ -573,12 +572,12 @@ impl IpsetManager {
         let mut req_get: IpSetReqAdtGet = unsafe { mem::zeroed() };
         req_get.op = LEGACY_IPSET_OP_QUERY;
         req_get.version = LEGACY_IPSET_VERSION;
-        
+
         let name_bytes = setname.as_bytes();
         req_get.set_name[..name_bytes.len()].copy_from_slice(name_bytes);
 
         let mut req_len = mem::size_of::<IpSetReqAdtGet>() as libc::socklen_t;
-        
+
         unsafe {
             if libc::getsockopt(
                 self.socket.as_raw_fd(),
@@ -678,20 +677,20 @@ impl IpsetManager {
     fn write_struct<T>(buffer: &mut [u8], offset: &mut usize, data: &T) {
         let size = mem::size_of::<T>();
         let aligned_offset = nl_align(*offset);
-        
+
         unsafe {
             let src = data as *const T as *const u8;
             let dst = buffer[aligned_offset..].as_mut_ptr();
             std::ptr::copy_nonoverlapping(src, dst, size);
         }
-        
+
         *offset = nl_align(aligned_offset + size);
     }
 
     /// Write structure to buffer at specific offset
     fn write_struct_at<T>(buffer: &mut [u8], offset: usize, data: &T) {
         let size = mem::size_of::<T>();
-        
+
         unsafe {
             let src = data as *const T as *const u8;
             let dst = buffer[offset..].as_mut_ptr();
@@ -703,18 +702,18 @@ impl IpsetManager {
     fn add_attr(buffer: &mut [u8], offset: &mut usize, attr_type: u16, data: &[u8]) {
         let attr_start = *offset;
         let payload_len = nl_align(mem::size_of::<NetlinkAttr>()) + data.len();
-        
+
         let attr = NetlinkAttr {
             nla_len: payload_len as u16,
             nla_type: attr_type,
         };
 
         Self::write_struct(buffer, offset, &attr);
-        
+
         // Copy attribute data
         let data_offset = attr_start + nl_align(mem::size_of::<NetlinkAttr>());
         buffer[data_offset..data_offset + data.len()].copy_from_slice(data);
-        
+
         *offset = nl_align(attr_start + payload_len);
     }
 }
@@ -747,7 +746,7 @@ impl IpsetManager {
 /// ```
 pub async fn add_to_ipset(setname: &str, addr: IpAddr, remove: bool) -> Result<(), IpsetError> {
     let manager = IpsetManager::new()?;
-    
+
     if remove {
         manager.remove_from_set(setname, addr).await
     } else {
@@ -788,7 +787,7 @@ mod tests {
     fn test_name_length_validation() {
         let long_name = "a".repeat(IPSET_MAXNAMELEN);
         assert!(long_name.len() >= IPSET_MAXNAMELEN);
-        
+
         let valid_name = "a".repeat(IPSET_MAXNAMELEN - 1);
         assert!(valid_name.len() < IPSET_MAXNAMELEN);
     }

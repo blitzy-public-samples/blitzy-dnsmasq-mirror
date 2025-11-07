@@ -149,7 +149,10 @@ impl Drop for WatchedDir {
             unsafe {
                 libc::close(self.fd);
             }
-            debug!("Closed directory descriptor {} for {:?}", self.fd, self.path);
+            debug!(
+                "Closed directory descriptor {} for {:?}",
+                self.fd, self.path
+            );
         }
     }
 }
@@ -286,7 +289,10 @@ impl KqueueWatcher {
         self.watched_files.insert(fd, watched_file);
         self.path_to_fd.insert(path, fd);
 
-        debug!("Successfully added watch for fd {} -> {:?}", fd, resolved_path);
+        debug!(
+            "Successfully added watch for fd {} -> {:?}",
+            fd, resolved_path
+        );
 
         Ok(())
     }
@@ -530,17 +536,11 @@ impl KqueueWatcher {
         let path_cstring = CString::new(path.as_os_str().as_bytes())
             .map_err(|_| KqueueError::FileNotFound(path.to_path_buf()))?;
 
-        let fd = unsafe {
-            libc::open(
-                path_cstring.as_ptr(),
-                libc::O_RDONLY | libc::O_CLOEXEC,
-            )
-        };
+        let fd = unsafe { libc::open(path_cstring.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
 
         if fd < 0 {
             let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EMFILE)
-                || err.raw_os_error() == Some(libc::ENFILE)
+            if err.raw_os_error() == Some(libc::EMFILE) || err.raw_os_error() == Some(libc::ENFILE)
             {
                 return Err(KqueueError::TooManyWatches);
             }
@@ -572,8 +572,7 @@ impl KqueueWatcher {
 
         if fd < 0 {
             let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EMFILE)
-                || err.raw_os_error() == Some(libc::ENFILE)
+            if err.raw_os_error() == Some(libc::EMFILE) || err.raw_os_error() == Some(libc::ENFILE)
             {
                 return Err(KqueueError::TooManyWatches);
             }
@@ -654,10 +653,7 @@ impl KqueueWatcher {
             0,
         );
 
-        debug!(
-            "Registering directory kevent for fd {} ({:?})",
-            fd, path
-        );
+        debug!("Registering directory kevent for fd {} ({:?})", fd, path);
 
         // Register the event
         let kq = *self.kqueue_fd.get_ref();
@@ -793,7 +789,9 @@ impl KqueueWatcher {
     /// Read files in a directory, filtering out unwanted entries
     async fn read_directory_files(&self, path: &Path) -> Result<Vec<PathBuf>, KqueueError> {
         let mut files = Vec::new();
-        let mut entries = fs::read_dir(path).await.map_err(|e| KqueueError::IoError(e))?;
+        let mut entries = fs::read_dir(path)
+            .await
+            .map_err(|e| KqueueError::IoError(e))?;
 
         while let Some(entry) = entries
             .next_entry()
@@ -810,16 +808,17 @@ impl KqueueWatcher {
             // - emacs backups (ending with ~)
             // - emacs lock files (#...#)
             // - dotfiles (starting with .)
-            if file_name.starts_with('.')
-                || file_name.starts_with('#')
-                || file_name.ends_with('~')
+            if file_name.starts_with('.') || file_name.starts_with('#') || file_name.ends_with('~')
             {
                 debug!("Filtering out file: {:?}", file_name);
                 continue;
             }
 
             // Only include regular files
-            let metadata = entry.metadata().await.map_err(|e| KqueueError::IoError(e))?;
+            let metadata = entry
+                .metadata()
+                .await
+                .map_err(|e| KqueueError::IoError(e))?;
             if metadata.is_file() {
                 files.push(entry_path);
                 debug!("Found file in directory: {:?}", entry_path);
@@ -906,10 +905,8 @@ mod tests {
         drop(file);
 
         // Wait for event with timeout
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            watcher.next_event()
-        ).await;
+        let event =
+            tokio::time::timeout(std::time::Duration::from_secs(2), watcher.next_event()).await;
 
         assert!(event.is_ok());
         if let Ok(Some(FileEvent::FileModified(path))) = event {
@@ -945,14 +942,10 @@ mod tests {
         File::create(temp_dir.path().join("#lock#")).unwrap();
 
         let watcher = KqueueWatcher::new().await.unwrap();
-        let files = watcher
-            .read_directory_files(temp_dir.path())
-            .await
-            .unwrap();
+        let files = watcher.read_directory_files(temp_dir.path()).await.unwrap();
 
         // Should only contain normal.txt
         assert_eq!(files.len(), 1);
         assert!(files[0].ends_with("normal.txt"));
     }
 }
-

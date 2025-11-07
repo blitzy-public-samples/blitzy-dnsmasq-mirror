@@ -52,7 +52,7 @@
 //!
 //! ```xml
 //! <?xml version="1.0" encoding="UTF-8"?>
-//! <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" 
+//! <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
 //!           "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 //! <plist version="1.0">
 //! <dict>
@@ -151,7 +151,7 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
-use nix::sys::socket::{getsockname, getsockopt, sockopt, AddressFamily, SockType as NixSockType};
+use nix::sys::socket::{AddressFamily, SockType as NixSockType, getsockname, getsockopt, sockopt};
 use thiserror::Error;
 use tokio::net::{TcpListener, UdpSocket};
 use tracing::{debug, error, info, warn};
@@ -585,7 +585,10 @@ pub async fn get_launchd_sockets() -> Result<Option<LaunchdSockets>, LaunchdErro
             Err(e) => {
                 // Non-fatal if a service isn't configured
                 // (e.g., TFTP disabled in plist)
-                warn!("Failed to retrieve {:?} sockets from launchd: {}", service_type, e);
+                warn!(
+                    "Failed to retrieve {:?} sockets from launchd: {}",
+                    service_type, e
+                );
             }
         }
     }
@@ -751,7 +754,11 @@ async fn retrieve_service_sockets(service_type: ServiceType) -> Result<Vec<RawFd
         libc::free(fd_array_ptr as *mut libc::c_void);
     }
 
-    debug!("Received {} file descriptor(s) for service '{}'", fds.len(), label);
+    debug!(
+        "Received {} file descriptor(s) for service '{}'",
+        fds.len(),
+        label
+    );
 
     // Validate each socket
     for &fd in &fds {

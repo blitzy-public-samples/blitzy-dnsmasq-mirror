@@ -62,7 +62,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
-use socket2::{Domain, Socket, Type, Protocol as SocketProtocol};
+use socket2::{Domain, Protocol as SocketProtocol, Socket, Type};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
@@ -80,7 +80,7 @@ use nix::sys::socket::{setsockopt, sockopt};
     target_os = "dragonfly",
     target_os = "macos"
 ))]
-use nix::libc::{if_nametoindex, AF_INET, AF_INET6, IPPROTO_IP, IPPROTO_IPV6};
+use nix::libc::{AF_INET, AF_INET6, IPPROTO_IP, IPPROTO_IPV6, if_nametoindex};
 
 /// Protocol type for socket listeners
 ///
@@ -119,16 +119,16 @@ pub enum Protocol {
 pub struct SocketListener {
     /// Tokio async UDP socket
     pub socket: Arc<UdpSocket>,
-    
+
     /// Bound address
     pub addr: SocketAddr,
-    
+
     /// Interface name if bound to specific interface
     pub interface: Option<String>,
-    
+
     /// Protocol served
     pub protocol: Protocol,
-    
+
     /// TFTP enabled flag
     pub tftp_ok: bool,
 }
@@ -147,10 +147,10 @@ pub struct SocketListener {
 pub struct TcpSocketListener {
     /// Tokio async TCP listener
     pub listener: TcpListener,
-    
+
     /// Bound address
     pub addr: SocketAddr,
-    
+
     /// Maximum concurrent connections (typically 20)
     pub max_connections: usize,
 }
@@ -165,7 +165,7 @@ pub enum SocketError {
     /// Failed to create socket
     #[error("Failed to create socket: {0}")]
     CreationFailed(#[from] std::io::Error),
-    
+
     /// Failed to bind to address
     #[error("Failed to bind to {addr}: {source}")]
     BindFailed {
@@ -175,7 +175,7 @@ pub enum SocketError {
         #[source]
         source: std::io::Error,
     },
-    
+
     /// Failed to set socket option
     #[error("Failed to set socket option {option}: {source}")]
     OptionFailed {
@@ -185,11 +185,11 @@ pub enum SocketError {
         #[source]
         source: std::io::Error,
     },
-    
+
     /// Interface not found
     #[error("Interface {0} not found")]
     InterfaceNotFound(String),
-    
+
     /// Interface error propagated from interface module
     #[error("Interface error: {0}")]
     InterfaceError(#[from] InterfaceError),
@@ -209,10 +209,10 @@ pub enum SocketError {
 pub struct PacketInfo {
     /// Destination address
     pub dest_addr: IpAddr,
-    
+
     /// Interface index
     pub interface_index: u32,
-    
+
     /// TTL if available
     pub ttl: Option<u8>,
 }
@@ -239,10 +239,10 @@ pub struct PacketInfo {
 pub struct RandomSocketPool {
     /// IPv4 sockets with random source ports
     ipv4_sockets: Vec<Arc<UdpSocket>>,
-    
+
     /// IPv6 sockets with random source ports
     ipv6_sockets: Vec<Arc<UdpSocket>>,
-    
+
     /// Current index for round-robin selection
     current_index: AtomicUsize,
 }
@@ -275,26 +275,26 @@ impl RandomSocketPool {
     pub async fn new(pool_size: usize) -> Result<Self, SocketError> {
         let mut ipv4_sockets = Vec::with_capacity(pool_size);
         let mut ipv6_sockets = Vec::with_capacity(pool_size);
-        
+
         // Create IPv4 sockets
         for _ in 0..pool_size {
             let socket = create_random_source_socket(AddressFamily::Ipv4).await?;
             ipv4_sockets.push(Arc::new(socket));
         }
-        
+
         // Create IPv6 sockets
         for _ in 0..pool_size {
             let socket = create_random_source_socket(AddressFamily::Ipv6).await?;
             ipv6_sockets.push(Arc::new(socket));
         }
-        
+
         Ok(Self {
             ipv4_sockets,
             ipv6_sockets,
             current_index: AtomicUsize::new(0),
         })
     }
-    
+
     /// Get next socket from pool using round-robin selection
     ///
     /// Returns a socket from the appropriate address family pool. Uses atomic
@@ -320,7 +320,7 @@ impl RandomSocketPool {
     /// ```
     pub fn next_socket(&self, family: AddressFamily) -> Arc<UdpSocket> {
         let index = self.current_index.fetch_add(1, Ordering::Relaxed);
-        
+
         match family {
             AddressFamily::Ipv4 => {
                 let pool = &self.ipv4_sockets;
@@ -379,7 +379,7 @@ impl ListenerManager {
             listeners: Arc::new(RwLock::new(Vec::new())),
         }
     }
-    
+
     /// Add a listener to the manager
     ///
     /// Appends a new listener to the managed collection. Acquires write lock
@@ -401,7 +401,7 @@ impl ListenerManager {
         let mut listeners = self.listeners.write().unwrap();
         listeners.push(listener);
     }
-    
+
     /// Remove a listener by address
     ///
     /// Removes the first listener matching the specified socket address.
@@ -424,7 +424,7 @@ impl ListenerManager {
         let mut listeners = self.listeners.write().unwrap();
         listeners.retain(|l| &l.addr != addr);
     }
-    
+
     /// Find a listener by address
     ///
     /// Searches for a listener with the specified socket address. Returns
@@ -456,7 +456,7 @@ impl ListenerManager {
             .find(|l| &l.addr == addr)
             .map(|l| Arc::clone(&l.socket))
     }
-    
+
     /// Refresh all listeners
     ///
     /// Recreates all listeners, typically in response to configuration reload
@@ -474,12 +474,12 @@ impl ListenerManager {
     pub async fn refresh_listeners(&self) -> Result<(), SocketError> {
         // Recreate all listeners (without holding the lock)
         let new_listeners = create_bound_listeners(false).await?;
-        
+
         // Now acquire the lock and update
         let mut listeners = self.listeners.write().unwrap();
         listeners.clear();
         listeners.extend(new_listeners);
-        
+
         Ok(())
     }
 }
@@ -527,7 +527,7 @@ impl Default for ListenerManager {
 /// ```
 pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>, SocketError> {
     let mut listeners = Vec::new();
-    
+
     // DNS UDP listener on port 53
     match bind_wildcard(53, false).await {
         Ok(socket) => {
@@ -547,7 +547,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
             }
         }
     }
-    
+
     // DNS UDP IPv6 listener
     match bind_wildcard(53, true).await {
         Ok(socket) => {
@@ -565,7 +565,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
             }
         }
     }
-    
+
     // DHCP listener (feature-gated)
     #[cfg(feature = "dhcp")]
     {
@@ -586,7 +586,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
             }
         }
     }
-    
+
     // TFTP listener (feature-gated)
     #[cfg(feature = "tftp")]
     {
@@ -607,7 +607,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
             }
         }
     }
-    
+
     Ok(listeners)
 }
 
@@ -654,10 +654,10 @@ pub async fn bind_to_interface(
     } else {
         Domain::IPV6
     };
-    
+
     let socket = Socket::new(domain, Type::DGRAM, Some(SocketProtocol::UDP))
         .map_err(SocketError::CreationFailed)?;
-    
+
     // Set SO_REUSEADDR for address reuse
     socket
         .set_reuse_address(true)
@@ -665,7 +665,7 @@ pub async fn bind_to_interface(
             option: "SO_REUSEADDR".to_string(),
             source: e,
         })?;
-    
+
     // Platform-specific interface binding
     #[cfg(target_os = "linux")]
     {
@@ -677,7 +677,7 @@ pub async fn bind_to_interface(
                 source: e,
             })?;
     }
-    
+
     #[cfg(any(
         target_os = "freebsd",
         target_os = "openbsd",
@@ -691,10 +691,10 @@ pub async fn bind_to_interface(
         if index == 0 {
             return Err(SocketError::InterfaceNotFound(interface.to_string()));
         }
-        
+
         let index_nonzero = NonZeroU32::new(index)
             .ok_or_else(|| SocketError::InterfaceNotFound(interface.to_string()))?;
-        
+
         socket
             .bind_device_by_index(Some(index_nonzero))
             .map_err(|e| SocketError::OptionFailed {
@@ -702,15 +702,16 @@ pub async fn bind_to_interface(
                 source: e,
             })?;
     }
-    
+
     // Bind to address
-    socket.bind(&addr.into()).map_err(|e| SocketError::BindFailed {
-        addr,
-        source: e,
-    })?;
-    
+    socket
+        .bind(&addr.into())
+        .map_err(|e| SocketError::BindFailed { addr, source: e })?;
+
     // Convert to Tokio UdpSocket
-    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
+    socket
+        .set_nonblocking(true)
+        .map_err(SocketError::CreationFailed)?;
     let std_socket: std::net::UdpSocket = socket.into();
     UdpSocket::from_std(std_socket).map_err(SocketError::CreationFailed)
 }
@@ -747,24 +748,25 @@ pub async fn bind_wildcard(port: u16, ipv6: bool) -> Result<UdpSocket, SocketErr
     } else {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)
     };
-    
+
     let domain = if ipv6 { Domain::IPV6 } else { Domain::IPV4 };
     let socket = Socket::new(domain, Type::DGRAM, Some(SocketProtocol::UDP))
         .map_err(SocketError::CreationFailed)?;
-    
+
     socket
         .set_reuse_address(true)
         .map_err(|e| SocketError::OptionFailed {
             option: "SO_REUSEADDR".to_string(),
             source: e,
         })?;
-    
-    socket.bind(&addr.into()).map_err(|e| SocketError::BindFailed {
-        addr,
-        source: e,
-    })?;
-    
-    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
+
+    socket
+        .bind(&addr.into())
+        .map_err(|e| SocketError::BindFailed { addr, source: e })?;
+
+    socket
+        .set_nonblocking(true)
+        .map_err(SocketError::CreationFailed)?;
     let std_socket: std::net::UdpSocket = socket.into();
     UdpSocket::from_std(std_socket).map_err(SocketError::CreationFailed)
 }
@@ -807,7 +809,7 @@ pub async fn create_random_source_socket(family: AddressFamily) -> Result<UdpSoc
         AddressFamily::Ipv4 => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
         AddressFamily::Ipv6 => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
     };
-    
+
     bind_wildcard(0, family == AddressFamily::Ipv6).await
 }
 
@@ -845,29 +847,29 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
     } else {
         Domain::IPV6
     };
-    
+
     let socket = Socket::new(domain, Type::STREAM, Some(SocketProtocol::TCP))
         .map_err(SocketError::CreationFailed)?;
-    
+
     socket
         .set_reuse_address(true)
         .map_err(|e| SocketError::OptionFailed {
             option: "SO_REUSEADDR".to_string(),
             source: e,
         })?;
-    
-    socket.bind(&addr.into()).map_err(|e| SocketError::BindFailed {
-        addr,
-        source: e,
-    })?;
-    
+
+    socket
+        .bind(&addr.into())
+        .map_err(|e| SocketError::BindFailed { addr, source: e })?;
+
     socket.listen(128).map_err(SocketError::CreationFailed)?;
-    
-    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
-    let std_listener: std::net::TcpListener = socket.into();
-    let listener = TcpListener::from_std(std_listener)
+
+    socket
+        .set_nonblocking(true)
         .map_err(SocketError::CreationFailed)?;
-    
+    let std_listener: std::net::TcpListener = socket.into();
+    let listener = TcpListener::from_std(std_listener).map_err(SocketError::CreationFailed)?;
+
     Ok(TcpSocketListener {
         listener,
         addr,
@@ -906,28 +908,29 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
 pub async fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SocketProtocol::UDP))
         .map_err(SocketError::CreationFailed)?;
-    
+
     socket
         .set_broadcast(true)
         .map_err(|e| SocketError::OptionFailed {
             option: "SO_BROADCAST".to_string(),
             source: e,
         })?;
-    
+
     socket
         .set_reuse_address(true)
         .map_err(|e| SocketError::OptionFailed {
             option: "SO_REUSEADDR".to_string(),
             source: e,
         })?;
-    
+
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 67);
-    socket.bind(&addr.into()).map_err(|e| SocketError::BindFailed {
-        addr,
-        source: e,
-    })?;
-    
-    socket.set_nonblocking(true).map_err(SocketError::CreationFailed)?;
+    socket
+        .bind(&addr.into())
+        .map_err(|e| SocketError::BindFailed { addr, source: e })?;
+
+    socket
+        .set_nonblocking(true)
+        .map_err(SocketError::CreationFailed)?;
     let std_socket: std::net::UdpSocket = socket.into();
     UdpSocket::from_std(std_socket).map_err(SocketError::CreationFailed)
 }
@@ -970,7 +973,7 @@ pub async fn bind_local(
     // For now, this is a no-op as the socket is already bound
     // In the C implementation, this sets source address for outbound packets
     // via IP_PKTINFO or similar mechanisms
-    
+
     // If interface binding is requested, that would be done here
     if let Some(iface) = interface {
         // Platform-specific interface binding would go here
@@ -988,7 +991,7 @@ pub async fn bind_local(
             std::mem::forget(socket2); // Don't close the fd
         }
     }
-    
+
     Ok(())
 }
 
@@ -1017,7 +1020,7 @@ pub fn extract_packet_info(_msg: &()) -> PacketInfo {
     // Placeholder implementation
     // Full implementation would parse ancillary data (cmsg) from recvmsg()
     // This requires low-level socket operations with msghdr structures
-    
+
     PacketInfo {
         dest_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         interface_index: 0,
@@ -1061,9 +1064,9 @@ pub fn extract_packet_info(_msg: &()) -> PacketInfo {
 pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
     #[cfg(unix)]
     {
-        use nix::sys::socket::{socket, AddressFamily, SockFlag, SockType, SockProtocol};
+        use nix::sys::socket::{AddressFamily, SockFlag, SockProtocol, SockType, socket};
         use std::os::fd::IntoRawFd;
-        
+
         let fd = socket(
             AddressFamily::Inet6,
             SockType::Raw,
@@ -1071,10 +1074,10 @@ pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
             SockProtocol::IcmpV6,
         )
         .map_err(|e| SocketError::CreationFailed(std::io::Error::from_raw_os_error(e as i32)))?;
-        
+
         Ok(fd.into_raw_fd())
     }
-    
+
     #[cfg(not(unix))]
     {
         Err(SocketError::CreationFailed(std::io::Error::new(
@@ -1087,7 +1090,7 @@ pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
 #[cfg(any(test, feature = "test-utils"))]
 pub mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_bind_wildcard_ipv4() {
         let result = bind_wildcard(0, false).await;
@@ -1096,7 +1099,7 @@ pub mod tests {
         let addr = socket.local_addr().unwrap();
         assert!(addr.is_ipv4());
     }
-    
+
     #[tokio::test]
     async fn test_bind_wildcard_ipv6() {
         let result = bind_wildcard(0, true).await;
@@ -1105,29 +1108,29 @@ pub mod tests {
         let addr = socket.local_addr().unwrap();
         assert!(addr.is_ipv6());
     }
-    
+
     #[tokio::test]
     async fn test_random_socket_pool() {
         let result = RandomSocketPool::new(4).await;
         assert!(result.is_ok());
-        
+
         let pool = result.unwrap();
         let socket1 = pool.next_socket(AddressFamily::Ipv4);
         let socket2 = pool.next_socket(AddressFamily::Ipv4);
-        
+
         // Sockets should have different ports (round-robin)
         let addr1 = socket1.local_addr().unwrap();
         let addr2 = socket2.local_addr().unwrap();
         assert_ne!(addr1.port(), addr2.port());
     }
-    
+
     #[tokio::test]
     async fn test_listener_manager() {
         let manager = ListenerManager::new();
-        
+
         let socket = bind_wildcard(0, false).await.unwrap();
         let addr = socket.local_addr().unwrap();
-        
+
         let listener = SocketListener {
             socket: Arc::new(socket),
             addr,
@@ -1135,29 +1138,29 @@ pub mod tests {
             protocol: Protocol::Dns { tcp: false },
             tftp_ok: false,
         };
-        
+
         manager.add_listener(listener).await;
-        
+
         let found = manager.find_listener(&addr).await;
         assert!(found.is_some());
     }
-    
+
     #[tokio::test]
     async fn test_create_tcp_listener() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
         let result = create_tcp_listener(addr).await;
         assert!(result.is_ok());
-        
+
         let listener = result.unwrap();
         assert_eq!(listener.max_connections, 20);
     }
-    
+
     #[tokio::test]
     async fn test_protocol_enum() {
         let dns_udp = Protocol::Dns { tcp: false };
         let dns_tcp = Protocol::Dns { tcp: true };
         assert_ne!(dns_udp, dns_tcp);
-        
+
         let dhcp = Protocol::Dhcpv4;
         assert_ne!(dns_udp, dhcp);
     }

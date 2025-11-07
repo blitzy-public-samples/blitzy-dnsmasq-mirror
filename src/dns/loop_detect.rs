@@ -10,8 +10,8 @@
 //! Detects and prevents DNS forwarding loops where queries would be
 //! sent back to dnsmasq itself, creating infinite forwarding loops.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// Loop detector for DNS forwarding
 #[derive(Debug)]
@@ -88,7 +88,7 @@ mod tests {
     fn test_add_local_address() {
         let mut detector = LoopDetector::new();
         let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
-        
+
         detector.add_local_address(addr);
         assert_eq!(detector.local_address_count(), 1);
         assert!(detector.is_loop(&addr));
@@ -99,9 +99,9 @@ mod tests {
         let mut detector = LoopDetector::new();
         let local_addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
         let remote_addr = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-        
+
         detector.add_local_address(local_addr);
-        
+
         assert!(detector.is_loop(&local_addr));
         assert!(!detector.is_loop(&remote_addr));
     }
@@ -110,14 +110,16 @@ mod tests {
     fn test_is_localhost() {
         assert!(LoopDetector::is_localhost(&IpAddr::V4(Ipv4Addr::LOCALHOST)));
         assert!(LoopDetector::is_localhost(&IpAddr::V6(Ipv6Addr::LOCALHOST)));
-        assert!(!LoopDetector::is_localhost(&IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+        assert!(!LoopDetector::is_localhost(&IpAddr::V4(Ipv4Addr::new(
+            8, 8, 8, 8
+        ))));
     }
 
     #[test]
     fn test_mark_and_check() {
         let mut detector = LoopDetector::new();
         let addr = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-        
+
         assert!(!detector.is_checked(&addr));
         detector.mark_checked(addr);
         assert!(detector.is_checked(&addr));
@@ -127,10 +129,10 @@ mod tests {
     fn test_clear_checked() {
         let mut detector = LoopDetector::new();
         let addr = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-        
+
         detector.mark_checked(addr);
         assert!(detector.is_checked(&addr));
-        
+
         detector.clear_checked();
         assert!(!detector.is_checked(&addr));
     }

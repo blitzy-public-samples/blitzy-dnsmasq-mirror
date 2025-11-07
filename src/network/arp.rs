@@ -207,7 +207,6 @@ impl MacAddr {
             None
         }
     }
-
 }
 
 impl fmt::Display for MacAddr {
@@ -234,9 +233,8 @@ impl FromStr for MacAddr {
 
         let mut bytes = [0u8; 6];
         for (i, part) in parts.iter().enumerate() {
-            bytes[i] = u8::from_str_radix(part, 16).map_err(|_| {
-                ArpError::ParseError(format!("Invalid hex byte: {}", part))
-            })?;
+            bytes[i] = u8::from_str_radix(part, 16)
+                .map_err(|_| ArpError::ParseError(format!("Invalid hex byte: {}", part)))?;
         }
 
         Ok(MacAddr(bytes))
@@ -402,9 +400,7 @@ impl ArpCache {
         // Look up entry
         if let Some(record) = self.arps.get(&ip) {
             // Only accept positive entries unless in lazy mode
-            if (record.status != ArpStatus::Empty || lazy)
-                && record.hwlen != 0
-                && record.hwlen <= 6
+            if (record.status != ArpStatus::Empty || lazy) && record.hwlen != 0 && record.hwlen <= 6
             {
                 return Ok(MacAddr::from_bytes(&record.hwaddr[..6]));
             }
@@ -468,7 +464,8 @@ impl ArpCache {
         }
 
         // Remove unconfirmed entries (still marked)
-        self.arps.retain(|_, record| record.status != ArpStatus::Mark);
+        self.arps
+            .retain(|_, record| record.status != ArpStatus::Mark);
 
         // Update refresh timestamp
         self.last_refresh = Some(Instant::now());
@@ -580,10 +577,12 @@ impl ArpCache {
             Err(ArpError::UnsupportedPlatform)
         })
         .await
-        .map_err(|_| ArpError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Task join error"
-        )))?
+        .map_err(|_| {
+            ArpError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Task join error",
+            ))
+        })?
     }
 }
 
@@ -696,10 +695,10 @@ mod tests {
     #[test]
     fn test_arp_cache_needs_refresh() {
         let mut cache = ArpCache::new();
-        
+
         // Initially needs refresh
         assert!(cache.needs_refresh());
-        
+
         // After setting timestamp, doesn't need refresh
         cache.last_refresh = Some(Instant::now());
         assert!(!cache.needs_refresh());
@@ -709,14 +708,14 @@ mod tests {
     async fn test_find_mac_negative_entry() {
         let mut cache = ArpCache::new();
         let ip: IpAddr = "192.168.1.100".parse().unwrap();
-        
+
         // Force cache to be fresh to avoid refresh attempt
         cache.last_refresh = Some(Instant::now());
-        
+
         // First lookup should create negative entry
         let result = cache.find_mac(ip, false).await.unwrap();
         assert!(result.is_none());
-        
+
         // Verify negative entry was created
         let entry = cache.arps.get(&ip).unwrap();
         assert_eq!(entry.status, ArpStatus::Empty);
@@ -727,13 +726,13 @@ mod tests {
     async fn test_find_mac_lazy_mode() {
         let mut cache = ArpCache::new();
         let ip: IpAddr = "192.168.1.100".parse().unwrap();
-        
+
         // Force cache to be fresh
         cache.last_refresh = Some(Instant::now());
-        
+
         // Create negative entry
         let _ = cache.find_mac(ip, false).await;
-        
+
         // In lazy mode, should return None for negative entry
         let result = cache.find_mac(ip, true).await.unwrap();
         assert!(result.is_none());

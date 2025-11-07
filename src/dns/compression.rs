@@ -141,7 +141,9 @@ pub enum CompressionError {
     ///
     /// Occurs when reading would go beyond packet bounds. Corresponds to C's
     /// `CHECK_LEN` macro failures in rfc1035.c.
-    #[error("Packet too short: attempted to read {attempted} bytes at offset {offset}, but packet is only {packet_len} bytes")]
+    #[error(
+        "Packet too short: attempted to read {attempted} bytes at offset {offset}, but packet is only {packet_len} bytes"
+    )]
     PacketTooShort {
         offset: usize,
         attempted: usize,
@@ -152,7 +154,9 @@ pub enum CompressionError {
     ///
     /// Compression pointers must point to earlier positions in the packet.
     /// Corresponds to C's implicit bounds checking in rfc1035.c line 195.
-    #[error("Invalid compression pointer offset {offset}: must be within packet bounds (0-{packet_len}) and point backwards")]
+    #[error(
+        "Invalid compression pointer offset {offset}: must be within packet bounds (0-{packet_len}) and point backwards"
+    )]
     InvalidOffset { offset: usize, packet_len: usize },
 
     /// Too many compression pointer hops (potential infinite loop)
@@ -167,7 +171,9 @@ pub enum CompressionError {
     /// Valid label types are 0x00 (normal) and 0xC0 (compression pointer).
     /// Types 0x40 (extended/bitstring) and 0x80 (reserved) are not supported.
     /// Corresponds to C's rejection in rfc1035.c lines 256, 488, 490.
-    #[error("Invalid label type {label_type:#04x}: only normal labels (0x00) and compression pointers (0xC0) are supported")]
+    #[error(
+        "Invalid label type {label_type:#04x}: only normal labels (0x00) and compression pointers (0xC0) are supported"
+    )]
     InvalidLabelType { label_type: u8 },
 
     /// Domain name exceeds maximum length
@@ -372,8 +378,8 @@ pub fn extract_name(
             }
 
             // Extract 14-bit offset: ((first_byte & 0x3F) << 8) | second_byte
-            let pointer_offset =
-                (((label_byte & COMPRESSION_OFFSET_MASK) as usize) << 8) | (packet[current_offset] as usize);
+            let pointer_offset = (((label_byte & COMPRESSION_OFFSET_MASK) as usize) << 8)
+                | (packet[current_offset] as usize);
             current_offset += 1;
 
             // Save location to return to after following pointers (first jump only)
@@ -714,7 +720,7 @@ pub fn skip_name(packet: &[u8], offset: &mut usize, extrabytes: usize) -> Compre
 ///
 /// // Write first name: "example.com"
 /// compress_name("example.com", &mut packet, &mut compression_map)?;
-/// 
+///
 /// // Write second name: "www.example.com" (will use pointer for "example.com" suffix)
 /// compress_name("www.example.com", &mut packet, &mut compression_map)?;
 /// # Ok::<(), CompressionError>(())
@@ -801,9 +807,7 @@ mod tests {
             // DNS header (12 bytes)
             0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             // Query: "example.com"
-            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-            0x03, b'c', b'o', b'm',
-            0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00,
             // QTYPE + QCLASS
             0x00, 0x01, 0x00, 0x01,
         ];
@@ -823,12 +827,9 @@ mod tests {
             // DNS header
             0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             // First name at offset 12: "example.com"
-            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-            0x03, b'c', b'o', b'm',
-            0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00,
             // Second name at offset 25: "www" + pointer to offset 12
-            0x03, b'w', b'w', b'w',
-            0xC0, 0x0C, // Pointer to offset 12
+            0x03, b'w', b'w', b'w', 0xC0, 0x0C, // Pointer to offset 12
         ];
 
         let mut offset = 25; // Start at the "www" label
@@ -843,28 +844,34 @@ mod tests {
     #[test]
     fn test_extract_packet_too_short() {
         let packet = vec![
-            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x07, b'e', b'x', b'a', // Truncated
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, b'e',
+            b'x', b'a', // Truncated
         ];
 
         let mut offset = 12;
         let result = extract_name(&packet, &mut offset, 0);
 
-        assert!(matches!(result, Err(CompressionError::PacketTooShort { .. })));
+        assert!(matches!(
+            result,
+            Err(CompressionError::PacketTooShort { .. })
+        ));
     }
 
     /// Test error on invalid compression pointer
     #[test]
     fn test_extract_invalid_pointer() {
         let packet = vec![
-            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0xC0, 0xFF, // Pointer to invalid offset 255
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0,
+            0xFF, // Pointer to invalid offset 255
         ];
 
         let mut offset = 12;
         let result = extract_name(&packet, &mut offset, 0);
 
-        assert!(matches!(result, Err(CompressionError::InvalidOffset { .. })));
+        assert!(matches!(
+            result,
+            Err(CompressionError::InvalidOffset { .. })
+        ));
     }
 
     /// Test error on too many hops (infinite loop prevention)
@@ -889,11 +896,9 @@ mod tests {
     #[test]
     fn test_skip_simple_name() {
         let packet = vec![
-            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-            0x03, b'c', b'o', b'm',
-            0x00,
-            0x00, 0x01, 0x00, 0x01,
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, b'e',
+            b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00, 0x00, 0x01, 0x00,
+            0x01,
         ];
 
         let mut offset = 12;
@@ -906,9 +911,8 @@ mod tests {
     #[test]
     fn test_skip_compressed_name() {
         let packet = vec![
-            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, b'w', b'w', b'w',
-            0xC0, 0x0C, // Pointer
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, b'w',
+            b'w', b'w', 0xC0, 0x0C, // Pointer
         ];
 
         let mut offset = 12;
@@ -926,9 +930,7 @@ mod tests {
         compress_name("example.com", &mut packet, &mut compression_map).unwrap();
 
         let expected = vec![
-            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e',
-            0x03, b'c', b'o', b'm',
-            0x00,
+            0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x03, b'c', b'o', b'm', 0x00,
         ];
         assert_eq!(packet, expected);
 
@@ -1000,4 +1002,3 @@ mod tests {
         assert!(!name.matches_ignore_case("different.com"));
     }
 }
-

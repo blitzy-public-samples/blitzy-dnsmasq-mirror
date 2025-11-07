@@ -87,8 +87,8 @@
 //! GPL-2.0-or-later
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
 use std::os::raw::{c_int, c_void};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -102,7 +102,7 @@ mod ffi {
 
     pub type nfct_handle = c_void;
     pub type nf_conntrack = c_void;
-    
+
     // Attribute identifiers from libnetfilter_conntrack/libnetfilter_conntrack.h
     pub const ATTR_L3PROTO: c_int = 1;
     pub const ATTR_L4PROTO: c_int = 2;
@@ -113,16 +113,16 @@ mod ffi {
     pub const ATTR_PORT_SRC: c_int = 7;
     pub const ATTR_PORT_DST: c_int = 8;
     pub const ATTR_MARK: c_int = 15;
-    
+
     // Subsystem identifiers
     pub const CONNTRACK: u8 = 1;
-    
+
     // Query types
     pub const NFCT_Q_GET: c_int = 4;
-    
+
     // Callback return values
     pub const NFCT_CB_CONTINUE: c_int = 1;
-    
+
     // Message types for callbacks
     #[repr(C)]
     #[derive(Copy, Clone)]
@@ -134,7 +134,7 @@ mod ffi {
         NFCT_T_ALL = 4,
         NFCT_T_ERROR = 5,
     }
-    
+
     pub type nfct_callback = extern "C" fn(
         msg_type: nf_conntrack_msg_type,
         ct: *const nf_conntrack,
@@ -144,24 +144,24 @@ mod ffi {
     extern "C" {
         pub fn nfct_new() -> *mut nf_conntrack;
         pub fn nfct_destroy(ct: *mut nf_conntrack);
-        
+
         pub fn nfct_open(subsys_id: u8, subscription: c_int) -> *mut nfct_handle;
         pub fn nfct_close(h: *mut nfct_handle) -> c_int;
-        
+
         pub fn nfct_set_attr_u8(ct: *mut nf_conntrack, attr: c_int, value: u8);
         pub fn nfct_set_attr_u16(ct: *mut nf_conntrack, attr: c_int, value: u16);
         pub fn nfct_set_attr_u32(ct: *mut nf_conntrack, attr: c_int, value: u32);
         pub fn nfct_set_attr(ct: *mut nf_conntrack, attr: c_int, value: *const c_void);
-        
+
         pub fn nfct_get_attr_u32(ct: *const nf_conntrack, attr: c_int) -> u32;
-        
+
         pub fn nfct_callback_register(
             h: *mut nfct_handle,
             msg_type: nf_conntrack_msg_type,
             cb: nfct_callback,
             data: *mut c_void,
         ) -> c_int;
-        
+
         pub fn nfct_query(h: *mut nfct_handle, qt: c_int, data: *const nf_conntrack) -> c_int;
     }
 }
@@ -327,17 +327,17 @@ extern "C" fn conntrack_callback(
         if data.is_null() || ct.is_null() {
             return ffi::NFCT_CB_CONTINUE;
         }
-        
+
         let callback_data = &mut *(data as *mut CallbackData);
-        
+
         // Extract the mark attribute from the conntrack entry
         let mark = ffi::nfct_get_attr_u32(ct, ffi::ATTR_MARK);
-        
+
         if let Ok(mut result) = callback_data.mark.lock() {
             *result = Some(mark);
         }
     }
-    
+
     ffi::NFCT_CB_CONTINUE
 }
 
@@ -358,18 +358,18 @@ pub async fn get_incoming_mark(
 
         // Determine protocol number for conntrack query
         // IPPROTO_TCP = 6, IPPROTO_UDP = 17 per IANA protocol numbers
-        let protocol: u8 = if is_tcp { 
+        let protocol: u8 = if is_tcp {
             6  // IPPROTO_TCP
-        } else { 
+        } else {
             17 // IPPROTO_UDP
         };
 
         // Extract port from peer address for source port attribute
         let peer_port = peer.port();
-        
+
         // DNS standard port (destination port for incoming queries)
         const DNS_PORT: u16 = 53;
-        
+
         // Determine address family and extract addresses
         let (is_ipv6, ipv4_peer, ipv6_peer, ipv4_local, ipv6_local) = match (peer.ip(), local) {
             (IpAddr::V4(peer_v4), IpAddr::V4(local_v4)) => {
@@ -402,7 +402,7 @@ pub async fn get_incoming_mark(
                     return Err(ConntrackError::IoError(err));
                 }
             }
-            
+
             // Ensure handle is closed on drop using a guard
             struct HandleGuard(*mut ffi::nfct_handle);
             impl Drop for HandleGuard {
@@ -422,7 +422,7 @@ pub async fn get_incoming_mark(
                     "Failed to create conntrack object",
                 )));
             }
-            
+
             // Ensure ct is destroyed on drop
             struct CtGuard(*mut ffi::nf_conntrack);
             impl Drop for CtGuard {
@@ -447,24 +447,24 @@ pub async fn get_incoming_mark(
             if is_ipv6 {
                 // IPv6 connection (AF_INET6 = 10 per POSIX standard)
                 ffi::nfct_set_attr_u8(ct, ffi::ATTR_L3PROTO, 10);
-                
+
                 if let Some(peer_v6) = ipv6_peer {
                     ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_SRC, peer_v6.octets().as_ptr() as *const c_void);
                 }
-                
+
                 if let Some(local_v6) = ipv6_local {
                     ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_DST, local_v6.octets().as_ptr() as *const c_void);
                 }
             } else {
                 // IPv4 connection (AF_INET = 2 per POSIX standard)
                 ffi::nfct_set_attr_u8(ct, ffi::ATTR_L3PROTO, 2);
-                
+
                 if let Some(peer_v4) = ipv4_peer {
                     // IPv4 address as u32 in network byte order
                     let addr_u32 = u32::from_be_bytes(peer_v4.octets());
                     ffi::nfct_set_attr_u32(ct, ffi::ATTR_IPV4_SRC, addr_u32);
                 }
-                
+
                 if let Some(local_v4) = ipv4_local {
                     let addr_u32 = u32::from_be_bytes(local_v4.octets());
                     ffi::nfct_set_attr_u32(ct, ffi::ATTR_IPV4_DST, addr_u32);
@@ -483,7 +483,7 @@ pub async fn get_incoming_mark(
                 conntrack_callback,
                 &mut callback_data as *mut _ as *mut c_void,
             );
-            
+
             if ret < 0 {
                 return Err(ConntrackError::IoError(std::io::Error::other(
                     "Failed to register callback",
@@ -492,7 +492,7 @@ pub async fn get_incoming_mark(
 
             // Execute conntrack query to retrieve the matching entry
             let ret = ffi::nfct_query(handle, ffi::NFCT_Q_GET, ct);
-            
+
             if ret < 0 {
                 let err = std::io::Error::last_os_error();
                 if err.raw_os_error() == Some(libc::EPERM) {
@@ -524,7 +524,7 @@ pub async fn get_incoming_mark(
                         "Conntrack entry found but no mark attribute present".to_string()
                     )
                 })?;
-            
+
             // Log successful mark retrieval for operational visibility
             debug!(
                 "Retrieved conntrack mark {} for {} -> {} ({})",
@@ -558,7 +558,7 @@ mod tests {
 
         // This will fail with QueryFailed in placeholder implementation
         let result = get_incoming_mark(peer, local, is_tcp).await;
-        
+
         // In real implementation with conntrack available, this would succeed
         // For now, we just verify the function signature and error handling
         assert!(result.is_err());
@@ -574,7 +574,7 @@ mod tests {
         let is_tcp = true;
 
         let result = get_incoming_mark(peer, local, is_tcp).await;
-        
+
         // Placeholder implementation returns error
         assert!(result.is_err());
     }
@@ -586,9 +586,12 @@ mod tests {
         let is_tcp = false;
 
         let result = get_incoming_mark(peer, local, is_tcp).await;
-        
+
         // Should return UnsupportedProtocol error for mismatched address families
-        assert!(matches!(result, Err(ConntrackError::UnsupportedProtocol(_))));
+        assert!(matches!(
+            result,
+            Err(ConntrackError::UnsupportedProtocol(_))
+        ));
     }
 
     #[test]

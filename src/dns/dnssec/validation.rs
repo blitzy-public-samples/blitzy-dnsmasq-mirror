@@ -955,8 +955,17 @@ async fn verify_rrset_signature(
 ) -> Result<bool, DnssecError> {
     // Check timestamp validity
     if !is_within_validity_period(rrsig.inception, rrsig.expiration, now) {
-        warn!("RRSIG timestamp out of valid range");
+        let now_secs = now.duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_secs() as u32;
+        let status = if now_secs < rrsig.inception {
+            "not yet valid"
+        } else {
+            "expired"
+        };
+        warn!("RRSIG timestamp out of valid range: {}", status);
         return Err(DnssecError::InvalidTimestamp {
+            status: status.to_string(),
             inception: rrsig.inception,
             expiration: rrsig.expiration,
         });
@@ -1183,7 +1192,7 @@ async fn validate_nsec_denial(
     
     if !result {
         return Err(DnssecError::NsecProofFailed {
-            query_name: query_name.to_string(),
+            name: query_name.to_string(),
         });
     }
     
@@ -1259,7 +1268,7 @@ async fn validate_nsec3_denial(
     
     warn!("No NSEC3 proof found for {}", query_name);
     Err(DnssecError::Nsec3ProofFailed {
-        query_name: query_name.to_string(),
+        name: query_name.to_string(),
     })
 }
 

@@ -247,8 +247,8 @@ pub enum DnsError {
 /// ```rust,ignore
 /// // Rust pattern with explicit error
 /// let lease = lease_db.find_by_client(&client_mac)
-///     .ok_or(DhcpError::LeaseNotFound { 
-///         client_mac: client_mac.to_string() 
+///     .ok_or(DhcpError::LeaseNotFound {
+///         client_mac: client_mac.to_string()
 ///     })?;
 /// ```
 #[derive(Debug, Error)]
@@ -651,8 +651,8 @@ pub enum SystemError {
 ///
 /// Rust uses typed errors that can convert to protocol error codes:
 /// ```rust,ignore
-/// Err(TftpError::FileNotFound { 
-///     filename: path.to_string() 
+/// Err(TftpError::FileNotFound {
+///     filename: path.to_string()
 /// })
 /// // Converted to TFTP ERROR packet with code 1
 /// ```
@@ -727,15 +727,15 @@ pub enum TftpError {
 /// // C pattern (from log.c)
 /// if (entries && entries->next == NULL) {
 ///     // Queue full, drop message
-///     entries->next = entry; 
+///     entries->next = entry;
 /// }
 /// ```
 ///
 /// Rust makes queue overflow explicit:
 /// ```rust,ignore
 /// log_queue.push(entry)
-///     .map_err(|_| LogError::QueueOverflow { 
-///         queue_size: MAX_LOGS 
+///     .map_err(|_| LogError::QueueOverflow {
+///         queue_size: MAX_LOGS
 ///     })?;
 /// ```
 #[derive(Debug, Error)]
@@ -818,7 +818,9 @@ pub enum DnssecError {
     },
 
     /// Timestamp validation failed
-    #[error("DNSSEC timestamp invalid: signature {status} (inception: {inception}, expiration: {expiration})")]
+    #[error(
+        "DNSSEC timestamp invalid: signature {status} (inception: {inception}, expiration: {expiration})"
+    )]
     InvalidTimestamp {
         /// Status (expired, not yet valid)
         status: String,
@@ -991,7 +993,7 @@ mod tests {
             path: "/etc/dnsmasq.conf".into(),
             source: io_err,
         };
-        
+
         // Verify error chain exists
         assert!(config_err.source().is_some());
         assert!(config_err.to_string().contains("/etc/dnsmasq.conf"));
@@ -1003,7 +1005,7 @@ mod tests {
             address: "0.0.0.0:53".into(),
             source: io::Error::new(io::ErrorKind::AddrInUse, "address in use"),
         };
-        
+
         let err_string = net_err.to_string();
         assert!(err_string.contains("0.0.0.0:53"));
         assert!(err_string.contains("bind"));
@@ -1016,7 +1018,7 @@ mod tests {
             target_gid: 1000,
             source: io::Error::new(io::ErrorKind::PermissionDenied, "operation not permitted"),
         };
-        
+
         let err_string = sys_err.to_string();
         assert!(err_string.contains("1000"));
         assert!(err_string.contains("privileges"));
@@ -1028,7 +1030,7 @@ mod tests {
             signer: "example.com".into(),
             algorithm: 8, // RSA/SHA-256
         };
-        
+
         let err_string = dnssec_err.to_string();
         assert!(err_string.contains("example.com"));
         assert!(err_string.contains("8"));
@@ -1039,8 +1041,7 @@ mod tests {
         fn test_function() -> DnsmasqResult<i32> {
             Ok(42)
         }
-        
+
         assert_eq!(test_function().unwrap(), 42);
     }
 }
-

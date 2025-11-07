@@ -9,9 +9,9 @@
 //!
 //! Manages DNS zone records and provides query responses for authoritative zones.
 
-use std::net::{Ipv4Addr, Ipv6Addr};
-use crate::dns::protocol::{DnsQuestion, ResourceRecord, RecordType, RecordClass};
+use crate::dns::protocol::{DnsQuestion, RecordClass, RecordType, ResourceRecord};
 use crate::types::errors::DnsError;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Authoritative DNS zone
 #[derive(Debug, Clone)]
@@ -45,7 +45,7 @@ impl AuthZone {
     pub fn contains(&self, name: &str) -> bool {
         let name_lower = name.to_lowercase();
         let zone_lower = self.name.to_lowercase();
-        
+
         name_lower == zone_lower || name_lower.ends_with(&format!(".{}", zone_lower))
     }
 
@@ -61,7 +61,7 @@ impl AuthZone {
 
         if results.is_empty() {
             Err(DnsError::NotFound {
-                message: format!("No records for {}", question.qname)
+                message: format!("No records for {}", question.qname),
             })
         } else {
             Ok(results)
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_zone_contains() {
         let zone = AuthZone::new("example.com".to_string());
-        
+
         assert!(zone.contains("example.com"));
         assert!(zone.contains("www.example.com"));
         assert!(zone.contains("mail.example.com"));
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn test_add_record() {
         let mut zone = AuthZone::new("example.com".to_string());
-        
+
         let record = ZoneRecord {
             name: "www.example.com".to_string(),
             record_type: RecordType::A,
@@ -225,7 +225,7 @@ mod tests {
                 address: Ipv4Addr::new(93, 184, 216, 34),
             },
         };
-        
+
         zone.add_record(record);
         assert_eq!(zone.record_count(), 1);
     }
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn test_zone_lookup() {
         let mut zone = AuthZone::new("example.com".to_string());
-        
+
         let record = ZoneRecord {
             name: "www.example.com".to_string(),
             record_type: RecordType::A,
@@ -264,7 +264,7 @@ mod tests {
                 address: Ipv4Addr::new(93, 184, 216, 34),
             },
         };
-        
+
         zone.add_record(record);
 
         let question = DnsQuestion::new(

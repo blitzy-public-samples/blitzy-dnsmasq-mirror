@@ -373,11 +373,7 @@ impl InotifyWatcher {
             let metadata = match fs::metadata(&dir_path).await {
                 Ok(m) => m,
                 Err(e) => {
-                    tracing::warn!(
-                        "Bad dynamic directory {}: {}",
-                        dir_path.display(),
-                        e
-                    );
+                    tracing::warn!("Bad dynamic directory {}: {}", dir_path.display(), e);
                     continue;
                 }
             };
@@ -398,11 +394,7 @@ impl InotifyWatcher {
             {
                 Ok(wd) => wd,
                 Err(e) => {
-                    tracing::error!(
-                        "Failed to create inotify for {}: {}",
-                        dir_path.display(),
-                        e
-                    );
+                    tracing::error!("Failed to create inotify for {}: {}", dir_path.display(), e);
                     continue;
                 }
             };
@@ -616,10 +608,7 @@ impl InotifyWatcher {
             };
 
             if metadata.is_file() {
-                info!(
-                    "Loading initial configuration file: {}",
-                    path.display()
-                );
+                info!("Loading initial configuration file: {}", path.display());
                 // In the C version, this would call read_hostsfile or option_read_dynfile
                 // In our async Rust version, we just log and let the caller handle it
             }
@@ -671,7 +660,7 @@ mod tests {
         // Should ignore lock files (starting AND ending with #)
         assert!(InotifyWatcher::should_ignore_file("#config#"));
         assert!(InotifyWatcher::should_ignore_file("##"));
-        
+
         // Should NOT ignore files that start with # but don't end with #
         assert!(!InotifyWatcher::should_ignore_file("#.#file"));
         assert!(!InotifyWatcher::should_ignore_file("#config"));
@@ -684,7 +673,7 @@ mod tests {
         assert!(!InotifyWatcher::should_ignore_file("config"));
         assert!(!InotifyWatcher::should_ignore_file("resolv.conf"));
         assert!(!InotifyWatcher::should_ignore_file("hosts"));
-        
+
         // Should ignore empty filename
         assert!(InotifyWatcher::should_ignore_file(""));
     }

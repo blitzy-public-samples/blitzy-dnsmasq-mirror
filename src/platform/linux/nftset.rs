@@ -164,19 +164,17 @@ impl NftablesManager {
     pub async fn new() -> Result<Self, NftsetError> {
         // Use the default nft binary path
         let nft_path = "/usr/sbin/nft".to_string();
-        
+
         // Verify that nft binary exists and is executable
         match Command::new(&nft_path).arg("--version").output().await {
             Ok(output) if output.status.success() => {
                 info!("nftables binary found at {}", nft_path);
                 Ok(NftablesManager { nft_path })
             }
-            Ok(_) | Err(_) => {
-                Err(NftsetError::InitFailed(format!(
-                    "nft binary not found or not executable at {}",
-                    nft_path
-                )))
-            }
+            Ok(_) | Err(_) => Err(NftsetError::InitFailed(format!(
+                "nft binary not found or not executable at {}",
+                nft_path
+            ))),
         }
     }
 
@@ -280,7 +278,10 @@ impl NftablesManager {
         // Construct the nftables command
         let operation = if remove { "delete" } else { "add" };
         let addr_str = addr.to_string();
-        let command = format!("{} element {} {{ {} }}", operation, parsed_setname, addr_str);
+        let command = format!(
+            "{} element {} {{ {} }}",
+            operation, parsed_setname, addr_str
+        );
 
         info!(
             "executing nftables command: {} address {} to/from set {}",
@@ -289,11 +290,8 @@ impl NftablesManager {
 
         // Execute the command using the nft binary
         // This matches the behavior of the C version which uses libnftables
-        let output = Command::new(&self.nft_path)
-            .arg(&command)
-            .output()
-            .await?;
-        
+        let output = Command::new(&self.nft_path).arg(&command).output().await?;
+
         if output.status.success() {
             info!(
                 "successfully {} address {} to/from nftables set {}",
@@ -306,7 +304,7 @@ impl NftablesManager {
             // Extract error message from stderr
             let error_msg = String::from_utf8_lossy(&output.stderr);
             let first_line = error_msg.lines().next().unwrap_or(&error_msg);
-            
+
             Err(NftsetError::CommandFailed(format!(
                 "set {}: {}",
                 parsed_setname, first_line
@@ -342,9 +340,11 @@ enum AddressFamilyFilter {
 /// # Errors
 ///
 /// Returns `NftsetError::InvalidSetName` if the format is invalid
-fn parse_setname_and_filter(setname: &str) -> Result<(String, Option<AddressFamilyFilter>), NftsetError> {
+fn parse_setname_and_filter(
+    setname: &str,
+) -> Result<(String, Option<AddressFamilyFilter>), NftsetError> {
     let trimmed = setname.trim();
-    
+
     if trimmed.is_empty() {
         return Err(NftsetError::InvalidSetName(
             "set name cannot be empty".to_string(),
@@ -353,9 +353,15 @@ fn parse_setname_and_filter(setname: &str) -> Result<(String, Option<AddressFami
 
     // Check for address family prefix
     let (parsed_name, filter) = if let Some(stripped) = trimmed.strip_prefix("4 ") {
-        (stripped.trim().to_string(), Some(AddressFamilyFilter::IPv4Only))
+        (
+            stripped.trim().to_string(),
+            Some(AddressFamilyFilter::IPv4Only),
+        )
     } else if let Some(stripped) = trimmed.strip_prefix("6 ") {
-        (stripped.trim().to_string(), Some(AddressFamilyFilter::IPv6Only))
+        (
+            stripped.trim().to_string(),
+            Some(AddressFamilyFilter::IPv6Only),
+        )
     } else {
         (trimmed.to_string(), None)
     };
@@ -404,11 +410,7 @@ fn parse_setname_and_filter(setname: &str) -> Result<(String, Option<AddressFami
 /// # Ok(())
 /// # }
 /// ```
-pub async fn add_to_nftset(
-    setname: &str,
-    addr: IpAddr,
-    remove: bool,
-) -> Result<(), NftsetError> {
+pub async fn add_to_nftset(setname: &str, addr: IpAddr, remove: bool) -> Result<(), NftsetError> {
     let manager = NftablesManager::new().await?;
     manager.modify_set(setname, addr, remove).await
 }
@@ -468,9 +470,9 @@ mod tests {
         // Test enum variants
         let ipv4_filter = AddressFamilyFilter::IPv4Only;
         let ipv6_filter = AddressFamilyFilter::IPv6Only;
-        
+
         assert_ne!(ipv4_filter, ipv6_filter);
-        
+
         // Test Debug trait
         let debug_str = format!("{:?}", ipv4_filter);
         assert!(debug_str.contains("IPv4Only"));
@@ -530,7 +532,7 @@ mod tests {
     async fn test_nftables_manager_initialization() {
         // Test that manager initialization handles both success and failure gracefully
         let result = NftablesManager::new().await;
-        
+
         match result {
             Ok(_manager) => {
                 // Success case - nft is installed
@@ -553,13 +555,12 @@ mod tests {
     #[test]
     fn test_ipaddr_string_conversion() {
         use std::net::{Ipv4Addr, Ipv6Addr};
-        
+
         // Test that IpAddr::to_string() works correctly for command construction
         let ipv4 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
         let ipv6 = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
-        
+
         assert_eq!(ipv4.to_string(), "192.168.1.1");
         assert_eq!(ipv6.to_string(), "2001:db8::1");
     }
 }
-

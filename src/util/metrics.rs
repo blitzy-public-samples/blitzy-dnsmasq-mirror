@@ -353,10 +353,16 @@ impl MetricLabel {
     fn help_text(&self) -> &'static str {
         match self {
             MetricLabel::DnsCacheInserted => "Number of DNS records inserted into cache",
-            MetricLabel::DnsCacheLiveFreed => "Number of non-expired cache entries evicted due to size limits",
-            MetricLabel::DnsQueriesForwarded => "Number of DNS queries forwarded to upstream servers",
+            MetricLabel::DnsCacheLiveFreed => {
+                "Number of non-expired cache entries evicted due to size limits"
+            }
+            MetricLabel::DnsQueriesForwarded => {
+                "Number of DNS queries forwarded to upstream servers"
+            }
             MetricLabel::DnsAuthAnswered => "Number of queries answered from authoritative zones",
-            MetricLabel::DnsLocalAnswered => "Number of queries answered from local data (/etc/hosts, config)",
+            MetricLabel::DnsLocalAnswered => {
+                "Number of queries answered from local data (/etc/hosts, config)"
+            }
             MetricLabel::Bootp => "Number of BOOTP requests processed (legacy DHCP)",
             MetricLabel::Pxe => "Number of PXE boot requests processed",
             MetricLabel::DhcpAck => "Number of DHCPACK messages sent",
@@ -523,8 +529,7 @@ impl MetricsCollector {
                 .expect("String write should never fail");
 
             // Write metric value
-            writeln!(&mut output, "{} {}", name, value)
-                .expect("String write should never fail");
+            writeln!(&mut output, "{} {}", name, value).expect("String write should never fail");
         }
 
         output
@@ -676,8 +681,7 @@ impl AtomicMetricsCollector {
                 .expect("String write should never fail");
 
             // Write metric value
-            writeln!(&mut output, "{} {}", name, value)
-                .expect("String write should never fail");
+            writeln!(&mut output, "{} {}", name, value).expect("String write should never fail");
         }
 
         output
@@ -742,8 +746,14 @@ mod tests {
     fn test_metric_label_as_str() {
         // Verify metric names match C's metric_names array
         assert_eq!(MetricLabel::DnsCacheInserted.as_str(), "dns_cache_inserted");
-        assert_eq!(MetricLabel::DnsCacheLiveFreed.as_str(), "dns_cache_live_freed");
-        assert_eq!(MetricLabel::DnsQueriesForwarded.as_str(), "dns_queries_forwarded");
+        assert_eq!(
+            MetricLabel::DnsCacheLiveFreed.as_str(),
+            "dns_cache_live_freed"
+        );
+        assert_eq!(
+            MetricLabel::DnsQueriesForwarded.as_str(),
+            "dns_queries_forwarded"
+        );
         assert_eq!(MetricLabel::DnsAuthAnswered.as_str(), "dns_auth_answered");
         assert_eq!(MetricLabel::DnsLocalAnswered.as_str(), "dns_local_answered");
         assert_eq!(MetricLabel::Bootp.as_str(), "bootp");
@@ -941,7 +951,7 @@ mod tests {
 
         // Verify Prometheus format compliance
         let lines: Vec<&str> = output.lines().collect();
-        
+
         // Every metric should have HELP, TYPE, and value lines (3 lines per metric)
         assert_eq!(lines.len(), MetricLabel::COUNT * 3);
 
@@ -953,7 +963,10 @@ mod tests {
         // Verify no invalid characters in metric names (only lowercase, digits, underscores)
         for metric in MetricLabel::iter() {
             let name = metric.as_str();
-            assert!(name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'));
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            );
         }
     }
 

@@ -61,20 +61,16 @@ use super::types::{ConfigError, DhcpRange};
 pub enum ParseError {
     /// Invalid syntax on a specific line
     #[error("Invalid syntax at line {line}: {content}")]
-    InvalidSyntax {
-        line: usize,
-        content: String,
-    },
+    InvalidSyntax { line: usize, content: String },
 
     /// Unknown configuration option
     #[error("Unknown option '{option}' at line {line}")]
-    UnknownOption {
-        line: usize,
-        option: String,
-    },
+    UnknownOption { line: usize, option: String },
 
     /// Invalid value for a configuration option
-    #[error("Invalid value for option '{option}' at line {line}: expected {expected}, got '{value}'")]
+    #[error(
+        "Invalid value for option '{option}' at line {line}: expected {expected}, got '{value}'"
+    )]
     InvalidValue {
         line: usize,
         option: String,
@@ -84,30 +80,19 @@ pub enum ParseError {
 
     /// Configuration file not found
     #[error("Configuration file not found: {path}")]
-    FileNotFound {
-        path: PathBuf,
-    },
+    FileNotFound { path: PathBuf },
 
     /// Circular include detected in configuration files
     #[error("Circular include detected: {path} (include chain: {chain})")]
-    CircularInclude {
-        path: PathBuf,
-        chain: String,
-    },
+    CircularInclude { path: PathBuf, chain: String },
 
     /// Maximum recursion depth exceeded for includes
     #[error("Recursion depth exceeded at line {line}: maximum depth is {max_depth}")]
-    RecursionDepthExceeded {
-        line: usize,
-        max_depth: usize,
-    },
+    RecursionDepthExceeded { line: usize, max_depth: usize },
 
     /// I/O error while reading configuration file
     #[error("I/O error reading {path}: {error}")]
-    IoError {
-        path: PathBuf,
-        error: String,
-    },
+    IoError { path: PathBuf, error: String },
 
     /// Configuration validation error
     #[error("Validation error: {0}")]
@@ -255,18 +240,20 @@ impl ConfigBuilder {
         // Validate cache size if specified
         if let Some(size) = self.cache_size {
             if size > 100000 {
-                return Err(ParseError::ValidationError(
-                    format!("Cache size {} exceeds maximum of 100000", size)
-                ));
+                return Err(ParseError::ValidationError(format!(
+                    "Cache size {} exceeds maximum of 100000",
+                    size
+                )));
             }
         }
 
         // Validate EDNS packet size
         if let Some(size) = self.edns_packet_max {
             if !(512..=65535).contains(&size) {
-                return Err(ParseError::ValidationError(
-                    format!("EDNS packet size {} out of range 512-65535", size)
-                ));
+                return Err(ParseError::ValidationError(format!(
+                    "EDNS packet size {} out of range 512-65535",
+                    size
+                )));
             }
         }
 
@@ -316,15 +303,14 @@ impl ParseContext {
         }
 
         // Check for circular includes
-        let canonical = path.canonicalize().map_err(|e| {
-            ParseError::IoError {
-                path: path.to_path_buf(),
-                error: e.to_string(),
-            }
+        let canonical = path.canonicalize().map_err(|e| ParseError::IoError {
+            path: path.to_path_buf(),
+            error: e.to_string(),
         })?;
 
         if self.include_stack.contains(&canonical) {
-            let chain = self.include_chain
+            let chain = self
+                .include_chain
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
@@ -402,10 +388,10 @@ type OptionHandler = fn(&str, usize, &mut ConfigBuilder) -> Result<(), ParseErro
 pub fn parse_config_file(path: &Path) -> Result<ConfigBuilder, ParseError> {
     let mut builder = ConfigBuilder::new();
     let mut context = ParseContext::new();
-    
+
     parse_file_recursive(path, &mut builder, &mut context)?;
     builder.validate()?;
-    
+
     Ok(builder)
 }
 
@@ -436,10 +422,10 @@ pub fn parse_config_string(content: &str) -> Result<ConfigBuilder, ParseError> {
     let lines: Vec<&str> = content.lines().collect();
     let mut line_continuation = String::new();
     let mut continuation_line_num = 0;
-    
+
     for (line_num, line) in lines.iter().enumerate() {
         let line_number = line_num + 1;
-        
+
         // Handle line continuation
         if line.trim_end().ends_with('\\') {
             if line_continuation.is_empty() {
@@ -450,7 +436,7 @@ pub fn parse_config_string(content: &str) -> Result<ConfigBuilder, ParseError> {
             line_continuation.push(' ');
             continue;
         }
-        
+
         // Process complete line (with or without continuation)
         let complete_line = if line_continuation.is_empty() {
             line.to_string()
@@ -460,17 +446,17 @@ pub fn parse_config_string(content: &str) -> Result<ConfigBuilder, ParseError> {
             line_continuation.clear();
             result
         };
-        
+
         let effective_line_num = if continuation_line_num > 0 {
             continuation_line_num
         } else {
             line_number
         };
-        
+
         parse_line(&complete_line, effective_line_num, &mut builder)?;
         continuation_line_num = 0;
     }
-    
+
     builder.validate()?;
     Ok(builder)
 }
@@ -492,11 +478,9 @@ fn parse_file_recursive(
     context.enter_file(path)?;
 
     // Open and parse the file
-    let file = File::open(path).map_err(|e| {
-        ParseError::IoError {
-            path: path.to_path_buf(),
-            error: e.to_string(),
-        }
+    let file = File::open(path).map_err(|e| ParseError::IoError {
+        path: path.to_path_buf(),
+        error: e.to_string(),
     })?;
 
     let reader = BufReader::new(file);
@@ -505,11 +489,9 @@ fn parse_file_recursive(
 
     for (line_idx, line_result) in reader.lines().enumerate() {
         let line_number = line_idx + 1;
-        let line = line_result.map_err(|e| {
-            ParseError::IoError {
-                path: path.to_path_buf(),
-                error: e.to_string(),
-            }
+        let line = line_result.map_err(|e| ParseError::IoError {
+            path: path.to_path_buf(),
+            error: e.to_string(),
         })?;
 
         // Handle line continuation
@@ -565,10 +547,10 @@ fn parse_line(
 ) -> Result<(), ParseError> {
     // Strip comments (but preserve # in quoted strings)
     let line_without_comment = strip_comment(line);
-    
+
     // Trim whitespace
     let trimmed = line_without_comment.trim();
-    
+
     // Skip empty lines
     if trimmed.is_empty() {
         return Ok(());
@@ -632,7 +614,7 @@ fn parse_key_value(line: &str, line_number: usize) -> Result<(String, String), P
 
     // Otherwise split on first whitespace
     let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
-    
+
     if parts.is_empty() {
         return Err(ParseError::InvalidSyntax {
             line: line_number,
@@ -653,7 +635,7 @@ fn parse_key_value(line: &str, line_number: usize) -> Result<(String, String), P
 /// Removes quotes from a value string and processes escape sequences
 fn unquote(s: &str) -> String {
     let trimmed = s.trim();
-    
+
     if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
         // Remove quotes and process escapes
         let inner = &trimmed[1..trimmed.len() - 1];
@@ -667,7 +649,7 @@ fn unquote(s: &str) -> String {
 fn process_escapes(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars();
-    
+
     while let Some(ch) = chars.next() {
         if ch == '\\' {
             if let Some(next) = chars.next() {
@@ -689,7 +671,7 @@ fn process_escapes(s: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 
@@ -720,14 +702,14 @@ fn dispatch_option(
             line: line_number,
             option: key.to_string(),
         };
-        
+
         if let Some(suggested) = suggestion {
-            error = ParseError::ValidationError(
-                format!("Unknown option '{}' at line {}. Did you mean '{}'?", 
-                    key, line_number, suggested)
-            );
+            error = ParseError::ValidationError(format!(
+                "Unknown option '{}' at line {}. Did you mean '{}'?",
+                key, line_number, suggested
+            ));
         }
-        
+
         Err(error)
     }
 }
@@ -747,21 +729,39 @@ fn build_option_handlers() -> HashMap<String, OptionHandler> {
     handlers.insert("local".to_string(), handle_local as OptionHandler);
     handlers.insert("cache-size".to_string(), handle_cache_size as OptionHandler);
     handlers.insert("c".to_string(), handle_cache_size as OptionHandler);
-    handlers.insert("edns-packet-max".to_string(), handle_edns_packet_max as OptionHandler);
-    handlers.insert("min-cache-ttl".to_string(), handle_min_cache_ttl as OptionHandler);
-    handlers.insert("max-cache-ttl".to_string(), handle_max_cache_ttl as OptionHandler);
+    handlers.insert(
+        "edns-packet-max".to_string(),
+        handle_edns_packet_max as OptionHandler,
+    );
+    handlers.insert(
+        "min-cache-ttl".to_string(),
+        handle_min_cache_ttl as OptionHandler,
+    );
+    handlers.insert(
+        "max-cache-ttl".to_string(),
+        handle_max_cache_ttl as OptionHandler,
+    );
     handlers.insert("neg-ttl".to_string(), handle_neg_ttl as OptionHandler);
-    
+
     // Network options
     handlers.insert("port".to_string(), handle_port as OptionHandler);
     handlers.insert("p".to_string(), handle_port as OptionHandler);
-    handlers.insert("listen-address".to_string(), handle_listen_address as OptionHandler);
+    handlers.insert(
+        "listen-address".to_string(),
+        handle_listen_address as OptionHandler,
+    );
     handlers.insert("a".to_string(), handle_listen_address as OptionHandler);
     handlers.insert("interface".to_string(), handle_interface as OptionHandler);
     handlers.insert("i".to_string(), handle_interface as OptionHandler);
-    handlers.insert("bind-interfaces".to_string(), handle_bind_interfaces as OptionHandler);
-    handlers.insert("bind-dynamic".to_string(), handle_bind_dynamic as OptionHandler);
-    
+    handlers.insert(
+        "bind-interfaces".to_string(),
+        handle_bind_interfaces as OptionHandler,
+    );
+    handlers.insert(
+        "bind-dynamic".to_string(),
+        handle_bind_dynamic as OptionHandler,
+    );
+
     // DHCP options (feature-gated)
     #[cfg(feature = "dhcp")]
     {
@@ -769,48 +769,81 @@ fn build_option_handlers() -> HashMap<String, OptionHandler> {
         handlers.insert("F".to_string(), handle_dhcp_range as OptionHandler);
         handlers.insert("dhcp-host".to_string(), handle_dhcp_host as OptionHandler);
         handlers.insert("G".to_string(), handle_dhcp_host as OptionHandler);
-        handlers.insert("dhcp-option".to_string(), handle_dhcp_option as OptionHandler);
+        handlers.insert(
+            "dhcp-option".to_string(),
+            handle_dhcp_option as OptionHandler,
+        );
         handlers.insert("O".to_string(), handle_dhcp_option as OptionHandler);
-        handlers.insert("dhcp-leasefile".to_string(), handle_dhcp_leasefile as OptionHandler);
+        handlers.insert(
+            "dhcp-leasefile".to_string(),
+            handle_dhcp_leasefile as OptionHandler,
+        );
         handlers.insert("l".to_string(), handle_dhcp_leasefile as OptionHandler);
-        handlers.insert("dhcp-lease-max".to_string(), handle_dhcp_lease_max as OptionHandler);
+        handlers.insert(
+            "dhcp-lease-max".to_string(),
+            handle_dhcp_lease_max as OptionHandler,
+        );
         handlers.insert("X".to_string(), handle_dhcp_lease_max as OptionHandler);
-        handlers.insert("no-dhcp-interface".to_string(), handle_no_dhcp_interface as OptionHandler);
+        handlers.insert(
+            "no-dhcp-interface".to_string(),
+            handle_no_dhcp_interface as OptionHandler,
+        );
         handlers.insert("log-dhcp".to_string(), handle_log_dhcp as OptionHandler);
     }
-    
+
     // TFTP options (feature-gated)
     #[cfg(feature = "tftp")]
     {
-        handlers.insert("enable-tftp".to_string(), handle_enable_tftp as OptionHandler);
+        handlers.insert(
+            "enable-tftp".to_string(),
+            handle_enable_tftp as OptionHandler,
+        );
         handlers.insert("tftp-root".to_string(), handle_tftp_root as OptionHandler);
-        handlers.insert("tftp-secure".to_string(), handle_tftp_secure as OptionHandler);
+        handlers.insert(
+            "tftp-secure".to_string(),
+            handle_tftp_secure as OptionHandler,
+        );
         handlers.insert("tftp-max".to_string(), handle_tftp_max as OptionHandler);
     }
-    
+
     // DNSSEC options (feature-gated)
     #[cfg(feature = "dnssec")]
     {
         handlers.insert("dnssec".to_string(), handle_dnssec as OptionHandler);
-        handlers.insert("trust-anchor".to_string(), handle_trust_anchor as OptionHandler);
-        handlers.insert("dnssec-check-unsigned".to_string(), handle_dnssec_check_unsigned as OptionHandler);
+        handlers.insert(
+            "trust-anchor".to_string(),
+            handle_trust_anchor as OptionHandler,
+        );
+        handlers.insert(
+            "dnssec-check-unsigned".to_string(),
+            handle_dnssec_check_unsigned as OptionHandler,
+        );
     }
-    
+
     // Logging options
-    handlers.insert("log-facility".to_string(), handle_log_facility as OptionHandler);
-    handlers.insert("log-queries".to_string(), handle_log_queries as OptionHandler);
+    handlers.insert(
+        "log-facility".to_string(),
+        handle_log_facility as OptionHandler,
+    );
+    handlers.insert(
+        "log-queries".to_string(),
+        handle_log_queries as OptionHandler,
+    );
     handlers.insert("q".to_string(), handle_log_queries as OptionHandler);
-    
+
     // Security options
     handlers.insert("user".to_string(), handle_user as OptionHandler);
     handlers.insert("u".to_string(), handle_user as OptionHandler);
     handlers.insert("group".to_string(), handle_group as OptionHandler);
     handlers.insert("g".to_string(), handle_group as OptionHandler);
-    
+
     // File path options
     handlers.insert("pid-file".to_string(), handle_pid_file as OptionHandler);
     handlers.insert("x".to_string(), handle_pid_file as OptionHandler);
-    handlers.insert("resolv-file".to_string(), handle_resolv_file as OptionHandler);
+    handlers.insert(
+        "resolv-file".to_string(),
+        handle_resolv_file as OptionHandler,
+    );
     handlers.insert("r".to_string(), handle_resolv_file as OptionHandler);
     handlers.insert("no-resolv".to_string(), handle_no_resolv as OptionHandler);
     handlers.insert("R".to_string(), handle_no_resolv as OptionHandler);
@@ -827,7 +860,7 @@ fn build_option_handlers() -> HashMap<String, OptionHandler> {
 fn find_closest_option(key: &str, handlers: &HashMap<String, OptionHandler>) -> Option<String> {
     let mut best_match = None;
     let mut best_distance = usize::MAX;
-    
+
     for handler_key in handlers.keys() {
         let distance = edit_distance(key, handler_key);
         if distance < best_distance && distance <= 3 {
@@ -835,7 +868,7 @@ fn find_closest_option(key: &str, handlers: &HashMap<String, OptionHandler>) -> 
             best_match = Some(handler_key.clone());
         }
     }
-    
+
     best_match
 }
 
@@ -845,36 +878,37 @@ fn edit_distance(a: &str, b: &str) -> usize {
     let b_chars: Vec<char> = b.chars().collect();
     let a_len = a_chars.len();
     let b_len = b_chars.len();
-    
+
     if a_len == 0 {
         return b_len;
     }
     if b_len == 0 {
         return a_len;
     }
-    
+
     let mut matrix = vec![vec![0usize; b_len + 1]; a_len + 1];
-    
+
     for (i, row) in matrix.iter_mut().enumerate().take(a_len + 1) {
         row[0] = i;
     }
     for (j, cell) in matrix[0].iter_mut().enumerate().take(b_len + 1) {
         *cell = j;
     }
-    
+
     for i in 1..=a_len {
         for j in 1..=b_len {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             matrix[i][j] = std::cmp::min(
-                std::cmp::min(
-                    matrix[i - 1][j] + 1,
-                    matrix[i][j - 1] + 1,
-                ),
+                std::cmp::min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
                 matrix[i - 1][j - 1] + cost,
             );
         }
     }
-    
+
     matrix[a_len][b_len]
 }
 
@@ -904,26 +938,24 @@ fn handle_server(value: &str, line: usize, builder: &mut ConfigBuilder) -> Resul
     let (ip_part, port) = if let Some(hash_pos) = addr_str.find('#') {
         let ip = &addr_str[..hash_pos];
         let port_str = &addr_str[hash_pos + 1..];
-        let port = port_str.parse::<u16>().map_err(|_| {
-            ParseError::InvalidValue {
+        let port = port_str
+            .parse::<u16>()
+            .map_err(|_| ParseError::InvalidValue {
                 line,
                 option: "server".to_string(),
                 value: value.to_string(),
                 expected: "valid port number".to_string(),
-            }
-        })?;
+            })?;
         (ip, port)
     } else {
         (addr_str, 53u16)
     };
 
-    let ip_addr = IpAddr::from_str(ip_part).map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "server".to_string(),
-            value: value.to_string(),
-            expected: "valid IP address".to_string(),
-        }
+    let ip_addr = IpAddr::from_str(ip_part).map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "server".to_string(),
+        value: value.to_string(),
+        expected: "valid IP address".to_string(),
     })?;
 
     let socket_addr = SocketAddr::new(ip_addr, port);
@@ -938,7 +970,7 @@ fn handle_server(value: &str, line: usize, builder: &mut ConfigBuilder) -> Resul
 fn handle_address(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
     // Parse /domain/address format
     let parts: Vec<&str> = value.split('/').filter(|s| !s.is_empty()).collect();
-    
+
     if parts.len() != 2 {
         return Err(ParseError::InvalidValue {
             line,
@@ -949,13 +981,11 @@ fn handle_address(value: &str, line: usize, builder: &mut ConfigBuilder) -> Resu
     }
 
     let domain = parts[0].to_string();
-    let address = IpAddr::from_str(parts[1]).map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "address".to_string(),
-            value: value.to_string(),
-            expected: "valid IP address".to_string(),
-        }
+    let address = IpAddr::from_str(parts[1]).map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "address".to_string(),
+        value: value.to_string(),
+        expected: "valid IP address".to_string(),
     })?;
 
     builder.local_addresses.insert(domain, address);
@@ -978,15 +1008,19 @@ fn handle_local(value: &str, line: usize, _builder: &mut ConfigBuilder) -> Resul
 }
 
 /// Handles --cache-size option: DNS cache size
-fn handle_cache_size(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let size = value.parse::<usize>().map_err(|_| {
-        ParseError::InvalidValue {
+fn handle_cache_size(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let size = value
+        .parse::<usize>()
+        .map_err(|_| ParseError::InvalidValue {
             line,
             option: "cache-size".to_string(),
             value: value.to_string(),
             expected: "non-negative integer".to_string(),
-        }
-    })?;
+        })?;
 
     builder.set_cache_size(size);
 
@@ -994,15 +1028,19 @@ fn handle_cache_size(value: &str, line: usize, builder: &mut ConfigBuilder) -> R
 }
 
 /// Handles --edns-packet-max option: EDNS0 packet size
-fn handle_edns_packet_max(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let size = value.parse::<usize>().map_err(|_| {
-        ParseError::InvalidValue {
+fn handle_edns_packet_max(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let size = value
+        .parse::<usize>()
+        .map_err(|_| ParseError::InvalidValue {
             line,
             option: "edns-packet-max".to_string(),
             value: value.to_string(),
             expected: "integer between 512 and 65535".to_string(),
-        }
-    })?;
+        })?;
 
     if !(512..=65535).contains(&size) {
         return Err(ParseError::InvalidValue {
@@ -1019,14 +1057,16 @@ fn handle_edns_packet_max(value: &str, line: usize, builder: &mut ConfigBuilder)
 }
 
 /// Handles --min-cache-ttl option: minimum cache TTL
-fn handle_min_cache_ttl(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let seconds = value.parse::<u64>().map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "min-cache-ttl".to_string(),
-            value: value.to_string(),
-            expected: "non-negative integer (seconds)".to_string(),
-        }
+fn handle_min_cache_ttl(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let seconds = value.parse::<u64>().map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "min-cache-ttl".to_string(),
+        value: value.to_string(),
+        expected: "non-negative integer (seconds)".to_string(),
     })?;
 
     builder.min_cache_ttl = Some(Duration::from_secs(seconds));
@@ -1035,14 +1075,16 @@ fn handle_min_cache_ttl(value: &str, line: usize, builder: &mut ConfigBuilder) -
 }
 
 /// Handles --max-cache-ttl option: maximum cache TTL
-fn handle_max_cache_ttl(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let seconds = value.parse::<u64>().map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "max-cache-ttl".to_string(),
-            value: value.to_string(),
-            expected: "non-negative integer (seconds)".to_string(),
-        }
+fn handle_max_cache_ttl(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let seconds = value.parse::<u64>().map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "max-cache-ttl".to_string(),
+        value: value.to_string(),
+        expected: "non-negative integer (seconds)".to_string(),
     })?;
 
     builder.max_cache_ttl = Some(Duration::from_secs(seconds));
@@ -1052,13 +1094,11 @@ fn handle_max_cache_ttl(value: &str, line: usize, builder: &mut ConfigBuilder) -
 
 /// Handles --neg-ttl option: negative cache TTL
 fn handle_neg_ttl(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let seconds = value.parse::<u64>().map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "neg-ttl".to_string(),
-            value: value.to_string(),
-            expected: "non-negative integer (seconds)".to_string(),
-        }
+    let seconds = value.parse::<u64>().map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "neg-ttl".to_string(),
+        value: value.to_string(),
+        expected: "non-negative integer (seconds)".to_string(),
     })?;
 
     builder.neg_ttl = Some(Duration::from_secs(seconds));
@@ -1072,13 +1112,11 @@ fn handle_neg_ttl(value: &str, line: usize, builder: &mut ConfigBuilder) -> Resu
 
 /// Handles --port option: DNS port number
 fn handle_port(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let port = value.parse::<u16>().map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "port".to_string(),
-            value: value.to_string(),
-            expected: "port number 0-65535".to_string(),
-        }
+    let port = value.parse::<u16>().map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "port".to_string(),
+        value: value.to_string(),
+        expected: "port number 0-65535".to_string(),
     })?;
 
     builder.port = Some(port);
@@ -1087,14 +1125,16 @@ fn handle_port(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<
 }
 
 /// Handles --listen-address option: bind address
-fn handle_listen_address(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let addr = IpAddr::from_str(value).map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "listen-address".to_string(),
-            value: value.to_string(),
-            expected: "valid IP address".to_string(),
-        }
+fn handle_listen_address(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let addr = IpAddr::from_str(value).map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "listen-address".to_string(),
+        value: value.to_string(),
+        expected: "valid IP address".to_string(),
     })?;
 
     builder.add_listen_address(addr);
@@ -1103,7 +1143,11 @@ fn handle_listen_address(value: &str, line: usize, builder: &mut ConfigBuilder) 
 }
 
 /// Handles --interface option: network interface
-fn handle_interface(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_interface(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1119,13 +1163,21 @@ fn handle_interface(value: &str, line: usize, builder: &mut ConfigBuilder) -> Re
 }
 
 /// Handles --bind-interfaces option: bind to interfaces only
-fn handle_bind_interfaces(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_bind_interfaces(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.bind_interfaces = true;
     Ok(())
 }
 
 /// Handles --bind-dynamic option: bind to dynamic interfaces
-fn handle_bind_dynamic(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_bind_dynamic(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.bind_dynamic = true;
     Ok(())
 }
@@ -1141,10 +1193,14 @@ fn handle_bind_dynamic(_value: &str, _line: usize, builder: &mut ConfigBuilder) 
 /// - `192.168.1.50,192.168.1.150,12h` - Basic range with lease time
 /// - `set:tag,192.168.1.1,static` - Tagged static range
 /// - `::1,::100,constructor:eth0,12h` - DHCPv6 range
-fn handle_dhcp_range(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_dhcp_range(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     // Parse comma-separated values
     let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
-    
+
     if parts.len() < 2 {
         return Err(ParseError::InvalidValue {
             line,
@@ -1155,23 +1211,19 @@ fn handle_dhcp_range(value: &str, line: usize, builder: &mut ConfigBuilder) -> R
     }
 
     // Parse start address
-    let start = IpAddr::from_str(parts[0]).map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "dhcp-range".to_string(),
-            value: value.to_string(),
-            expected: "valid IP address for range start".to_string(),
-        }
+    let start = IpAddr::from_str(parts[0]).map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "dhcp-range".to_string(),
+        value: value.to_string(),
+        expected: "valid IP address for range start".to_string(),
     })?;
 
     // Parse end address
-    let end = IpAddr::from_str(parts[1]).map_err(|_| {
-        ParseError::InvalidValue {
-            line,
-            option: "dhcp-range".to_string(),
-            value: value.to_string(),
-            expected: "valid IP address for range end".to_string(),
-        }
+    let end = IpAddr::from_str(parts[1]).map_err(|_| ParseError::InvalidValue {
+        line,
+        option: "dhcp-range".to_string(),
+        value: value.to_string(),
+        expected: "valid IP address for range end".to_string(),
     })?;
 
     // Parse optional lease time (default 1 hour)
@@ -1199,7 +1251,11 @@ fn handle_dhcp_range(value: &str, line: usize, builder: &mut ConfigBuilder) -> R
 /// Handles --dhcp-host option: static DHCP host configuration
 ///
 /// Format: `11:22:33:44:55:66,192.168.1.100,hostname`
-fn handle_dhcp_host(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_dhcp_host(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1219,7 +1275,11 @@ fn handle_dhcp_host(value: &str, line: usize, builder: &mut ConfigBuilder) -> Re
 /// Handles --dhcp-option option: DHCP option to send to clients
 ///
 /// Formats: `option:router,192.168.1.1` or `3,192.168.1.1`
-fn handle_dhcp_option(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_dhcp_option(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1237,7 +1297,11 @@ fn handle_dhcp_option(value: &str, line: usize, builder: &mut ConfigBuilder) -> 
 
 #[cfg(feature = "dhcp")]
 /// Handles --dhcp-leasefile option: lease database file path
-fn handle_dhcp_leasefile(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_dhcp_leasefile(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1254,15 +1318,19 @@ fn handle_dhcp_leasefile(value: &str, line: usize, builder: &mut ConfigBuilder) 
 
 #[cfg(feature = "dhcp")]
 /// Handles --dhcp-lease-max option: maximum number of DHCP leases
-fn handle_dhcp_lease_max(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let max_leases = value.parse::<usize>().map_err(|_| {
-        ParseError::InvalidValue {
+fn handle_dhcp_lease_max(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let max_leases = value
+        .parse::<usize>()
+        .map_err(|_| ParseError::InvalidValue {
             line,
             option: "dhcp-lease-max".to_string(),
             value: value.to_string(),
             expected: "positive integer".to_string(),
-        }
-    })?;
+        })?;
 
     builder.dhcp_lease_max = Some(max_leases);
 
@@ -1271,7 +1339,11 @@ fn handle_dhcp_lease_max(value: &str, line: usize, builder: &mut ConfigBuilder) 
 
 #[cfg(feature = "dhcp")]
 /// Handles --no-dhcp-interface option: exclude interface from DHCP
-fn handle_no_dhcp_interface(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_no_dhcp_interface(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1288,7 +1360,11 @@ fn handle_no_dhcp_interface(value: &str, line: usize, builder: &mut ConfigBuilde
 
 #[cfg(feature = "dhcp")]
 /// Handles --log-dhcp option: enable DHCP logging
-fn handle_log_dhcp(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_log_dhcp(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.log_dhcp = true;
     Ok(())
 }
@@ -1299,14 +1375,22 @@ fn handle_log_dhcp(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> R
 
 #[cfg(feature = "tftp")]
 /// Handles --enable-tftp option: enable TFTP server
-fn handle_enable_tftp(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_enable_tftp(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.enable_tftp = true;
     Ok(())
 }
 
 #[cfg(feature = "tftp")]
 /// Handles --tftp-root option: TFTP root directory
-fn handle_tftp_root(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_tftp_root(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1323,22 +1407,30 @@ fn handle_tftp_root(value: &str, line: usize, builder: &mut ConfigBuilder) -> Re
 
 #[cfg(feature = "tftp")]
 /// Handles --tftp-secure option: enable TFTP secure mode
-fn handle_tftp_secure(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_tftp_secure(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.tftp_secure = true;
     Ok(())
 }
 
 #[cfg(feature = "tftp")]
 /// Handles --tftp-max option: maximum TFTP connections
-fn handle_tftp_max(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
-    let max_connections = value.parse::<usize>().map_err(|_| {
-        ParseError::InvalidValue {
+fn handle_tftp_max(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
+    let max_connections = value
+        .parse::<usize>()
+        .map_err(|_| ParseError::InvalidValue {
             line,
             option: "tftp-max".to_string(),
             value: value.to_string(),
             expected: "positive integer".to_string(),
-        }
-    })?;
+        })?;
 
     builder.tftp_max_connections = Some(max_connections);
 
@@ -1351,7 +1443,11 @@ fn handle_tftp_max(value: &str, line: usize, builder: &mut ConfigBuilder) -> Res
 
 #[cfg(feature = "dnssec")]
 /// Handles --dnssec option: enable DNSSEC validation
-fn handle_dnssec(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_dnssec(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.dnssec = true;
     Ok(())
 }
@@ -1360,7 +1456,11 @@ fn handle_dnssec(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Res
 /// Handles --trust-anchor option: DNSSEC trust anchor
 ///
 /// Format: `.,19036,8,2,49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5`
-fn handle_trust_anchor(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_trust_anchor(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1377,7 +1477,11 @@ fn handle_trust_anchor(value: &str, line: usize, builder: &mut ConfigBuilder) ->
 
 #[cfg(feature = "dnssec")]
 /// Handles --dnssec-check-unsigned option: check unsigned zones
-fn handle_dnssec_check_unsigned(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_dnssec_check_unsigned(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.dnssec_check_unsigned = true;
     Ok(())
 }
@@ -1389,7 +1493,11 @@ fn handle_dnssec_check_unsigned(_value: &str, _line: usize, builder: &mut Config
 /// Handles --log-facility option: syslog facility
 ///
 /// Values: daemon, local0-local7, user, etc.
-fn handle_log_facility(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_log_facility(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1401,9 +1509,8 @@ fn handle_log_facility(value: &str, line: usize, builder: &mut ConfigBuilder) ->
 
     // Validate facility name
     let valid_facilities = [
-        "daemon", "user", "kern", "mail", "auth", "syslog", "lpr", "news", "uucp",
-        "cron", "local0", "local1", "local2", "local3", "local4", "local5",
-        "local6", "local7",
+        "daemon", "user", "kern", "mail", "auth", "syslog", "lpr", "news", "uucp", "cron",
+        "local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7",
     ];
 
     if !valid_facilities.contains(&value) {
@@ -1421,7 +1528,11 @@ fn handle_log_facility(value: &str, line: usize, builder: &mut ConfigBuilder) ->
 }
 
 /// Handles --log-queries option: enable query logging
-fn handle_log_queries(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_log_queries(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.log_queries = true;
     Ok(())
 }
@@ -1467,7 +1578,11 @@ fn handle_group(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result
 // =============================================================================
 
 /// Handles --pid-file option: PID file path
-fn handle_pid_file(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_pid_file(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1483,7 +1598,11 @@ fn handle_pid_file(value: &str, line: usize, builder: &mut ConfigBuilder) -> Res
 }
 
 /// Handles --resolv-file option: resolv.conf file path
-fn handle_resolv_file(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_resolv_file(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         // Empty value disables resolv.conf reading
         builder.no_resolv = true;
@@ -1495,19 +1614,31 @@ fn handle_resolv_file(value: &str, line: usize, builder: &mut ConfigBuilder) -> 
 }
 
 /// Handles --no-resolv option: disable resolv.conf
-fn handle_no_resolv(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_no_resolv(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.no_resolv = true;
     Ok(())
 }
 
 /// Handles --no-hosts option: disable /etc/hosts
-fn handle_no_hosts(_value: &str, _line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_no_hosts(
+    _value: &str,
+    _line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     builder.no_hosts = true;
     Ok(())
 }
 
 /// Handles --addn-hosts option: additional hosts file
-fn handle_addn_hosts(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_addn_hosts(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1523,7 +1654,11 @@ fn handle_addn_hosts(value: &str, line: usize, builder: &mut ConfigBuilder) -> R
 }
 
 /// Handles --hostsdir option: hosts directory
-fn handle_hostsdir(value: &str, line: usize, builder: &mut ConfigBuilder) -> Result<(), ParseError> {
+fn handle_hostsdir(
+    value: &str,
+    line: usize,
+    builder: &mut ConfigBuilder,
+) -> Result<(), ParseError> {
     if value.is_empty() {
         return Err(ParseError::InvalidValue {
             line,
@@ -1547,7 +1682,7 @@ fn handle_hostsdir(value: &str, line: usize, builder: &mut ConfigBuilder) -> Res
 /// Formats: `60`, `60s`, `5m`, `2h`, `1d`, `1w`
 fn parse_duration(s: &str) -> Result<Duration, ParseError> {
     let trimmed = s.trim();
-    
+
     // Check for suffix
     let (value_str, multiplier) = if let Some(stripped) = trimmed.strip_suffix('w') {
         (stripped, 7 * 24 * 3600)
@@ -1563,9 +1698,9 @@ fn parse_duration(s: &str) -> Result<Duration, ParseError> {
         (trimmed, 1) // Default to seconds
     };
 
-    let value = value_str.parse::<u64>().map_err(|_| {
-        ParseError::ValidationError(format!("Invalid duration: {}", s))
-    })?;
+    let value = value_str
+        .parse::<u64>()
+        .map_err(|_| ParseError::ValidationError(format!("Invalid duration: {}", s)))?;
 
     Ok(Duration::from_secs(value * multiplier))
 }
@@ -1582,7 +1717,7 @@ mod tests {
     fn test_parse_simple_config() {
         let config_str = "port=5353\ncache-size=500";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.port, Some(5353));
         assert_eq!(builder.cache_size, Some(500));
     }
@@ -1591,7 +1726,7 @@ mod tests {
     fn test_parse_with_comments() {
         let config_str = "# Comment line\nport=5353  # End of line comment";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.port, Some(5353));
     }
 
@@ -1599,7 +1734,7 @@ mod tests {
     fn test_parse_quoted_values() {
         let config_str = r#"user="dnsmasq""#;
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.user, Some("dnsmasq".to_string()));
     }
 
@@ -1607,7 +1742,7 @@ mod tests {
     fn test_parse_server_option() {
         let config_str = "server=8.8.8.8\nserver=8.8.4.4#53";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.servers.len(), 2);
     }
 
@@ -1615,7 +1750,7 @@ mod tests {
     fn test_parse_listen_address() {
         let config_str = "listen-address=127.0.0.1\nlisten-address=::1";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.listen_addresses.len(), 2);
     }
 
@@ -1623,7 +1758,7 @@ mod tests {
     fn test_parse_interface() {
         let config_str = "interface=eth0\ninterface=wlan0";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.interfaces.len(), 2);
         assert!(builder.interfaces.contains(&"eth0".to_string()));
     }
@@ -1632,7 +1767,7 @@ mod tests {
     fn test_parse_boolean_flags() {
         let config_str = "bind-interfaces\nlog-queries\nno-resolv";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert!(builder.bind_interfaces);
         assert!(builder.log_queries);
         assert!(builder.no_resolv);
@@ -1650,7 +1785,7 @@ mod tests {
     fn test_unknown_option_error() {
         let config_str = "unknown-option=value";
         let result = parse_config_string(config_str);
-        
+
         assert!(result.is_err());
         match result {
             Err(ParseError::UnknownOption { option, .. }) => {
@@ -1664,7 +1799,7 @@ mod tests {
     fn test_invalid_value_error() {
         let config_str = "port=invalid";
         let result = parse_config_string(config_str);
-        
+
         assert!(result.is_err());
     }
 
@@ -1672,7 +1807,7 @@ mod tests {
     fn test_line_continuation() {
         let config_str = "server=8.8.8.8\\\n#comment after continuation\nserver=8.8.4.4";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert!(!builder.servers.is_empty());
     }
 
@@ -1688,7 +1823,10 @@ mod tests {
     fn test_strip_comment() {
         assert_eq!(strip_comment("port=53 # comment"), "port=53 ");
         assert_eq!(strip_comment("# full line comment"), "");
-        assert_eq!(strip_comment(r#"user="admin#user""#), r#"user="admin#user""#);
+        assert_eq!(
+            strip_comment(r#"user="admin#user""#),
+            r#"user="admin#user""#
+        );
     }
 
     #[test]
@@ -1703,7 +1841,7 @@ mod tests {
     fn test_parse_dhcp_range() {
         let config_str = "dhcp-range=192.168.1.50,192.168.1.150,12h";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.dhcp_ranges.len(), 1);
         let range = &builder.dhcp_ranges[0];
         assert_eq!(range.start, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50)));
@@ -1714,9 +1852,8 @@ mod tests {
     fn test_edns_packet_max_validation() {
         let config_str = "edns-packet-max=4096";
         let builder = parse_config_string(config_str).expect("Parse failed");
-        
+
         assert_eq!(builder.edns_packet_max, Some(4096));
         assert_eq!(EDNS_PACKET_SIZE, 4096); // Verify constant usage
     }
 }
-

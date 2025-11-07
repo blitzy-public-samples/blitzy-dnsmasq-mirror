@@ -218,10 +218,7 @@ impl From<PlatformError> for DnsmasqError {
                 DnsmasqError::System(crate::types::errors::SystemError::FileSystemError {
                     operation: operation.clone(),
                     path: "platform operation".to_string(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        operation,
-                    ),
+                    source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, operation),
                 })
             }
             _ => {
@@ -376,7 +373,11 @@ pub enum InterfaceEvent {
     Removed { index: u32, name: String },
 
     /// Interface address was added or removed
-    AddressChanged { index: u32, address: IpAddr, added: bool },
+    AddressChanged {
+        index: u32,
+        address: IpAddr,
+        added: bool,
+    },
 }
 
 /// Configuration file change events
@@ -795,7 +796,10 @@ mod tests {
         // Verify all variants are constructible
         assert!(matches!(added, InterfaceEvent::Added(_)));
         assert!(matches!(removed, InterfaceEvent::Removed { .. }));
-        assert!(matches!(addr_changed, InterfaceEvent::AddressChanged { .. }));
+        assert!(matches!(
+            addr_changed,
+            InterfaceEvent::AddressChanged { .. }
+        ));
     }
 
     #[test]

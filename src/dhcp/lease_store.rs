@@ -253,7 +253,7 @@ impl LeaseDatabase {
                 source: Some(e),
             })
         })?;
-        
+
         let reader = BufReader::new(file);
         let mut database = LeaseDatabase::new();
 
@@ -264,7 +264,7 @@ impl LeaseDatabase {
                     source: Some(e),
                 })
             })?;
-            
+
             // Skip empty lines and comments
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -311,7 +311,7 @@ impl LeaseDatabase {
     /// Returns error if temporary file cannot be created, written, or renamed.
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), DnsmasqError> {
         let path = path.as_ref();
-        
+
         // Get the directory for the temporary file
         let dir = path.parent().ok_or_else(|| {
             DnsmasqError::Config(crate::types::errors::ConfigError::InvalidValue {
@@ -408,7 +408,7 @@ impl Default for LeaseDatabase {
 pub enum ParsedLine {
     /// A lease entry (DHCPv4 or DHCPv6).
     Lease(LeaseEntry),
-    
+
     /// A DUID entry (DHCPv6 server identifier).
     Duid(DuidEntry),
 }
@@ -450,7 +450,7 @@ impl LeaseStore {
     /// better error handling and safety.
     pub fn parse_lease_line(line: &str) -> Result<ParsedLine, DnsmasqError> {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        
+
         if parts.is_empty() {
             return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
                 message: "Empty line".to_string(),
@@ -466,7 +466,7 @@ impl LeaseStore {
                     source: None,
                 }));
             }
-            
+
             let duid_bytes = parse_hex_with_colons(parts[1])?;
             return Ok(ParsedLine::Duid(DuidEntry { duid_bytes }));
         }
@@ -474,7 +474,10 @@ impl LeaseStore {
         // Parse lease line (requires at least 5 fields)
         if parts.len() < 5 {
             return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
-                message: format!("Lease line has only {} fields, expected at least 5", parts.len()),
+                message: format!(
+                    "Lease line has only {} fields, expected at least 5",
+                    parts.len()
+                ),
                 source: None,
             }));
         }
@@ -520,14 +523,14 @@ impl LeaseStore {
             } else {
                 (false, iaid_str)
             };
-            
+
             let iaid_value = iaid_num_str.parse::<u32>().map_err(|_| {
                 DnsmasqError::Dhcp(DhcpError::DatabaseError {
                     message: format!("Invalid IAID value: {}", iaid_num_str),
                     source: None,
                 })
             })?;
-            
+
             (vec![], Some(iaid_value), is_ta)
         } else {
             // DHCPv4 format: second field is hardware address
@@ -594,7 +597,7 @@ impl LeaseStore {
                 if hw_type != 1 {
                     line.push_str(&format!("{:02x}-", hw_type));
                 }
-                
+
                 for (i, byte) in lease.hardware_address.iter().enumerate() {
                     if i > 0 {
                         line.push(':');
@@ -668,7 +671,7 @@ impl LeaseStore {
             })
         })? {
             line_num += 1;
-            
+
             // Skip empty lines and comments
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -686,9 +689,7 @@ impl LeaseStore {
                 Err(e) => {
                     warn!(
                         "Failed to parse lease file line {}: {} (line: {})",
-                        line_num,
-                        e,
-                        line
+                        line_num, e, line
                     );
                     // Continue parsing remaining lines
                 }
@@ -783,10 +784,7 @@ pub fn read_leases<P: AsRef<Path>>(path: P) -> Result<LeaseDatabase, DnsmasqErro
 /// # Returns
 ///
 /// Result indicating success or error
-pub fn write_leases<P: AsRef<Path>>(
-    path: P,
-    database: &LeaseDatabase,
-) -> Result<(), DnsmasqError> {
+pub fn write_leases<P: AsRef<Path>>(path: P, database: &LeaseDatabase) -> Result<(), DnsmasqError> {
     database.save_to_file(path)
 }
 
@@ -836,11 +834,13 @@ pub async fn execute_lease_init_script<P: AsRef<Path>>(
     // Check exit code
     if !output.status.success() {
         let exit_code = output.status.code().unwrap_or(-1);
-        return Err(DnsmasqError::Config(crate::types::errors::ConfigError::InvalidValue {
-            option: "lease-change-script".to_string(),
-            value: script_path.display().to_string(),
-            message: format!("Script returned exit code {}", exit_code),
-        }));
+        return Err(DnsmasqError::Config(
+            crate::types::errors::ConfigError::InvalidValue {
+                option: "lease-change-script".to_string(),
+                value: script_path.display().to_string(),
+                message: format!("Script returned exit code {}", exit_code),
+            },
+        ));
     }
 
     // Parse output as lease database
@@ -946,12 +946,15 @@ mod tests {
     fn test_parse_dhcpv4_lease() {
         let line = "1609459200 00:11:22:33:44:55 192.168.1.100 client1 *";
         let result = LeaseStore::parse_lease_line(line).unwrap();
-        
+
         match result {
             ParsedLine::Lease(lease) => {
                 assert_eq!(lease.expiry, 1609459200);
                 assert_eq!(lease.address, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
-                assert_eq!(lease.hardware_address, vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+                assert_eq!(
+                    lease.hardware_address,
+                    vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]
+                );
                 assert_eq!(lease.hostname, Some("client1".to_string()));
                 assert_eq!(lease.client_id, None);
                 assert_eq!(lease.iaid, None);
@@ -965,11 +968,14 @@ mod tests {
     fn test_parse_dhcpv6_lease() {
         let line = "1609459200 12345678 2001:db8::1 client-v6 *";
         let result = LeaseStore::parse_lease_line(line).unwrap();
-        
+
         match result {
             ParsedLine::Lease(lease) => {
                 assert_eq!(lease.expiry, 1609459200);
-                assert_eq!(lease.address, IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)));
+                assert_eq!(
+                    lease.address,
+                    IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))
+                );
                 assert_eq!(lease.iaid, Some(12345678));
                 assert!(!lease.is_temporary_address);
             }
@@ -981,7 +987,7 @@ mod tests {
     fn test_parse_dhcpv6_temporary_lease() {
         let line = "1609459200 T87654321 2001:db8::2 * *";
         let result = LeaseStore::parse_lease_line(line).unwrap();
-        
+
         match result {
             ParsedLine::Lease(lease) => {
                 assert_eq!(lease.iaid, Some(87654321));
@@ -995,7 +1001,7 @@ mod tests {
     fn test_parse_duid() {
         let line = "duid 00:01:00:01:12:34:56:78:00:11:22:33:44:55";
         let result = LeaseStore::parse_lease_line(line).unwrap();
-        
+
         match result {
             ParsedLine::Duid(duid) => {
                 assert_eq!(duid.duid_bytes.len(), 14);
@@ -1017,7 +1023,7 @@ mod tests {
             iaid: None,
             is_temporary_address: false,
         };
-        
+
         let formatted = LeaseStore::format_lease_line(&lease);
         assert!(formatted.contains("1609459200"));
         assert!(formatted.contains("00:11:22:33:44:55"));
@@ -1037,10 +1043,10 @@ mod tests {
             iaid: None,
             is_temporary_address: false,
         };
-        
+
         let formatted = LeaseStore::format_lease_line(&original);
         let result = LeaseStore::parse_lease_line(&formatted).unwrap();
-        
+
         match result {
             ParsedLine::Lease(parsed) => {
                 assert_eq!(parsed.expiry, original.expiry);

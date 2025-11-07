@@ -279,40 +279,40 @@ pub mod dnssec;
 
 // Protocol types - DNS message structures
 pub use protocol::{
-    DnsMessage,       // Complete DNS message with header, questions, and records
-    DnsHeader,        // DNS message header with ID, flags, and counts
-    DnsQuestion,      // DNS question section entry
-    ResourceRecord,   // DNS resource record enum with all record types
-    RecordType,       // DNS record type enum (A, AAAA, CNAME, etc.)
-    RecordClass,      // DNS record class enum (IN, CS, CH, HS)
+    DnsHeader,      // DNS message header with ID, flags, and counts
+    DnsMessage,     // Complete DNS message with header, questions, and records
+    DnsQuestion,    // DNS question section entry
+    RecordClass,    // DNS record class enum (IN, CS, CH, HS)
+    RecordType,     // DNS record type enum (A, AAAA, CNAME, etc.)
+    ResourceRecord, // DNS resource record enum with all record types
 };
 
 // Cache types - DNS response caching
 pub use cache::{
-    DnsCache,         // DNS cache with LRU eviction
-    CacheEntry,       // Individual cached DNS response
-    CacheKey,         // Cache lookup key (name, type, class)
+    CacheEntry, // Individual cached DNS response
+    CacheKey,   // Cache lookup key (name, type, class)
+    DnsCache,   // DNS cache with LRU eviction
 };
 
 // Server types - DNS server configuration and implementation
 pub use server::{
-    DnsServer,        // DNS server implementation
-    ServerConfig,     // DNS server configuration
+    DnsServer,    // DNS server implementation
+    ServerConfig, // DNS server configuration
 };
 
 // Forward types - Query forwarding state
-pub use forward::ForwardRecord;  // Forward query tracking record
+pub use forward::ForwardRecord; // Forward query tracking record
 
 // EDNS types - Extended DNS support
 pub use edns::{
-    OptRecord,        // EDNS OPT pseudo-record
-    EdnsOption,       // EDNS option enum
+    EdnsOption, // EDNS option enum
+    OptRecord,  // EDNS OPT pseudo-record
 };
 
 // Domain types - Domain name utilities
 pub use domain::{
-    SynthDomain,         // Synthetic domain configuration
-    ConditionalDomain,   // Conditional forwarding domain
+    ConditionalDomain, // Conditional forwarding domain
+    SynthDomain,       // Synthetic domain configuration
 };
 
 // ============================================================================
@@ -360,7 +360,7 @@ mod tests {
     fn test_public_exports() {
         // Ensure key types are accessible from the dns module root
         // This validates that re-exports are correct and complete
-        
+
         // We can't instantiate these types without full implementations,
         // but we can verify they're in scope by referencing them
         let _: Option<DnsMessage> = None;
@@ -376,7 +376,7 @@ mod tests {
         fn returns_dns_result() -> DnsResult<()> {
             Ok(())
         }
-        
+
         assert!(returns_dns_result().is_ok());
     }
 
@@ -386,7 +386,7 @@ mod tests {
         // Test that DnsError can be converted to DnsmasqError
         // This validates the From implementation in the errors module
         let dns_error = DnsError::ProtocolError {
-            message: "test error".to_string()
+            message: "test error".to_string(),
         };
         let _: DnsmasqError = dns_error.into();
     }

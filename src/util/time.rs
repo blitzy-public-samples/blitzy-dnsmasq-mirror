@@ -139,14 +139,14 @@ static START_TIME_SYSTEM: OnceLock<SystemTime> = OnceLock::new();
 ///
 /// // Initialize time tracking at program startup
 /// init_time_source();
-/// 
+///
 /// // Now safe to call monotonic_time() from anywhere
 /// // ...
 /// ```
 pub fn init_time_source() {
     // Initialize the primary time source (Instant)
     START_TIME.get_or_init(Instant::now);
-    
+
     // Also initialize the broken-rtc fallback if the feature is enabled
     #[cfg(feature = "broken-rtc")]
     {
@@ -220,7 +220,7 @@ pub fn monotonic_time() -> u64 {
             .expect("init_time_source() must be called before monotonic_time()");
         start.elapsed().as_secs()
     }
-    
+
     #[cfg(feature = "broken-rtc")]
     {
         // Fallback for embedded systems without reliable RTC
@@ -290,41 +290,41 @@ pub fn format_duration(seconds: u64) -> String {
     if seconds == INFINITE_LEASE || seconds == u32::MAX as u64 {
         return "infinite".to_string();
     }
-    
+
     // Handle zero duration
     if seconds == 0 {
         return "0s".to_string();
     }
-    
+
     let mut parts = Vec::new();
     let mut remaining = seconds;
-    
+
     // Days
     let days = remaining / SECS_PER_DAY;
     if days > 0 {
         parts.push(format!("{}d", days));
         remaining %= SECS_PER_DAY;
     }
-    
+
     // Hours
     let hours = remaining / SECS_PER_HOUR;
     if hours > 0 {
         parts.push(format!("{}h", hours));
         remaining %= SECS_PER_HOUR;
     }
-    
+
     // Minutes
     let minutes = remaining / SECS_PER_MINUTE;
     if minutes > 0 {
         parts.push(format!("{}m", minutes));
         remaining %= SECS_PER_MINUTE;
     }
-    
+
     // Seconds
     if remaining > 0 {
         parts.push(format!("{}s", remaining));
     }
-    
+
     parts.join(" ")
 }
 
@@ -402,7 +402,7 @@ pub fn is_expired(timestamp: Timestamp, timeout_secs: u64) -> bool {
 pub fn time_remaining(timestamp: Timestamp, timeout_secs: u64) -> Option<u64> {
     let now = monotonic_time();
     let expiry = timestamp.saturating_add(timeout_secs);
-    
+
     if now >= expiry {
         None
     } else {
@@ -531,7 +531,7 @@ pub fn calculate_lease_expiry(start: Timestamp, lease_secs: LeaseTime) -> Timest
 /// ```
 pub fn lease_time_remaining(expiry: Timestamp) -> Option<u64> {
     let now = monotonic_time();
-    
+
     if now >= expiry {
         None
     } else {
@@ -549,7 +549,7 @@ mod tests {
     fn test_init_time_source() {
         // Should not panic
         init_time_source();
-        
+
         // Should be idempotent
         init_time_source();
         init_time_source();
@@ -558,11 +558,11 @@ mod tests {
     #[test]
     fn test_monotonic_time_increases() {
         init_time_source();
-        
+
         let time1 = monotonic_time();
         thread::sleep(StdDuration::from_millis(100));
         let time2 = monotonic_time();
-        
+
         assert!(time2 >= time1, "Monotonic time should never decrease");
     }
 
@@ -613,12 +613,12 @@ mod tests {
     #[test]
     fn test_is_expired() {
         init_time_source();
-        
+
         let start = monotonic_time();
-        
+
         // Should not be expired immediately
         assert!(!is_expired(start, 10));
-        
+
         // Should be expired after timeout
         thread::sleep(StdDuration::from_millis(100));
         assert!(is_expired(start, 0));
@@ -627,21 +627,21 @@ mod tests {
     #[test]
     fn test_time_remaining() {
         init_time_source();
-        
+
         let start = monotonic_time();
         let timeout = 3600;
-        
+
         // Should have time remaining
         let remaining = time_remaining(start, timeout);
         assert!(remaining.is_some());
         assert!(remaining.unwrap() > 0);
         assert!(remaining.unwrap() <= timeout);
-        
+
         // Test with a timestamp that's guaranteed to be expired
         // Sleep a bit to ensure some time passes
         thread::sleep(StdDuration::from_millis(10));
         let now = monotonic_time();
-        
+
         // Create a timestamp that's definitely in the past
         // If now is 0, this will be 0, and with timeout 0, it should be expired
         let past = now.saturating_sub(1);
@@ -658,7 +658,7 @@ mod tests {
     fn test_duration_to_seconds() {
         let dur = StdDuration::from_secs(3600);
         assert_eq!(duration_to_seconds(dur), 3600);
-        
+
         // Test truncation of fractional seconds
         let dur_with_nanos = StdDuration::new(3600, 500_000_000);
         assert_eq!(duration_to_seconds(dur_with_nanos), 3600);
@@ -684,16 +684,16 @@ mod tests {
     #[test]
     fn test_lease_time_remaining() {
         init_time_source();
-        
+
         let now = monotonic_time();
         let future_expiry = now + 3600;
         let past_expiry = now.saturating_sub(10);
-        
+
         // Future expiry should have time remaining
         let remaining = lease_time_remaining(future_expiry);
         assert!(remaining.is_some());
         assert!(remaining.unwrap() > 0);
-        
+
         // Past expiry should return None
         assert_eq!(lease_time_remaining(past_expiry), None);
     }

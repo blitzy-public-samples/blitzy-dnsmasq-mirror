@@ -70,7 +70,7 @@
 
 use crate::constants::DNS_PACKET_SIZE;
 use crate::dns::protocol::ResourceRecord;
-use crate::types::errors::{DnsmasqError, DnsError};
+use crate::types::errors::{DnsError, DnsmasqError};
 use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{BufMut, BytesMut};
 use std::io::Cursor;
@@ -210,12 +210,12 @@ impl ClientSubnetInfo {
         let family = cursor
             .read_u16::<NetworkEndian>()
             .map_err(|e| EdnsError::MalformedOption(format!("Failed to read family: {}", e)))?;
-        let source_prefix = cursor
-            .read_u8()
-            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read source prefix: {}", e)))?;
-        let scope_prefix = cursor
-            .read_u8()
-            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read scope prefix: {}", e)))?;
+        let source_prefix = cursor.read_u8().map_err(|e| {
+            EdnsError::MalformedOption(format!("Failed to read source prefix: {}", e))
+        })?;
+        let scope_prefix = cursor.read_u8().map_err(|e| {
+            EdnsError::MalformedOption(format!("Failed to read scope prefix: {}", e))
+        })?;
 
         let address = match family {
             1 => {
@@ -428,11 +428,7 @@ impl OptRecord {
     /// Expects the RDATA section of an OPT record (after NAME, TYPE, CLASS, TTL, RDLEN).
     /// The CLASS and TTL fields should be parsed externally and passed to construct the
     /// OptRecord structure.
-    pub fn from_bytes(
-        udp_payload_size: u16,
-        ttl_bytes: u32,
-        rdata: &[u8],
-    ) -> EdnsResult<Self> {
+    pub fn from_bytes(udp_payload_size: u16, ttl_bytes: u32, rdata: &[u8]) -> EdnsResult<Self> {
         // Extract extended RCODE, version, and flags from TTL field
         let extended_rcode = ((ttl_bytes >> 24) & 0xFF) as u8;
         let version = ((ttl_bytes >> 16) & 0xFF) as u8;
@@ -462,9 +458,8 @@ impl OptRecord {
     pub fn to_bytes(&self) -> (u16, u32, Vec<u8>) {
         // Construct TTL field: extended_rcode | version | flags
         let flags = if self.dnssec_ok { 0x8000u16 } else { 0u16 };
-        let ttl_bytes = ((self.extended_rcode as u32) << 24)
-            | ((self.version as u32) << 16)
-            | (flags as u32);
+        let ttl_bytes =
+            ((self.extended_rcode as u32) << 24) | ((self.version as u32) << 16) | (flags as u32);
 
         // Serialize all options
         let mut rdata = BytesMut::new();
@@ -667,7 +662,11 @@ impl EdnsOption {
             }
             _ => {
                 // Unknown option - preserve as-is for forwarding
-                debug!("Unknown EDNS option code {}, preserving {} bytes", code, data.len());
+                debug!(
+                    "Unknown EDNS option code {}, preserving {} bytes",
+                    code,
+                    data.len()
+                );
                 Ok(EdnsOption::Unknown {
                     code,
                     data: data.to_vec(),
@@ -733,7 +732,9 @@ impl EdnsOption {
 /// }
 /// ```
 pub fn find_opt_record(additional: &[ResourceRecord]) -> Option<&ResourceRecord> {
-    additional.iter().find(|rr| matches!(rr, ResourceRecord::OPT { .. }))
+    additional
+        .iter()
+        .find(|rr| matches!(rr, ResourceRecord::OPT { .. }))
 }
 
 /// Add OPT record to a DNS message
@@ -906,9 +907,7 @@ mod tests {
 
     #[test]
     fn test_opt_record_serialization() {
-        let opt = OptRecord::new()
-            .with_udp_size(4096)
-            .with_dnssec_ok(true);
+        let opt = OptRecord::new().with_udp_size(4096).with_dnssec_ok(true);
 
         let (udp_size, ttl_bytes, rdata) = opt.to_bytes();
         assert_eq!(udp_size, 4096);
@@ -968,10 +967,8 @@ mod tests {
 
     #[test]
     fn test_edns_option_codes() {
-        let client_subnet = EdnsOption::ClientSubnet(ClientSubnetInfo::new_v4(
-            Ipv4Addr::new(192, 168, 1, 0),
-            24,
-        ));
+        let client_subnet =
+            EdnsOption::ClientSubnet(ClientSubnetInfo::new_v4(Ipv4Addr::new(192, 168, 1, 0), 24));
         assert_eq!(client_subnet.code(), option_codes::CLIENT_SUBNET);
 
         let cookie = EdnsOption::Cookie {
@@ -1025,7 +1022,10 @@ mod tests {
         let data = vec![1, 2, 3, 4, 5];
         let option = EdnsOption::from_code_and_data(9999, &data).unwrap();
         match option {
-            EdnsOption::Unknown { code, data: parsed_data } => {
+            EdnsOption::Unknown {
+                code,
+                data: parsed_data,
+            } => {
                 assert_eq!(code, 9999);
                 assert_eq!(parsed_data, data);
             }
@@ -1084,7 +1084,11 @@ mod tests {
         add_opt_record(&mut additional, 4096, true, vec![]);
         assert_eq!(additional.len(), 1);
         match &additional[0] {
-            ResourceRecord::OPT { udp_payload_size, dnssec_ok, .. } => {
+            ResourceRecord::OPT {
+                udp_payload_size,
+                dnssec_ok,
+                ..
+            } => {
                 assert_eq!(*udp_payload_size, 4096);
                 assert!(*dnssec_ok);
             }
@@ -1095,7 +1099,11 @@ mod tests {
         add_opt_record(&mut additional, 1232, false, vec![]);
         assert_eq!(additional.len(), 1);
         match &additional[0] {
-            ResourceRecord::OPT { udp_payload_size, dnssec_ok, .. } => {
+            ResourceRecord::OPT {
+                udp_payload_size,
+                dnssec_ok,
+                ..
+            } => {
                 assert_eq!(*udp_payload_size, 1232);
                 assert!(!*dnssec_ok);
             }
@@ -1126,7 +1134,9 @@ mod tests {
         let opt = find_opt_record(&additional);
         assert!(opt.is_some());
         match opt.unwrap() {
-            ResourceRecord::OPT { udp_payload_size, .. } => {
+            ResourceRecord::OPT {
+                udp_payload_size, ..
+            } => {
                 assert_eq!(*udp_payload_size, 4096);
             }
             _ => panic!("Expected OPT record"),

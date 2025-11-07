@@ -829,4 +829,3 @@ mod tests {
         // AUTH_DEFAULT_TTL_SECS > 0
     }
 }
-

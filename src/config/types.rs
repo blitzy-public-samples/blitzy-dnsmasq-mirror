@@ -393,7 +393,7 @@ pub struct BogusRule {
     /// Domain name to mark as bogus
     pub domain: String,
     /// Optional subnet (if specified, only responses in subnet treated as bogus)
-    pub subnet: Option<String>,  // CIDR notation (e.g., "192.168.0.0/16")
+    pub subnet: Option<String>, // CIDR notation (e.g., "192.168.0.0/16")
 }
 
 /// DNS cache configuration parameters
@@ -842,7 +842,7 @@ pub struct AuthConfig {
     /// Authoritative zones (domain names)
     pub zones: Vec<String>,
     /// SOA record parameters (if any)
-    pub soa: Option<String>,  // Simplified; full SOA implementation would need struct
+    pub soa: Option<String>, // Simplified; full SOA implementation would need struct
     /// TTL for authoritative records
     pub ttl: Duration,
     /// Peer nameservers (for zone transfers)
@@ -1053,32 +1053,32 @@ impl Default for SecurityConfig {
 pub struct Config {
     /// DNS subsystem configuration
     pub dns: DnsConfig,
-    
+
     /// DHCP subsystem configuration (feature-gated)
     #[cfg(feature = "dhcp")]
     pub dhcp: Option<DhcpConfig>,
-    
+
     /// Network configuration
     pub network: NetworkConfig,
-    
+
     /// Logging configuration
     pub logging: LoggingConfig,
-    
+
     /// Security configuration
     pub security: SecurityConfig,
-    
+
     /// TFTP configuration (feature-gated)
     #[cfg(feature = "tftp")]
     pub tftp: Option<TftpConfig>,
-    
+
     /// DNSSEC configuration (feature-gated)
     #[cfg(feature = "dnssec")]
     pub dnssec: Option<DnssecConfig>,
-    
+
     /// Authoritative DNS configuration (feature-gated)
     #[cfg(feature = "auth-dns")]
     pub auth: Option<AuthConfig>,
-    
+
     /// File paths (config file, PID file, lease file)
     pub files: FileConfig,
 }
@@ -1105,8 +1105,6 @@ impl Default for FileConfig {
         }
     }
 }
-
-
 
 // =============================================================================
 // CONFIGURATION BUILDER
@@ -1303,14 +1301,17 @@ mod tests {
         let mut builder = ConfigBuilder::new();
         builder.dns(DnsConfig::default());
         builder.network(NetworkConfig::default());
-        
+
         // Validate returns &mut Self for chaining
         builder.validate().unwrap();
-        
+
         // Build consumes the builder
         let config = builder.build().unwrap();
 
-        assert_eq!(config.dns.cache_size, super::super::defaults::DEFAULT_CACHE_SIZE);
+        assert_eq!(
+            config.dns.cache_size,
+            super::super::defaults::DEFAULT_CACHE_SIZE
+        );
         assert_eq!(config.network.port, 53);
     }
 
@@ -1322,7 +1323,7 @@ mod tests {
             ..Default::default()
         };
         builder.dns(dns);
-        
+
         assert!(builder.validate().is_err());
     }
 }

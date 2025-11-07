@@ -1,5 +1,5 @@
 // Copyright (C) 2024 Blitzy - dnsmasq Rust Implementation
-// 
+//
 // This file is part of the dnsmasq Rust port, translating C's union all_addr
 // and union mysockaddr into type-safe Rust enums and utilizing std::net types.
 //
@@ -79,19 +79,19 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 pub enum AllAddr {
     /// IPv4 address variant
     Ipv4(Ipv4Addr),
-    
+
     /// IPv6 address variant
     Ipv6(Ipv6Addr),
-    
+
     /// CNAME record target data
     Cname(CnameData),
-    
+
     /// DNSSEC DNSKEY record data
     DnsKey(DnsKeyData),
-    
+
     /// DNSSEC DS (Delegation Signer) record data
     DelegationSigner(DsData),
-    
+
     /// DNS SRV record data for service location
     ServiceRecord(SrvData),
 }
@@ -281,7 +281,7 @@ impl AllAddr {
 pub struct CnameData {
     /// CNAME target name
     pub target: String,
-    
+
     /// Unique identifier for CNAME chain tracking and loop detection
     pub uid: u32,
 }
@@ -342,13 +342,13 @@ impl CnameData {
 pub struct DnsKeyData {
     /// Raw public key data bytes
     pub keydata: Vec<u8>,
-    
+
     /// DNSKEY flags (bit 7: Zone Key, bit 15: Secure Entry Point)
     pub flags: u16,
-    
+
     /// Key tag for quick identification (16-bit hash of key data)
     pub keytag: u16,
-    
+
     /// Cryptographic algorithm (5=RSA/SHA-1, 8=RSA/SHA-256, 13=ECDSA-P256, 15=Ed25519)
     pub algorithm: u8,
 }
@@ -418,13 +418,13 @@ impl DnsKeyData {
 pub struct DsData {
     /// Digest of the referenced DNSKEY record
     pub keydata: Vec<u8>,
-    
+
     /// Key tag of the referenced DNSKEY
     pub keytag: u16,
-    
+
     /// Algorithm of the referenced DNSKEY
     pub algorithm: u8,
-    
+
     /// Digest algorithm (1=SHA-1, 2=SHA-256, 4=SHA-384)
     pub digest_type: u8,
 }
@@ -495,13 +495,13 @@ impl DsData {
 pub struct SrvData {
     /// Target hostname providing the service
     pub target: String,
-    
+
     /// TCP or UDP port number
     pub port: u16,
-    
+
     /// Priority (lower values have higher priority)
     pub priority: u16,
-    
+
     /// Relative weight for load balancing
     pub weight: u16,
 }
@@ -585,7 +585,7 @@ impl SrvData {
 pub fn is_addr_ula(addr: &Ipv6Addr) -> bool {
     // Get the segments (16-bit values) of the IPv6 address
     let segments = addr.segments();
-    
+
     // Check if the first byte (high 8 bits of first segment) is 0xfd
     // segments[0] is in host byte order, so we check the high byte
     (segments[0] & 0xff00) == 0xfd00
@@ -633,7 +633,7 @@ pub fn is_addr_ula(addr: &Ipv6Addr) -> bool {
 /// ```
 pub fn is_addr_ula_zero(addr: &Ipv6Addr) -> bool {
     let segments = addr.segments();
-    
+
     // Check if address is exactly fd00::
     // First segment must be 0xfd00, all others must be 0
     segments[0] == 0xfd00
@@ -687,7 +687,7 @@ pub fn is_addr_ula_zero(addr: &Ipv6Addr) -> bool {
 /// ```
 pub fn is_addr_link_local_zero(addr: &Ipv6Addr) -> bool {
     let segments = addr.segments();
-    
+
     // Check if address is exactly fe80::
     // First segment must be 0xfe80, all others must be 0
     segments[0] == 0xfe80
@@ -708,7 +708,7 @@ mod tests {
     fn test_alladdr_ipv4() {
         let ipv4 = Ipv4Addr::new(192, 168, 1, 1);
         let addr = AllAddr::from_ipv4(ipv4);
-        
+
         assert!(addr.is_ipv4());
         assert!(!addr.is_ipv6());
         assert_eq!(addr.as_ipv4(), Some(ipv4));
@@ -720,7 +720,7 @@ mod tests {
     fn test_alladdr_ipv6() {
         let ipv6 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
         let addr = AllAddr::from_ipv6(ipv6);
-        
+
         assert!(addr.is_ipv6());
         assert!(!addr.is_ipv4());
         assert_eq!(addr.as_ipv6(), Some(ipv6));
@@ -733,7 +733,7 @@ mod tests {
         let cname = CnameData::new("example.com".to_string(), 42);
         assert_eq!(cname.target, "example.com");
         assert_eq!(cname.uid, 42);
-        
+
         let addr = AllAddr::Cname(cname);
         assert!(!addr.is_ipv4());
         assert!(!addr.is_ipv6());
@@ -744,7 +744,7 @@ mod tests {
     fn test_dnskey_data() {
         let keydata = vec![0x03, 0x01, 0x00, 0x01];
         let dnskey = DnsKeyData::new(keydata.clone(), 257, 12345, 8);
-        
+
         assert_eq!(dnskey.keydata, keydata);
         assert_eq!(dnskey.flags, 257);
         assert_eq!(dnskey.keytag, 12345);
@@ -755,7 +755,7 @@ mod tests {
     fn test_ds_data() {
         let digest = vec![0xAB, 0xCD, 0xEF];
         let ds = DsData::new(digest.clone(), 54321, 8, 2);
-        
+
         assert_eq!(ds.keydata, digest);
         assert_eq!(ds.keytag, 54321);
         assert_eq!(ds.algorithm, 8);
@@ -765,7 +765,7 @@ mod tests {
     #[test]
     fn test_srv_data() {
         let srv = SrvData::new("server.example.com".to_string(), 443, 10, 50);
-        
+
         assert_eq!(srv.target, "server.example.com");
         assert_eq!(srv.port, 443);
         assert_eq!(srv.priority, 10);
@@ -776,16 +776,18 @@ mod tests {
     fn test_is_addr_ula() {
         // ULA addresses (fd00::/8)
         let ula1 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
-        let ula2 = Ipv6Addr::new(0xfdff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff);
-        
+        let ula2 = Ipv6Addr::new(
+            0xfdff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+        );
+
         assert!(is_addr_ula(&ula1));
         assert!(is_addr_ula(&ula2));
-        
+
         // Non-ULA addresses
         let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
         let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
         let fc00 = Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1);
-        
+
         assert!(!is_addr_ula(&global));
         assert!(!is_addr_ula(&link_local));
         assert!(!is_addr_ula(&fc00)); // fc00::/8 is reserved, not fd00::/8
@@ -796,12 +798,12 @@ mod tests {
         // Exactly fd00::
         let ula_zero = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
         assert!(is_addr_ula_zero(&ula_zero));
-        
+
         // Not fd00:: (has host bits set)
         let ula_host = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
         let ula_subnet = Ipv6Addr::new(0xfd00, 0, 0, 1, 0, 0, 0, 0);
         let fd01 = Ipv6Addr::new(0xfd01, 0, 0, 0, 0, 0, 0, 0);
-        
+
         assert!(!is_addr_ula_zero(&ula_host));
         assert!(!is_addr_ula_zero(&ula_subnet));
         assert!(!is_addr_ula_zero(&fd01));
@@ -812,12 +814,12 @@ mod tests {
         // Exactly fe80::
         let link_local_zero = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0);
         assert!(is_addr_link_local_zero(&link_local_zero));
-        
+
         // Not fe80:: (has host bits set)
         let link_local_host = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
         let link_local_interface = Ipv6Addr::new(0xfe80, 0, 0, 0, 0x1234, 0x5678, 0x9abc, 0xdef0);
         let fe81 = Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 0);
-        
+
         assert!(!is_addr_link_local_zero(&link_local_host));
         assert!(!is_addr_link_local_zero(&link_local_interface));
         assert!(!is_addr_link_local_zero(&fe81));
@@ -828,14 +830,14 @@ mod tests {
         let ipv4_1 = AllAddr::from_ipv4(Ipv4Addr::new(10, 0, 0, 1));
         let ipv4_2 = AllAddr::from_ipv4(Ipv4Addr::new(10, 0, 0, 1));
         let ipv4_3 = AllAddr::from_ipv4(Ipv4Addr::new(10, 0, 0, 2));
-        
+
         assert_eq!(ipv4_1, ipv4_2);
         assert_ne!(ipv4_1, ipv4_3);
-        
+
         let cname_1 = AllAddr::Cname(CnameData::new("example.com".to_string(), 1));
         let cname_2 = AllAddr::Cname(CnameData::new("example.com".to_string(), 1));
         let cname_3 = AllAddr::Cname(CnameData::new("example.org".to_string(), 1));
-        
+
         assert_eq!(cname_1, cname_2);
         assert_ne!(cname_1, cname_3);
         assert_ne!(ipv4_1, cname_1);

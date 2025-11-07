@@ -31,5 +31,5 @@ pub use protocol::{
 };
 
 pub use transfer::{
-    Transfer, TransferOptions, TftpFile, FileMetadata, TransferError, TransferAction,
+    FileMetadata, TftpFile, Transfer, TransferAction, TransferError, TransferOptions,
 };

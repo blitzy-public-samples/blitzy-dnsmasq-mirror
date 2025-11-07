@@ -342,13 +342,12 @@ impl BpfSocket {
     ///
     /// Returns `SendFailed` if write fails.
     pub async fn send_raw(&self, data: &[u8]) -> Result<(), BpfError> {
-        use nix::sys::uio::{writev, IoVec};
+        use nix::sys::uio::{IoVec, writev};
 
         let fd = self.fd.as_raw_fd();
         let iov = [IoVec::from_slice(data)];
 
-        writev(fd, &iov)
-            .map_err(|e| BpfError::SendFailed(format!("writev failed: {}", e)))?;
+        writev(fd, &iov).map_err(|e| BpfError::SendFailed(format!("writev failed: {}", e)))?;
 
         Ok(())
     }
@@ -457,14 +456,14 @@ pub async fn enumerate_interfaces(family: AddressFamily) -> Result<Vec<Interface
 
     for ifaddr in addrs {
         let name = ifaddr.interface_name.clone();
-        
+
         // Get or create interface entry
         let interface = interface_map.entry(name.clone()).or_insert_with(|| {
             let index = unsafe {
                 let cname = std::ffi::CString::new(name.as_str()).unwrap();
                 libc::if_nametoindex(cname.as_ptr())
             };
-            
+
             Interface {
                 index,
                 name: name.clone(),
@@ -489,7 +488,7 @@ pub async fn enumerate_interfaces(family: AddressFamily) -> Result<Vec<Interface
                 SockAddr::Inet(inet_addr) => {
                     if family == AddressFamily::Inet || family == AddressFamily::Unspec {
                         let ip = Ipv4Addr::from(inet_addr.ip());
-                        
+
                         // Get netmask
                         let netmask = if let Some(SockAddr::Inet(nm)) = ifaddr.netmask {
                             Ipv4Addr::from(nm.ip())
@@ -537,9 +536,8 @@ pub async fn enumerate_interfaces(family: AddressFamily) -> Result<Vec<Interface
                             ),
                             not(target_os = "macos")
                         ))]
-                        let (ipv6_flags, valid_lifetime, preferred_lifetime) = {
-                            query_ipv6_metadata(&name, &ip).unwrap_or((None, None, None))
-                        };
+                        let (ipv6_flags, valid_lifetime, preferred_lifetime) =
+                            { query_ipv6_metadata(&name, &ip).unwrap_or((None, None, None)) };
 
                         #[cfg(any(
                             target_os = "macos",
@@ -631,7 +629,7 @@ pub async fn init_bpf() -> Result<BpfSocket, BpfError> {
     // Modern BSD uses cloning /dev/bpf, older systems use /dev/bpf0, /dev/bpf1, etc.
     for i in 0..256 {
         let device_path = format!("/dev/bpf{}", i);
-        
+
         match OpenOptions::new()
             .read(true)
             .write(true)
@@ -641,7 +639,7 @@ pub async fn init_bpf() -> Result<BpfSocket, BpfError> {
             Ok(file) => {
                 use std::os::unix::io::IntoRawFd;
                 let fd = file.into_raw_fd();
-                
+
                 // Set FD_CLOEXEC
                 unsafe {
                     let flags = libc::fcntl(fd, libc::F_GETFD);
@@ -649,9 +647,9 @@ pub async fn init_bpf() -> Result<BpfSocket, BpfError> {
                 }
 
                 let async_fd = AsyncFd::new(fd)?;
-                
+
                 tracing::info!("Opened BPF device: {}", device_path);
-                
+
                 return Ok(BpfSocket {
                     fd: async_fd,
                     device_path,
@@ -698,7 +696,7 @@ pub async fn send_via_bpf(
     // Validate hardware type
     let htype = packet.get_htype();
     let hlen = packet.get_hlen();
-    
+
     if htype != ARPHRD_ETHER as u8 || hlen != ETHER_ADDR_LEN as u8 {
         return Err(BpfError::UnsupportedHardwareType(htype as u16));
     }
@@ -706,13 +704,18 @@ pub async fn send_via_bpf(
     // Get client MAC address from DHCP packet
     let client_mac = packet.get_chaddr();
     if client_mac.len() < ETHER_ADDR_LEN {
-        return Err(BpfError::SendFailed("Invalid client MAC address".to_string()));
+        return Err(BpfError::SendFailed(
+            "Invalid client MAC address".to_string(),
+        ));
     }
 
     // Determine destination MAC and IP based on broadcast flag
     let broadcast_flag = packet.get_flags() & BROADCAST_FLAG != 0;
     let (dest_mac, dest_ip) = if broadcast_flag {
-        ([0xff, 0xff, 0xff, 0xff, 0xff, 0xff], Ipv4Addr::new(255, 255, 255, 255))
+        (
+            [0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+            Ipv4Addr::new(255, 255, 255, 255),
+        )
     } else {
         let mut mac = [0u8; 6];
         mac.copy_from_slice(&client_mac[..6]);
@@ -755,21 +758,19 @@ pub async fn send_via_bpf(
     udp_header.write_u16::<BigEndian>(0)?; // Checksum (calculate later)
 
     // Serialize DHCP packet
-    let dhcp_data = packet.serialize()
+    let dhcp_data = packet
+        .serialize()
         .map_err(|e| BpfError::SendFailed(format!("DHCP serialization failed: {}", e)))?;
     let dhcp_slice = &dhcp_data[..len.min(dhcp_data.len())];
 
     // Calculate UDP checksum (includes pseudo-header)
-    let udp_checksum = calculate_udp_checksum(
-        &iface_addr,
-        &dest_ip,
-        &udp_header,
-        dhcp_slice,
-    );
+    let udp_checksum = calculate_udp_checksum(&iface_addr, &dest_ip, &udp_header, dhcp_slice);
     udp_header[6..8].copy_from_slice(&udp_checksum.to_be_bytes());
 
     // Assemble complete frame
-    let mut frame = Vec::with_capacity(eth_header.len() + ip_header.len() + udp_header.len() + dhcp_slice.len());
+    let mut frame = Vec::with_capacity(
+        eth_header.len() + ip_header.len() + udp_header.len() + dhcp_slice.len(),
+    );
     frame.extend_from_slice(&eth_header);
     frame.extend_from_slice(&ip_header);
     frame.extend_from_slice(&udp_header);
@@ -818,9 +819,7 @@ fn get_interface_mac(interface: &str) -> Result<[u8; 6], BpfError> {
 
     // Enumerate interfaces to find MAC
     let interfaces = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(
-            enumerate_interfaces(AddressFamily::Link)
-        )
+        tokio::runtime::Handle::current().block_on(enumerate_interfaces(AddressFamily::Link))
     })?;
 
     for iface in interfaces {
@@ -831,7 +830,10 @@ fn get_interface_mac(interface: &str) -> Result<[u8; 6], BpfError> {
         }
     }
 
-    Err(BpfError::InterfaceNotFound(format!("MAC address not found for interface {}", interface)))
+    Err(BpfError::InterfaceNotFound(format!(
+        "MAC address not found for interface {}",
+        interface
+    )))
 }
 
 /// Calculate IP header checksum
@@ -839,7 +841,7 @@ fn get_interface_mac(interface: &str) -> Result<[u8; 6], BpfError> {
 /// Implements ones-complement sum algorithm for IP checksum.
 fn calculate_checksum(data: &[u8]) -> u16 {
     let mut sum: u32 = 0;
-    
+
     // Sum 16-bit words
     for chunk in data.chunks(2) {
         if chunk.len() == 2 {
@@ -909,11 +911,7 @@ fn calculate_udp_checksum(
 
     // Return one's complement, but use 0xffff if result is 0x0000
     let checksum = !sum as u16;
-    if checksum == 0 {
-        0xffff
-    } else {
-        checksum
-    }
+    if checksum == 0 { 0xffff } else { checksum }
 }
 
 /// Initialize PF_ROUTE routing socket for interface monitoring
@@ -929,7 +927,7 @@ fn calculate_udp_checksum(
 ///
 /// Returns `SocketError` if socket creation fails.
 pub async fn init_routing_socket() -> Result<RoutingSocket, BpfError> {
-    use nix::sys::socket::{socket, AddressFamily, SockFlag, SockType};
+    use nix::sys::socket::{AddressFamily, SockFlag, SockType, socket};
 
     let fd = socket(
         AddressFamily::Route,
@@ -966,9 +964,11 @@ pub async fn init_routing_socket() -> Result<RoutingSocket, BpfError> {
 /// # Errors
 ///
 /// Returns error if message is malformed or truncated.
-pub async fn process_routing_message(socket: &RoutingSocket) -> Result<Option<RoutingEvent>, BpfError> {
-    use nix::sys::socket::recv;
+pub async fn process_routing_message(
+    socket: &RoutingSocket,
+) -> Result<Option<RoutingEvent>, BpfError> {
     use nix::sys::socket::MsgFlags;
+    use nix::sys::socket::recv;
 
     let fd = socket.fd.as_raw_fd();
     let mut buffer = vec![0u8; 4096];
@@ -1026,9 +1026,9 @@ pub async fn process_routing_message(socket: &RoutingSocket) -> Result<Option<Ro
                         socket.set_deleted_address(deleted);
                         Ok(Some(RoutingEvent::AddressDeleted(addr)))
                     } else {
-                        Ok(Some(RoutingEvent::AddressDeleted(
-                            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
-                        )))
+                        Ok(Some(RoutingEvent::AddressDeleted(IpAddr::V4(
+                            Ipv4Addr::new(0, 0, 0, 0),
+                        ))))
                     }
                 }
                 RTM_IFINFO => {
@@ -1049,9 +1049,7 @@ pub async fn process_routing_message(socket: &RoutingSocket) -> Result<Option<Ro
             // No message available
             Ok(None)
         }
-        Err(e) => {
-            Err(BpfError::IoError(std::io::Error::from(e)))
-        }
+        Err(e) => Err(BpfError::IoError(std::io::Error::from(e))),
     }
 }
 
@@ -1161,4 +1159,3 @@ mod tests {
         }
     }
 }
-

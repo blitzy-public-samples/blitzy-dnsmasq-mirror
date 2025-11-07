@@ -53,11 +53,11 @@ pub enum StringError {
     /// String length is invalid (too short or too long)
     #[error("Invalid string length: {0}")]
     InvalidLength(String),
-    
+
     /// Empty string where content is required
     #[error("Empty string not allowed")]
     EmptyString,
-    
+
     /// String exceeds maximum allowed length
     #[error("String too long: {current} bytes (max {max})")]
     StringTooLong { current: usize, max: usize },
@@ -69,11 +69,11 @@ pub enum ParseError {
     /// Invalid hexadecimal digit encountered
     #[error("Invalid hex digit at position {position}: '{character}'")]
     InvalidHexDigit { position: usize, character: char },
-    
+
     /// Invalid format for hex string
     #[error("Invalid format: {0}")]
     InvalidFormat(String),
-    
+
     /// Wildcard mixed with hex digits in same byte
     #[error("Wildcard '*' cannot be mixed with hex digits in the same byte")]
     WildcardMixedWithHex,
@@ -85,15 +85,15 @@ pub enum DnsNameError {
     /// Label exceeds 63 bytes (RFC 1035 limit)
     #[error("Label too long: {length} bytes (max 63)")]
     LabelTooLong { length: usize },
-    
+
     /// Total name exceeds 253 bytes (RFC 1035 limit)
     #[error("Name too long: {length} bytes (max 253)")]
     NameTooLong { length: usize },
-    
+
     /// Invalid character in domain name
     #[error("Invalid character in domain name: '{0}'")]
     InvalidCharacter(char),
-    
+
     /// Empty label (consecutive dots or leading/trailing dot)
     #[error("Empty label in domain name")]
     EmptyLabel,
@@ -105,7 +105,7 @@ pub enum IdnError {
     /// IDN to ASCII conversion failed
     #[error("IDN conversion failed: {0}")]
     ConversionFailed(String),
-    
+
     /// Invalid domain name for IDN processing
     #[error("Invalid name for IDN conversion")]
     InvalidName,
@@ -144,23 +144,23 @@ pub fn is_legal_hostname(name: &str) -> bool {
     if name.is_empty() || name.len() > MAX_DOMAIN_NAME_LENGTH {
         return false;
     }
-    
+
     // Check for leading or trailing dots
     if name.starts_with('.') || name.ends_with('.') {
         return false;
     }
-    
+
     // Check each label
     for label in name.split('.') {
         if label.is_empty() {
             // Empty label (consecutive dots)
             return false;
         }
-        
+
         if label.len() > MAX_LABEL_LENGTH {
             return false;
         }
-        
+
         // Check first label has valid hostname characters
         let mut is_first_char = true;
         for c in label.chars() {
@@ -177,7 +177,7 @@ pub fn is_legal_hostname(name: &str) -> bool {
             }
         }
     }
-    
+
     true
 }
 
@@ -216,7 +216,7 @@ pub fn safe_copy(dest: &mut String, src: &str, max_len: usize) -> Result<(), Str
             max: max_len,
         });
     }
-    
+
     dest.clear();
     dest.push_str(src);
     Ok(())
@@ -285,13 +285,13 @@ pub fn hostname_equal(a: &str, b: &str) -> bool {
 pub fn hostname_cmp(a: &str, b: &str) -> Ordering {
     let mut chars_a = a.chars();
     let mut chars_b = b.chars();
-    
+
     loop {
         match (chars_a.next(), chars_b.next()) {
             (Some(c1), Some(c2)) => {
                 let c1_lower = c1.to_ascii_lowercase();
                 let c2_lower = c2.to_ascii_lowercase();
-                
+
                 match c1_lower.cmp(&c2_lower) {
                     Ordering::Equal => continue,
                     other => return other,
@@ -337,22 +337,22 @@ pub fn is_subdomain(child: &str, parent: &str) -> bool {
     // Convert to lowercase for case-insensitive comparison
     let child_lower = child.to_lowercase();
     let parent_lower = parent.to_lowercase();
-    
+
     // If child is shorter than parent, cannot be subdomain
     if child_lower.len() < parent_lower.len() {
         return false;
     }
-    
+
     // If parent is empty, nothing can be subdomain
     if parent_lower.is_empty() {
         return false;
     }
-    
+
     // If equal, it's a match
     if child_lower == parent_lower {
         return true;
     }
-    
+
     // Check if child ends with parent and is preceded by a dot
     if child_lower.ends_with(&parent_lower) {
         let prefix_len = child_lower.len() - parent_lower.len();
@@ -361,7 +361,7 @@ pub fn is_subdomain(child: &str, parent: &str) -> bool {
             return child_lower.as_bytes()[prefix_len - 1] == b'.';
         }
     }
-    
+
     false
 }
 
@@ -393,13 +393,13 @@ pub fn is_subdomain(child: &str, parent: &str) -> bool {
 pub fn wildcard_match(pattern: &str, text: &str) -> bool {
     let mut pattern_chars = pattern.chars();
     let mut text_chars = text.chars();
-    
+
     loop {
         match (pattern_chars.next(), text_chars.next()) {
             (Some('*'), _) => return true, // Wildcard matches rest
             (Some(p), Some(t)) if p == t => continue,
             (Some(_), Some(_)) => return false, // Mismatch
-            (None, None) => return true, // Both exhausted
+            (None, None) => return true,        // Both exhausted
             _ => return false,
         }
     }
@@ -433,7 +433,7 @@ pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bo
     let mut pattern_chars = pattern.chars();
     let mut text_chars = text.chars();
     let mut count = 0;
-    
+
     while count < max_labels {
         match (pattern_chars.next(), text_chars.next()) {
             (Some('*'), _) => return true,
@@ -446,7 +446,7 @@ pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bo
             _ => return false,
         }
     }
-    
+
     true // Exhausted max_labels without mismatch
 }
 
@@ -486,7 +486,7 @@ pub fn parse_hex_string(
     let mut bytes = Vec::new();
     let mut wildcard_mask = Vec::new();
     let mut has_wildcards = false;
-    
+
     let parts: Vec<&str> = if let Some(sep) = separator {
         input.split(sep).collect()
     } else {
@@ -502,12 +502,12 @@ pub fn parse_hex_string(
             .map(|chunk| std::str::from_utf8(chunk).unwrap())
             .collect()
     };
-    
+
     for (pos, part) in parts.iter().enumerate() {
         if part.trim().is_empty() {
             continue;
         }
-        
+
         if *part == "*" {
             bytes.push(0); // Placeholder for wildcard
             wildcard_mask.push(true);
@@ -517,19 +517,26 @@ pub fn parse_hex_string(
             if part.contains('*') {
                 return Err(ParseError::WildcardMixedWithHex);
             }
-            
+
             // Parse hex digits
             let byte = u8::from_str_radix(part, 16).map_err(|_| ParseError::InvalidHexDigit {
                 position: pos,
                 character: part.chars().next().unwrap_or('?'),
             })?;
-            
+
             bytes.push(byte);
             wildcard_mask.push(false);
         }
     }
-    
-    Ok((bytes, if has_wildcards { Some(wildcard_mask) } else { None }))
+
+    Ok((
+        bytes,
+        if has_wildcards {
+            Some(wildcard_mask)
+        } else {
+            None
+        },
+    ))
 }
 
 /// Compare byte arrays with wildcard mask support
@@ -562,13 +569,13 @@ pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
     if a.len() != b.len() || a.len() != mask.len() {
         return false;
     }
-    
+
     for i in 0..a.len() {
         if !mask[i] && a[i] != b[i] {
             return false;
         }
     }
-    
+
     true
 }
 
@@ -633,44 +640,44 @@ pub fn format_socket_addr(addr: &SocketAddr) -> String {
 pub fn encode_dns_name(domain: &str) -> Result<Vec<u8>, DnsNameError> {
     let mut result = Vec::with_capacity(domain.len() + 2);
     let mut total_length = 0;
-    
+
     // Split by dots and encode each label
     for label in domain.split('.') {
         if label.is_empty() {
             return Err(DnsNameError::EmptyLabel);
         }
-        
+
         let label_bytes = label.as_bytes();
         if label_bytes.len() > MAX_LABEL_LENGTH {
             return Err(DnsNameError::LabelTooLong {
                 length: label_bytes.len(),
             });
         }
-        
+
         // Check for invalid characters
         for &byte in label_bytes {
             if !byte.is_ascii_alphanumeric() && byte != b'-' && byte != b'_' {
                 return Err(DnsNameError::InvalidCharacter(byte as char));
             }
         }
-        
+
         // Write length byte
         result.push(label_bytes.len() as u8);
         // Write label bytes
         result.extend_from_slice(label_bytes);
-        
+
         total_length += 1 + label_bytes.len();
     }
-    
+
     if total_length > MAX_DOMAIN_NAME_LENGTH {
         return Err(DnsNameError::NameTooLong {
             length: total_length,
         });
     }
-    
+
     // Add terminating zero byte
     result.push(0);
-    
+
     Ok(result)
 }
 
@@ -710,7 +717,7 @@ pub fn canonicalize_hostname(name: &str) -> Result<String, IdnError> {
     if name.is_ascii() {
         return Ok(name.to_string());
     }
-    
+
     // Use idna crate for conversion
     idna::domain_to_ascii(name).map_err(|e| IdnError::ConversionFailed(e.to_string()))
 }
@@ -757,7 +764,7 @@ pub fn expand_buffer(buf: &mut Vec<u8>, required_size: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_is_legal_hostname() {
         // Valid hostnames
@@ -766,14 +773,14 @@ mod tests {
         assert!(is_legal_hostname("my-server"));
         assert!(is_legal_hostname("web1"));
         assert!(is_legal_hostname("test.example.com"));
-        
+
         // Invalid hostnames
         assert!(!is_legal_hostname(""));
         assert!(!is_legal_hostname("-invalid"));
         assert!(!is_legal_hostname("_underscore"));
         assert!(!is_legal_hostname("invalid..com"));
     }
-    
+
     #[test]
     fn test_hostname_equal() {
         assert!(hostname_equal("example.com", "example.com"));
@@ -781,7 +788,7 @@ mod tests {
         assert!(hostname_equal("TEST", "test"));
         assert!(!hostname_equal("different", "names"));
     }
-    
+
     #[test]
     fn test_hostname_cmp() {
         assert_eq!(hostname_cmp("aaa", "bbb"), Ordering::Less);
@@ -789,7 +796,7 @@ mod tests {
         assert_eq!(hostname_cmp("test", "test"), Ordering::Equal);
         assert_eq!(hostname_cmp("Test", "test"), Ordering::Equal);
     }
-    
+
     #[test]
     fn test_is_subdomain() {
         assert!(is_subdomain("www.example.com", "example.com"));
@@ -799,7 +806,7 @@ mod tests {
         assert!(!is_subdomain("badexample.com", "example.com"));
         assert!(!is_subdomain("short", "longer.name"));
     }
-    
+
     #[test]
     fn test_wildcard_match() {
         assert!(wildcard_match("*.example.com", "www.example.com"));
@@ -809,7 +816,7 @@ mod tests {
         assert!(!wildcard_match("abc", "def"));
         assert!(!wildcard_match("test", "testing"));
     }
-    
+
     #[test]
     fn test_wildcard_match_prefix() {
         assert!(wildcard_match_prefix("prefix*", "prefix-suffix", 6));
@@ -817,40 +824,40 @@ mod tests {
         assert!(wildcard_match_prefix("abc", "abc", 3));
         assert!(!wildcard_match_prefix("abc", "def", 3));
     }
-    
+
     #[test]
     fn test_parse_hex_string() {
         // With colon separator
         let (bytes, mask) = parse_hex_string("01:02:03", Some(':')).unwrap();
         assert_eq!(bytes, vec![0x01, 0x02, 0x03]);
         assert_eq!(mask, None);
-        
+
         // With wildcard
         let (bytes, mask) = parse_hex_string("01:*:03", Some(':')).unwrap();
         assert_eq!(bytes, vec![0x01, 0x00, 0x03]);
         assert_eq!(mask, Some(vec![false, true, false]));
-        
+
         // Without separator
         let (bytes, mask) = parse_hex_string("0a0b0c", None).unwrap();
         assert_eq!(bytes, vec![0x0a, 0x0b, 0x0c]);
         assert_eq!(mask, None);
-        
+
         // Invalid hex
         assert!(parse_hex_string("0g", None).is_err());
     }
-    
+
     #[test]
     fn test_compare_with_mask() {
         let a = vec![0x01, 0x02, 0x03, 0x04];
         let b = vec![0x01, 0xFF, 0x03, 0x04];
         let mask = vec![false, true, false, false];
-        
+
         assert!(compare_with_mask(&a, &b, &mask));
-        
+
         let mask_no_wild = vec![false, false, false, false];
         assert!(!compare_with_mask(&a, &b, &mask_no_wild));
     }
-    
+
     #[test]
     fn test_encode_dns_name() {
         let encoded = encode_dns_name("example.com").unwrap();
@@ -859,10 +866,10 @@ mod tests {
         assert_eq!(encoded[8], 3); // Length of "com"
         assert_eq!(&encoded[9..12], b"com");
         assert_eq!(encoded[12], 0); // Terminating zero
-        
+
         // Empty label
         assert!(encode_dns_name("example..com").is_err());
-        
+
         // Label too long
         let long_label = "a".repeat(64);
         assert!(matches!(
@@ -870,31 +877,34 @@ mod tests {
             Err(DnsNameError::LabelTooLong { .. })
         ));
     }
-    
+
     #[test]
     fn test_format_socket_addr() {
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-        
+
         let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
         assert_eq!(format_socket_addr(&addr4), "192.168.1.1:53");
-        
-        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)), 53);
+
+        let addr6 = SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+            53,
+        );
         assert_eq!(format_socket_addr(&addr6), "[2001:db8::1]:53");
     }
-    
+
     #[test]
     fn test_expand_buffer() {
         let mut buf = Vec::with_capacity(10);
         assert!(buf.capacity() >= 10);
-        
+
         expand_buffer(&mut buf, 100);
         assert!(buf.capacity() >= 100);
-        
+
         // Should not shrink
         expand_buffer(&mut buf, 50);
         assert!(buf.capacity() >= 100);
     }
-    
+
     #[test]
     fn test_canonicalize_hostname_ascii() {
         let result = canonicalize_hostname("example.com").unwrap();

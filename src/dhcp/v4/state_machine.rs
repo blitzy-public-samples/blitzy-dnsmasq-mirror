@@ -68,8 +68,8 @@ impl Dhcpv4StateMachine {
     ///
     /// Expected response message type, or None if no response needed
     pub fn process_message(&mut self, msg_type: Dhcpv4MessageType) -> Option<Dhcpv4MessageType> {
-        use MessageType::*;
         use Dhcpv4State::*;
+        use MessageType::*;
 
         match (self.state, msg_type) {
             // From INIT: Client sends DISCOVER

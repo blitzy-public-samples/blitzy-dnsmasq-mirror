@@ -90,7 +90,9 @@ use thiserror::Error;
 use tracing::error;
 
 use crate::constants::{BOOTREPLY, DHCP_CHADDR_MAX, DHCP_COOKIE};
-use crate::dhcp::v4::options::{DhcpOption, OPTION_CLIENT_ID, OPTION_MESSAGE_TYPE, OPTION_OVERLOAD};
+use crate::dhcp::v4::options::{
+    DhcpOption, OPTION_CLIENT_ID, OPTION_MESSAGE_TYPE, OPTION_OVERLOAD,
+};
 use crate::types::addresses::AllAddr;
 use crate::types::errors::DnsmasqResult;
 
@@ -596,8 +598,8 @@ impl DhcpPacket {
 
         DhcpPacket {
             op: 0,
-            htype: 1,  // Ethernet
-            hlen: 6,   // MAC address length
+            htype: 1, // Ethernet
+            hlen: 6,  // MAC address length
             hops: 0,
             xid: 0,
             secs: 0,
@@ -1425,7 +1427,10 @@ mod tests {
         data[2] = 20; // hlen > 16
 
         let result = DhcpPacket::parse(&data);
-        assert!(matches!(result, Err(PacketError::InvalidHardwareLength(20))));
+        assert!(matches!(
+            result,
+            Err(PacketError::InvalidHardwareLength(20))
+        ));
     }
 
     #[test]
@@ -1474,7 +1479,9 @@ mod tests {
 
     #[test]
     fn test_client_id_from_hardware_address() {
-        let hw_addr = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let hw_addr = [
+            0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
         let client_id = ClientId::from_hardware_address(&hw_addr, 6);
 
         assert_eq!(client_id.len(), 6);
@@ -1497,7 +1504,10 @@ mod tests {
         assert_eq!(packet.get_op(), reparsed.get_op());
         assert_eq!(packet.get_xid(), reparsed.get_xid());
         assert_eq!(packet.get_hlen(), reparsed.get_hlen());
-        assert_eq!(packet.get_message_type().unwrap(), reparsed.get_message_type().unwrap());
+        assert_eq!(
+            packet.get_message_type().unwrap(),
+            reparsed.get_message_type().unwrap()
+        );
     }
 
     #[test]
@@ -1633,5 +1643,3 @@ mod tests {
         assert_eq!(serialized.len(), MIN_PACKET_SIZE);
     }
 }
-
-

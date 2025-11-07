@@ -54,7 +54,7 @@
 //!         prefix: "host".to_string(),
 //!     },
 //! ];
-//! 
+//!
 //! if let Some(ip) = parse_synthetic_domain("host42.example.com", &synth_domains) {
 //!     // ip == 192.168.1.43
 //! }
@@ -76,7 +76,7 @@ pub enum SynthFormat {
     /// Indexed format: prefix + numeric index (e.g., "host42")
     /// Index is calculated as offset from start_ip
     Indexed,
-    
+
     /// IP-based format: prefix + encoded IP (e.g., "10-0-0-1")
     /// IP address with dots/colons replaced by dashes
     IpBased,
@@ -117,16 +117,16 @@ pub enum SynthFormat {
 pub struct SynthDomain {
     /// Domain suffix for synthetic names (e.g., "example.com")
     pub domain: String,
-    
+
     /// Start of IP range for synthetic domain
     pub start_ip: IpAddr,
-    
+
     /// End of IP range for synthetic domain (inclusive)
     pub end_ip: IpAddr,
-    
+
     /// Format for name generation (indexed or IP-based)
     pub format: SynthFormat,
-    
+
     /// Text prefix prepended to generated names (e.g., "host")
     pub prefix: String,
 }
@@ -159,7 +159,7 @@ pub struct SynthDomain {
 pub struct IpNetwork {
     /// Network address (base address of the network)
     pub addr: IpAddr,
-    
+
     /// Prefix length (0-32 for IPv4, 0-128 for IPv6)
     pub prefix_len: u8,
 }
@@ -197,7 +197,7 @@ pub struct IpNetwork {
 pub struct ConditionalDomain {
     /// Domain suffix to assign to matching addresses
     pub domain: String,
-    
+
     /// List of networks that should receive this domain
     pub networks: Vec<IpNetwork>,
 }
@@ -233,7 +233,7 @@ pub fn domain_equal(a: &str, b: &str) -> bool {
     // Strip trailing dots from both names
     let a_trimmed = a.trim_end_matches('.');
     let b_trimmed = b.trim_end_matches('.');
-    
+
     // Perform case-insensitive ASCII comparison
     a_trimmed.eq_ignore_ascii_case(b_trimmed)
 }
@@ -285,19 +285,19 @@ pub fn domain_equal(a: &str, b: &str) -> bool {
 /// ```
 pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Option<IpAddr> {
     let name_lower = name.to_lowercase();
-    
+
     for config in synth_domains {
         // Check if name ends with the configured domain
         let domain_with_dot = format!(".{}", config.domain.to_lowercase());
-        
+
         if !name_lower.ends_with(&domain_with_dot) {
             continue;
         }
-        
+
         // Extract the prefix portion (everything before the domain)
         let prefix_end = name_lower.len() - domain_with_dot.len();
         let hostname_part = &name_lower[..prefix_end];
-        
+
         // Extract the numeric/IP portion after the prefix
         let data_part = if !config.prefix.is_empty() {
             let prefix_lower = config.prefix.to_lowercase();
@@ -310,7 +310,7 @@ pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Opti
         } else {
             hostname_part
         };
-        
+
         match config.format {
             SynthFormat::Indexed => {
                 // Parse indexed format: numeric offset from start_ip
@@ -332,7 +332,7 @@ pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Opti
             }
         }
     }
-    
+
     None
 }
 
@@ -380,15 +380,15 @@ pub fn generate_synthetic_domain(ip: IpAddr, synth_domains: &[SynthDomain]) -> O
         if !is_ip_in_range(&ip, &config.start_ip, &config.end_ip) {
             continue;
         }
-        
+
         // Ensure IP family matches the configuration
         match (ip, &config.start_ip) {
             (IpAddr::V4(_), IpAddr::V4(_)) | (IpAddr::V6(_), IpAddr::V6(_)) => {}
             _ => continue, // Family mismatch
         }
-        
+
         let mut result = String::new();
-        
+
         match config.format {
             SynthFormat::Indexed => {
                 // Generate indexed format: prefix + index
@@ -403,17 +403,15 @@ pub fn generate_synthetic_domain(ip: IpAddr, synth_domains: &[SynthDomain]) -> O
                 result.push_str(&format_ip_as_hostname(&ip));
             }
         }
-        
+
         // Append domain suffix
-        if !result.is_empty()
-            && result.len() + config.domain.len() < MAX_DOMAIN_NAME
-        {
+        if !result.is_empty() && result.len() + config.domain.len() < MAX_DOMAIN_NAME {
             result.push('.');
             result.push_str(&config.domain);
             return Some(result);
         }
     }
-    
+
     None
 }
 
@@ -464,7 +462,7 @@ pub fn select_domain_v4(addr: Ipv4Addr, cond_domains: &[ConditionalDomain]) -> O
             }
         }
     }
-    
+
     None
 }
 
@@ -518,7 +516,7 @@ pub fn select_domain_v6(addr: Ipv6Addr, cond_domains: &[ConditionalDomain]) -> O
             }
         }
     }
-    
+
     None
 }
 
@@ -549,27 +547,27 @@ pub fn select_domain_v6(addr: Ipv6Addr, cond_domains: &[ConditionalDomain]) -> O
 pub fn wildcard_match(pattern: &str, domain: &str) -> bool {
     let pattern_lower = pattern.to_lowercase();
     let domain_lower = domain.to_lowercase();
-    
+
     if let Some(suffix) = pattern_lower.strip_prefix("*.") {
         // Leading wildcard: *.example.com
-        
+
         // Domain must end with the suffix
         if !domain_lower.ends_with(suffix) {
             return false;
         }
-        
+
         // If exact match to suffix, reject (*.example.com shouldn't match example.com)
         if domain_lower == suffix {
             return false;
         }
-        
+
         // Check that there's a dot before the suffix (ensures subdomain exists)
         let prefix_len = domain_lower.len() - suffix.len();
         if prefix_len > 0 {
             let before_suffix = &domain_lower[prefix_len - 1..prefix_len];
             return before_suffix == ".";
         }
-        
+
         false
     } else {
         // No wildcard: exact suffix match
@@ -577,7 +575,7 @@ pub fn wildcard_match(pattern: &str, domain: &str) -> bool {
         if domain_lower == pattern_lower {
             return true;
         }
-        
+
         // Check if domain ends with "." + pattern (suffix match)
         let pattern_with_dot = format!(".{}", pattern_lower);
         domain_lower.ends_with(&pattern_with_dot)
@@ -597,11 +595,11 @@ fn is_in_network_v4(addr: Ipv4Addr, network: Ipv4Addr, prefix_len: u8) -> bool {
     if prefix_len > 32 {
         return false;
     }
-    
+
     if prefix_len == 0 {
         return true; // 0.0.0.0/0 matches everything
     }
-    
+
     let addr_bits = u32::from(addr);
     let network_bits = u32::from(network);
     let mask = if prefix_len == 32 {
@@ -609,7 +607,7 @@ fn is_in_network_v4(addr: Ipv4Addr, network: Ipv4Addr, prefix_len: u8) -> bool {
     } else {
         0xFFFFFFFF << (32 - prefix_len)
     };
-    
+
     (addr_bits & mask) == (network_bits & mask)
 }
 
@@ -622,20 +620,20 @@ fn is_in_network_v6(addr: Ipv6Addr, network: Ipv6Addr, prefix_len: u8) -> bool {
     if prefix_len > 128 {
         return false;
     }
-    
+
     if prefix_len == 0 {
         return true; // ::/0 matches everything
     }
-    
+
     let addr_bytes = addr.octets();
     let network_bytes = network.octets();
-    
+
     // Compare full bytes
     let full_bytes = (prefix_len / 8) as usize;
     if addr_bytes[..full_bytes] != network_bytes[..full_bytes] {
         return false;
     }
-    
+
     // Compare remaining bits in the next byte
     let remaining_bits = prefix_len % 8;
     if remaining_bits > 0 && full_bytes < 16 {
@@ -644,7 +642,7 @@ fn is_in_network_v6(addr: Ipv6Addr, network: Ipv6Addr, prefix_len: u8) -> bool {
             return false;
         }
     }
-    
+
     true
 }
 
@@ -665,7 +663,7 @@ fn parse_ip_from_hostname(hostname: &str, hint_ip: &IpAddr) -> Option<IpAddr> {
         IpAddr::V6(_) => {
             // IPv6: Handle special cases and replace dashes with colons
             let mut ip_str = hostname.to_string();
-            
+
             // Special case: --ffff- prefix for IPv4-mapped IPv6
             if ip_str.starts_with("--ffff-") {
                 ip_str = ip_str.replacen("--ffff-", "::ffff:", 1);
@@ -681,12 +679,12 @@ fn parse_ip_from_hostname(hostname: &str, hint_ip: &IpAddr) -> Option<IpAddr> {
                 // Single dashes are colons
                 ip_str = ip_str.replace('-', ":");
             }
-            
+
             // Handle leading colon
             if ip_str.starts_with(':') && !ip_str.starts_with("::") {
                 ip_str = format!("0{}", ip_str);
             }
-            
+
             ip_str.parse::<Ipv6Addr>().ok().map(IpAddr::V6)
         }
     }
@@ -708,14 +706,14 @@ fn format_ip_as_hostname(ip: &IpAddr) -> String {
         IpAddr::V6(addr) => {
             // IPv6: Replace colons with dashes, :: becomes --
             let ip_str = addr.to_string();
-            
+
             // Handle leading colon by prepending 0
             let ip_str = if ip_str.starts_with(':') && !ip_str.starts_with("::") {
                 format!("0{}", ip_str)
             } else {
                 ip_str
             };
-            
+
             // Replace :: with -- (compression)
             let ip_str = ip_str.replace("::", "--");
             // Replace single colons with dashes
@@ -813,16 +811,16 @@ mod tests {
     fn test_wildcard_match() {
         // Exact match
         assert!(wildcard_match("example.com", "example.com"));
-        
+
         // Suffix match without wildcard
         assert!(wildcard_match("example.com", "foo.example.com"));
         assert!(wildcard_match("example.com", "bar.baz.example.com"));
-        
+
         // Wildcard match
         assert!(wildcard_match("*.example.com", "foo.example.com"));
         assert!(wildcard_match("*.example.com", "bar.baz.example.com"));
         assert!(!wildcard_match("*.example.com", "example.com"));
-        
+
         // Case insensitive
         assert!(wildcard_match("*.Example.COM", "FOO.example.com"));
     }
@@ -831,7 +829,7 @@ mod tests {
     fn test_is_in_network_v4() {
         let addr = Ipv4Addr::new(192, 168, 1, 100);
         let network = Ipv4Addr::new(192, 168, 1, 0);
-        
+
         assert!(is_in_network_v4(addr, network, 24));
         assert!(is_in_network_v4(addr, network, 16));
         assert!(!is_in_network_v4(addr, Ipv4Addr::new(192, 168, 2, 0), 24));
@@ -841,10 +839,14 @@ mod tests {
     fn test_is_in_network_v6() {
         let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 1);
         let network = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0);
-        
+
         assert!(is_in_network_v6(addr, network, 32));
         assert!(is_in_network_v6(addr, network, 16));
-        assert!(!is_in_network_v6(addr, Ipv6Addr::new(0x2001, 0xdb9, 0, 0, 0, 0, 0, 0), 32));
+        assert!(!is_in_network_v6(
+            addr,
+            Ipv6Addr::new(0x2001, 0xdb9, 0, 0, 0, 0, 0, 0),
+            32
+        ));
     }
 
     #[test]
@@ -874,10 +876,8 @@ mod tests {
             prefix: "host".to_string(),
         }];
 
-        let name = generate_synthetic_domain(
-            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 43)),
-            &synth_domains,
-        );
+        let name =
+            generate_synthetic_domain(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 43)), &synth_domains);
         assert_eq!(name, Some("host42.example.com".to_string()));
     }
 
@@ -912,4 +912,3 @@ mod tests {
         assert!(formatted.contains('-'));
     }
 }
-

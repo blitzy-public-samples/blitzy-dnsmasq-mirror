@@ -26,9 +26,7 @@ pub struct AuthServer {
 impl AuthServer {
     /// Create a new authoritative server
     pub fn new() -> Self {
-        Self {
-            zones: Vec::new(),
-        }
+        Self { zones: Vec::new() }
     }
 
     /// Add a zone to the authoritative server
@@ -42,15 +40,18 @@ impl AuthServer {
     }
 
     /// Generate an authoritative response for a question
-    pub fn generate_response(&self, question: &DnsQuestion) -> Result<Vec<ResourceRecord>, DnsError> {
+    pub fn generate_response(
+        &self,
+        question: &DnsQuestion,
+    ) -> Result<Vec<ResourceRecord>, DnsError> {
         for zone in &self.zones {
             if zone.contains(&question.qname) {
                 return zone.lookup(question);
             }
         }
-        
+
         Err(DnsError::NotFound {
-            message: format!("No authoritative zone for {}", question.qname)
+            message: format!("No authoritative zone for {}", question.qname),
         })
     }
 
@@ -69,7 +70,7 @@ impl Default for AuthServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dns::protocol::{RecordType, RecordClass};
+    use crate::dns::protocol::{RecordClass, RecordType};
 
     #[test]
     fn test_auth_server_creation() {
@@ -81,7 +82,7 @@ mod tests {
     fn test_add_zone() {
         let mut server = AuthServer::new();
         let zone = AuthZone::new("example.com".to_string());
-        
+
         server.add_zone(zone);
         assert_eq!(server.zone_count(), 1);
     }

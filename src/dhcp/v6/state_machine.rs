@@ -252,7 +252,9 @@ impl Dhcpv6StateMachine {
     ) -> Result<Self, DnsmasqError> {
         // Check for rapid commit option in SOLICIT messages
         let rapid_commit = msg_type == Dhcpv6MessageType::Solicit
-            && options.iter().any(|opt| matches!(opt, Dhcp6Option::RapidCommit));
+            && options
+                .iter()
+                .any(|opt| matches!(opt, Dhcp6Option::RapidCommit));
 
         let initial_state = match msg_type {
             Dhcpv6MessageType::Solicit => Dhcpv6State::Solicit,
@@ -549,8 +551,14 @@ mod tests {
 
     #[test]
     fn test_message_type_conversion() {
-        assert_eq!(Dhcpv6MessageType::from_u8(1), Some(Dhcpv6MessageType::Solicit));
-        assert_eq!(Dhcpv6MessageType::from_u8(7), Some(Dhcpv6MessageType::Reply));
+        assert_eq!(
+            Dhcpv6MessageType::from_u8(1),
+            Some(Dhcpv6MessageType::Solicit)
+        );
+        assert_eq!(
+            Dhcpv6MessageType::from_u8(7),
+            Some(Dhcpv6MessageType::Reply)
+        );
         assert_eq!(Dhcpv6MessageType::from_u8(99), None);
 
         assert_eq!(Dhcpv6MessageType::Solicit.to_u8(), 1);
@@ -579,7 +587,7 @@ mod tests {
     #[test]
     fn test_state_transition_from_message_type() {
         let options = vec![];
-        
+
         let transition =
             Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Solicit, 0x123, &options)
                 .unwrap();
@@ -594,12 +602,10 @@ mod tests {
         assert!(transition_rc.requires_rapid_commit());
 
         // Invalid initial message types
-        assert!(Dhcpv6StateMachine::from_message_type(
-            Dhcpv6MessageType::Advertise,
-            0x789,
-            &options
-        )
-        .is_err());
+        assert!(
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Advertise, 0x789, &options)
+                .is_err()
+        );
     }
 
     #[test]
@@ -623,16 +629,14 @@ mod tests {
         assert!(Dhcpv6StateMachine::validate(Dhcpv6State::Request, Dhcpv6State::Decline).is_ok());
 
         // Information request
-        assert!(Dhcpv6StateMachine::validate(
-            Dhcpv6State::Solicit,
-            Dhcpv6State::InformationRequest
-        )
-        .is_ok());
-        assert!(Dhcpv6StateMachine::validate(
-            Dhcpv6State::InformationRequest,
-            Dhcpv6State::Reply
-        )
-        .is_ok());
+        assert!(
+            Dhcpv6StateMachine::validate(Dhcpv6State::Solicit, Dhcpv6State::InformationRequest)
+                .is_ok()
+        );
+        assert!(
+            Dhcpv6StateMachine::validate(Dhcpv6State::InformationRequest, Dhcpv6State::Reply)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -673,10 +677,7 @@ mod tests {
         );
 
         transition.transition_to(Dhcpv6State::Advertise).unwrap();
-        assert_eq!(
-            transition.response_message_type(),
-            Dhcpv6MessageType::Reply
-        );
+        assert_eq!(transition.response_message_type(), Dhcpv6MessageType::Reply);
 
         // Test rapid commit bypass
         let options_rc = vec![Dhcp6Option::RapidCommit];
@@ -775,7 +776,8 @@ mod tests {
     fn test_lease_renewal_cycle() {
         let options = vec![];
         let mut transition =
-            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Renew, 0x789, &options).unwrap();
+            Dhcpv6StateMachine::from_message_type(Dhcpv6MessageType::Renew, 0x789, &options)
+                .unwrap();
 
         assert_eq!(transition.current_state(), Dhcpv6State::Renew);
         assert!(transition.requires_address_allocation());
@@ -800,9 +802,6 @@ mod tests {
 
         // INFORMATION-REQUEST → REPLY
         assert!(transition.transition_to(Dhcpv6State::Reply).is_ok());
-        assert_eq!(
-            transition.response_message_type(),
-            Dhcpv6MessageType::Reply
-        );
+        assert_eq!(transition.response_message_type(), Dhcpv6MessageType::Reply);
     }
 }

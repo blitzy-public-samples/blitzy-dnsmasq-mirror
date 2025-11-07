@@ -8,8 +8,8 @@ pub mod errors;
 
 // Re-export commonly used error types and Result alias for convenience
 pub use errors::{
-    DnsmasqError, DnsmasqResult, DnsError, DhcpError, NetworkError, 
-    ConfigError, SystemError, TftpError, LogError, DnssecError, AuthError
+    AuthError, ConfigError, DhcpError, DnsError, DnsmasqError, DnsmasqResult, DnssecError,
+    LogError, NetworkError, SystemError, TftpError,
 };
 
 /// Daemon state placeholder (will be fully implemented)

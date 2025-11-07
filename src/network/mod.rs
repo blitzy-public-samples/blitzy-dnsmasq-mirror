@@ -116,10 +116,10 @@ use thiserror::Error;
 // Module Declarations
 // =============================================================================
 
-pub mod socket;
-pub mod packet;
-pub mod interface;
 pub mod arp;
+pub mod interface;
+pub mod packet;
+pub mod socket;
 
 // =============================================================================
 // Network-Wide Error Type
@@ -147,15 +147,15 @@ pub enum NetworkError {
     /// Error from socket operations
     #[error(transparent)]
     Socket(#[from] socket::SocketError),
-    
+
     /// Error from packet buffer operations
     #[error(transparent)]
     Packet(#[from] packet::PacketError),
-    
+
     /// Error from interface enumeration operations
     #[error(transparent)]
     Interface(#[from] interface::InterfaceError),
-    
+
     /// Error from ARP cache operations
     #[error(transparent)]
     Arp(#[from] arp::ArpError),
@@ -234,15 +234,8 @@ pub const RANDOM_SOURCE_PORTS: usize = 4;
 
 // Socket types and functions
 pub use socket::{
-    SocketListener,
-    TcpSocketListener,
-    Protocol,
-    SocketError,
-    create_bound_listeners,
-    bind_to_interface,
-    bind_wildcard,
-    create_random_source_socket,
-    RandomSocketPool,
+    Protocol, RandomSocketPool, SocketError, SocketListener, TcpSocketListener, bind_to_interface,
+    bind_wildcard, create_bound_listeners, create_random_source_socket,
 };
 
 // =============================================================================
@@ -251,12 +244,8 @@ pub use socket::{
 
 // Packet buffer types
 pub use packet::{
-    PacketBuffer,
-    PacketError,
+    PacketBuffer, PacketBufferPool, PacketError, PacketReader, PacketWriter,
     Protocol as PacketProtocol,
-    PacketBufferPool,
-    PacketReader,
-    PacketWriter,
 };
 
 // DNSSEC buffers (feature-gated)
@@ -269,15 +258,8 @@ pub use packet::DnssecBuffers;
 
 // Interface enumeration types
 pub use interface::{
-    InterfaceRecord,
-    InterfaceFlags,
-    InterfaceError,
-    InterfaceEvent,
-    enumerate_interfaces,
-    index_to_name,
-    name_to_index,
-    is_interface_allowed,
-    watch_interfaces,
+    InterfaceError, InterfaceEvent, InterfaceFlags, InterfaceRecord, enumerate_interfaces,
+    index_to_name, is_interface_allowed, name_to_index, watch_interfaces,
 };
 
 // =============================================================================
@@ -285,14 +267,7 @@ pub use interface::{
 // =============================================================================
 
 // ARP table access
-pub use arp::{
-    ArpRecord,
-    ArpCache,
-    ArpError,
-    ArpStatus,
-    MacAddr,
-    find_mac,
-};
+pub use arp::{ArpCache, ArpError, ArpRecord, ArpStatus, MacAddr, find_mac};
 
 // =============================================================================
 // Prelude Module
@@ -311,11 +286,7 @@ pub use arp::{
 /// reduces boilerplate in files that use many network types.
 pub mod prelude {
     pub use super::{
-        SocketListener,
-        PacketBuffer,
-        InterfaceRecord,
-        enumerate_interfaces,
-        create_bound_listeners,
+        InterfaceRecord, PacketBuffer, SocketListener, create_bound_listeners, enumerate_interfaces,
     };
 }
 
@@ -338,6 +309,6 @@ pub mod prelude {
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
-    pub use super::socket::tests::*;
     pub use super::interface::tests::*;
+    pub use super::socket::tests::*;
 }

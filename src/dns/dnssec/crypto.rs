@@ -40,8 +40,8 @@
 //!
 //! Translated from `src/crypto.c` (lines 17-1312) in the C implementation.
 
-use ring::signature;
 use ring::digest::{self, Context, Digest, SHA1_FOR_LEGACY_USE_ONLY, SHA256, SHA384, SHA512};
+use ring::signature;
 use std::vec::Vec;
 use thiserror::Error;
 
@@ -113,27 +113,27 @@ pub enum CryptoError {
     /// Algorithm not supported or not implemented
     #[error("Unsupported algorithm: {0}")]
     UnsupportedAlgorithm(u8),
-    
+
     /// Public key format is invalid or malformed
     #[error("Invalid key format")]
     InvalidKeyFormat,
-    
+
     /// Signature format is invalid or malformed
     #[error("Invalid signature format")]
     InvalidSignatureFormat,
-    
+
     /// Key data is too short for the specified algorithm
     #[error("Key data too short")]
     KeyTooShort,
-    
+
     /// Signature data is too short for the specified algorithm
     #[error("Signature data too short")]
     SignatureTooShort,
-    
+
     /// Signature verification failed (signature is mathematically invalid)
     #[error("Verification failed")]
     VerificationFailed,
-    
+
     /// Hash context initialization failed
     #[error("Hash initialization failed")]
     HashInitializationFailed,
@@ -187,7 +187,7 @@ pub struct EcdsaSignature {
 pub trait Hasher {
     /// Update the hash context with additional data
     fn update(&mut self, data: &[u8]);
-    
+
     /// Finalize the hash and return the digest
     fn finalize(self: Box<Self>) -> Vec<u8>;
 }
@@ -201,7 +201,7 @@ impl Hasher for Sha1Hasher {
     fn update(&mut self, data: &[u8]) {
         self.context.update(data);
     }
-    
+
     fn finalize(self: Box<Self>) -> Vec<u8> {
         self.context.finish().as_ref().to_vec()
     }
@@ -216,7 +216,7 @@ impl Hasher for Sha256Hasher {
     fn update(&mut self, data: &[u8]) {
         self.context.update(data);
     }
-    
+
     fn finalize(self: Box<Self>) -> Vec<u8> {
         self.context.finish().as_ref().to_vec()
     }
@@ -231,7 +231,7 @@ impl Hasher for Sha384Hasher {
     fn update(&mut self, data: &[u8]) {
         self.context.update(data);
     }
-    
+
     fn finalize(self: Box<Self>) -> Vec<u8> {
         self.context.finish().as_ref().to_vec()
     }
@@ -246,7 +246,7 @@ impl Hasher for Sha512Hasher {
     fn update(&mut self, data: &[u8]) {
         self.context.update(data);
     }
-    
+
     fn finalize(self: Box<Self>) -> Vec<u8> {
         self.context.finish().as_ref().to_vec()
     }
@@ -444,7 +444,7 @@ fn parse_rsa_public_key(key_data: &[u8]) -> Result<RsaPublicKey, CryptoError> {
     if key_data.len() < 3 {
         return Err(CryptoError::KeyTooShort);
     }
-    
+
     let mut pos = 0;
     let exp_len = if key_data[pos] == 0 {
         // Extended length format: 3 bytes total (0x00 + 2-byte big-endian length)
@@ -461,16 +461,16 @@ fn parse_rsa_public_key(key_data: &[u8]) -> Result<RsaPublicKey, CryptoError> {
         pos += 1;
         exp_len
     };
-    
+
     if pos + exp_len >= key_data.len() {
         return Err(CryptoError::InvalidKeyFormat);
     }
-    
+
     let exponent = key_data[pos..pos + exp_len].to_vec();
     pos += exp_len;
-    
+
     let modulus = key_data[pos..].to_vec();
-    
+
     Ok(RsaPublicKey { exponent, modulus })
 }
 
@@ -490,14 +490,17 @@ fn parse_rsa_public_key(key_data: &[u8]) -> Result<RsaPublicKey, CryptoError> {
 /// Parsed ECDSA public key, or error if format is invalid
 ///
 /// Source: C implementation dnsmasq_ecdsa_verify() key parsing, src/crypto.c lines 646-650
-fn parse_ecdsa_public_key(key_data: &[u8], coord_len: usize) -> Result<EcdsaPublicKey, CryptoError> {
+fn parse_ecdsa_public_key(
+    key_data: &[u8],
+    coord_len: usize,
+) -> Result<EcdsaPublicKey, CryptoError> {
     if key_data.len() != 2 * coord_len {
         return Err(CryptoError::InvalidKeyFormat);
     }
-    
+
     let x = key_data[0..coord_len].to_vec();
     let y = key_data[coord_len..2 * coord_len].to_vec();
-    
+
     Ok(EcdsaPublicKey { x, y })
 }
 
@@ -517,14 +520,17 @@ fn parse_ecdsa_public_key(key_data: &[u8], coord_len: usize) -> Result<EcdsaPubl
 /// Parsed ECDSA signature, or error if format is invalid
 ///
 /// Source: C implementation dnsmasq_ecdsa_verify() signature parsing, src/crypto.c lines 652-653
-fn parse_ecdsa_signature(sig_data: &[u8], component_len: usize) -> Result<EcdsaSignature, CryptoError> {
+fn parse_ecdsa_signature(
+    sig_data: &[u8],
+    component_len: usize,
+) -> Result<EcdsaSignature, CryptoError> {
     if sig_data.len() != 2 * component_len {
         return Err(CryptoError::InvalidSignatureFormat);
     }
-    
+
     let r = sig_data[0..component_len].to_vec();
     let s = sig_data[component_len..2 * component_len].to_vec();
-    
+
     Ok(EcdsaSignature { r, s })
 }
 
@@ -559,36 +565,28 @@ fn verify_rsa_signature(
     algorithm: Algorithm,
 ) -> Result<bool, CryptoError> {
     use ring::signature;
-    
+
     // Parse RSA public key from RFC 3110 format
     let key = parse_rsa_public_key(public_key)?;
-    
+
     // Create RSA public key components
     // ring expects modulus (n) and exponent (e) in big-endian format
     let public_key_components = signature::RsaPublicKeyComponents {
         n: &key.modulus,
         e: &key.exponent,
     };
-    
+
     // Select verification parameters based on algorithm and verify
     let result = match algorithm {
         Algorithm::RsaSha256 => {
-            public_key_components.verify(
-                &signature::RSA_PKCS1_2048_8192_SHA256,
-                message,
-                signature
-            )
+            public_key_components.verify(&signature::RSA_PKCS1_2048_8192_SHA256, message, signature)
         }
         Algorithm::RsaSha512 => {
-            public_key_components.verify(
-                &signature::RSA_PKCS1_2048_8192_SHA512,
-                message,
-                signature
-            )
+            public_key_components.verify(&signature::RSA_PKCS1_2048_8192_SHA512, message, signature)
         }
         _ => return Err(CryptoError::UnsupportedAlgorithm(algorithm as u8)),
     };
-    
+
     // Convert result
     match result {
         Ok(()) => Ok(true),
@@ -630,14 +628,15 @@ fn verify_ecdsa_signature(
     algorithm: Algorithm,
 ) -> Result<bool, CryptoError> {
     use ring::signature;
-    
+
     // Determine coordinate length and verification algorithm based on curve
-    let (coord_len, verification_alg): (usize, &'static dyn signature::VerificationAlgorithm) = match algorithm {
-        Algorithm::EcdsaP256Sha256 => (32, &signature::ECDSA_P256_SHA256_FIXED),
-        Algorithm::EcdsaP384Sha384 => (48, &signature::ECDSA_P384_SHA384_FIXED),
-        _ => return Err(CryptoError::UnsupportedAlgorithm(algorithm as u8)),
-    };
-    
+    let (coord_len, verification_alg): (usize, &'static dyn signature::VerificationAlgorithm) =
+        match algorithm {
+            Algorithm::EcdsaP256Sha256 => (32, &signature::ECDSA_P256_SHA256_FIXED),
+            Algorithm::EcdsaP384Sha384 => (48, &signature::ECDSA_P384_SHA384_FIXED),
+            _ => return Err(CryptoError::UnsupportedAlgorithm(algorithm as u8)),
+        };
+
     // Validate lengths
     if public_key.len() != 2 * coord_len {
         return Err(CryptoError::InvalidKeyFormat);
@@ -645,20 +644,21 @@ fn verify_ecdsa_signature(
     if signature.len() != 2 * coord_len {
         return Err(CryptoError::InvalidSignatureFormat);
     }
-    
+
     // Parse public key coordinates
     let key = parse_ecdsa_public_key(public_key, coord_len)?;
-    
+
     // Construct uncompressed point format: 0x04 || x || y
     // This is the format ring expects for ECDSA public keys
     let mut public_key_bytes = Vec::with_capacity(1 + 2 * coord_len);
     public_key_bytes.push(0x04); // Uncompressed point indicator
     public_key_bytes.extend_from_slice(&key.x);
     public_key_bytes.extend_from_slice(&key.y);
-    
+
     // Create unparsed public key
-    let unparsed_public_key = signature::UnparsedPublicKey::new(verification_alg, &public_key_bytes);
-    
+    let unparsed_public_key =
+        signature::UnparsedPublicKey::new(verification_alg, &public_key_bytes);
+
     // Verify signature
     // Ring's ECDSA_*_FIXED algorithms accept signatures in r||s format directly
     // which matches the DNS RRSIG signature format
@@ -700,13 +700,11 @@ fn verify_eddsa_signature(
             if signature.len() != 64 {
                 return Err(CryptoError::InvalidSignatureFormat);
             }
-            
+
             // Use ring's Ed25519 verification
-            let peer_public_key = signature::UnparsedPublicKey::new(
-                &signature::ED25519,
-                public_key
-            );
-            
+            let peer_public_key =
+                signature::UnparsedPublicKey::new(&signature::ED25519, public_key);
+
             match peer_public_key.verify(message, signature) {
                 Ok(()) => Ok(true),
                 Err(_) => Ok(false),
@@ -833,11 +831,11 @@ mod tests {
     fn test_rsa_key_parsing_standard_length() {
         // Standard format: 1-byte exponent length, exponent, modulus
         let key_data = vec![
-            3,  // exponent length
-            1, 0, 1,  // exponent (65537)
-            0xAA, 0xBB, 0xCC, 0xDD,  // modulus (truncated for test)
+            3, // exponent length
+            1, 0, 1, // exponent (65537)
+            0xAA, 0xBB, 0xCC, 0xDD, // modulus (truncated for test)
         ];
-        
+
         let key = parse_rsa_public_key(&key_data);
         assert!(key.is_ok());
         let key = key.unwrap();
@@ -849,12 +847,12 @@ mod tests {
     fn test_rsa_key_parsing_extended_length() {
         // Extended format: 0x00, 2-byte big-endian length, exponent, modulus
         let key_data = vec![
-            0,     // extended length indicator
-            0, 3,  // exponent length (3 bytes)
-            1, 0, 1,  // exponent
-            0xAA, 0xBB,  // modulus
+            0, // extended length indicator
+            0, 3, // exponent length (3 bytes)
+            1, 0, 1, // exponent
+            0xAA, 0xBB, // modulus
         ];
-        
+
         let key = parse_rsa_public_key(&key_data);
         assert!(key.is_ok());
         let key = key.unwrap();
@@ -864,13 +862,16 @@ mod tests {
 
     #[test]
     fn test_rsa_key_parsing_too_short() {
-        let key_data = vec![1, 2];  // Too short
-        assert!(matches!(parse_rsa_public_key(&key_data), Err(CryptoError::KeyTooShort)));
+        let key_data = vec![1, 2]; // Too short
+        assert!(matches!(
+            parse_rsa_public_key(&key_data),
+            Err(CryptoError::KeyTooShort)
+        ));
     }
 
     #[test]
     fn test_ecdsa_key_parsing_p256() {
-        let key_data = vec![0u8; 64];  // 32-byte X + 32-byte Y for P-256
+        let key_data = vec![0u8; 64]; // 32-byte X + 32-byte Y for P-256
         let key = parse_ecdsa_public_key(&key_data, 32);
         assert!(key.is_ok());
         let key = key.unwrap();
@@ -880,7 +881,7 @@ mod tests {
 
     #[test]
     fn test_ecdsa_key_parsing_wrong_length() {
-        let key_data = vec![0u8; 60];  // Wrong length for P-256
+        let key_data = vec![0u8; 60]; // Wrong length for P-256
         assert!(matches!(
             parse_ecdsa_public_key(&key_data, 32),
             Err(CryptoError::InvalidKeyFormat)
@@ -889,7 +890,7 @@ mod tests {
 
     #[test]
     fn test_ecdsa_signature_parsing() {
-        let sig_data = vec![0u8; 64];  // 32-byte R + 32-byte S
+        let sig_data = vec![0u8; 64]; // 32-byte R + 32-byte S
         let sig = parse_ecdsa_signature(&sig_data, 32);
         assert!(sig.is_ok());
         let sig = sig.unwrap();
@@ -899,33 +900,23 @@ mod tests {
 
     #[test]
     fn test_ed25519_signature_verification_wrong_key_size() {
-        let public_key = vec![0u8; 16];  // Wrong size (should be 32)
+        let public_key = vec![0u8; 16]; // Wrong size (should be 32)
         let signature = vec![0u8; 64];
         let message = b"test message";
-        
-        let result = verify_eddsa_signature(
-            &public_key,
-            &signature,
-            message,
-            Algorithm::Ed25519
-        );
-        
+
+        let result = verify_eddsa_signature(&public_key, &signature, message, Algorithm::Ed25519);
+
         assert!(matches!(result, Err(CryptoError::InvalidKeyFormat)));
     }
 
     #[test]
     fn test_ed25519_signature_verification_wrong_sig_size() {
         let public_key = vec![0u8; 32];
-        let signature = vec![0u8; 32];  // Wrong size (should be 64)
+        let signature = vec![0u8; 32]; // Wrong size (should be 64)
         let message = b"test message";
-        
-        let result = verify_eddsa_signature(
-            &public_key,
-            &signature,
-            message,
-            Algorithm::Ed25519
-        );
-        
+
+        let result = verify_eddsa_signature(&public_key, &signature, message, Algorithm::Ed25519);
+
         assert!(matches!(result, Err(CryptoError::InvalidSignatureFormat)));
     }
 }

@@ -43,9 +43,9 @@
 //! - RFC 5155: NSEC3 hashed authenticated denial of existence
 //! - RFC 6891: EDNS0 OPT pseudo-record preservation
 
-use std::collections::HashSet;
 use crate::dns::protocol::{DnsMessage, RecordType, ResourceRecord};
-use crate::types::errors::{DnsmasqError, DnsError};
+use crate::types::errors::{DnsError, DnsmasqError};
+use std::collections::HashSet;
 
 /// Filter records from a DNS message using a custom predicate function
 ///
@@ -157,10 +157,10 @@ pub fn filter_by_type(message: &mut DnsMessage, record_type: RecordType) {
 pub fn filter_by_name(message: &mut DnsMessage, name_pattern: &str) {
     // Convert pattern to lowercase for case-insensitive comparison
     let pattern_lower = name_pattern.to_lowercase();
-    
+
     // Check if pattern is a simple wildcard
     let is_full_wildcard = pattern_lower == "*";
-    
+
     // Check if pattern has prefix wildcard (*.example.com)
     let has_prefix_wildcard = pattern_lower.starts_with("*.");
     let prefix_suffix = if has_prefix_wildcard {
@@ -168,7 +168,7 @@ pub fn filter_by_name(message: &mut DnsMessage, name_pattern: &str) {
     } else {
         ""
     };
-    
+
     // Check if pattern has suffix wildcard (example.*)
     let has_suffix_wildcard = pattern_lower.ends_with(".*");
     let suffix_prefix = if has_suffix_wildcard {
@@ -179,7 +179,7 @@ pub fn filter_by_name(message: &mut DnsMessage, name_pattern: &str) {
 
     filter_records(message, |rr| {
         let name = rr.name().to_lowercase();
-        
+
         if is_full_wildcard {
             true // Match everything
         } else if has_prefix_wildcard {
@@ -220,10 +220,10 @@ pub fn filter_by_name(message: &mut DnsMessage, name_pattern: &str) {
 /// OPT records must be preserved because they signal EDNS0 capabilities
 /// (larger UDP payload size, DNSSEC OK bit) to the client.
 pub fn filter_additional(message: &mut DnsMessage) {
-    message.additional.retain(|rr| {
-        matches!(rr, ResourceRecord::OPT { .. })
-    });
-    
+    message
+        .additional
+        .retain(|rr| matches!(rr, ResourceRecord::OPT { .. }));
+
     // Update header count
     message.header.arcount = message.additional.len() as u16;
 }
@@ -271,11 +271,14 @@ pub fn strip_dnssec_records(message: &mut DnsMessage) {
     filter_records(message, |rr| {
         matches!(
             rr.record_type(),
-            RecordType::RRSIG | RecordType::DNSKEY | RecordType::DS | 
-            RecordType::NSEC | RecordType::NSEC3
+            RecordType::RRSIG
+                | RecordType::DNSKEY
+                | RecordType::DS
+                | RecordType::NSEC
+                | RecordType::NSEC3
         )
     });
-    
+
     // Clear the Authenticated Data bit since we removed DNSSEC records
     message.header.flags.ad = false;
 }
@@ -331,14 +334,14 @@ pub fn strip_dnssec_records(message: &mut DnsMessage) {
 /// to ensure the final serialized message will definitely fit.
 pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
     let mut current_size = estimated_message_size(message);
-    
+
     if current_size <= max_size {
         // Already fits, no truncation needed
         return false;
     }
-    
+
     let mut truncated = false;
-    
+
     // First, try removing additional records (except OPT)
     while current_size > max_size && !message.additional.is_empty() {
         // Find and remove last non-OPT record
@@ -351,39 +354,39 @@ pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
                 break;
             }
         }
-        
+
         if !removed {
             // All additional records are OPT, can't remove any more
             break;
         }
-        
+
         current_size = estimated_message_size(message);
     }
-    
+
     // If still too large, remove authority records
     while current_size > max_size && !message.authority.is_empty() {
         message.authority.pop();
         truncated = true;
         current_size = estimated_message_size(message);
     }
-    
+
     // If still too large, remove answer records (but keep at least one if possible)
     while current_size > max_size && message.answers.len() > 1 {
         message.answers.pop();
         truncated = true;
         current_size = estimated_message_size(message);
     }
-    
+
     // Update header section counts
     message.header.ancount = message.answers.len() as u16;
     message.header.nscount = message.authority.len() as u16;
     message.header.arcount = message.additional.len() as u16;
-    
+
     // Set TC bit if we truncated anything
     if truncated {
         message.header.flags.tc = true;
     }
-    
+
     truncated
 }
 
@@ -432,7 +435,7 @@ pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
 pub fn estimated_message_size(message: &DnsMessage) -> usize {
     // DNS header is fixed 12 bytes
     let mut size = 12;
-    
+
     // Question section
     for question in &message.questions {
         // Domain name (estimate 2 bytes per label, avg 4 labels = 8 bytes, +1 for length bytes, +1 for null)
@@ -440,26 +443,26 @@ pub fn estimated_message_size(message: &DnsMessage) -> usize {
         // Type (2 bytes) + Class (2 bytes)
         size += 4;
     }
-    
+
     // Answer section
     for rr in &message.answers {
         size += estimate_rr_size(rr);
     }
-    
+
     // Authority section
     for rr in &message.authority {
         size += estimate_rr_size(rr);
     }
-    
+
     // Additional section
     for rr in &message.additional {
         size += estimate_rr_size(rr);
     }
-    
+
     // Apply compression discount (assume 10% savings from compression)
     // This is conservative - actual compression may save more
     size = (size * 90) / 100;
-    
+
     size
 }
 
@@ -509,19 +512,19 @@ pub fn remove_duplicates(message: &mut DnsMessage) {
         // HashSet insertion returns false if element already existed
         seen_answers.insert(format!("{:?}", rr))
     });
-    
+
     // Deduplicate authority
     let mut seen_authority = HashSet::new();
-    message.authority.retain(|rr| {
-        seen_authority.insert(format!("{:?}", rr))
-    });
-    
+    message
+        .authority
+        .retain(|rr| seen_authority.insert(format!("{:?}", rr)));
+
     // Deduplicate additional
     let mut seen_additional = HashSet::new();
-    message.additional.retain(|rr| {
-        seen_additional.insert(format!("{:?}", rr))
-    });
-    
+    message
+        .additional
+        .retain(|rr| seen_additional.insert(format!("{:?}", rr)));
+
     // Update header counts
     message.header.ancount = message.answers.len() as u16;
     message.header.nscount = message.authority.len() as u16;
@@ -555,18 +558,18 @@ fn estimate_name_size(name: &str) -> usize {
     if name.is_empty() || name == "." {
         return 1; // Just the null terminator for root
     }
-    
+
     // Split into labels and count: length_byte + label_bytes per label + null terminator
     let labels: Vec<&str> = name.trim_end_matches('.').split('.').collect();
     let mut size = 1; // Null terminator
-    
+
     for label in labels {
         if !label.is_empty() {
             size += 1; // Length byte
             size += label.len(); // Label characters
         }
     }
-    
+
     size
 }
 
@@ -595,7 +598,7 @@ fn estimate_name_size(name: &str) -> usize {
 fn estimate_rr_size(rr: &ResourceRecord) -> usize {
     // Name + Type (2) + Class (2) + TTL (4) + RDLEN (2) = 10 bytes overhead
     let mut size = 10;
-    
+
     match rr {
         ResourceRecord::A { name, address, .. } => {
             size += estimate_name_size(name);
@@ -622,7 +625,9 @@ fn estimate_rr_size(rr: &ResourceRecord) -> usize {
             size += estimate_name_size(name);
             size += estimate_name_size(ptrdname);
         }
-        ResourceRecord::SOA { name, mname, rname, .. } => {
+        ResourceRecord::SOA {
+            name, mname, rname, ..
+        } => {
             size += estimate_name_size(name);
             size += estimate_name_size(mname);
             size += estimate_name_size(rname);
@@ -645,13 +650,20 @@ fn estimate_rr_size(rr: &ResourceRecord) -> usize {
             size += 1; // Root name (just null terminator)
             size += data.len();
         }
-        ResourceRecord::RRSIG { name, signer_name, signature, .. } => {
+        ResourceRecord::RRSIG {
+            name,
+            signer_name,
+            signature,
+            ..
+        } => {
             size += estimate_name_size(name);
             size += 18; // Fixed fields
             size += estimate_name_size(signer_name);
             size += signature.len();
         }
-        ResourceRecord::DNSKEY { name, public_key, .. } => {
+        ResourceRecord::DNSKEY {
+            name, public_key, ..
+        } => {
             size += estimate_name_size(name);
             size += 4; // flags, protocol, algorithm
             size += public_key.len();
@@ -661,12 +673,23 @@ fn estimate_rr_size(rr: &ResourceRecord) -> usize {
             size += 4; // key_tag, algorithm, digest_type
             size += digest.len();
         }
-        ResourceRecord::NSEC { name, next_domain, type_bitmaps, .. } => {
+        ResourceRecord::NSEC {
+            name,
+            next_domain,
+            type_bitmaps,
+            ..
+        } => {
             size += estimate_name_size(name);
             size += estimate_name_size(next_domain);
             size += type_bitmaps.len();
         }
-        ResourceRecord::NSEC3 { name, salt, next_hashed_owner, type_bitmaps, .. } => {
+        ResourceRecord::NSEC3 {
+            name,
+            salt,
+            next_hashed_owner,
+            type_bitmaps,
+            ..
+        } => {
             size += estimate_name_size(name);
             size += 5; // hash_algorithm, flags, iterations (1 + 1 + 2), salt length (1)
             size += salt.len();
@@ -675,7 +698,7 @@ fn estimate_rr_size(rr: &ResourceRecord) -> usize {
             size += type_bitmaps.len();
         }
     }
-    
+
     size
 }
 
@@ -686,7 +709,7 @@ fn estimate_rr_size(rr: &ResourceRecord) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dns::protocol::{DnsHeader, DnsFlags, RecordClass};
+    use crate::dns::protocol::{DnsFlags, DnsHeader, RecordClass};
     use std::net::Ipv4Addr;
 
     /// Helper to create a test DNS message
@@ -710,7 +733,7 @@ mod tests {
     #[test]
     fn test_filter_by_type_removes_matching_records() {
         let mut message = create_test_message();
-        
+
         // Add A and AAAA records
         message.answers.push(ResourceRecord::A {
             name: "example.com".to_string(),
@@ -724,10 +747,10 @@ mod tests {
             ttl: 300,
             address: Ipv4Addr::new(192, 0, 2, 2),
         });
-        
+
         // Filter A records
         filter_by_type(&mut message, RecordType::A);
-        
+
         assert_eq!(message.answers.len(), 0);
         assert_eq!(message.header.ancount, 0);
     }
@@ -735,7 +758,7 @@ mod tests {
     #[test]
     fn test_filter_by_name_exact_match() {
         let mut message = create_test_message();
-        
+
         message.answers.push(ResourceRecord::A {
             name: "example.com".to_string(),
             class: RecordClass::IN,
@@ -748,9 +771,9 @@ mod tests {
             ttl: 300,
             address: Ipv4Addr::new(192, 0, 2, 2),
         });
-        
+
         filter_by_name(&mut message, "example.com");
-        
+
         assert_eq!(message.answers.len(), 1);
         assert_eq!(message.answers[0].name(), "example.org");
     }
@@ -758,7 +781,7 @@ mod tests {
     #[test]
     fn test_strip_dnssec_records() {
         let mut message = create_test_message();
-        
+
         // Add regular and DNSSEC records
         message.answers.push(ResourceRecord::A {
             name: "example.com".to_string(),
@@ -780,10 +803,10 @@ mod tests {
             signer_name: "example.com".to_string(),
             signature: vec![],
         });
-        
+
         message.header.flags.ad = true;
         strip_dnssec_records(&mut message);
-        
+
         assert_eq!(message.answers.len(), 1);
         assert!(matches!(message.answers[0], ResourceRecord::A { .. }));
         assert!(!message.header.flags.ad); // AD bit cleared
@@ -792,7 +815,7 @@ mod tests {
     #[test]
     fn test_filter_additional_preserves_opt() {
         let mut message = create_test_message();
-        
+
         message.additional.push(ResourceRecord::A {
             name: "example.com".to_string(),
             class: RecordClass::IN,
@@ -806,9 +829,9 @@ mod tests {
             dnssec_ok: true,
             data: vec![],
         });
-        
+
         filter_additional(&mut message);
-        
+
         assert_eq!(message.additional.len(), 1);
         assert!(matches!(message.additional[0], ResourceRecord::OPT { .. }));
     }
@@ -817,7 +840,7 @@ mod tests {
     fn test_estimated_message_size() {
         let message = create_test_message();
         let size = estimated_message_size(&message);
-        
+
         // Empty message should be around header size (12 bytes) after compression discount
         assert!(size >= 10 && size <= 15);
     }
@@ -825,7 +848,7 @@ mod tests {
     #[test]
     fn test_remove_duplicates() {
         let mut message = create_test_message();
-        
+
         // Add duplicate records
         let record1 = ResourceRecord::A {
             name: "example.com".to_string(),
@@ -839,12 +862,12 @@ mod tests {
             ttl: 300,
             address: Ipv4Addr::new(192, 0, 2, 1),
         };
-        
+
         message.answers.push(record1);
         message.answers.push(record2);
-        
+
         remove_duplicates(&mut message);
-        
+
         assert_eq!(message.answers.len(), 1);
     }
 }

@@ -168,10 +168,10 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tracing::Level;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 #[cfg(unix)]
 use syslog_tracing::Syslog;
@@ -204,10 +204,10 @@ pub const LOG_OVERFLOW_REPORT_INTERVAL: std::time::Duration = std::time::Duratio
 pub enum FileRotation {
     /// Rotate daily at midnight local time
     Daily,
-    
+
     /// Rotate hourly at the top of each hour
     Hourly,
-    
+
     /// Rotate when file reaches size limit (not yet implemented - placeholder for future)
     SizeBased(u64),
 }
@@ -281,22 +281,22 @@ impl From<FileRotation> for Rotation {
 pub struct LogConfig {
     /// Enable logging to syslog (UNIX domain socket /dev/log)
     pub enable_syslog: bool,
-    
+
     /// Enable logging to file (with optional rotation)
     pub enable_file: Option<PathBuf>,
-    
+
     /// Enable logging to stderr (for --debug mode)
     pub enable_stderr: bool,
-    
+
     /// Enable JSON structured logging (for SIEM integration)
     pub enable_json: bool,
-    
+
     /// Maximum log level to emit (DEBUG, INFO, WARN, ERROR, TRACE)
     pub max_level: Level,
-    
+
     /// Syslog facility code (3=LOG_DAEMON, 16=LOG_LOCAL0, etc.)
     pub syslog_facility: Option<u8>,
-    
+
     /// File rotation policy (daily, hourly, size-based)
     pub file_rotation: Option<FileRotation>,
 }
@@ -337,7 +337,7 @@ pub enum LogError {
     /// - Permissions deny access to syslog socket
     #[error("Failed to initialize syslog: {0}")]
     SyslogInitFailed(#[source] io::Error),
-    
+
     /// Failed to open log file
     ///
     /// Corresponds to C's `open()` failure in `log_reopen()`. This can occur if:
@@ -346,7 +346,7 @@ pub enum LogError {
     /// - File system is read-only or out of space
     #[error("Failed to open log file: {0}")]
     FileOpenFailed(#[source] io::Error),
-    
+
     /// Invalid configuration parameters
     ///
     /// Validation errors for configuration that would cause undefined behavior:
@@ -420,7 +420,7 @@ pub enum LogError {
 pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
     // Validate configuration
     validate_config(config)?;
-    
+
     // Build EnvFilter for level filtering
     let level_filter = match config.max_level {
         Level::TRACE => "trace",
@@ -429,70 +429,68 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
         Level::WARN => "warn",
         Level::ERROR => "error",
     };
-    
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level_filter));
-    
+
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level_filter));
+
     // Start building the subscriber with layers
     let subscriber = tracing_subscriber::registry().with(env_filter);
-    
+
     // Add syslog layer if enabled (Unix only)
     #[cfg(unix)]
     let subscriber = if config.enable_syslog {
         let facility = config.syslog_facility.unwrap_or(DEFAULT_LOG_FACILITY);
-        
+
         // Build syslog writer using syslog-tracing
         let identity = c"dnsmasq";
         let options = syslog_tracing::Options::LOG_PID;
         let syslog_facility = facility_code_to_syslog_facility(facility);
-        
-        let syslog = Syslog::new(identity, options, syslog_facility)
-            .ok_or_else(|| LogError::SyslogInitFailed(
-                io::Error::other("Failed to initialize syslog")
-            ))?;
-        
+
+        let syslog = Syslog::new(identity, options, syslog_facility).ok_or_else(|| {
+            LogError::SyslogInitFailed(io::Error::other("Failed to initialize syslog"))
+        })?;
+
         // Wrap syslog writer in a fmt layer
-        let syslog_layer = fmt::layer()
-            .with_writer(syslog)
-            .with_ansi(false)
-            .boxed();
-        
+        let syslog_layer = fmt::layer().with_writer(syslog).with_ansi(false).boxed();
+
         subscriber.with(Some(syslog_layer))
     } else {
         subscriber.with(None::<Box<dyn tracing_subscriber::Layer<_> + Send + Sync>>)
     };
-    
+
     // Non-Unix platforms: syslog not supported
     #[cfg(not(unix))]
     let subscriber = subscriber;
-    
+
     // Add file layer if enabled
     let subscriber = if let Some(ref log_path) = config.enable_file {
-        let rotation = config.file_rotation.map(Rotation::from).unwrap_or(Rotation::NEVER);
-        
+        let rotation = config
+            .file_rotation
+            .map(Rotation::from)
+            .unwrap_or(Rotation::NEVER);
+
         // Extract directory and filename
-        let directory = log_path.parent()
-            .ok_or_else(|| LogError::InvalidConfig("Log file path must have a parent directory".to_string()))?;
-        let filename = log_path.file_name()
+        let directory = log_path.parent().ok_or_else(|| {
+            LogError::InvalidConfig("Log file path must have a parent directory".to_string())
+        })?;
+        let filename = log_path
+            .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| LogError::InvalidConfig("Log file path must have a valid filename".to_string()))?;
-        
+            .ok_or_else(|| {
+                LogError::InvalidConfig("Log file path must have a valid filename".to_string())
+            })?;
+
         // Create rolling file appender
         let file_appender = RollingFileAppender::builder()
             .rotation(rotation)
             .filename_prefix(filename)
             .build(directory)
-            .map_err(|e| LogError::FileOpenFailed(
-                io::Error::other(e.to_string())
-            ))?;
-        
+            .map_err(|e| LogError::FileOpenFailed(io::Error::other(e.to_string())))?;
+
         // Build fmt layer for file output
         let file_layer = if config.enable_json {
             // JSON structured output
-            fmt::layer()
-                .json()
-                .with_writer(file_appender)
-                .boxed()
+            fmt::layer().json().with_writer(file_appender).boxed()
         } else {
             // Plain text output
             fmt::layer()
@@ -500,20 +498,17 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
                 .with_writer(file_appender)
                 .boxed()
         };
-        
+
         subscriber.with(Some(file_layer))
     } else {
         subscriber.with(None::<Box<dyn tracing_subscriber::Layer<_> + Send + Sync>>)
     };
-    
+
     // Add stderr layer if enabled
     let subscriber = if config.enable_stderr {
         let stderr_layer = if config.enable_json {
             // JSON structured output to stderr
-            fmt::layer()
-                .json()
-                .with_writer(std::io::stderr)
-                .boxed()
+            fmt::layer().json().with_writer(std::io::stderr).boxed()
         } else {
             // Plain text with colors to stderr
             fmt::layer()
@@ -521,16 +516,17 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
                 .with_writer(std::io::stderr)
                 .boxed()
         };
-        
+
         subscriber.with(Some(stderr_layer))
     } else {
         subscriber.with(None::<Box<dyn tracing_subscriber::Layer<_> + Send + Sync>>)
     };
-    
+
     // Initialize the global subscriber
-    subscriber.try_init()
+    subscriber
+        .try_init()
         .map_err(|e| LogError::InvalidConfig(format!("Failed to set global subscriber: {}", e)))?;
-    
+
     Ok(())
 }
 
@@ -597,28 +593,29 @@ fn validate_config(config: &LogConfig) -> Result<(), LogError> {
     // Ensure at least one output is enabled
     if !config.enable_syslog && config.enable_file.is_none() && !config.enable_stderr {
         return Err(LogError::InvalidConfig(
-            "At least one log output (syslog, file, or stderr) must be enabled".to_string()
+            "At least one log output (syslog, file, or stderr) must be enabled".to_string(),
         ));
     }
-    
+
     // Validate syslog facility code (0-23 are standard, 24-31 are reserved)
     if let Some(facility) = config.syslog_facility {
         if facility > 23 {
-            return Err(LogError::InvalidConfig(
-                format!("Invalid syslog facility code: {} (must be 0-23)", facility)
-            ));
+            return Err(LogError::InvalidConfig(format!(
+                "Invalid syslog facility code: {} (must be 0-23)",
+                facility
+            )));
         }
     }
-    
+
     // Validate file path if file logging is enabled
     if let Some(ref path) = config.enable_file {
         if path.as_os_str().is_empty() {
             return Err(LogError::InvalidConfig(
-                "Log file path cannot be empty".to_string()
+                "Log file path cannot be empty".to_string(),
             ));
         }
     }
-    
+
     Ok(())
 }
 
@@ -653,7 +650,7 @@ fn validate_config(config: &LogConfig) -> Result<(), LogError> {
 #[cfg(unix)]
 fn facility_code_to_syslog_facility(code: u8) -> syslog_tracing::Facility {
     use syslog_tracing::Facility;
-    
+
     match code {
         // Note: Kernel (0) and Syslog (5) facilities are not exposed by syslog-tracing
         // Map them to Daemon as a reasonable fallback
@@ -684,7 +681,7 @@ fn facility_code_to_syslog_facility(code: u8) -> syslog_tracing::Facility {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = LogConfig::default();
@@ -695,7 +692,7 @@ mod tests {
         assert_eq!(config.max_level, Level::INFO);
         assert_eq!(config.syslog_facility, Some(DEFAULT_LOG_FACILITY));
     }
-    
+
     #[test]
     fn test_config_validation_no_outputs() {
         let config = LogConfig {
@@ -707,10 +704,10 @@ mod tests {
             syslog_facility: None,
             file_rotation: None,
         };
-        
+
         assert!(validate_config(&config).is_err());
     }
-    
+
     #[test]
     fn test_config_validation_invalid_facility() {
         let config = LogConfig {
@@ -722,10 +719,10 @@ mod tests {
             syslog_facility: Some(99), // Invalid
             file_rotation: None,
         };
-        
+
         assert!(validate_config(&config).is_err());
     }
-    
+
     #[test]
     fn test_config_validation_valid() {
         let config = LogConfig {
@@ -737,36 +734,39 @@ mod tests {
             syslog_facility: None,
             file_rotation: None,
         };
-        
+
         assert!(validate_config(&config).is_ok());
     }
-    
+
     #[test]
     fn test_file_rotation_conversion() {
         assert_eq!(Rotation::from(FileRotation::Daily), Rotation::DAILY);
         assert_eq!(Rotation::from(FileRotation::Hourly), Rotation::HOURLY);
         // SizeBased falls back to daily for now
-        assert_eq!(Rotation::from(FileRotation::SizeBased(1024)), Rotation::DAILY);
+        assert_eq!(
+            Rotation::from(FileRotation::SizeBased(1024)),
+            Rotation::DAILY
+        );
     }
-    
+
     #[cfg(unix)]
     #[test]
     fn test_facility_code_conversion_no_panic() {
         // Test that facility code conversion doesn't panic for various inputs
         // (Cannot use assert_eq! because Facility doesn't implement PartialEq)
-        facility_code_to_syslog_facility(0);  // Kernel -> Daemon
-        facility_code_to_syslog_facility(3);  // Daemon
+        facility_code_to_syslog_facility(0); // Kernel -> Daemon
+        facility_code_to_syslog_facility(3); // Daemon
         facility_code_to_syslog_facility(16); // Local0
         facility_code_to_syslog_facility(23); // Local7
         facility_code_to_syslog_facility(99); // Invalid -> default
         // If we reach here without panic, the test passes
     }
-    
+
     #[test]
     fn test_log_error_display() {
         let err = LogError::InvalidConfig("test error".to_string());
         assert!(err.to_string().contains("test error"));
-        
+
         let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
         let err = LogError::SyslogInitFailed(io_err);
         assert!(err.to_string().contains("syslog"));

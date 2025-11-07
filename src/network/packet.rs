@@ -341,7 +341,9 @@ impl EdnsConfig {
     pub fn new(max_udp_size: u16) -> Self {
         Self {
             // Clamp to valid range (512-4096)
-            max_udp_size: max_udp_size.max(DNS_PACKET_SIZE as u16).min(EDNS_PKTSZ as u16),
+            max_udp_size: max_udp_size
+                .max(DNS_PACKET_SIZE as u16)
+                .min(EDNS_PKTSZ as u16),
             do_bit: false,
         }
     }
@@ -360,7 +362,9 @@ impl EdnsConfig {
     /// ```
     pub fn with_dnssec(max_udp_size: u16) -> Self {
         Self {
-            max_udp_size: max_udp_size.max(DNS_PACKET_SIZE as u16).min(EDNS_PKTSZ as u16),
+            max_udp_size: max_udp_size
+                .max(DNS_PACKET_SIZE as u16)
+                .min(EDNS_PKTSZ as u16),
             do_bit: true,
         }
     }
@@ -841,7 +845,10 @@ pub trait PacketReader {
     /// - Network I/O error occurs
     /// - Buffer is too small for packet
     /// - Connection closed unexpectedly
-    fn read_packet(&mut self, buf: &mut [u8]) -> impl std::future::Future<Output = IoResult<usize>> + Send;
+    fn read_packet(
+        &mut self,
+        buf: &mut [u8],
+    ) -> impl std::future::Future<Output = IoResult<usize>> + Send;
 }
 
 /// Trait for async packet writing
@@ -868,7 +875,10 @@ pub trait PacketWriter {
     /// - Network I/O error occurs
     /// - Connection closed unexpectedly
     /// - Write timeout occurs
-    fn write_packet(&mut self, buf: &[u8]) -> impl std::future::Future<Output = IoResult<()>> + Send;
+    fn write_packet(
+        &mut self,
+        buf: &[u8],
+    ) -> impl std::future::Future<Output = IoResult<()>> + Send;
 }
 
 // =============================================================================

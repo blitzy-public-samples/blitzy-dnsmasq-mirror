@@ -110,7 +110,10 @@ pub enum ValidationError {
     },
 
     /// A DNS label exceeds maximum length
-    #[error("Label '{label}' has invalid length: {length} exceeds maximum {}", MAX_LABEL_LENGTH)]
+    #[error(
+        "Label '{label}' has invalid length: {length} exceeds maximum {}",
+        MAX_LABEL_LENGTH
+    )]
     InvalidLabelLength {
         /// The label that exceeded the limit
         label: String,
@@ -162,7 +165,9 @@ pub enum ValidationError {
     },
 
     /// Label contains too many wildcards
-    #[error("Label '{label}' contains {count} wildcards, maximum {MAX_WILDCARDS_PER_LABEL} allowed")]
+    #[error(
+        "Label '{label}' contains {count} wildcards, maximum {MAX_WILDCARDS_PER_LABEL} allowed"
+    )]
     TooManyWildcards {
         /// The label with too many wildcards
         label: String,
@@ -210,7 +215,7 @@ pub enum ValidationError {
 fn match_glob_label(pattern: &str, value: &str) -> bool {
     let pattern_bytes = pattern.as_bytes();
     let value_bytes = value.as_bytes();
-    
+
     let mut value_index = 0;
     let mut pattern_index = 0;
     let mut next_value_index = 0;
@@ -219,7 +224,7 @@ fn match_glob_label(pattern: &str, value: &str) -> bool {
     while value_index < value_bytes.len() || pattern_index < pattern_bytes.len() {
         if pattern_index < pattern_bytes.len() {
             let mut pattern_char = pattern_bytes[pattern_index] as char;
-            
+
             // Convert to uppercase for case-insensitive matching
             if pattern_char.is_ascii_lowercase() {
                 pattern_char = pattern_char.to_ascii_uppercase();
@@ -240,7 +245,7 @@ fn match_glob_label(pattern: &str, value: &str) -> bool {
                 // Ordinary character
                 if value_index < value_bytes.len() {
                     let mut value_char = value_bytes[value_index] as char;
-                    
+
                     // Convert to uppercase for case-insensitive matching
                     if value_char.is_ascii_lowercase() {
                         value_char = value_char.to_ascii_uppercase();
@@ -323,12 +328,19 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
     let mut i = 0;
 
     while i <= chars.len() {
-        let current_char = if i < chars.len() { Some(chars[i]) } else { None };
+        let current_char = if i < chars.len() {
+            Some(chars[i])
+        } else {
+            None
+        };
 
         // Validate character set
         if let Some(ch) = current_char {
             if ch != '-' && ch != '.' && !ch.is_ascii_alphanumeric() {
-                debug!("Invalid DNS name: Invalid character '{}' at position {}", ch, i);
+                debug!(
+                    "Invalid DNS name: Invalid character '{}' at position {}",
+                    ch, i
+                );
                 return Err(ValidationError::InvalidCharacter {
                     position: i,
                     character: ch,
@@ -344,7 +356,8 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
                 return Err(ValidationError::EmptyLabel);
             }
             if current_char == Some('-') {
-                let label_str: String = chars[label_start..i.min(label_start + 10)].iter().collect();
+                let label_str: String =
+                    chars[label_start..i.min(label_start + 10)].iter().collect();
                 debug!("Invalid DNS name: Label starts with hyphen");
                 return Err(ValidationError::LeadingOrTrailingHyphen {
                     label: format!("-{}", label_str),
@@ -364,9 +377,7 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
             if i > 0 && chars[i - 1] == '-' {
                 let label_str: String = chars[label_start..i].iter().collect();
                 debug!("Invalid DNS name: Label ends with hyphen");
-                return Err(ValidationError::LeadingOrTrailingHyphen {
-                    label: label_str,
-                });
+                return Err(ValidationError::LeadingOrTrailingHyphen { label: label_str });
             }
 
             let num_label_bytes = i - label_start;
@@ -394,18 +405,14 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
                 if is_label_numeric {
                     let label_str: String = chars[label_start..i].iter().collect();
                     debug!("Invalid DNS name: Final label is fully numeric");
-                    return Err(ValidationError::NumericFinalLabel {
-                        label: label_str,
-                    });
+                    return Err(ValidationError::NumericFinalLabel { label: label_str });
                 }
 
                 // Check for 'local' pseudo-TLD (case-insensitive)
                 let label_str: String = chars[label_start..i].iter().collect();
                 if label_str.eq_ignore_ascii_case("local") {
                     debug!("Invalid DNS name: 'local' pseudo-TLD");
-                    return Err(ValidationError::ReservedTld {
-                        tld: label_str,
-                    });
+                    return Err(ValidationError::ReservedTld { tld: label_str });
                 }
 
                 if !(1..=MAX_DNS_NAME_LENGTH).contains(&num_bytes) {
@@ -493,12 +500,19 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
     let mut i = 0;
 
     while i <= chars.len() {
-        let current_char = if i < chars.len() { Some(chars[i]) } else { None };
+        let current_char = if i < chars.len() {
+            Some(chars[i])
+        } else {
+            None
+        };
 
         // Validate character set (including wildcard)
         if let Some(ch) = current_char {
             if ch != '*' && ch != '-' && ch != '.' && !ch.is_ascii_alphanumeric() {
-                debug!("Invalid DNS pattern: Invalid character '{}' at position {}", ch, i);
+                debug!(
+                    "Invalid DNS pattern: Invalid character '{}' at position {}",
+                    ch, i
+                );
                 return Err(ValidationError::InvalidCharacter {
                     position: i,
                     character: ch,
@@ -517,7 +531,8 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
                 return Err(ValidationError::EmptyLabel);
             }
             if current_char == Some('-') {
-                let label_str: String = chars[label_start..i.min(label_start + 10)].iter().collect();
+                let label_str: String =
+                    chars[label_start..i.min(label_start + 10)].iter().collect();
                 debug!("Invalid DNS pattern: Label starts with hyphen");
                 return Err(ValidationError::LeadingOrTrailingHyphen {
                     label: format!("-{}", label_str),
@@ -532,13 +547,15 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
                 if !ch.is_ascii_digit() {
                     is_label_numeric = false;
                 }
-                
+
                 // Count wildcards
                 if ch == '*' {
                     if num_wildcards >= MAX_WILDCARDS_PER_LABEL {
                         let label_str: String = chars[label_start..i + 1].iter().collect();
-                        debug!("Invalid DNS pattern: Wildcard used more than {} times per label", 
-                               MAX_WILDCARDS_PER_LABEL);
+                        debug!(
+                            "Invalid DNS pattern: Wildcard used more than {} times per label",
+                            MAX_WILDCARDS_PER_LABEL
+                        );
                         return Err(ValidationError::TooManyWildcards {
                             label: label_str,
                             count: num_wildcards + 1,
@@ -554,15 +571,16 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
             if i > 0 && chars[i - 1] == '-' {
                 let label_str: String = chars[label_start..i].iter().collect();
                 debug!("Invalid DNS pattern: Label ends with hyphen");
-                return Err(ValidationError::LeadingOrTrailingHyphen {
-                    label: label_str,
-                });
+                return Err(ValidationError::LeadingOrTrailingHyphen { label: label_str });
             }
 
             let num_label_bytes = (i - label_start) - num_wildcards;
             if num_label_bytes > MAX_LABEL_LENGTH {
                 let label_str: String = chars[label_start..i].iter().collect();
-                debug!("Invalid DNS pattern: Label is too long ({})", num_label_bytes);
+                debug!(
+                    "Invalid DNS pattern: Label is too long ({})",
+                    num_label_bytes
+                );
                 return Err(ValidationError::InvalidLabelLength {
                     label: label_str,
                     length: num_label_bytes,
@@ -592,22 +610,21 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
                 if is_label_numeric {
                     let label_str: String = chars[label_start..i].iter().collect();
                     debug!("Invalid DNS pattern: Final label is fully numeric");
-                    return Err(ValidationError::NumericFinalLabel {
-                        label: label_str,
-                    });
+                    return Err(ValidationError::NumericFinalLabel { label: label_str });
                 }
 
                 // Check for 'local' pseudo-TLD (case-insensitive)
                 let label_str: String = chars[label_start..i].iter().collect();
                 if label_str.eq_ignore_ascii_case("local") {
                     debug!("Invalid DNS pattern: 'local' pseudo-TLD");
-                    return Err(ValidationError::ReservedTld {
-                        tld: label_str,
-                    });
+                    return Err(ValidationError::ReservedTld { tld: label_str });
                 }
 
                 if !(1..=MAX_DNS_NAME_LENGTH).contains(&num_bytes) {
-                    debug!("DNS pattern has invalid length after removing wildcards ({})", num_bytes);
+                    debug!(
+                        "DNS pattern has invalid length after removing wildcards ({})",
+                        num_bytes
+                    );
                     return Err(ValidationError::InvalidLength {
                         actual: num_bytes,
                         max: MAX_DNS_NAME_LENGTH,
@@ -730,26 +747,38 @@ mod tests {
     fn test_validate_dns_name_single_label() {
         assert!(matches!(
             validate_dns_name("ipcamera"),
-            Err(ValidationError::InsufficientLabels { actual: 1, required: 2 })
+            Err(ValidationError::InsufficientLabels {
+                actual: 1,
+                required: 2
+            })
         ));
     }
 
     #[test]
     fn test_validate_dns_name_leading_hyphen() {
         let result = validate_dns_name("-example.com");
-        assert!(matches!(result, Err(ValidationError::LeadingOrTrailingHyphen { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::LeadingOrTrailingHyphen { .. })
+        ));
     }
 
     #[test]
     fn test_validate_dns_name_trailing_hyphen() {
         let result = validate_dns_name("example-.com");
-        assert!(matches!(result, Err(ValidationError::LeadingOrTrailingHyphen { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::LeadingOrTrailingHyphen { .. })
+        ));
     }
 
     #[test]
     fn test_validate_dns_name_numeric_final_label() {
         let result = validate_dns_name("example.123");
-        assert!(matches!(result, Err(ValidationError::NumericFinalLabel { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::NumericFinalLabel { .. })
+        ));
     }
 
     #[test]
@@ -779,7 +808,10 @@ mod tests {
     #[test]
     fn test_validate_dns_name_invalid_character() {
         let result = validate_dns_name("exam_ple.com");
-        assert!(matches!(result, Err(ValidationError::InvalidCharacter { character: '_', .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::InvalidCharacter { character: '_', .. })
+        ));
     }
 
     #[test]
@@ -787,7 +819,10 @@ mod tests {
         let long_label = "a".repeat(64);
         let name = format!("{}.com", long_label);
         let result = validate_dns_name(&name);
-        assert!(matches!(result, Err(ValidationError::InvalidLabelLength { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::InvalidLabelLength { .. })
+        ));
     }
 
     #[test]
@@ -802,8 +837,12 @@ mod tests {
         }
         let long_name = labels.join(".");
         // Verify the length is indeed > 253
-        assert!(long_name.len() > 253, "Test setup: name should be longer than 253 chars, got {}", long_name.len());
-        
+        assert!(
+            long_name.len() > 253,
+            "Test setup: name should be longer than 253 chars, got {}",
+            long_name.len()
+        );
+
         let result = validate_dns_name(&long_name);
         assert!(matches!(result, Err(ValidationError::InvalidLength { .. })));
     }
@@ -821,22 +860,34 @@ mod tests {
     #[test]
     fn test_validate_dns_pattern_wildcard_in_final_labels() {
         let result = validate_dns_pattern("*.com");
-        assert!(matches!(result, Err(ValidationError::WildcardInFinalLabels { .. })));
-        
+        assert!(matches!(
+            result,
+            Err(ValidationError::WildcardInFinalLabels { .. })
+        ));
+
         let result = validate_dns_pattern("test.*.com");
-        assert!(matches!(result, Err(ValidationError::WildcardInFinalLabels { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::WildcardInFinalLabels { .. })
+        ));
     }
 
     #[test]
     fn test_validate_dns_pattern_too_many_wildcards() {
         let result = validate_dns_pattern("***test.example.com");
-        assert!(matches!(result, Err(ValidationError::TooManyWildcards { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::TooManyWildcards { .. })
+        ));
     }
 
     #[test]
     fn test_validate_dns_pattern_single_label() {
         let result = validate_dns_pattern("*");
-        assert!(matches!(result, Err(ValidationError::InsufficientLabels { .. })));
+        assert!(matches!(
+            result,
+            Err(ValidationError::InsufficientLabels { .. })
+        ));
     }
 
     #[test]
@@ -847,7 +898,7 @@ mod tests {
             validate_dns_pattern("*.example.local"),
             Err(ValidationError::ReservedTld { .. })
         ));
-        
+
         // Pattern without wildcards with "local" TLD should also fail with ReservedTld
         assert!(matches!(
             validate_dns_pattern("host.local"),
@@ -911,22 +962,40 @@ mod tests {
     #[test]
     fn test_matches_pattern_prefix_wildcard() {
         assert!(matches_pattern("video1.example.com", "video*.example.com"));
-        assert!(matches_pattern("video-prod.example.com", "video*.example.com"));
+        assert!(matches_pattern(
+            "video-prod.example.com",
+            "video*.example.com"
+        ));
         assert!(!matches_pattern("api.example.com", "video*.example.com"));
     }
 
     #[test]
     fn test_matches_pattern_multiple_wildcards() {
-        assert!(matches_pattern("app1-prod-east.example.com", "*-prod-*.example.com"));
-        assert!(matches_pattern("api-prod-west.example.com", "*-prod-*.example.com"));
-        assert!(!matches_pattern("app1-staging-east.example.com", "*-prod-*.example.com"));
+        assert!(matches_pattern(
+            "app1-prod-east.example.com",
+            "*-prod-*.example.com"
+        ));
+        assert!(matches_pattern(
+            "api-prod-west.example.com",
+            "*-prod-*.example.com"
+        ));
+        assert!(!matches_pattern(
+            "app1-staging-east.example.com",
+            "*-prod-*.example.com"
+        ));
     }
 
     #[test]
     fn test_matches_pattern_multiple_wildcard_labels() {
         assert!(matches_pattern("api1.us.example.com", "api*.*.example.com"));
-        assert!(matches_pattern("api-test.staging.example.com", "api*.*.example.com"));
-        assert!(!matches_pattern("web1.us.example.com", "api*.*.example.com"));
+        assert!(matches_pattern(
+            "api-test.staging.example.com",
+            "api*.*.example.com"
+        ));
+        assert!(!matches_pattern(
+            "web1.us.example.com",
+            "api*.*.example.com"
+        ));
     }
 
     #[test]

@@ -255,11 +255,7 @@ pub mod metrics;
 /// Translated from: `src/tables.c`
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 pub mod tables;
 
@@ -280,11 +276,11 @@ pub use string::{
 
 // --- Time Utilities ---
 
-pub use time::{format_duration, is_expired, monotonic_time, LeaseTime, Timestamp};
+pub use time::{LeaseTime, Timestamp, format_duration, is_expired, monotonic_time};
 
 // --- Logging ---
 
-pub use logging::{init_logging, LogConfig};
+pub use logging::{LogConfig, init_logging};
 
 // --- Crypto ---
 
@@ -302,7 +298,7 @@ pub use pattern::{matches_pattern, validate_dns_name, validate_dns_pattern};
 ///
 /// These types and functions are only available when the `metrics` feature is enabled.
 #[cfg(feature = "metrics")]
-pub use metrics::{metric_label, MetricLabel, MetricsCollector};
+pub use metrics::{MetricLabel, MetricsCollector, metric_label};
 
 // ============================================================================
 // Module Documentation Tests

@@ -346,7 +346,7 @@ impl BlockDataPool {
         // Attempt to allocate new blocks
         // In C, whine_malloc() would log error and return NULL on failure
         let mut new_blocks = Vec::with_capacity(count);
-        
+
         for _ in 0..count {
             // Create empty block with no data
             let block = BlockData {
@@ -708,10 +708,7 @@ impl BlockDataPool {
 
         info!(
             "Block data pool statistics: {} blocks in use, {} max, {} allocated ({} bytes per block)",
-            stats.count,
-            stats.high_water_mark,
-            stats.allocated,
-            BLOCK_SIZE
+            stats.count, stats.high_water_mark, stats.allocated, BLOCK_SIZE
         );
 
         stats
@@ -746,7 +743,7 @@ impl BlockDataPool {
         // Count blocks in chain and collect them
         let mut blocks_to_free = Vec::new();
         let mut current = Some(chain);
-        
+
         while let Some(mut block) = current {
             current = block.next.take();
             // Clear data to save memory while in free list
@@ -755,7 +752,7 @@ impl BlockDataPool {
         }
 
         let block_count = blocks_to_free.len();
-        
+
         // Decrement usage count
         self.count = self.count.saturating_sub(block_count);
 
@@ -828,9 +825,9 @@ mod tests {
     fn test_allocate_small_data() {
         let mut pool = BlockDataPool::new(0, false);
         let data = vec![1, 2, 3, 4, 5];
-        
+
         let chain = pool.allocate(&data).unwrap();
-        
+
         assert_eq!(chain.data, data);
         assert!(chain.next.is_none());
         assert_eq!(pool.count, 1);
@@ -842,13 +839,13 @@ mod tests {
         let mut pool = BlockDataPool::new(0, false);
         // Data larger than BLOCK_SIZE (40 bytes), should span multiple blocks
         let data = vec![0u8; 100];
-        
+
         let chain = pool.allocate(&data).unwrap();
-        
+
         // Should create 3 blocks: 40 + 40 + 20 = 100 bytes
         assert_eq!(chain.data.len(), 40);
         assert!(chain.next.is_some());
-        
+
         let mut count = 1;
         let mut current = chain.next.as_ref();
         while let Some(block) = current {
@@ -863,10 +860,10 @@ mod tests {
     fn test_retrieve() {
         let mut pool = BlockDataPool::new(0, false);
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        
+
         let chain = pool.allocate(&data).unwrap();
         let retrieved = pool.retrieve(&chain);
-        
+
         assert_eq!(data, retrieved);
     }
 
@@ -874,10 +871,10 @@ mod tests {
     fn test_retrieve_large_data() {
         let mut pool = BlockDataPool::new(0, false);
         let data = vec![42u8; 150]; // Spans 4 blocks (40+40+40+30)
-        
+
         let chain = pool.allocate(&data).unwrap();
         let retrieved = pool.retrieve(&chain);
-        
+
         assert_eq!(data, retrieved);
     }
 
@@ -885,13 +882,13 @@ mod tests {
     fn test_free_chain() {
         let mut pool = BlockDataPool::new(0, false);
         let data = vec![0u8; 100]; // 3 blocks
-        
+
         let chain = pool.allocate(&data).unwrap();
         assert_eq!(pool.count, 3);
-        
+
         let free_before = pool.free_blocks.len();
         pool.free_chain(chain);
-        
+
         assert_eq!(pool.count, 0);
         assert_eq!(pool.free_blocks.len(), free_before + 3);
     }
@@ -899,19 +896,19 @@ mod tests {
     #[test]
     fn test_high_water_mark() {
         let mut pool = BlockDataPool::new(0, false);
-        
+
         // Allocate some data
         let chain1 = pool.allocate(&[0u8; 40]).unwrap();
         assert_eq!(pool.high_water_mark, 1);
-        
+
         let chain2 = pool.allocate(&[0u8; 80]).unwrap(); // 2 blocks
         assert_eq!(pool.high_water_mark, 3);
-        
+
         // Free first chain
         pool.free_chain(chain1);
         assert_eq!(pool.count, 2);
         assert_eq!(pool.high_water_mark, 3); // High water mark shouldn't decrease
-        
+
         pool.free_chain(chain2);
         assert_eq!(pool.count, 0);
         assert_eq!(pool.high_water_mark, 3);
@@ -920,9 +917,9 @@ mod tests {
     #[test]
     fn test_report_statistics() {
         let mut pool = BlockDataPool::new(50, true);
-        
+
         let _chain = pool.allocate(&[0u8; 100]).unwrap();
-        
+
         let stats = pool.report_statistics();
         assert_eq!(stats.count, 3); // 100 bytes = 3 blocks
         assert_eq!(stats.high_water_mark, 3);
@@ -933,7 +930,7 @@ mod tests {
     fn test_allocate_empty_data() {
         let mut pool = BlockDataPool::new(0, false);
         let chain = pool.allocate(&[]).unwrap();
-        
+
         assert_eq!(chain.data.len(), 0);
         assert!(chain.next.is_none());
     }
@@ -942,35 +939,35 @@ mod tests {
     async fn test_read_write_file() {
         use tokio::fs::File;
         use tokio::io::AsyncWriteExt;
-        
+
         let mut pool = BlockDataPool::new(0, false);
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        
+
         // Create temp file
         let temp_path = "/tmp/blockdata_test.dat";
         let mut file = File::create(temp_path).await.unwrap();
         file.write_all(&data).await.unwrap();
         drop(file);
-        
+
         // Read from file
         let mut file = File::open(temp_path).await.unwrap();
         let chain = pool.read_from(&mut file, data.len()).await.unwrap();
-        
+
         let retrieved = pool.retrieve(&chain);
         assert_eq!(data, retrieved);
-        
+
         // Write to file
         let write_path = "/tmp/blockdata_test_write.dat";
         let mut write_file = File::create(write_path).await.unwrap();
         pool.write_to(&chain, &mut write_file).await.unwrap();
         drop(write_file);
-        
+
         // Verify written data
         let mut verify_file = File::open(write_path).await.unwrap();
         let mut written_data = Vec::new();
         verify_file.read_to_end(&mut written_data).await.unwrap();
         assert_eq!(data, written_data);
-        
+
         // Cleanup
         std::fs::remove_file(temp_path).ok();
         std::fs::remove_file(write_path).ok();

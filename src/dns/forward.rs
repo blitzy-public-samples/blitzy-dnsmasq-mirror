@@ -10,10 +10,10 @@
 //! Manages forwarding of DNS queries to configured upstream servers with
 //! domain-specific routing, server health tracking, and response correlation.
 
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
 use crate::dns::protocol::{DnsMessage, DnsQuestion};
 use crate::types::errors::DnsError;
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 /// Forward query tracking record
 #[derive(Debug, Clone)]
@@ -28,12 +28,7 @@ pub struct ForwardRecord {
 
 impl ForwardRecord {
     /// Create a new forward record
-    pub fn new(
-        id: u16,
-        original_id: u16,
-        question: DnsQuestion,
-        upstream: SocketAddr,
-    ) -> Self {
+    pub fn new(id: u16, original_id: u16, question: DnsQuestion, upstream: SocketAddr) -> Self {
         Self {
             id,
             original_id,
@@ -77,24 +72,24 @@ impl Forwarder {
     pub fn forward(&mut self, mut message: DnsMessage) -> Result<ForwardRecord, DnsError> {
         if self.upstreams.is_empty() {
             return Err(DnsError::ForwardError {
-                message: "No upstream servers configured".to_string()
+                message: "No upstream servers configured".to_string(),
             });
         }
 
         // Select upstream server (round-robin) and get its address
         let upstream_addr = self.select_upstream()?.address;
-        
+
         let original_id = message.header.id;
         let new_id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
-        
+
         message.header.id = new_id;
 
         let question = if let Some(q) = message.questions.first() {
             q.clone()
         } else {
             return Err(DnsError::ProtocolError {
-                message: "No question in message".to_string()
+                message: "No question in message".to_string(),
             });
         };
 
@@ -123,7 +118,7 @@ impl Forwarder {
         self.upstreams
             .first()
             .ok_or_else(|| DnsError::ForwardError {
-                message: "No upstreams available".to_string()
+                message: "No upstreams available".to_string(),
             })
     }
 
@@ -172,21 +167,17 @@ impl UpstreamServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dns::protocol::{RecordType, RecordClass};
+    use crate::dns::protocol::{RecordClass, RecordType};
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn test_forward_record_timeout() {
         let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
-        let question = DnsQuestion::new(
-            "example.com".to_string(),
-            RecordType::A,
-            RecordClass::IN,
-        );
-        
+        let question = DnsQuestion::new("example.com".to_string(), RecordType::A, RecordClass::IN);
+
         let mut record = ForwardRecord::new(1, 100, question, upstream);
         record.timeout = Duration::from_millis(1);
-        
+
         std::thread::sleep(Duration::from_millis(10));
         assert!(record.is_timed_out());
     }
@@ -195,7 +186,7 @@ mod tests {
     fn test_forwarder_creation() {
         let upstream = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
         let forwarder = Forwarder::new(vec![upstream]);
-        
+
         assert_eq!(forwarder.upstreams.len(), 1);
         assert_eq!(forwarder.pending_count(), 0);
     }
@@ -204,14 +195,14 @@ mod tests {
     fn test_upstream_health_tracking() {
         let upstream_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
         let mut upstream = UpstreamServer::new(upstream_addr);
-        
+
         assert!(!upstream.is_unhealthy());
-        
+
         upstream.record_failure();
         upstream.record_failure();
         upstream.record_failure();
         assert!(upstream.is_unhealthy());
-        
+
         upstream.record_success();
         assert!(!upstream.is_unhealthy());
     }

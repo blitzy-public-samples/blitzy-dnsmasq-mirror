@@ -108,7 +108,7 @@
 
 use crate::types::errors::DnssecError;
 use rand::rngs::{OsRng, ThreadRng};
-use rand::{thread_rng, Rng, RngCore};
+use rand::{Rng, RngCore, thread_rng};
 
 // Feature-gated DNSSEC imports
 #[cfg(feature = "dnssec")]
@@ -188,7 +188,7 @@ pub fn init_rng() {
     // as the C version calls die() on failure
     let mut rng = thread_rng();
     let _test: u64 = rng.next_u64();
-    
+
     // RNG is now confirmed operational
     // thread_rng() will automatically seed from OS entropy on first use
 }
@@ -431,25 +431,25 @@ pub fn random_port() -> u16 {
 pub enum DnssecAlgorithm {
     /// RSA/MD5 (algorithm 1) - DEPRECATED, legacy support only
     RsaMd5,
-    
+
     /// RSA/SHA-1 (algorithm 5) - Legacy algorithm
     RsaSha1,
-    
+
     /// RSA/SHA-256 (algorithm 8) - Recommended RSA variant
     RsaSha256,
-    
+
     /// RSA/SHA-512 (algorithm 10) - Recommended RSA variant
     RsaSha512,
-    
+
     /// ECDSA Curve P-256 with SHA-256 (algorithm 13) - Recommended
     EcdsaP256Sha256,
-    
+
     /// ECDSA Curve P-384 with SHA-384 (algorithm 14) - Recommended
     EcdsaP384Sha384,
-    
+
     /// Ed25519 (algorithm 15) - Modern EdDSA, recommended
     Ed25519,
-    
+
     /// Ed448 (algorithm 16) - Optional EdDSA variant
     Ed448,
 }
@@ -490,7 +490,7 @@ impl DnssecAlgorithm {
 #[cfg(feature = "dnssec")]
 impl TryFrom<u8> for DnssecAlgorithm {
     type Error = DnssecError;
-    
+
     /// Parse DNSSEC algorithm from wire format algorithm number
     ///
     /// Converts IANA-registered algorithm numbers from DNSKEY and RRSIG records
@@ -654,13 +654,13 @@ pub fn verify_signature(
         | DnssecAlgorithm::RsaSha1
         | DnssecAlgorithm::RsaSha256
         | DnssecAlgorithm::RsaSha512 => verify_rsa_signature(algo, key, data, signature),
-        
+
         DnssecAlgorithm::EcdsaP256Sha256 | DnssecAlgorithm::EcdsaP384Sha384 => {
             verify_ecdsa_signature(algo, key, data, signature)
         }
-        
+
         DnssecAlgorithm::Ed25519 => verify_ed25519_signature(key, data, signature),
-        
+
         DnssecAlgorithm::Ed448 => Err(DnssecError::CryptoError {
             message: "Ed448 (algorithm 16) not yet supported".to_string(),
         }),
@@ -747,7 +747,7 @@ pub fn verify_rsa_signature(
             message: "RSA key is empty".to_string(),
         });
     }
-    
+
     // Extract exponent length and position
     let (exp_len, exp_start) = if key[0] == 0 {
         // Extended format: 0x00 followed by 2-byte big-endian length
@@ -762,7 +762,7 @@ pub fn verify_rsa_signature(
         // Standard format: 1-byte length
         (key[0] as usize, 1)
     };
-    
+
     // Extract exponent and modulus
     let exp_end = exp_start + exp_len;
     if exp_end > key.len() {
@@ -770,19 +770,22 @@ pub fn verify_rsa_signature(
             message: "RSA key too short for exponent".to_string(),
         });
     }
-    
+
     let exponent = &key[exp_start..exp_end];
     let modulus = &key[exp_end..];
-    
+
     if modulus.is_empty() {
         return Err(DnssecError::CryptoError {
             message: "RSA key missing modulus".to_string(),
         });
     }
-    
+
     // Create public key from components
-    let public_key = signature::RsaPublicKeyComponents { n: modulus, e: exponent };
-    
+    let public_key = signature::RsaPublicKeyComponents {
+        n: modulus,
+        e: exponent,
+    };
+
     // Verify signature with algorithm-specific verification
     // ring requires concrete types, not trait objects, so we match and call verify directly
     match algo {
@@ -792,32 +795,37 @@ pub fn verify_rsa_signature(
                 message: "RSAMD5 (algorithm 1) is deprecated and not supported".to_string(),
             })
         }
-        DnssecAlgorithm::RsaSha1 => {
-            public_key
-                .verify(&signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY, data, signature)
-                .map_err(|_| DnssecError::CryptoError {
-                    message: format!("RSA-SHA1 signature verification failed for algorithm {}", algo),
-                })
-        }
-        DnssecAlgorithm::RsaSha256 => {
-            public_key
-                .verify(&signature::RSA_PKCS1_2048_8192_SHA256, data, signature)
-                .map_err(|_| DnssecError::CryptoError {
-                    message: format!("RSA-SHA256 signature verification failed for algorithm {}", algo),
-                })
-        }
-        DnssecAlgorithm::RsaSha512 => {
-            public_key
-                .verify(&signature::RSA_PKCS1_2048_8192_SHA512, data, signature)
-                .map_err(|_| DnssecError::CryptoError {
-                    message: format!("RSA-SHA512 signature verification failed for algorithm {}", algo),
-                })
-        }
-        _ => {
-            Err(DnssecError::CryptoError {
-                message: format!("Algorithm {} is not RSA", algo),
-            })
-        }
+        DnssecAlgorithm::RsaSha1 => public_key
+            .verify(
+                &signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
+                data,
+                signature,
+            )
+            .map_err(|_| DnssecError::CryptoError {
+                message: format!(
+                    "RSA-SHA1 signature verification failed for algorithm {}",
+                    algo
+                ),
+            }),
+        DnssecAlgorithm::RsaSha256 => public_key
+            .verify(&signature::RSA_PKCS1_2048_8192_SHA256, data, signature)
+            .map_err(|_| DnssecError::CryptoError {
+                message: format!(
+                    "RSA-SHA256 signature verification failed for algorithm {}",
+                    algo
+                ),
+            }),
+        DnssecAlgorithm::RsaSha512 => public_key
+            .verify(&signature::RSA_PKCS1_2048_8192_SHA512, data, signature)
+            .map_err(|_| DnssecError::CryptoError {
+                message: format!(
+                    "RSA-SHA512 signature verification failed for algorithm {}",
+                    algo
+                ),
+            }),
+        _ => Err(DnssecError::CryptoError {
+            message: format!("Algorithm {} is not RSA", algo),
+        }),
     }
 }
 
@@ -911,7 +919,7 @@ pub fn verify_ecdsa_signature(
             });
         }
     };
-    
+
     if key.len() != expected_key_len {
         return Err(DnssecError::CryptoError {
             message: format!(
@@ -921,29 +929,29 @@ pub fn verify_ecdsa_signature(
             ),
         });
     }
-    
+
     // Select verification algorithm based on curve
     let verification_algorithm: &dyn signature::VerificationAlgorithm = match algo {
         DnssecAlgorithm::EcdsaP256Sha256 => &signature::ECDSA_P256_SHA256_ASN1,
         DnssecAlgorithm::EcdsaP384Sha384 => &signature::ECDSA_P384_SHA384_ASN1,
         _ => unreachable!(),
     };
-    
+
     // The key format for ring is the uncompressed point format (0x04 || X || Y)
     // RFC 6605 omits the 0x04 prefix, so we need to add it
     let mut uncompressed_key = Vec::with_capacity(key.len() + 1);
     uncompressed_key.push(0x04); // Uncompressed point indicator
     uncompressed_key.extend_from_slice(key);
-    
+
     // Create unparsed public key
     let public_key = signature::UnparsedPublicKey::new(verification_algorithm, &uncompressed_key);
-    
+
     // Verify signature
-    public_key.verify(data, signature).map_err(|_| {
-        DnssecError::CryptoError {
+    public_key
+        .verify(data, signature)
+        .map_err(|_| DnssecError::CryptoError {
             message: format!("ECDSA signature verification failed for algorithm {}", algo),
-        }
-    })
+        })
 }
 
 #[cfg(feature = "dnssec")]
@@ -1026,23 +1034,26 @@ pub fn verify_ed25519_signature(
             message: format!("Ed25519 key must be 32 bytes, got {}", key.len()),
         });
     }
-    
+
     // Validate signature length
     if signature.len() != 64 {
         return Err(DnssecError::CryptoError {
-            message: format!("Ed25519 signature must be 64 bytes, got {}", signature.len()),
+            message: format!(
+                "Ed25519 signature must be 64 bytes, got {}",
+                signature.len()
+            ),
         });
     }
-    
+
     // Create unparsed public key
     let public_key = signature::UnparsedPublicKey::new(&signature::ED25519, key);
-    
+
     // Verify signature
-    public_key.verify(data, signature).map_err(|_| {
-        DnssecError::CryptoError {
+    public_key
+        .verify(data, signature)
+        .map_err(|_| DnssecError::CryptoError {
             message: "Ed25519 signature verification failed".to_string(),
-        }
-    })
+        })
 }
 
 #[cfg(feature = "dnssec")]
@@ -1117,86 +1128,91 @@ pub fn hash_for_algorithm(algo: DnssecAlgorithm) -> &'static Algorithm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_rng_initialization() {
         // Should not panic
         init_rng();
     }
-    
+
     #[test]
     fn test_random_u16_in_range() {
         init_rng();
-        
+
         // u16 is always in range 0..=65535, so just verify it doesn't panic
         for _ in 0..100 {
             let _value = random_u16();
         }
     }
-    
+
     #[test]
     fn test_random_u32_distribution() {
         init_rng();
-        
+
         // Generate multiple values, ensure they're not all the same
         let mut values = std::collections::HashSet::new();
         for _ in 0..100 {
             values.insert(random_u32());
         }
-        
+
         // With cryptographic RNG, probability of collision is negligible
         assert!(values.len() > 90, "RNG appears non-random");
     }
-    
+
     #[test]
     fn test_random_u64_distribution() {
         init_rng();
-        
+
         let mut values = std::collections::HashSet::new();
         for _ in 0..100 {
             values.insert(random_u64());
         }
-        
+
         assert!(values.len() > 90, "RNG appears non-random");
     }
-    
+
     #[test]
     fn test_generate_dns_id() {
         init_rng();
-        
+
         // u16 is always in range 0..=65535, so just verify it doesn't panic
         for _ in 0..100 {
             let _id = generate_dns_id();
         }
     }
-    
+
     #[test]
     fn test_random_port_range() {
         init_rng();
-        
+
         for _ in 0..100 {
             let port = random_port();
-            assert!(port >= PORT_RANDOM_MIN, "Port {} below minimum {}", port, PORT_RANDOM_MIN);
+            assert!(
+                port >= PORT_RANDOM_MIN,
+                "Port {} below minimum {}",
+                port,
+                PORT_RANDOM_MIN
+            );
             // PORT_RANDOM_MAX is u16::MAX, so no need to check upper bound
             assert!(port >= 1024, "Port {} is privileged (<1024)", port);
         }
     }
-    
+
     #[test]
     fn test_random_port_distribution() {
         init_rng();
-        
+
         // Generate ports and verify distribution
         let mut counts = [0u32; 10]; // Divide range into 10 buckets
         let bucket_size = (PORT_RANDOM_MAX - PORT_RANDOM_MIN + 1) / 10;
-        
+
         for _ in 0..1000 {
             let port = random_port();
             let bucket = ((port - PORT_RANDOM_MIN) / bucket_size) as usize;
             let bucket = bucket.min(9); // Handle edge case for max port
             counts[bucket] += 1;
         }
-        
+
         // Each bucket should have roughly 100 ± 40 values (chi-square test would be better)
         for (i, &count) in counts.iter().enumerate() {
             assert!(
@@ -1207,26 +1223,50 @@ mod tests {
             );
         }
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_dnssec_algorithm_conversion() {
         use std::convert::TryFrom;
-        
+
         // Test all supported algorithms
-        assert_eq!(DnssecAlgorithm::try_from(1).unwrap(), DnssecAlgorithm::RsaMd5);
-        assert_eq!(DnssecAlgorithm::try_from(5).unwrap(), DnssecAlgorithm::RsaSha1);
-        assert_eq!(DnssecAlgorithm::try_from(8).unwrap(), DnssecAlgorithm::RsaSha256);
-        assert_eq!(DnssecAlgorithm::try_from(10).unwrap(), DnssecAlgorithm::RsaSha512);
-        assert_eq!(DnssecAlgorithm::try_from(13).unwrap(), DnssecAlgorithm::EcdsaP256Sha256);
-        assert_eq!(DnssecAlgorithm::try_from(14).unwrap(), DnssecAlgorithm::EcdsaP384Sha384);
-        assert_eq!(DnssecAlgorithm::try_from(15).unwrap(), DnssecAlgorithm::Ed25519);
-        assert_eq!(DnssecAlgorithm::try_from(16).unwrap(), DnssecAlgorithm::Ed448);
-        
+        assert_eq!(
+            DnssecAlgorithm::try_from(1).unwrap(),
+            DnssecAlgorithm::RsaMd5
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(5).unwrap(),
+            DnssecAlgorithm::RsaSha1
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(8).unwrap(),
+            DnssecAlgorithm::RsaSha256
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(10).unwrap(),
+            DnssecAlgorithm::RsaSha512
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(13).unwrap(),
+            DnssecAlgorithm::EcdsaP256Sha256
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(14).unwrap(),
+            DnssecAlgorithm::EcdsaP384Sha384
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(15).unwrap(),
+            DnssecAlgorithm::Ed25519
+        );
+        assert_eq!(
+            DnssecAlgorithm::try_from(16).unwrap(),
+            DnssecAlgorithm::Ed448
+        );
+
         // Test unsupported algorithm
         assert!(DnssecAlgorithm::try_from(99).is_err());
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_dnssec_algorithm_to_u8() {
@@ -1234,26 +1274,29 @@ mod tests {
         assert_eq!(DnssecAlgorithm::EcdsaP256Sha256.to_u8(), 13);
         assert_eq!(DnssecAlgorithm::Ed25519.to_u8(), 15);
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_dnssec_algorithm_display() {
         assert_eq!(format!("{}", DnssecAlgorithm::RsaSha256), "RSASHA256");
-        assert_eq!(format!("{}", DnssecAlgorithm::EcdsaP256Sha256), "ECDSAP256SHA256");
+        assert_eq!(
+            format!("{}", DnssecAlgorithm::EcdsaP256Sha256),
+            "ECDSAP256SHA256"
+        );
         assert_eq!(format!("{}", DnssecAlgorithm::Ed25519), "ED25519");
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_hash_for_algorithm() {
         use ring::digest;
-        
+
         // SHA-1 algorithms
         assert_eq!(
             hash_for_algorithm(DnssecAlgorithm::RsaSha1),
             &digest::SHA1_FOR_LEGACY_USE_ONLY
         );
-        
+
         // SHA-256 algorithms
         assert_eq!(
             hash_for_algorithm(DnssecAlgorithm::RsaSha256),
@@ -1267,32 +1310,27 @@ mod tests {
             hash_for_algorithm(DnssecAlgorithm::Ed25519),
             &digest::SHA256
         );
-        
+
         // SHA-384 algorithms
         assert_eq!(
             hash_for_algorithm(DnssecAlgorithm::EcdsaP384Sha384),
             &digest::SHA384
         );
-        
+
         // SHA-512 algorithms
         assert_eq!(
             hash_for_algorithm(DnssecAlgorithm::RsaSha512),
             &digest::SHA512
         );
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_rsa_signature_invalid_key() {
         // Empty key should error
-        let result = verify_rsa_signature(
-            DnssecAlgorithm::RsaSha256,
-            &[],
-            b"data",
-            b"signature",
-        );
+        let result = verify_rsa_signature(DnssecAlgorithm::RsaSha256, &[], b"data", b"signature");
         assert!(result.is_err());
-        
+
         // Key too short for exponent
         let result = verify_rsa_signature(
             DnssecAlgorithm::RsaSha256,
@@ -1302,7 +1340,7 @@ mod tests {
         );
         assert!(result.is_err());
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_ecdsa_signature_invalid_key_length() {
@@ -1314,7 +1352,7 @@ mod tests {
             b"signature",
         );
         assert!(result.is_err());
-        
+
         // P-384 expects 96 bytes
         let result = verify_ecdsa_signature(
             DnssecAlgorithm::EcdsaP384Sha384,
@@ -1324,23 +1362,20 @@ mod tests {
         );
         assert!(result.is_err());
     }
-    
+
     #[test]
     #[cfg(feature = "dnssec")]
     fn test_ed25519_signature_invalid_lengths() {
         // Invalid key length
         let result = verify_ed25519_signature(
             &[0u8; 16], // Should be 32 bytes
-            b"data",
-            &[0u8; 64],
+            b"data", &[0u8; 64],
         );
         assert!(result.is_err());
-        
+
         // Invalid signature length
         let result = verify_ed25519_signature(
-            &[0u8; 32],
-            b"data",
-            &[0u8; 32], // Should be 64 bytes
+            &[0u8; 32], b"data", &[0u8; 32], // Should be 64 bytes
         );
         assert!(result.is_err());
     }

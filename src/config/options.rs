@@ -113,7 +113,6 @@ pub struct Cli {
     // =========================================================================
     // GENERAL OPTIONS
     // =========================================================================
-    
     /// Specify configuration file (defaults to /etc/dnsmasq.conf)
     ///
     /// The configuration file uses key=value or key syntax. Multiple --conf-file
@@ -184,7 +183,6 @@ pub struct Cli {
     // =========================================================================
     // LOGGING OPTIONS
     // =========================================================================
-
     /// Enable DNS query logging (optional destination)
     ///
     /// Log all DNS queries received. Optional argument specifies extra logging:
@@ -226,7 +224,6 @@ pub struct Cli {
     // =========================================================================
     // NETWORK INTERFACE OPTIONS
     // =========================================================================
-
     /// Specify local address(es) to listen on
     ///
     /// Listen on specific IP addresses. Can be specified multiple times.
@@ -282,7 +279,6 @@ pub struct Cli {
     // =========================================================================
     // DNS PORT AND QUERY PORT OPTIONS
     // =========================================================================
-
     /// Specify DNS listening port (default 53, 0 disables DNS)
     ///
     /// Set DNS server listening port. Standard DNS port is 53. Setting to 0
@@ -314,7 +310,6 @@ pub struct Cli {
     // =========================================================================
     // DNS CACHE OPTIONS
     // =========================================================================
-
     /// Specify the size of the cache in entries (default 150)
     ///
     /// Set DNS cache size in number of cached records. 0 disables caching
@@ -372,7 +367,6 @@ pub struct Cli {
     // =========================================================================
     // DNS UPSTREAM SERVER OPTIONS
     // =========================================================================
-
     /// Specify upstream DNS server(s)
     ///
     /// Format: [/domain/]server[@source_address][#port]
@@ -434,13 +428,17 @@ pub struct Cli {
     ///
     /// Limits concurrent outstanding upstream queries. Prevents resource
     /// exhaustion during query floods. Default 150. Increase for busy servers.
-    #[arg(short = '0', long = "dns-forward-max", value_name = "NUMBER", default_value = "150")]
+    #[arg(
+        short = '0',
+        long = "dns-forward-max",
+        value_name = "NUMBER",
+        default_value = "150"
+    )]
     pub dns_forward_max: usize,
 
     // =========================================================================
     // DNS QUERY FILTERING OPTIONS
     // =========================================================================
-
     /// Do NOT forward DNS queries without domain part
     ///
     /// Reject queries for bare hostnames (no dots). Prevents unnecessary
@@ -496,7 +494,6 @@ pub struct Cli {
     // =========================================================================
     // DNS REBIND PROTECTION OPTIONS
     // =========================================================================
-
     /// Enable DNS rebinding protection
     ///
     /// Reject upstream responses containing private IP addresses (RFC1918,
@@ -531,7 +528,6 @@ pub struct Cli {
     // =========================================================================
     // LOCAL DNS RECORDS OPTIONS
     // =========================================================================
-
     /// Return specified IP for all hosts in domain
     ///
     /// Format: /domain/ipaddr or /domain/ (return NXDOMAIN)
@@ -590,7 +586,6 @@ pub struct Cli {
     // =========================================================================
     // EDNS AND PACKET SIZE OPTIONS
     // =========================================================================
-
     /// Specify maximum EDNS0 UDP packet size
     ///
     /// Set EDNS0 UDP payload size advertised in OPT records. Default 4096 bytes.
@@ -602,7 +597,6 @@ pub struct Cli {
     // =========================================================================
     // DHCP SERVER OPTIONS (feature-gated)
     // =========================================================================
-    
     #[cfg(feature = "dhcp")]
     /// Specify DHCP address range and lease time
     ///
@@ -785,7 +779,6 @@ pub struct Cli {
     // =========================================================================
     // DHCPv6 OPTIONS (feature-gated)
     // =========================================================================
-
     #[cfg(feature = "dhcp-v6")]
     /// Enable router advertisement for IPv6
     ///
@@ -838,7 +831,6 @@ pub struct Cli {
     // =========================================================================
     // TFTP SERVER OPTIONS (feature-gated)
     // =========================================================================
-
     #[cfg(feature = "tftp")]
     /// Enable TFTP server on specified interfaces
     ///
@@ -918,7 +910,6 @@ pub struct Cli {
     // =========================================================================
     // DNSSEC OPTIONS (feature-gated)
     // =========================================================================
-
     #[cfg(feature = "dnssec")]
     /// Enable DNSSEC validation
     ///
@@ -974,7 +965,6 @@ pub struct Cli {
     // =========================================================================
     // AUTHORITATIVE DNS OPTIONS (feature-gated)
     // =========================================================================
-
     #[cfg(feature = "auth-dns")]
     /// Specify authoritative DNS zone
     ///
@@ -1013,7 +1003,6 @@ pub struct Cli {
     // =========================================================================
     // LINUX INTEGRATION OPTIONS (feature-gated, platform-specific)
     // =========================================================================
-
     #[cfg(all(feature = "ipset", target_os = "linux"))]
     /// Add resolved IPs to Linux ipset
     ///
@@ -1045,7 +1034,6 @@ pub struct Cli {
     // =========================================================================
     // INTEGRATION OPTIONS (feature-gated)
     // =========================================================================
-
     #[cfg(feature = "dbus")]
     /// Enable D-Bus messaging interface
     ///
@@ -1177,7 +1165,7 @@ impl Cli {
         // Validate TTL values for reasonableness
         // TTL of 0 is valid (no caching), and u64::MAX is technically valid
         // though impractical (584 million years)
-        
+
         Ok(())
     }
 
@@ -1398,16 +1386,7 @@ mod tests {
 
     #[test]
     fn test_short_options() {
-        let args = vec![
-            "dnsmasq",
-            "-d",
-            "-p",
-            "5353",
-            "-c",
-            "1000",
-            "-S",
-            "8.8.8.8",
-        ];
+        let args = vec!["dnsmasq", "-d", "-p", "5353", "-c", "1000", "-S", "8.8.8.8"];
         let cli = Cli::parse_from(args);
         assert!(cli.no_daemon);
         assert_eq!(cli.port, 5353);

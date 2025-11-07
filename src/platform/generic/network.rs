@@ -43,7 +43,7 @@ use std::time::{Duration, SystemTime};
 
 use nix::ifaddrs::getifaddrs;
 use nix::net::if_::{if_indextoname, if_nametoindex};
-use nix::sys::socket::{socket, setsockopt, sockopt, AddressFamily, SockFlag, SockType};
+use nix::sys::socket::{AddressFamily, SockFlag, SockType, setsockopt, socket, sockopt};
 
 use crate::platform::{
     Interface, InterfaceEvent, InterfaceFlags, NetworkPlatform, PlatformError, PlatformMonitor,
@@ -341,11 +341,7 @@ impl GenericPlatform {
     /// let sock = platform.create_socket(AddressFamily::Inet, SockType::Datagram)?;
     /// // Bind sock to address...
     /// ```
-    pub fn create_socket(
-        &self,
-        family: AddressFamily,
-        sock_type: SockType,
-    ) -> PlatformResult<i32> {
+    pub fn create_socket(&self, family: AddressFamily, sock_type: SockType) -> PlatformResult<i32> {
         // Create basic socket
         let fd = socket(family, sock_type, SockFlag::empty(), None).map_err(|e| {
             PlatformError::IoError {
@@ -355,11 +351,9 @@ impl GenericPlatform {
         })?;
 
         // Set SO_REUSEADDR to allow quick restart (standard across all platforms)
-        setsockopt(&fd, sockopt::ReuseAddr, &true).map_err(|e| {
-            PlatformError::IoError {
-                operation: "set SO_REUSEADDR".to_string(),
-                source: std::io::Error::from_raw_os_error(e as i32),
-            }
+        setsockopt(&fd, sockopt::ReuseAddr, &true).map_err(|e| PlatformError::IoError {
+            operation: "set SO_REUSEADDR".to_string(),
+            source: std::io::Error::from_raw_os_error(e as i32),
         })?;
 
         Ok(fd)

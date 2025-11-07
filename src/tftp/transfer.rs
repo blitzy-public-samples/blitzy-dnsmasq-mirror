@@ -313,16 +313,16 @@ impl TftpFile {
 
         // Validate permissions
         let permissions = std_metadata.permissions();
-        
+
         // On Unix, check world-readable for root or ownership in secure mode
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = permissions.mode();
-            
+
             // Check if running as root (uid 0)
             let uid = unsafe { libc::geteuid() };
-            
+
             if uid == 0 {
                 // Running as root, must be world-readable
                 if (mode & 0o004) == 0 {
@@ -336,21 +336,21 @@ impl TftpFile {
                 let file_uid = std_metadata.uid();
                 if file_uid != uid {
                     return Err(TransferError::PermissionDenied(
-                        "File not owned by dnsmasq user (secure mode)".to_string()
+                        "File not owned by dnsmasq user (secure mode)".to_string(),
                     ));
                 }
             }
         }
 
         let size = std_metadata.len();
-        
+
         // Extract device and inode for stale detection
         #[cfg(unix)]
         let (device, inode) = {
             use std::os::unix::fs::MetadataExt;
             (std_metadata.dev(), std_metadata.ino())
         };
-        
+
         #[cfg(not(unix))]
         let (device, inode) = (0, 0);
 
@@ -383,23 +383,20 @@ impl TftpFile {
         let current_meta = tokio::fs::metadata(&self.filename)
             .await
             .map_err(TransferError::FileReadError)?;
-        
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            let current_metadata = FileMetadata::new(
-                current_meta.dev(),
-                current_meta.ino(),
-                current_meta.len(),
-            );
-            
+            let current_metadata =
+                FileMetadata::new(current_meta.dev(), current_meta.ino(), current_meta.len());
+
             if self.metadata.is_stale(&current_metadata) {
                 return Err(TransferError::InvalidState(
                     "File has been replaced (stale inode)".to_string(),
                 ));
             }
         }
-        
+
         Ok(())
     }
 
@@ -413,22 +410,22 @@ impl TftpFile {
     /// Vector of bytes read from file
     async fn read_block(&self, offset: u64, size: usize) -> Result<Vec<u8>, TransferError> {
         use tokio::io::{AsyncReadExt, AsyncSeekExt};
-        
+
         let mut file_guard = self.file.lock().await;
-        
+
         // Seek to offset
         file_guard
             .seek(SeekFrom::Start(offset))
             .await
             .map_err(TransferError::FileReadError)?;
-        
+
         // Read data
         let mut buffer = vec![0u8; size];
         let bytes_read = file_guard
             .read(&mut buffer)
             .await
             .map_err(TransferError::FileReadError)?;
-        
+
         buffer.truncate(bytes_read);
         Ok(buffer)
     }
@@ -456,55 +453,55 @@ pub struct Transfer {
     /// UDP socket for this transfer
     /// C reference: sockfd field (int)
     pub socket: Arc<UdpSocket>,
-    
+
     /// Client address (IP and port)
     /// C reference: peer field (union mysockaddr)
     pub peer: SocketAddr,
-    
+
     /// Server source address for multi-homed systems
     /// C reference: source field (union all_addr)
     source: IpAddr,
-    
+
     /// Network interface index for multi-homed binding
     /// C reference: if_index field (int)
     if_index: u32,
-    
+
     /// Current block number (0 = OACK, 1-65535 = DATA blocks)
     /// C reference: block field (unsigned int)
     pub block: u16,
-    
+
     /// Negotiated block size in bytes (512-65464)
     /// C reference: blocksize field (unsigned int)
     pub blocksize: u16,
-    
+
     /// Absolute timeout instant for next retransmission
     /// C reference: timeout field (time_t)
     pub timeout: Instant,
-    
+
     /// Exponential backoff counter (0-7, abort at > 7)
     /// C reference: backoff field (int)
     pub backoff: u8,
-    
+
     /// Current file offset in bytes for next read
     /// C reference: offset field (off_t)
     offset: u64,
-    
+
     /// Number of CR characters inserted in current block (netascii mode)
     /// C reference: expansion field (unsigned int)
     expansion: usize,
-    
+
     /// Transfer mode (octet, netascii, mail)
     /// C reference: netascii field (char)
     mode: TransferMode,
-    
+
     /// Whether previous block ended with LF (prevents double-expansion)
     /// C reference: carrylf field (char)
     carrylf: bool,
-    
+
     /// Transfer options negotiated with client
     /// C reference: opt_blocksize, opt_transize fields
     options: TransferOptions,
-    
+
     /// Shared file reference
     /// C reference: file field (struct tftp_file *)
     file: Arc<TftpFile>,
@@ -547,7 +544,11 @@ impl Transfer {
             peer,
             source,
             if_index,
-            block: if options.blocksize_requested || options.tsize_requested { 0 } else { 1 },
+            block: if options.blocksize_requested || options.tsize_requested {
+                0
+            } else {
+                1
+            },
             blocksize,
             timeout: Instant::now() + Duration::from_secs(INITIAL_TIMEOUT_SECS),
             backoff: 0,
@@ -579,7 +580,7 @@ impl Transfer {
         let opcode = cursor
             .read_u16::<BigEndian>()
             .map_err(|e| TransferError::PacketError(e.to_string()))?;
-        
+
         let block_or_error = cursor
             .read_u16::<BigEndian>()
             .map_err(|e| TransferError::PacketError(e.to_string()))?;
@@ -591,15 +592,15 @@ impl Transfer {
                     // Valid ACK for current block
                     self.reset_timeout();
                     self.backoff = 0;
-                    
+
                     if self.block != 0 {
                         // Advance offset for next block
                         self.offset += self.blocksize as u64 - self.expansion as u64;
                     }
-                    
+
                     // Advance to next block
                     self.block = self.block.wrapping_add(1);
-                    
+
                     Ok(TransferAction::SendBlock)
                 } else {
                     // Duplicate or out-of-order ACK, ignore
@@ -638,22 +639,22 @@ impl Transfer {
     /// C reference: get_block() OACK construction (lines 1446-1469)
     fn construct_oack(&self) -> Result<Vec<u8>, TransferError> {
         let mut packet = Vec::new();
-        
+
         // Opcode: OACK (6)
         packet.extend_from_slice(&6u16.to_be_bytes());
-        
+
         if self.options.blocksize_requested {
             packet.extend_from_slice(b"blksize\0");
             packet.extend_from_slice(self.blocksize.to_string().as_bytes());
             packet.push(0);
         }
-        
+
         if self.options.tsize_requested {
             packet.extend_from_slice(b"tsize\0");
             packet.extend_from_slice(self.file.size().to_string().as_bytes());
             packet.push(0);
         }
-        
+
         Ok(packet)
     }
 
@@ -665,34 +666,34 @@ impl Transfer {
         if self.offset >= self.file.size() {
             return Ok(Vec::new());
         }
-        
+
         // Calculate read size
         let remaining = self.file.size() - self.offset;
         let read_size = std::cmp::min(remaining, self.blocksize as u64) as usize;
-        
+
         // Read data from file
         let mut data = self.file.read_block(self.offset, read_size).await?;
-        
+
         // Reset expansion counter
         self.expansion = 0;
-        
+
         // Apply netascii translation if needed
         if self.mode == TransferMode::Netascii {
             data = self.apply_netascii_translation(data)?;
         }
-        
+
         // Construct DATA packet
         let mut packet = Vec::with_capacity(4 + data.len());
-        
+
         // Opcode: DATA (3)
         packet.extend_from_slice(&3u16.to_be_bytes());
-        
+
         // Block number
         packet.extend_from_slice(&self.block.to_be_bytes());
-        
+
         // Data
         packet.extend_from_slice(&data);
-        
+
         Ok(packet)
     }
 
@@ -705,12 +706,12 @@ impl Transfer {
         let original_size = data.len();
         let mut result = Vec::with_capacity(data.len() + data.len() / 10); // Estimate expansion
         let mut new_carrylf = false;
-        
+
         for (i, &byte) in data.iter().enumerate() {
             if byte == b'\n' && (i != 0 || !self.carrylf) {
                 // Found LF that needs CR inserted
                 self.expansion += 1;
-                
+
                 if original_size != self.blocksize as usize {
                     // Not a full block, we have room to expand
                     result.push(b'\r');
@@ -728,7 +729,7 @@ impl Transfer {
                 result.push(byte);
             }
         }
-        
+
         self.carrylf = new_carrylf;
         Ok(result)
     }
@@ -751,7 +752,8 @@ impl Transfer {
     ///
     /// C reference: Timeout update in check_tftp_listeners() (line 904)
     pub fn reset_timeout(&mut self) {
-        let backoff_duration = Duration::from_secs(INITIAL_TIMEOUT_SECS * (1 << (self.backoff / 2)));
+        let backoff_duration =
+            Duration::from_secs(INITIAL_TIMEOUT_SECS * (1 << (self.backoff / 2)));
         self.timeout = Instant::now() + backoff_duration;
     }
 
@@ -770,10 +772,8 @@ mod tests {
 
     #[test]
     fn test_transfer_options_builder() {
-        let opts = TransferOptions::new()
-            .with_blocksize()
-            .with_tsize();
-        
+        let opts = TransferOptions::new().with_blocksize().with_tsize();
+
         assert!(opts.blocksize_requested);
         assert!(opts.tsize_requested);
         assert!(!opts.timeout_requested);
@@ -784,7 +784,7 @@ mod tests {
         let meta1 = FileMetadata::new(1, 12345, 1024);
         let meta2 = FileMetadata::new(1, 12345, 1024);
         let meta3 = FileMetadata::new(1, 67890, 1024);
-        
+
         assert!(!meta1.is_stale(&meta2));
         assert!(meta1.is_stale(&meta3));
     }
@@ -801,4 +801,3 @@ mod tests {
         // This test demonstrates the structure
     }
 }
-

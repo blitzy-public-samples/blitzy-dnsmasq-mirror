@@ -96,68 +96,40 @@
 // Only compile this module on BSD systems with ipset feature enabled
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use std::fs::OpenOptions;
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use std::io::{Error as IoError, Result as IoResult};
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use std::net::IpAddr;
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use std::os::unix::io::AsRawFd;
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use libc::{c_int, c_void, ioctl};
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use thiserror::Error;
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 use tracing::{error, info, warn};
 
@@ -171,11 +143,7 @@ use tracing::{error, info, warn};
 /// Table names exceeding this length will be rejected with [`PfError::TableNameTooLong`].
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 pub const PF_TABLE_NAME_SIZE: usize = 32;
 
@@ -185,11 +153,7 @@ pub const PF_TABLE_NAME_SIZE: usize = 32;
 /// access, typically restricted to root or users in the appropriate group.
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 pub const PF_DEVICE_PATH: &str = "/dev/pf";
 
@@ -212,31 +176,19 @@ pub const PF_DEVICE_PATH: &str = "/dev/pf";
 // and will need adjustment for specific BSD variants.
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 const DIOCRADDTABLES: c_int = 0xc450443d; // Add tables ioctl command
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 const DIOCRADDADDRS: c_int = 0xc4504444; // Add addresses ioctl command
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 const DIOCRDELADDRS: c_int = 0xc4504445; // Delete addresses ioctl command
 
@@ -255,11 +207,7 @@ const DIOCRDELADDRS: c_int = 0xc4504445; // Delete addresses ioctl command
 // pf table flags (from net/pfvar.h)
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 const PFR_TFLAG_PERSIST: c_int = 0x00000001; // Table persists across ruleset reloads
 
@@ -267,24 +215,14 @@ const PFR_TFLAG_PERSIST: c_int = 0x00000001; // Table persists across ruleset re
 // Note: These differ between BSD and Linux!
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 const AF_INET: u8 = libc::AF_INET as u8; // IPv4 (value 2)
 
-#[cfg(all(
-    feature = "ipset",
-    target_os = "freebsd"
-))]
+#[cfg(all(feature = "ipset", target_os = "freebsd"))]
 const AF_INET6: u8 = 28; // FreeBSD uses 28 for IPv6
 
-#[cfg(all(
-    feature = "ipset",
-    any(target_os = "openbsd", target_os = "netbsd")
-))]
+#[cfg(all(feature = "ipset", any(target_os = "openbsd", target_os = "netbsd")))]
 const AF_INET6: u8 = 24; // OpenBSD/NetBSD use 24 for IPv6 (different from FreeBSD!)
 
 // ================================================================================================
@@ -298,11 +236,7 @@ const AF_INET6: u8 = 24; // OpenBSD/NetBSD use 24 for IPv6 (different from FreeB
 #[derive(Debug, Error)]
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 pub enum PfError {
     /// The specified pf table does not exist
@@ -354,11 +288,7 @@ pub enum PfError {
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 impl PfError {
     /// Convert errno to appropriate PfError variant
@@ -388,11 +318,7 @@ impl PfError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 pub enum TableOperation {
     /// Add IP address to the specified pf table
@@ -415,30 +341,22 @@ pub enum TableOperation {
 #[repr(C)]
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 struct PfrAddr {
-    pfra_ip4addr: libc::in_addr,      // IPv4 address (overlaps with pfra_ip6addr)
-    pfra_ip6addr: libc::in6_addr,     // IPv6 address (union with IPv4)
-    pfra_af: u8,                       // Address family (AF_INET or AF_INET6)
-    pfra_net: u8,                      // Netmask bits (32 for IPv4 /32, 128 for IPv6 /128)
-    pfra_not: u8,                      // Negation flag (unused in dnsmasq)
-    pfra_fback: u8,                    // Feedback flag (unused in dnsmasq)
-    pfra_type: u32,                    // Address type (unused in dnsmasq)
-    _pad: [u8; 12],                    // Padding to match kernel struct size
+    pfra_ip4addr: libc::in_addr,  // IPv4 address (overlaps with pfra_ip6addr)
+    pfra_ip6addr: libc::in6_addr, // IPv6 address (union with IPv4)
+    pfra_af: u8,                  // Address family (AF_INET or AF_INET6)
+    pfra_net: u8,                 // Netmask bits (32 for IPv4 /32, 128 for IPv6 /128)
+    pfra_not: u8,                 // Negation flag (unused in dnsmasq)
+    pfra_fback: u8,               // Feedback flag (unused in dnsmasq)
+    pfra_type: u32,               // Address type (unused in dnsmasq)
+    _pad: [u8; 12],               // Padding to match kernel struct size
 }
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 impl Default for PfrAddr {
     fn default() -> Self {
@@ -454,27 +372,19 @@ impl Default for PfrAddr {
 #[derive(Copy, Clone)]
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 struct PfrTable {
-    pfrt_anchor: [u8; 1024],           // Anchor name (unused in dnsmasq, always empty)
-    pfrt_name: [u8; 32],               // Table name (PF_TABLE_NAME_SIZE)
-    pfrt_flags: c_int,                 // Table flags (PFR_TFLAG_PERSIST)
-    pfrt_fback: u8,                    // Feedback flag (unused in dnsmasq)
-    _pad: [u8; 3],                     // Padding for alignment
+    pfrt_anchor: [u8; 1024], // Anchor name (unused in dnsmasq, always empty)
+    pfrt_name: [u8; 32],     // Table name (PF_TABLE_NAME_SIZE)
+    pfrt_flags: c_int,       // Table flags (PFR_TFLAG_PERSIST)
+    pfrt_fback: u8,          // Feedback flag (unused in dnsmasq)
+    _pad: [u8; 3],           // Padding for alignment
 }
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 impl Default for PfrTable {
     fn default() -> Self {
@@ -490,31 +400,23 @@ impl Default for PfrTable {
 #[repr(C)]
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 struct PfiocTable {
-    pfrio_table: PfrTable,             // Table to operate on
-    pfrio_buffer: *mut c_void,         // Pointer to buffer (PfrAddr* or PfrTable*)
-    pfrio_esize: c_int,                // Size of each element in buffer
-    pfrio_size: c_int,                 // Number of elements in buffer
-    pfrio_nadd: c_int,                 // Number of elements added (output)
-    pfrio_ndel: c_int,                 // Number of elements deleted (output)
-    pfrio_nchange: c_int,              // Number of elements changed (output)
-    pfrio_flags: c_int,                // Operation flags
-    pfrio_ticket: u32,                 // Ticket for atomic operations (unused)
+    pfrio_table: PfrTable,     // Table to operate on
+    pfrio_buffer: *mut c_void, // Pointer to buffer (PfrAddr* or PfrTable*)
+    pfrio_esize: c_int,        // Size of each element in buffer
+    pfrio_size: c_int,         // Number of elements in buffer
+    pfrio_nadd: c_int,         // Number of elements added (output)
+    pfrio_ndel: c_int,         // Number of elements deleted (output)
+    pfrio_nchange: c_int,      // Number of elements changed (output)
+    pfrio_flags: c_int,        // Operation flags
+    pfrio_ticket: u32,         // Ticket for atomic operations (unused)
 }
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 impl Default for PfiocTable {
     fn default() -> Self {
@@ -549,11 +451,7 @@ impl Default for PfiocTable {
 /// ```
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 pub struct PfDevice {
     /// File descriptor for /dev/pf
@@ -562,11 +460,7 @@ pub struct PfDevice {
 
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 impl PfDevice {
     /// Initialize BSD packet filter device for table manipulation
@@ -735,10 +629,7 @@ impl PfDevice {
                 error = %PfError::from_errno(errno, "DIOCRADDTABLES".to_string()),
                 "Failed to create table"
             );
-            return Err(PfError::from_errno(
-                errno,
-                "DIOCRADDTABLES".to_string(),
-            ));
+            return Err(PfError::from_errno(errno, "DIOCRADDTABLES".to_string()));
         }
 
         if io.pfrio_nadd > 0 {
@@ -847,11 +738,7 @@ impl PfDevice {
 #[cfg(test)]
 #[cfg(all(
     feature = "ipset",
-    any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd"
-    )
+    any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")
 ))]
 mod tests {
     use super::*;
@@ -915,4 +802,3 @@ mod tests {
 
 // Note: Integration tests requiring actual /dev/pf access should be in tests/ directory
 // and marked with #[ignore] or conditional on CI environment that has pf available.
-

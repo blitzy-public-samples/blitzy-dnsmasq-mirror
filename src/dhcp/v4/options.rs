@@ -29,7 +29,7 @@
 //! - `in_list()` → `is_option_requested()`
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::convert::{TryFrom, Into};
+use std::convert::{Into, TryFrom};
 use std::io::{Cursor, Write};
 use std::net::Ipv4Addr;
 use thiserror::Error;
@@ -294,16 +294,14 @@ impl DhcpOption {
             }
 
             OPTION_HOSTNAME => {
-                let hostname = String::from_utf8(option_data.to_vec()).map_err(|_| {
-                    OptionError::InvalidUtf8 { code }
-                })?;
+                let hostname = String::from_utf8(option_data.to_vec())
+                    .map_err(|_| OptionError::InvalidUtf8 { code })?;
                 Ok(DhcpOption::Hostname(hostname))
             }
 
             OPTION_DOMAINNAME => {
-                let domain = String::from_utf8(option_data.to_vec()).map_err(|_| {
-                    OptionError::InvalidUtf8 { code }
-                })?;
+                let domain = String::from_utf8(option_data.to_vec())
+                    .map_err(|_| OptionError::InvalidUtf8 { code })?;
                 Ok(DhcpOption::DomainName(domain))
             }
 
@@ -355,12 +353,12 @@ impl DhcpOption {
                     });
                 }
                 let mut cursor = Cursor::new(option_data);
-                let value = cursor
-                    .read_u32::<BigEndian>()
-                    .map_err(|_| OptionError::MalformedOptionData {
+                let value = cursor.read_u32::<BigEndian>().map_err(|_| {
+                    OptionError::MalformedOptionData {
                         code,
                         reason: "Failed to read u32".to_string(),
-                    })?;
+                    }
+                })?;
                 match code {
                     OPTION_LEASE_TIME => Ok(DhcpOption::LeaseTime(value)),
                     OPTION_T1 => Ok(DhcpOption::T1(value)),
@@ -394,9 +392,8 @@ impl DhcpOption {
             OPTION_REQUESTED_OPTIONS => Ok(DhcpOption::RequestedOptions(option_data.to_vec())),
 
             OPTION_MESSAGE => {
-                let message = String::from_utf8(option_data.to_vec()).map_err(|_| {
-                    OptionError::InvalidUtf8 { code }
-                })?;
+                let message = String::from_utf8(option_data.to_vec())
+                    .map_err(|_| OptionError::InvalidUtf8 { code })?;
                 Ok(DhcpOption::Message(message))
             }
 
@@ -409,35 +406,32 @@ impl DhcpOption {
                     });
                 }
                 let mut cursor = Cursor::new(option_data);
-                let value = cursor
-                    .read_u16::<BigEndian>()
-                    .map_err(|_| OptionError::MalformedOptionData {
+                let value = cursor.read_u16::<BigEndian>().map_err(|_| {
+                    OptionError::MalformedOptionData {
                         code,
                         reason: "Failed to read u16".to_string(),
-                    })?;
+                    }
+                })?;
                 Ok(DhcpOption::MaxMessageSize(value))
             }
 
             OPTION_VENDOR_ID => {
-                let vendor_id = String::from_utf8(option_data.to_vec()).map_err(|_| {
-                    OptionError::InvalidUtf8 { code }
-                })?;
+                let vendor_id = String::from_utf8(option_data.to_vec())
+                    .map_err(|_| OptionError::InvalidUtf8 { code })?;
                 Ok(DhcpOption::VendorId(vendor_id))
             }
 
             OPTION_CLIENT_ID => Ok(DhcpOption::ClientIdentifier(option_data.to_vec())),
 
             OPTION_SNAME => {
-                let name = String::from_utf8(option_data.to_vec()).map_err(|_| {
-                    OptionError::InvalidUtf8 { code }
-                })?;
+                let name = String::from_utf8(option_data.to_vec())
+                    .map_err(|_| OptionError::InvalidUtf8 { code })?;
                 Ok(DhcpOption::TftpServerName(name))
             }
 
             OPTION_FILENAME => {
-                let filename = String::from_utf8(option_data.to_vec()).map_err(|_| {
-                    OptionError::InvalidUtf8 { code }
-                })?;
+                let filename = String::from_utf8(option_data.to_vec())
+                    .map_err(|_| OptionError::InvalidUtf8 { code })?;
                 Ok(DhcpOption::BootFilename(filename))
             }
 
@@ -452,12 +446,12 @@ impl DhcpOption {
                     });
                 }
                 let mut cursor = Cursor::new(option_data);
-                let arch = cursor
-                    .read_u16::<BigEndian>()
-                    .map_err(|_| OptionError::MalformedOptionData {
+                let arch = cursor.read_u16::<BigEndian>().map_err(|_| {
+                    OptionError::MalformedOptionData {
                         code,
                         reason: "Failed to read u16".to_string(),
-                    })?;
+                    }
+                })?;
                 Ok(DhcpOption::ClientArchitecture(arch))
             }
 
@@ -977,4 +971,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

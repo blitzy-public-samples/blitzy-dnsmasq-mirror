@@ -49,10 +49,17 @@
 //! ```
 
 pub mod crypto;
+pub mod validation;
 
 // Re-export commonly used types for convenience
 pub use crypto::{
-    Algorithm, CryptoError, HashFunction, 
-    verify_signature, hash_init, find_hash_algorithm,
-    algorithm_digest_name, ds_digest_algorithm_name, nsec3_hash_algorithm_name,
+    Algorithm, CryptoError, HashFunction, algorithm_digest_name, ds_digest_algorithm_name,
+    find_hash_algorithm, hash_init, nsec3_hash_algorithm_name, verify_signature,
+};
+
+// Re-export validation types
+pub use validation::{
+    DnssecStatus, TrustAnchor, ValidationResult, RrsigRecord, DnskeyRecord, DsRecord,
+    compute_key_tag, generate_dnssec_query, setup_timestamp, validate_by_ds, validate_ds,
+    validate_reply, validation_status_to_ede,
 };
