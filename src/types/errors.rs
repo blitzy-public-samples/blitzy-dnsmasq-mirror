@@ -224,6 +224,10 @@ pub enum DnsError {
         /// Description of what was not found
         message: String,
     },
+
+    /// DNS message serialization error
+    #[error("DNS serialization error: {0}")]
+    Serialization(String),
 }
 
 /// DHCP subsystem errors
@@ -419,6 +423,38 @@ pub enum NetworkError {
         /// Description of validation failure
         message: String,
     },
+
+    /// Signal handler error
+    #[error("Signal handler error: {0}")]
+    SignalHandler(String),
+
+    /// Socket receive error
+    #[error("Socket receive error: {0}")]
+    Receive(String),
+
+    /// Socket accept error
+    #[error("Socket accept error: {0}")]
+    Accept(String),
+
+    /// Socket send error
+    #[error("Socket send error: {0}")]
+    Send(String),
+
+    /// Socket option configuration error
+    #[error("Socket option error: {0}")]
+    SocketOption(String),
+
+    /// Socket bind error
+    #[error("Socket bind error: {0}")]
+    Bind(String),
+
+    /// Socket creation error
+    #[error("Socket creation error: {0}")]
+    SocketCreation(String),
+
+    /// Socket listen error
+    #[error("Socket listen error: {0}")]
+    Listen(String),
 }
 
 /// Configuration parsing and validation errors
