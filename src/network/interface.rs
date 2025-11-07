@@ -990,7 +990,7 @@ mod solaris {
 // Add once_cell dependency for lazy static initialization
 use once_cell::sync::Lazy;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod tests {
     use super::*;
     

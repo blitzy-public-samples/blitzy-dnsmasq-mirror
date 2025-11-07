@@ -62,14 +62,17 @@
 //!
 //! ## Querying ARP cache
 //!
-//! ```rust,no_run
-//! use dnsmasq::network::find_mac;
+//! ```rust,ignore
+//! use dnsmasq::network::{find_mac, ArpCache};
 //! use std::net::Ipv4Addr;
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let arp_cache = Arc::new(RwLock::new(ArpCache::new()));
 //!     let ip = Ipv4Addr::new(192, 168, 1, 100);
-//!     if let Some(mac) = find_mac(ip.into()).await? {
+//!     if let Some(mac) = find_mac(arp_cache, ip.into()).await? {
 //!         println!("MAC address: {}", mac);
 //!     }
 //!     Ok(())
@@ -168,7 +171,7 @@ pub enum NetworkError {
 /// use dnsmasq::network::{Result, enumerate_interfaces, InterfaceRecord};
 ///
 /// async fn get_interfaces() -> Result<Vec<InterfaceRecord>> {
-///     enumerate_interfaces().await
+///     Ok(enumerate_interfaces().await?)
 /// }
 /// ```
 pub type Result<T> = std::result::Result<T, NetworkError>;

@@ -1084,7 +1084,7 @@ pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod tests {
     use super::*;
     
