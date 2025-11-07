@@ -93,10 +93,9 @@
 //! ```
 
 use crate::dns::blockdata::BlockData;
-use crate::dns::protocol::{C_IN, MAXDNAME, T_A, T_AAAA, T_CNAME, T_DNSKEY, T_DS, T_SRV};
 use bitflags::bitflags;
 use std::net::IpAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 // ============================================================================
 // Cache Record ID Type
@@ -900,6 +899,8 @@ impl CacheRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::protocol::{T_A, T_AAAA};
+    use std::time::Duration;
 
     #[test]
     fn test_cache_record_id() {
