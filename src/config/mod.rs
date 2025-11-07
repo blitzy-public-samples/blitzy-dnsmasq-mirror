@@ -11,6 +11,9 @@ pub mod defaults;
 /// Configuration type definitions and validation
 pub mod types;
 
+/// Command-line argument parsing
+pub mod options;
+
 /// Main configuration structure
 #[derive(Debug, Clone)]
 pub struct Config {

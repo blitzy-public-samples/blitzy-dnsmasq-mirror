@@ -107,6 +107,8 @@ use crate::config::types::ConfigError;
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Network services for small networks", long_about = None)]
 #[command(author = "Simon Kelley (C version), Blitzy Platform (Rust port)")]
+#[command(disable_version_flag = true)]
+#[command(disable_help_flag = true)]
 pub struct Cli {
     // =========================================================================
     // GENERAL OPTIONS
