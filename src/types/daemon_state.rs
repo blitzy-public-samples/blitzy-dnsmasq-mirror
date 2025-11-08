@@ -85,8 +85,12 @@ use std::time::Instant;
 
 // Internal imports - ONLY from depends_on_files
 use crate::config::Config;
+#[cfg(feature = "dhcp")]
+pub use crate::config::types::DhcpContext;
 use crate::config::types::DhcpOption;
 use crate::constants::MAX_FORWARD_REQUESTS;
+#[cfg(feature = "dhcp")]
+use crate::dhcp::lease::LeaseDatabase;
 use crate::dns::cache::DnsCache;
 use crate::dns::forward::Server;
 use crate::network::interface::InterfaceRecord;
@@ -262,7 +266,7 @@ pub struct DhcpState {
     pub static_hosts: Vec<StaticHost>,
 
     /// DHCP lease database (active and expired leases)
-    pub lease_database: DhcpLeaseDatabase,
+    pub lease_database: LeaseDatabase,
 
     /// `DHCPv6` server DUID (DHCP Unique Identifier)
     pub server_duid: Option<Vec<u8>>,
@@ -271,26 +275,9 @@ pub struct DhcpState {
     pub options: Vec<DhcpOption>,
 }
 
-/// DHCP context representing an address range and associated options
-///
-/// Corresponds to C's `struct dhcp_context` from dnsmasq.h.
-/// Defines an IP address range for DHCP allocation with associated
-/// network parameters and options.
-#[cfg(feature = "dhcp")]
-#[derive(Debug, Clone)]
-pub struct DhcpContext {
-    /// Start of address range
-    pub range_start: IpAddr,
-
-    /// End of address range
-    pub range_end: IpAddr,
-
-    /// Network interface this context applies to
-    pub interface: Option<String>,
-
-    /// Default lease time in seconds
-    pub lease_time: u32,
-}
+// NOTE: DhcpContext is now imported from config::types to maintain consistency
+// with the detailed DHCPv4 context structure used throughout the codebase.
+// The simplified version previously defined here has been removed.
 
 /// Static DHCP host configuration
 ///
@@ -309,38 +296,9 @@ pub struct StaticHost {
     pub hostname: Option<String>,
 }
 
-/// DHCP lease database
-///
-/// Manages active and expired DHCP leases with persistence to disk.
-/// Replaces C's lease file management from lease.c.
-#[cfg(feature = "dhcp")]
-#[derive(Debug)]
-pub struct DhcpLeaseDatabase {
-    /// Active leases (MAC → lease info)
-    pub active_leases: HashMap<[u8; 6], DhcpLease>,
-
-    /// Path to lease file for persistence
-    pub lease_file_path: Option<std::path::PathBuf>,
-}
-
-/// Individual DHCP lease record
-///
-/// Tracks a single DHCP lease with expiration time and client information.
-#[cfg(feature = "dhcp")]
-#[derive(Debug, Clone)]
-pub struct DhcpLease {
-    /// Assigned IP address
-    pub ip_address: IpAddr,
-
-    /// Lease expiration time
-    pub expires_at: Instant,
-
-    /// Client hostname (if provided)
-    pub hostname: Option<String>,
-
-    /// Client identifier (if provided)
-    pub client_id: Option<Vec<u8>>,
-}
+// NOTE: DhcpLeaseDatabase and DhcpLease have been replaced by the proper
+// LeaseDatabase from src/dhcp/lease.rs to maintain consistency across the codebase.
+// The redundant types have been removed to avoid confusion.
 
 /// Network interface and socket state
 ///
@@ -464,10 +422,7 @@ impl DaemonState {
                 #[cfg(feature = "dhcp-v6")]
                 contexts_v6: Vec::new(),
                 static_hosts: Vec::new(),
-                lease_database: DhcpLeaseDatabase {
-                    active_leases: HashMap::new(),
-                    lease_file_path: None,
-                },
+                lease_database: LeaseDatabase::new(1000), // Default max 1000 leases
                 server_duid: None,
                 options: Vec::new(),
             },
@@ -579,22 +534,18 @@ impl DaemonState {
     /// Replaces direct access to lease structures in lease.c
     #[must_use]
     #[cfg(feature = "dhcp")]
-    pub fn get_lease_database(&self) -> &DhcpLeaseDatabase {
+    pub fn get_lease_database(&self) -> &LeaseDatabase {
         &self.dhcp.lease_database
     }
 
     /// Get empty lease database (no-op when DHCP feature disabled)
     ///
-    /// Returns reference to empty database structure for API compatibility.
+    /// This method should not be called when DHCP feature is disabled.
+    /// It exists for API compatibility but will panic if called.
     #[must_use]
     #[cfg(not(feature = "dhcp"))]
-    pub fn get_lease_database(&self) -> &DhcpLeaseDatabase {
-        // Return a static empty database
-        static EMPTY_DB: DhcpLeaseDatabase = DhcpLeaseDatabase {
-            active_leases: HashMap::new(),
-            lease_file_path: None,
-        };
-        &EMPTY_DB
+    pub fn get_lease_database(&self) -> &LeaseDatabase {
+        panic!("get_lease_database() called without dhcp feature enabled")
     }
 
     /// Get DNS cache for query resolution
@@ -1124,10 +1075,7 @@ impl DaemonStateBuilder {
                 #[cfg(feature = "dhcp-v6")]
                 contexts_v6: Vec::new(),
                 static_hosts: Vec::new(),
-                lease_database: DhcpLeaseDatabase {
-                    active_leases: HashMap::new(),
-                    lease_file_path: None,
-                },
+                lease_database: LeaseDatabase::new(1000), // Default max 1000 leases
                 server_duid: None,
                 options: Vec::new(),
             },
