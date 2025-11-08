@@ -123,8 +123,8 @@
 //!
 //! Provides socket management, packet reception, `DUID` generation, and address allocation:
 //!
-//! - `Dhcpv6Server`: Main server structure managing `DHCPv6` socket and server state
-//! - `Dhcpv6ServerConfig`: Server configuration structure with `DUID`, prefix, lifetimes, etc.
+//! - `DhcpV6Server`: Main server structure managing `DHCPv6` socket and server state
+//! - `DhcpV6ServerConfig`: Server configuration structure with `DUID`, prefix, lifetimes, etc.
 //!
 //! ### 2. **`protocol`** - `RFC 3315` Protocol Implementation (`rfc3315.c` translation)
 //!
@@ -210,11 +210,11 @@
 //! ### Basic `DHCPv6` Server Initialization
 //!
 //! ```rust,ignore
-//! use dnsmasq::dhcp::v6::{Dhcpv6Server, Dhcpv6ServerConfig};
+//! use dnsmasq::dhcp::v6::{DhcpV6Server, DhcpV6ServerConfig};
 //! use std::net::Ipv6Addr;
 //!
 //! // Create DHCPv6 server configuration
-//! let config = Dhcpv6ServerConfig {
+//! let config = DhcpV6ServerConfig {
 //!     server_duid: vec![0x00, 0x01, 0x00, 0x01], // DUID-LLT example
 //!     prefix: "2001:db8::".parse().unwrap(),
 //!     prefix_len: 64,
@@ -226,7 +226,7 @@
 //! };
 //!
 //! // Initialize DHCPv6 server with configuration
-//! let server = Dhcpv6Server::new(config);
+//! let server = DhcpV6Server::new(config);
 //! ```
 //!
 //! ### Processing Incoming `DHCPv6` Packets
@@ -361,7 +361,7 @@ pub mod state_machine;
 
 // Re-export key types for external use when DHCPv6 is enabled
 #[cfg(feature = "dhcp-v6")]
-pub use server::Dhcpv6Server;
+pub use server::DhcpV6Server;
 
 #[cfg(feature = "dhcp-v6")]
 pub use protocol::{Dhcp6Message, Dhcpv6MessageType};

@@ -161,7 +161,7 @@ pub enum Dhcp6Error {
 ///
 /// Replaces C's global daemon->dhcp6fd with structured server instance.
 /// Maintains DHCPv6 socket, server DUID, and references to daemon state.
-pub struct Dhcpv6Server {
+pub struct DhcpV6Server {
     /// UDP socket bound to port 547
     socket: Arc<UdpSocket>,
     
@@ -172,7 +172,7 @@ pub struct Dhcpv6Server {
     daemon_state: Arc<RwLock<DaemonState>>,
 }
 
-impl Dhcpv6Server {
+impl DhcpV6Server {
     /// Create new DHCPv6 server instance
     ///
     /// # Arguments
@@ -840,7 +840,7 @@ pub async fn address6_allocate(
     // Try each context in order
     for context in contexts {
         // Get address range from context - must be IPv6
-        let (start_v6, end_v6) = match (context.range_start, context.range_end) {
+        let (start_v6, end_v6) = match (context.start, context.end) {
             (IpAddr::V6(start), IpAddr::V6(end)) => (start, end),
             _ => {
                 // Skip non-IPv6 contexts
@@ -925,12 +925,12 @@ pub async fn is_address_available(
     let daemon = daemon_state.read().await;
 
     // Check if address is in lease database
-    for lease in daemon.dhcp.lease_database.active_leases.values() {
-        if lease.ip_address == std::net::IpAddr::V6(addr) {
+    for lease in daemon.dhcp.lease_database.get_all_leases() {
+        if lease.ip_addr() == std::net::IpAddr::V6(addr) {
             // Address is leased, check if lease expired
-            // Note: For now we assume active_leases only contains non-expired leases
-            // TODO: Add proper expiration checking
-            return false; // Address in use
+            if !lease.is_expired() {
+                return false; // Address in use
+            }
         }
     }
 
@@ -1181,7 +1181,7 @@ mod tests {
         
         let config = Config::default();
         let daemon_state = Arc::new(RwLock::new(DaemonState::new(config)));
-        let server = Dhcpv6Server::new(daemon_state);
+        let server = DhcpV6Server::new(daemon_state);
 
         // Server should be created with placeholder DUID
         assert!(matches!(server.duid, Duid::LL { .. }));
