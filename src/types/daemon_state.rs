@@ -85,6 +85,7 @@ use std::time::Instant;
 
 // Internal imports - ONLY from depends_on_files
 use crate::config::Config;
+use crate::config::types::DhcpOption;
 use crate::constants::MAX_FORWARD_REQUESTS;
 use crate::dns::cache::DnsCache;
 use crate::dns::forward::Server;
@@ -141,11 +142,11 @@ pub struct DaemonState {
     config: Config,
 
     /// DNS subsystem state
-    dns: DnsState,
+    pub dns: DnsState,
 
     /// DHCP subsystem state (feature-gated)
     #[cfg(feature = "dhcp")]
-    dhcp: DhcpState,
+    pub dhcp: DhcpState,
 
     /// Network interface and socket state
     network: NetworkState,
@@ -179,13 +180,19 @@ pub struct DaemonState {
 /// - `upstream_servers`: List of configured upstream DNS servers
 /// - `forward_records`: Active DNS queries awaiting upstream responses
 #[derive(Debug)]
-struct DnsState {
+pub struct DnsState {
     /// DNS response cache (Arc-wrapped for potential sharing)
-    cache: Arc<DnsCache>,
+    pub cache: Arc<DnsCache>,
 
     /// Configured upstream DNS servers for query forwarding
     /// Corresponds to C's `struct server *servers`
-    upstream_servers: Vec<Server>,
+    pub upstream_servers: Vec<Server>,
+
+    /// DNS servers list (alias for upstream_servers for compatibility)
+    pub servers: Vec<AllAddr>,
+
+    /// Domain search list
+    pub domain: Option<String>,
 
     /// Active forward records tracking in-flight queries
     /// Maps query ID to forward record for response matching
@@ -243,19 +250,25 @@ struct ForwardRecord {
 /// Only compiled when `dhcp` feature is enabled.
 #[cfg(feature = "dhcp")]
 #[derive(Debug)]
-struct DhcpState {
+pub struct DhcpState {
     /// `DHCPv4` contexts (address ranges and options)
-    contexts_v4: Vec<DhcpContext>,
+    pub contexts_v4: Vec<DhcpContext>,
 
     /// `DHCPv6` contexts (address ranges and options)
     #[cfg(feature = "dhcp-v6")]
-    contexts_v6: Vec<DhcpContext>,
+    pub contexts_v6: Vec<DhcpContext>,
 
     /// Static DHCP host configurations (MAC → IP mappings)
-    static_hosts: Vec<StaticHost>,
+    pub static_hosts: Vec<StaticHost>,
 
     /// DHCP lease database (active and expired leases)
-    lease_database: DhcpLeaseDatabase,
+    pub lease_database: DhcpLeaseDatabase,
+
+    /// DHCPv6 server DUID (DHCP Unique Identifier)
+    pub server_duid: Option<Vec<u8>>,
+
+    /// DHCP options configuration
+    pub options: Vec<DhcpOption>,
 }
 
 /// DHCP context representing an address range and associated options
@@ -440,6 +453,8 @@ impl DaemonState {
             dns: DnsState {
                 cache: Arc::new(DnsCache::new(cache_size)),
                 upstream_servers: Vec::new(),
+                servers: Vec::new(),
+                domain: None,
                 forward_records: HashMap::with_capacity(MAX_FORWARD_REQUESTS),
                 next_query_id: 1,
             },
@@ -453,6 +468,8 @@ impl DaemonState {
                     active_leases: HashMap::new(),
                     lease_file_path: None,
                 },
+                server_duid: None,
+                options: Vec::new(),
             },
             network: NetworkState {
                 interfaces: Vec::new(),
@@ -1096,6 +1113,8 @@ impl DaemonStateBuilder {
             dns: DnsState {
                 cache: Arc::new(dns_cache),
                 upstream_servers,
+                servers: Vec::new(),
+                domain: None,
                 forward_records: HashMap::with_capacity(MAX_FORWARD_REQUESTS),
                 next_query_id: 1,
             },
@@ -1109,6 +1128,8 @@ impl DaemonStateBuilder {
                     active_leases: HashMap::new(),
                     lease_file_path: None,
                 },
+                server_duid: None,
+                options: Vec::new(),
             },
             network: NetworkState {
                 interfaces,
