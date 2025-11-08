@@ -1106,10 +1106,17 @@ mod tests {
 
     #[test]
     fn test_result_type_alias() {
-        fn test_function() -> DnsmasqResult<i32> {
-            Ok(42)
+        fn test_function(should_fail: bool) -> DnsmasqResult<i32> {
+            if should_fail {
+                Err(DnsmasqError::Config(ConfigError::InvalidOption {
+                    option: "test".to_string(),
+                }))
+            } else {
+                Ok(42)
+            }
         }
 
-        assert_eq!(test_function().unwrap(), 42);
+        assert_eq!(test_function(false).unwrap(), 42);
+        assert!(test_function(true).is_err());
     }
 }
