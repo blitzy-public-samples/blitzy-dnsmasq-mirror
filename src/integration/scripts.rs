@@ -17,7 +17,7 @@
 //! ## Purpose
 //!
 //! Provides async script execution for DHCP lease events (add/delete/renew), TFTP
-//! transfers, ARP detections, and DHCPv6 relay snooping. Scripts receive event data
+//! transfers, ARP detections, and `DHCPv6` relay snooping. Scripts receive event data
 //! via `DNSMASQ_*` environment variables, enabling integration with external systems
 //! for lease management, logging, and firewall updates.
 //!
@@ -59,7 +59,7 @@
 //!
 //! - `tokio::process`: Async Command execution replacing C fork/exec
 //! - `tokio::sync::mpsc`: Event queue replacing C static buffer
-//! - `mlua` (optional): Lua interpreter replacing C lua_State
+//! - `mlua` (optional): Lua interpreter replacing C `lua_State`
 //! - `Lease`: DHCP lease structure from `src/dhcp/lease.rs`
 //! - `MacAddr`: MAC address type from `src/network/arp.rs`
 //!
@@ -67,12 +67,21 @@
 //!
 //! ```rust,no_run
 //! use dnsmasq::integration::scripts::{ScriptExecutor, LeaseAction};
+//! use dnsmasq::dhcp::lease::Lease;
 //! use std::time::Duration;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")
+//! let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")?
 //!     .with_timeout(Duration::from_secs(30));
 //!
+//! # // Create a sample lease (in real code, this would come from DHCP server)
+//! # let lease = Lease::new(
+//! #     "192.168.1.100".parse()?,
+//! #     vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+//! #     None,
+//! #     Some("client-hostname".to_string()),
+//! #     3600,
+//! # );
 //! // Queue a lease add event
 //! executor.queue_lease_event(
 //!     LeaseAction::Add,
@@ -135,7 +144,7 @@ const MAX_ENV_VALUE_LEN: usize = 8192;
 /// Script execution errors.
 ///
 /// Comprehensive error types for all script execution failure modes, replacing
-/// C's errno-based error reporting via err_fd pipe with structured Rust errors.
+/// C's errno-based error reporting via `err_fd` pipe with structured Rust errors.
 ///
 /// ## C Reference
 ///
@@ -148,7 +157,9 @@ pub enum ScriptError {
     /// Contains exit code and captured stderr for debugging script issues.
     #[error("Script execution failed with exit code {exit_code}: {stderr}")]
     ExecutionFailed {
+        /// Process exit code returned by the script
         exit_code: i32,
+        /// Standard error output captured from the script
         stderr: String,
     },
 
@@ -168,7 +179,7 @@ pub enum ScriptError {
 
     /// I/O error during script execution or output capture.
     ///
-    /// Wraps std::io::Error for file operations, pipe creation, or process
+    /// Wraps `std::io::Error` for file operations, pipe creation, or process
     /// spawning failures.
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
@@ -176,7 +187,7 @@ pub enum ScriptError {
     /// Lua script error (feature-gated).
     ///
     /// Lua script execution failures including syntax errors, runtime errors,
-    /// or missing lease() function in loaded script.
+    /// or missing `lease()` function in loaded script.
     #[cfg(feature = "lua")]
     #[error("Lua script error: {0}")]
     LuaError(#[from] mlua::Error),
@@ -201,7 +212,7 @@ pub enum ScriptError {
 /// ## C Reference
 ///
 /// Maps to: `#define ACTION_OLD 1`, `ACTION_ADD 2`, `ACTION_DEL 3` (not shown
-/// in provided excerpt, but referenced in queue_script line 1197).
+/// in provided excerpt, but referenced in `queue_script` line 1197).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaseAction {
     /// Lease renewal (existing lease extended).
@@ -228,7 +239,7 @@ impl LeaseAction {
     ///
     /// Returns the string representation used for `DNSMASQ_LEASE_ACTION`
     /// environment variable, matching C version's behavior.
-    fn as_env_str(&self) -> &'static str {
+    fn as_env_str(self) -> &'static str {
         match self {
             LeaseAction::Renew => "old",
             LeaseAction::Add => "add",
@@ -261,7 +272,7 @@ pub enum ArpAction {
 
 impl ArpAction {
     /// Convert to environment variable string value.
-    fn as_env_str(&self) -> &'static str {
+    fn as_env_str(self) -> &'static str {
         match self {
             ArpAction::Add => "add",
             ArpAction::Delete => "del",
@@ -272,7 +283,7 @@ impl ArpAction {
 /// Script event types.
 ///
 /// Enum representing all event types that can trigger script execution,
-/// replacing C's struct script_data wire format with owned Rust types.
+/// replacing C's struct `script_data` wire format with owned Rust types.
 ///
 /// ## C Reference
 ///
@@ -285,8 +296,11 @@ pub enum ScriptEvent {
     /// Contains all information needed to populate DHCP lease environment
     /// variables for script execution.
     DhcpLeaseEvent {
+        /// Type of lease change (add, renew, delete)
         action: LeaseAction,
+        /// Complete lease information including IP, MAC, expiry time
         lease: Lease,
+        /// Client-supplied hostname if available
         hostname: Option<String>,
     },
 
@@ -296,8 +310,11 @@ pub enum ScriptEvent {
     /// name, and client address.
     #[cfg(feature = "tftp")]
     TftpEvent {
+        /// Size of the transferred file in bytes
         file_len: u64,
+        /// Name of the file that was transferred
         filename: String,
+        /// Network address of the TFTP client
         peer: SocketAddr,
     },
 
@@ -306,20 +323,27 @@ pub enum ScriptEvent {
     /// Notifies scripts of devices appearing or disappearing from network
     /// based on ARP cache monitoring.
     ArpEvent {
+        /// Type of ARP change (add or delete)
         action: ArpAction,
+        /// Hardware (MAC) address of the device
         mac: MacAddr,
+        /// IP address associated with the device
         addr: IpAddr,
     },
 
-    /// DHCPv6 relay snooping event.
+    /// `DHCPv6` relay snooping event.
     ///
-    /// Monitors DHCPv6 prefix delegations relayed through this server,
+    /// Monitors `DHCPv6` prefix delegations relayed through this server,
     /// enabling external tracking of IPv6 prefix assignments.
     #[cfg(feature = "dhcp-v6")]
     RelaySnoop {
+        /// IPv6 address of the `DHCPv6` client
         client: Ipv6Addr,
+        /// Network interface where the relay was observed
         interface: String,
+        /// IPv6 prefix that was delegated
         prefix: Ipv6Addr,
+        /// Length of the delegated prefix in bits
         prefix_len: u8,
     },
 }
@@ -373,13 +397,13 @@ pub struct ScriptExecutor {
     /// Event queue receiver (moved to background task).
     ///
     /// Processed by background task that executes scripts for each event.
-    /// Wrapped in Arc<RwLock<>> for shared ownership.
+    /// Wrapped in Arc<`RwLock`<>> for shared ownership.
     event_rx: Arc<RwLock<Option<mpsc::Receiver<ScriptEvent>>>>,
 
     /// Lua interpreter state (feature-gated).
     ///
-    /// Loaded with user-provided Lua script that defines lease(), tftp(), or
-    /// arp() functions for event handling. Provides faster in-process event
+    /// Loaded with user-provided Lua script that defines `lease()`, `tftp()`, or
+    /// `arp()` functions for event handling. Provides faster in-process event
     /// handling compared to fork+exec.
     #[cfg(feature = "lua")]
     lua: Arc<RwLock<Option<Lua>>>,
@@ -398,6 +422,10 @@ impl ScriptExecutor {
     /// ## Returns
     ///
     /// * `Result<Self, ScriptError>` - New executor or error if path invalid
+    ///
+    /// ## Errors
+    ///
+    /// Returns `ScriptError::InvalidPath` if the script path is not absolute.
     ///
     /// ## C Reference
     ///
@@ -444,6 +472,7 @@ impl ScriptExecutor {
     /// ## C Reference
     ///
     /// Matches C behavior when `daemon->helperfd == -1` (no helper process).
+    #[must_use]
     pub fn disabled() -> Self {
         let (event_tx, event_rx) = mpsc::channel(1);
 
@@ -491,7 +520,7 @@ impl ScriptExecutor {
     /// Load Lua script for in-process event handling (feature-gated).
     ///
     /// Loads and compiles Lua script from file, making it available for
-    /// event callbacks. Script should define lease(), tftp(), and/or arp()
+    /// event callbacks. Script should define `lease()`, `tftp()`, and/or `arp()`
     /// functions.
     ///
     /// ## Arguments
@@ -502,9 +531,14 @@ impl ScriptExecutor {
     ///
     /// * `Result<Self, ScriptError>` - Self for chaining or Lua error
     ///
+    /// ## Errors
+    ///
+    /// Returns `ScriptError::Io` if the Lua script file cannot be read,
+    /// or `ScriptError::Lua` if the script compilation fails.
+    ///
     /// ## C Reference
     ///
-    /// Replaces: Lua initialization in create_helper() (helper.c lines 313-332).
+    /// Replaces: Lua initialization in `create_helper()` (helper.c lines 313-332).
     ///
     /// ## Example
     ///
@@ -548,6 +582,10 @@ impl ScriptExecutor {
     /// ## Returns
     ///
     /// * `Result<(), ScriptError>` - Success or queue full error
+    ///
+    /// ## Errors
+    ///
+    /// Returns `ScriptError::QueueFull` if the event queue is at capacity.
     ///
     /// ## C Reference
     ///
@@ -602,6 +640,10 @@ impl ScriptExecutor {
     ///
     /// * `Result<(), ScriptError>` - Success or queue error
     ///
+    /// ## Errors
+    ///
+    /// Returns `ScriptError::QueueFull` if the event queue is at capacity.
+    ///
     /// ## C Reference
     ///
     /// Replaces: `queue_tftp()` function (helper.c lines 1366-1443).
@@ -641,6 +683,10 @@ impl ScriptExecutor {
     ///
     /// * `Result<(), ScriptError>` - Success or queue error
     ///
+    /// ## Errors
+    ///
+    /// Returns `ScriptError::QueueFull` if the event queue is at capacity.
+    ///
     /// ## C Reference
     ///
     /// Replaces: `queue_arp()` function (helper.c lines 1444-1464).
@@ -664,13 +710,13 @@ impl ScriptExecutor {
             .map_err(|_| ScriptError::QueueClosed)
     }
 
-    /// Queue DHCPv6 relay snooping event (feature-gated).
+    /// Queue `DHCPv6` relay snooping event (feature-gated).
     ///
-    /// Monitors DHCPv6 prefix delegations relayed through this server.
+    /// Monitors `DHCPv6` prefix delegations relayed through this server.
     ///
     /// ## Arguments
     ///
-    /// * `client` - IPv6 address of DHCPv6 client
+    /// * `client` - IPv6 address of `DHCPv6` client
     /// * `interface` - Interface name where relay message received
     /// * `prefix` - IPv6 prefix being delegated
     /// * `prefix_len` - Prefix length in bits
@@ -678,6 +724,10 @@ impl ScriptExecutor {
     /// ## Returns
     ///
     /// * `Result<(), ScriptError>` - Success or queue error
+    ///
+    /// ## Errors
+    ///
+    /// Returns `ScriptError::QueueFull` if the event queue is at capacity.
     ///
     /// ## C Reference
     ///
@@ -711,6 +761,10 @@ impl ScriptExecutor {
     /// with appropriate environment variables. Should be called once after
     /// executor initialization.
     ///
+    /// ## Panics
+    ///
+    /// Panics if `start()` is called multiple times on the same executor instance.
+    ///
     /// ## Returns
     ///
     /// * `tokio::task::JoinHandle` - Handle to background task
@@ -720,14 +774,16 @@ impl ScriptExecutor {
     /// ```rust,no_run
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// use dnsmasq::integration::scripts::ScriptExecutor;
+    /// use std::sync::Arc;
     ///
-    /// let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")?;
+    /// let executor = Arc::new(ScriptExecutor::new("/usr/local/bin/dhcp-script")?);
+    /// let executor_clone = executor.clone();
     /// let handle = executor.start().await;
     ///
-    /// // ... queue events ...
+    /// // ... use executor_clone to queue events ...
     ///
-    /// // Shutdown: drop executor and await handle
-    /// drop(executor);
+    /// // Shutdown: drop executor references and await handle
+    /// drop(executor_clone);
     /// handle.await?;
     /// # Ok(())
     /// # }
@@ -736,9 +792,22 @@ impl ScriptExecutor {
         let mut rx = self.event_rx.write().await.take()
             .expect("start() called multiple times");
 
+        // Clone necessary fields to avoid holding Arc in spawned task
+        // This allows the channel to close when external Arc references are dropped
+        let script_path = self.script_path.clone();
+        let timeout = self.timeout;
+        #[cfg(feature = "lua")]
+        let lua = self.lua.clone();
+
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
-                if let Err(e) = self.process_event(event).await {
+                if let Err(e) = Self::process_event_internal(
+                    script_path.as_ref(),
+                    timeout,
+                    #[cfg(feature = "lua")]
+                    lua.clone(),
+                    event
+                ).await {
                     error!("Script execution error: {}", e);
                 }
             }
@@ -755,18 +824,27 @@ impl ScriptExecutor {
     ///
     /// ## Arguments
     ///
+    /// * `script_path` - Optional path to script executable
+    /// * `timeout` - Script execution timeout
+    /// * `lua` - Optional Lua interpreter state (feature-gated)
     /// * `event` - Event to process
     ///
     /// ## Returns
     ///
     /// * `Result<(), ScriptError>` - Success or execution error
-    async fn process_event(&self, event: ScriptEvent) -> Result<(), ScriptError> {
+    async fn process_event_internal(
+        script_path: Option<&PathBuf>,
+        timeout: Duration,
+        #[cfg(feature = "lua")]
+        lua: Arc<RwLock<Option<mlua::Lua>>>,
+        event: ScriptEvent,
+    ) -> Result<(), ScriptError> {
         match event {
             ScriptEvent::DhcpLeaseEvent { action, lease, hostname } => {
                 // Try Lua callback first if available
                 #[cfg(feature = "lua")]
-                if let Some(lua) = self.lua.read().await.as_ref() {
-                    if let Err(e) = self.call_lua_lease(lua, action, &lease, hostname.as_deref()).await {
+                if let Some(lua_instance) = lua.read().await.as_ref() {
+                    if let Err(e) = Self::call_lua_lease_internal(lua_instance, action, &lease, hostname.as_deref()).await {
                         warn!("Lua callback failed, falling back to script: {}", e);
                     } else {
                         return Ok(());
@@ -774,47 +852,48 @@ impl ScriptExecutor {
                 }
 
                 // Execute external script
-                if let Some(script_path) = &self.script_path {
-                    self.execute_lease_script(script_path, action, &lease, hostname.as_deref()).await?;
+                if let Some(path) = script_path {
+                    Self::execute_lease_script_internal(path, timeout, action, &lease, hostname.as_deref()).await?;
                 }
             }
 
             #[cfg(feature = "tftp")]
             ScriptEvent::TftpEvent { file_len, filename, peer } => {
                 #[cfg(feature = "lua")]
-                if let Some(lua) = self.lua.read().await.as_ref() {
-                    if let Err(e) = self.call_lua_tftp(lua, file_len, &filename, &peer).await {
+                if let Some(lua_instance) = lua.read().await.as_ref() {
+                    if let Err(e) = Self::call_lua_tftp_internal(lua_instance, file_len, &filename, &peer).await {
                         warn!("Lua tftp callback failed: {}", e);
                     } else {
                         return Ok(());
                     }
                 }
 
-                if let Some(script_path) = &self.script_path {
-                    self.execute_tftp_script(script_path, file_len, &filename, &peer).await?;
+                if let Some(path) = script_path {
+                    Self::execute_tftp_script_internal(path, timeout, file_len, &filename, &peer).await?;
                 }
             }
 
             ScriptEvent::ArpEvent { action, mac, addr } => {
                 #[cfg(feature = "lua")]
-                if let Some(lua) = self.lua.read().await.as_ref() {
-                    if let Err(e) = self.call_lua_arp(lua, action, &mac, &addr).await {
+                if let Some(lua_instance) = lua.read().await.as_ref() {
+                    if let Err(e) = Self::call_lua_arp_internal(lua_instance, action, &mac, &addr).await {
                         warn!("Lua arp callback failed: {}", e);
                     } else {
                         return Ok(());
                     }
                 }
 
-                if let Some(script_path) = &self.script_path {
-                    self.execute_arp_script(script_path, action, &mac, &addr).await?;
+                if let Some(path) = script_path {
+                    Self::execute_arp_script_internal(path, timeout, action, &mac, &addr).await?;
                 }
             }
 
             #[cfg(feature = "dhcp-v6")]
             ScriptEvent::RelaySnoop { client, interface, prefix, prefix_len } => {
-                if let Some(script_path) = &self.script_path {
-                    self.execute_relay_snoop_script(
-                        script_path,
+                if let Some(path) = script_path {
+                    Self::execute_relay_snoop_script_internal(
+                        path,
+                        timeout,
                         &client,
                         &interface,
                         &prefix,
@@ -835,11 +914,11 @@ impl ScriptExecutor {
     /// ## C Reference
     ///
     /// Replaces: Script execution logic in helper process main loop (helper.c
-    /// lines 446-689) including my_setenv() calls (lines 912-921) and
-    /// grab_extradata() parsing (lines 968-997).
-    async fn execute_lease_script(
-        &self,
+    /// lines 446-689) including `my_setenv()` calls (lines 912-921) and
+    /// `grab_extradata()` parsing (lines 968-997).
+    async fn execute_lease_script_internal(
         script_path: &Path,
+        timeout: Duration,
         action: LeaseAction,
         lease: &Lease,
         hostname: Option<&str>,
@@ -901,7 +980,7 @@ impl ScriptExecutor {
             }
         }
 
-        self.execute_script_with_env(script_path, env).await
+        Self::execute_script_with_env_internal(script_path, timeout, env).await
     }
 
     /// Execute external script for TFTP transfer event (feature-gated).
@@ -910,9 +989,9 @@ impl ScriptExecutor {
     ///
     /// Replaces: TFTP action handling in helper (helper.c lines 603-629).
     #[cfg(feature = "tftp")]
-    async fn execute_tftp_script(
-        &self,
+    async fn execute_tftp_script_internal(
         script_path: &Path,
+        timeout: Duration,
         file_len: u64,
         filename: &str,
         peer: &SocketAddr,
@@ -923,7 +1002,7 @@ impl ScriptExecutor {
         env.insert("DNSMASQ_TFTP_FILE_NAME".to_string(), sanitize_env_value(filename));
         env.insert("DNSMASQ_TFTP_REMOTE_ADDR".to_string(), peer.ip().to_string());
 
-        self.execute_script_with_env(script_path, env).await
+        Self::execute_script_with_env_internal(script_path, timeout, env).await
     }
 
     /// Execute external script for ARP detection event.
@@ -931,9 +1010,9 @@ impl ScriptExecutor {
     /// ## C Reference
     ///
     /// Replaces: ARP action handling in helper (helper.c lines 630-657).
-    async fn execute_arp_script(
-        &self,
+    async fn execute_arp_script_internal(
         script_path: &Path,
+        timeout: Duration,
         action: ArpAction,
         mac: &MacAddr,
         addr: &IpAddr,
@@ -944,18 +1023,18 @@ impl ScriptExecutor {
         env.insert("DNSMASQ_ARP_MAC".to_string(), mac.to_string());
         env.insert("DNSMASQ_ARP_IP".to_string(), addr.to_string());
 
-        self.execute_script_with_env(script_path, env).await
+        Self::execute_script_with_env_internal(script_path, timeout, env).await
     }
 
-    /// Execute external script for DHCPv6 relay snoop event (feature-gated).
+    /// Execute external script for `DHCPv6` relay snoop event (feature-gated).
     ///
     /// ## C Reference
     ///
     /// Replaces: Relay snoop handling (helper.c lines 586-602).
     #[cfg(feature = "dhcp-v6")]
-    async fn execute_relay_snoop_script(
-        &self,
+    async fn execute_relay_snoop_script_internal(
         script_path: &Path,
+        timeout: Duration,
         client: &Ipv6Addr,
         interface: &str,
         prefix: &Ipv6Addr,
@@ -965,9 +1044,9 @@ impl ScriptExecutor {
 
         env.insert("DNSMASQ_RELAY_CLIENT".to_string(), client.to_string());
         env.insert("DNSMASQ_RELAY_INTERFACE".to_string(), interface.to_string());
-        env.insert("DNSMASQ_RELAY_PREFIX".to_string(), format!("{}/{}", prefix, prefix_len));
+        env.insert("DNSMASQ_RELAY_PREFIX".to_string(), format!("{prefix}/{prefix_len}"));
 
-        self.execute_script_with_env(script_path, env).await
+        Self::execute_script_with_env_internal(script_path, timeout, env).await
     }
 
     /// Execute script with environment variables and timeout.
@@ -978,9 +1057,9 @@ impl ScriptExecutor {
     /// ## C Reference
     ///
     /// Replaces: fork/exec logic in helper (helper.c lines 658-688).
-    async fn execute_script_with_env(
-        &self,
+    async fn execute_script_with_env_internal(
         script_path: &Path,
+        timeout: Duration,
         env: HashMap<String, String>,
     ) -> Result<(), ScriptError> {
         debug!("Executing script: {} with {} env vars", script_path.display(), env.len());
@@ -994,8 +1073,8 @@ impl ScriptExecutor {
         // Spawn process with timeout
         let child = cmd.spawn()?;
 
-        let output = tokio::time::timeout(self.timeout, child.wait_with_output()).await
-            .map_err(|_| ScriptError::Timeout(self.timeout))??;
+        let output = tokio::time::timeout(timeout, child.wait_with_output()).await
+            .map_err(|_| ScriptError::Timeout(timeout))??;
 
         if !output.status.success() {
             let exit_code = output.status.code().unwrap_or(-1);
@@ -1013,15 +1092,15 @@ impl ScriptExecutor {
 
     /// Call Lua lease callback (feature-gated).
     ///
-    /// Invokes Lua lease() function with event data table, providing faster
+    /// Invokes Lua `lease()` function with event data table, providing faster
     /// in-process event handling compared to fork+exec.
     ///
     /// ## C Reference
     ///
-    /// Replaces: Lua lease() call (helper.c lines 469-495).
+    /// Replaces: Lua `lease()` call (helper.c lines 469-495).
     #[cfg(feature = "lua")]
-    async fn call_lua_lease(
-        &self,
+    #[allow(clippy::unused_async)]
+    async fn call_lua_lease_internal(
         lua: &Lua,
         action: LeaseAction,
         lease: &Lease,
@@ -1071,7 +1150,7 @@ impl ScriptExecutor {
         }
 
         // Call lease(action, data)
-        lease_fn.call::<_, ()>((action.as_env_str(), table))?;
+        lease_fn.call::<()>((action.as_env_str(), table))?;
 
         Ok(())
     }
@@ -1080,10 +1159,10 @@ impl ScriptExecutor {
     ///
     /// ## C Reference
     ///
-    /// Replaces: Lua tftp() call (helper.c lines 322-338).
+    /// Replaces: Lua `tftp()` call (helper.c lines 322-338).
     #[cfg(all(feature = "lua", feature = "tftp"))]
-    async fn call_lua_tftp(
-        &self,
+    #[allow(clippy::unused_async)]
+    async fn call_lua_tftp_internal(
         lua: &Lua,
         file_len: u64,
         filename: &str,
@@ -1102,7 +1181,7 @@ impl ScriptExecutor {
         table.set("file_name", filename)?;
         table.set("remote_addr", peer.ip().to_string())?;
 
-        tftp_fn.call::<_, ()>(table)?;
+        tftp_fn.call::<()>(table)?;
 
         Ok(())
     }
@@ -1111,10 +1190,10 @@ impl ScriptExecutor {
     ///
     /// ## C Reference
     ///
-    /// Replaces: Lua arp() call (helper.c lines 340-357).
+    /// Replaces: Lua `arp()` call (helper.c lines 340-357).
     #[cfg(feature = "lua")]
-    async fn call_lua_arp(
-        &self,
+    #[allow(clippy::unused_async)]
+    async fn call_lua_arp_internal(
         lua: &Lua,
         action: ArpAction,
         mac: &MacAddr,
@@ -1133,7 +1212,7 @@ impl ScriptExecutor {
         table.set("mac_addr", mac.to_string())?;
         table.set("ip_addr", addr.to_string())?;
 
-        arp_fn.call::<_, ()>(table)?;
+        arp_fn.call::<()>(table)?;
 
         Ok(())
     }
@@ -1149,10 +1228,10 @@ impl ScriptExecutor {
 ///
 /// ## C Reference
 ///
-/// Replaces: MAC formatting in my_setenv() calls (helper.c lines 550-560).
+/// Replaces: MAC formatting in `my_setenv()` calls (helper.c lines 550-560).
 fn format_mac_addr(hwaddr: &[u8]) -> String {
     hwaddr.iter()
-        .map(|b| format!("{:02X}", b))
+        .map(|b| format!("{b:02X}"))
         .collect::<Vec<_>>()
         .join(":")
 }
@@ -1165,10 +1244,12 @@ fn format_mac_addr(hwaddr: &[u8]) -> String {
 ///
 /// Replaces: Client ID formatting (helper.c lines 508-524).
 fn format_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
     bytes.iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<_>>()
-        .join("")
+        .fold(String::new(), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
 }
 
 /// Sanitize environment variable value.
@@ -1178,7 +1259,7 @@ fn format_hex(bytes: &[u8]) -> String {
 ///
 /// ## C Reference
 ///
-/// Replaces: '=' stripping in grab_extradata() (helper.c lines 987-990).
+/// Replaces: '=' stripping in `grab_extradata()` (helper.c lines 987-990).
 fn sanitize_env_value(value: &str) -> String {
     let sanitized = value.replace('=', "");
 

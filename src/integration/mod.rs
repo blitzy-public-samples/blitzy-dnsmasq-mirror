@@ -154,16 +154,23 @@
 //! # #[cfg(feature = "scripts")]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! use dnsmasq::integration::scripts::{ScriptExecutor, LeaseAction};
-//! use std::net::IpAddr;
+//! use dnsmasq::dhcp::lease::Lease;
 //!
 //! // Create script executor
 //! let executor = ScriptExecutor::new("/etc/dnsmasq-script.sh")?;
 //!
+//! # // Create a sample lease (in real code, this would come from DHCP server)
+//! # let lease = Lease::new(
+//! #     "192.168.1.100".parse()?,
+//! #     vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+//! #     None,
+//! #     Some("test-host".to_string()),
+//! #     3600,
+//! # );
 //! // Queue lease event
 //! executor.queue_lease_event(
 //!     LeaseAction::Add,
-//!     "00:11:22:33:44:55".to_string(),
-//!     "192.168.1.100".parse::<IpAddr>()?,
+//!     lease,
 //!     Some("test-host".to_string()),
 //! ).await?;
 //! # Ok(())
@@ -207,7 +214,7 @@ pub use ubus::{UbusContext, UbusMetrics};
 pub use ubus::UbusLease;
 
 #[cfg(feature = "scripts")]
-pub use scripts::{LeaseAction, ScriptError, ScriptEvent, ScriptExecutor, ScriptResult};
+pub use scripts::{ArpAction, LeaseAction, ScriptError, ScriptEvent, ScriptExecutor};
 
 /// Module initialization status
 ///
