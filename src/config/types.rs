@@ -707,16 +707,16 @@ impl Default for DhcpConfig {
 pub struct DhcpContext {
     /// Context flags (CONTEXT_* from dnsmasq.h lines 3248-3287)
     pub flags: u32,
-    /// Start of IPv4 address range
-    pub start: Ipv4Addr,
-    /// End of IPv4 address range
-    pub end: Ipv4Addr,
-    /// Subnet mask for this range
-    pub netmask: Ipv4Addr,
-    /// Broadcast address for subnet
-    pub broadcast: Ipv4Addr,
-    /// Router address (default gateway) to advertise
-    pub router: Ipv4Addr,
+    /// Start of address range (IPv4 or IPv6)
+    pub start: IpAddr,
+    /// End of address range (IPv4 or IPv6)
+    pub end: IpAddr,
+    /// Subnet mask for this range (IPv4 only)
+    pub netmask: Option<Ipv4Addr>,
+    /// Broadcast address for subnet (IPv4 only)
+    pub broadcast: Option<Ipv4Addr>,
+    /// Router address (default gateway) to advertise (IPv4 only, IPv6 uses RA)
+    pub router: Option<Ipv4Addr>,
     /// Lease duration for this context
     pub lease_time: Duration,
     /// Interface name this context applies to
