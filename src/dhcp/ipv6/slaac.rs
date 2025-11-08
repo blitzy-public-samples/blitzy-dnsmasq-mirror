@@ -286,6 +286,7 @@ static mut PING_ID: u16 = 0;
 /// let dns_cache = DnsCache::new(1000);
 /// slaac_add_addrs(&mut state, &mut lease, now, false, &mut dns_cache)?;
 /// ```
+#[allow(clippy::implicit_hasher)]
 pub fn slaac_add_addrs(
     state: &mut DaemonState,
     lease: &mut Lease,
@@ -360,6 +361,7 @@ pub fn slaac_add_addrs(
 ///     schedule_timer_event(next_event);
 /// }
 /// ```
+#[allow(clippy::implicit_hasher)]
 pub fn periodic_slaac(
     now: u64,
     leases: &mut HashMap<[u8; 6], Lease>,
@@ -437,6 +439,7 @@ pub fn periodic_slaac(
 /// let log_config = &daemon.logging;
 /// slaac_ping_reply(&sender, &packet, interface, leases, dns_cache, log_config)?;
 /// ```
+#[allow(clippy::implicit_hasher)]
 pub fn slaac_ping_reply(
     sender: &Ipv6Addr,
     packet: &[u8],
@@ -634,7 +637,7 @@ mod tests {
     #[test]
     fn test_slaac_address_creation() {
         let addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
-        let now = 1234567890u64;
+        let now = 1_234_567_890_u64;
 
         let slaac = SlaacAddress::new(addr, now);
 
@@ -648,7 +651,7 @@ mod tests {
     #[test]
     fn test_slaac_address_confirmed() {
         let addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
-        let mut slaac = SlaacAddress::new(addr, 1234567890);
+        let mut slaac = SlaacAddress::new(addr, 1_234_567_890);
 
         slaac.backoff = 0;
         assert!(slaac.is_confirmed());
@@ -657,7 +660,7 @@ mod tests {
     #[test]
     fn test_slaac_address_given_up() {
         let addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
-        let mut slaac = SlaacAddress::new(addr, 1234567890);
+        let mut slaac = SlaacAddress::new(addr, 1_234_567_890);
 
         slaac.ping_time = 0;
         assert!(slaac.is_given_up());
