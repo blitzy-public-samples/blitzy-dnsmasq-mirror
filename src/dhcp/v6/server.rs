@@ -10,7 +10,7 @@
 //!
 //! Main `DHCPv6` server implementation, replacing `src/dhcp6.c`.
 
-use super::protocol::{Dhcpv6Message, Dhcpv6MessageType};
+use super::protocol::{Dhcp6Message, Dhcpv6MessageType};
 use super::state_machine::Dhcpv6StateMachine;
 use crate::dhcp::lease::{Lease, LeaseType, LeaseV6};
 use std::net::Ipv6Addr;
@@ -79,8 +79,8 @@ impl Dhcpv6Server {
     /// # Returns
     ///
     /// Response message if applicable
-    pub fn handle_message(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
-        let msg_type = self.message_type_from_u8(message.msg_type)?;
+    pub fn handle_message(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
+        let msg_type = self.message_type_from_u8(message.msg_type.to_u8())?;
 
         match msg_type {
             Dhcpv6MessageType::Solicit => self.handle_solicit(message),
@@ -97,10 +97,10 @@ impl Dhcpv6Server {
     /// Handle SOLICIT message
     #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
-    fn handle_solicit(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_solicit(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Implement full SOLICIT logic
         // For now, return a basic ADVERTISE
-        let mut response = Dhcpv6Message::new(2); // ADVERTISE
+        let mut response = Dhcp6Message::new(2); // ADVERTISE
         response.transaction_id = message.transaction_id;
         Some(response)
     }
@@ -108,9 +108,9 @@ impl Dhcpv6Server {
     /// Handle REQUEST message
     #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
-    fn handle_request(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_request(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Implement full REQUEST logic
-        let mut response = Dhcpv6Message::new(7); // REPLY
+        let mut response = Dhcp6Message::new(7); // REPLY
         response.transaction_id = message.transaction_id;
         Some(response)
     }
@@ -118,9 +118,9 @@ impl Dhcpv6Server {
     /// Handle RENEW message
     #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
-    fn handle_renew(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_renew(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Implement RENEW logic
-        let mut response = Dhcpv6Message::new(7); // REPLY
+        let mut response = Dhcp6Message::new(7); // REPLY
         response.transaction_id = message.transaction_id;
         Some(response)
     }
@@ -128,34 +128,34 @@ impl Dhcpv6Server {
     /// Handle REBIND message
     #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
-    fn handle_rebind(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_rebind(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Implement REBIND logic
-        let mut response = Dhcpv6Message::new(7); // REPLY
+        let mut response = Dhcp6Message::new(7); // REPLY
         response.transaction_id = message.transaction_id;
         Some(response)
     }
 
     /// Handle RELEASE message
     #[allow(clippy::unused_self)]
-    fn handle_release(&mut self, _message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_release(&mut self, _message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Remove lease from database
         None // No response to RELEASE
     }
 
     /// Handle INFORMATION-REQUEST message
     #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    fn handle_information_request(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_information_request(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Implement stateless configuration response
-        let mut response = Dhcpv6Message::new(7); // REPLY
+        let mut response = Dhcp6Message::new(7); // REPLY
         response.transaction_id = message.transaction_id;
         Some(response)
     }
 
     /// Handle CONFIRM message
     #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    fn handle_confirm(&mut self, message: &Dhcpv6Message) -> Option<Dhcpv6Message> {
+    fn handle_confirm(&mut self, message: &Dhcp6Message) -> Option<Dhcp6Message> {
         // TODO: Validate client's addresses
-        let mut response = Dhcpv6Message::new(7); // REPLY
+        let mut response = Dhcp6Message::new(7); // REPLY
         response.transaction_id = message.transaction_id;
         Some(response)
     }
