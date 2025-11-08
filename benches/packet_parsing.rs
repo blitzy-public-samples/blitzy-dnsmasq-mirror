@@ -37,14 +37,11 @@
 
 use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::net::{Ipv4Addr, Ipv6Addr};
 
 // Import DNS protocol parsing functions
 use dnsmasq::dns::compression::extract_name;
-use dnsmasq::dns::protocol::ResourceRecord;
 
 // Import DHCP protocol parsing functions
-use dnsmasq::dhcp::v4::options::DhcpOption;
 use dnsmasq::dhcp::v4::protocol::DhcpPacket;
 use dnsmasq::dhcp::v6::options::Duid;
 use dnsmasq::dhcp::v6::protocol::Dhcp6Message;
@@ -822,8 +819,9 @@ fn bench_dhcpv4_option_parsing(c: &mut Criterion) {
         b.iter(|| {
             if let Ok(packet) = DhcpPacket::parse(&discover) {
                 let message_type = packet.get_message_type();
-                black_box(message_type)
+                let _ = black_box(message_type);
             }
+            black_box(());
         });
     });
     
@@ -833,8 +831,9 @@ fn bench_dhcpv4_option_parsing(c: &mut Criterion) {
                 // Iterate through all options
                 let option_53 = packet.get_option(53);
                 let option_55 = packet.get_option(55);
-                black_box((option_53, option_55))
+                black_box((option_53, option_55));
             }
+            black_box(());
         });
     });
     
