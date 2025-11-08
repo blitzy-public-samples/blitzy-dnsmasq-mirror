@@ -73,7 +73,7 @@
 //! // Spawn helper task with script configuration
 //! let handle = spawn_helper_process(
 //!     Some(PathBuf::from("/etc/dnsmasq/lease-change.sh")),
-//!     None, // No Lua script
+//!     &None, // No Lua script
 //!     Duration::from_secs(60),
 //! )?;
 //!
@@ -529,7 +529,7 @@ impl HelperHandle {
 /// // Script-only mode
 /// let handle = spawn_helper_process(
 ///     Some(PathBuf::from("/usr/local/bin/dhcp-event.sh")),
-///     None,
+///     &None,
 ///     Duration::from_secs(60),
 /// )?;
 ///
@@ -537,7 +537,7 @@ impl HelperHandle {
 /// # #[cfg(feature = "lua")]
 /// let handle = spawn_helper_process(
 ///     None,
-///     Some(PathBuf::from("/etc/dnsmasq/event.lua")),
+///     &Some(PathBuf::from("/etc/dnsmasq/event.lua")),
 ///     Duration::from_secs(30),
 /// )?;
 ///
@@ -545,7 +545,7 @@ impl HelperHandle {
 /// # #[cfg(feature = "lua")]
 /// let handle = spawn_helper_process(
 ///     Some(PathBuf::from("/usr/local/bin/fallback.sh")),
-///     Some(PathBuf::from("/etc/dnsmasq/primary.lua")),
+///     &Some(PathBuf::from("/etc/dnsmasq/primary.lua")),
 ///     Duration::from_secs(60),
 /// )?;
 /// # Ok(())
@@ -572,7 +572,7 @@ pub fn spawn_helper_process(
         let lua = Lua::new();
 
         // Load Lua script file
-        lua.load(&std::fs::read_to_string(&lua_path)?)
+        lua.load(&std::fs::read_to_string(lua_path)?)
             .set_name(lua_path.to_string_lossy().as_ref())
             .exec()
             .map_err(|e| HelperError::LuaError(e.to_string()))?;
