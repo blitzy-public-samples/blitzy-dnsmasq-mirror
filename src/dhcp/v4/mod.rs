@@ -4,16 +4,16 @@
 // DHCPv4 module root organizing protocol implementation, state machine, options handling,
 // and server logic with public API exports for daemon integration.
 
-//! # DHCPv4 Server Implementation
+//! # `DHCPv4` Server Implementation
 //!
-//! This module provides a complete, memory-safe implementation of the DHCPv4 (Dynamic Host
+//! This module provides a complete, memory-safe implementation of the `DHCPv4` (Dynamic Host
 //! Configuration Protocol version 4) server, translating approximately 6,000 lines of C code
 //! from `src/dhcp.c` (2,049 lines) and `src/rfc2131.c` (3,980 lines) to idiomatic Rust with
 //! compile-time memory safety guarantees, zero-cost abstractions, and async I/O.
 //!
 //! ## Purpose and Scope
 //!
-//! The DHCPv4 module implements a production-grade DHCP server supporting:
+//! The `DHCPv4` module implements a production-grade DHCP server supporting:
 //!
 //! - **Address Allocation**: Dynamic IP address assignment from configured pools with conflict
 //!   detection via ping-before-offer (ICMP echo requests)
@@ -32,7 +32,7 @@
 //!
 //! ## Architecture and Modules
 //!
-//! The DHCPv4 implementation is organized into four focused submodules, each replacing specific
+//! The `DHCPv4` implementation is organized into four focused submodules, each replacing specific
 //! C components with safe Rust alternatives:
 //!
 //! ### Protocol Module (`protocol.rs`)
@@ -50,11 +50,11 @@
 //!
 //! ### State Machine Module (`state_machine.rs`)
 //!
-//! Implements type-safe DHCPv4 state transitions, replacing:
+//! Implements type-safe `DHCPv4` state transitions, replacing:
 //! - C: Implicit state tracking in `dhcp_reply()` using lease flags and packet inspection
 //!
 //! **Key Features:**
-//! - Explicit state enumeration: Init, Selecting, Requesting, Bound, Renewing, Rebinding, InitReboot
+//! - Explicit state enumeration: Init, Selecting, Requesting, Bound, Renewing, Rebinding, `InitReboot`
 //! - Compile-time enforcement of valid state transitions (prevents protocol violations)
 //! - Transaction tracking with transaction ID (xid) correlation between DISCOVER/OFFER and
 //!   REQUEST/ACK pairs
@@ -68,19 +68,19 @@
 //!
 //! **Key Features:**
 //! - Type-safe option enum with variants for all RFC 2132 standard options (codes 0-255)
-//! - TryFrom<&[u8]> trait for safe parsing from wire format (no pointer arithmetic)
-//! - Into<Vec<u8>> trait for safe serialization to wire format
+//! - `TryFrom<&[u8]>` trait for safe parsing from wire format (no pointer arithmetic)
+//! - `Into<Vec<u8>>` trait for safe serialization to wire format
 //! - Relay agent information sub-option parsing (Option 82)
 //! - PXE boot options (Option 43, 93, 97) for network boot
 //!
 //! ### Server Module (`server.rs`)
 //!
-//! Implements the main DHCPv4 server runtime, replacing:
+//! Implements the main `DHCPv4` server runtime, replacing:
 //! - C: `src/dhcp.c` functions `dhcp_init()`, `dhcp_packet()`, `address_allocate()`,
 //!   `complete_context()`, `do_icmp_ping()`, `relay_upstream4()`
 //!
 //! **Key Features:**
-//! - Async socket management using tokio::net::UdpSocket (replaces C's poll() event loop)
+//! - Async socket management using `tokio::net::UdpSocket` (replaces C's `poll()` event loop)
 //! - Packet reception loop with concurrent request handling
 //! - Context selection based on receiving interface, relay GIADDR, and subnet-select option
 //! - Address allocation from configured pools with conflict detection
@@ -124,7 +124,7 @@
 //!
 //! ## Usage Example
 //!
-//! The following example demonstrates initializing and running the DHCPv4 server:
+//! The following example demonstrates initializing and running the `DHCPv4` server:
 //!
 //! ```rust,ignore
 //! use crate::dhcp::v4::{DhcpV4Server, DhcpPacket, MessageType};
@@ -169,17 +169,17 @@
 //!
 //! ## Feature Flags
 //!
-//! The DHCPv4 module respects the following Cargo feature flags for conditional compilation,
+//! The `DHCPv4` module respects the following Cargo feature flags for conditional compilation,
 //! mirroring the C implementation's compile-time macros:
 //!
 //! - **`dhcp-v4`** (enabled by default via `dhcp` feature bundle)
-//!   - Enables the entire DHCPv4 server module
+//!   - Enables the entire `DHCPv4` server module
 //!   - C equivalent: `HAVE_DHCP` macro
 //!   - Dependency: Requires `dns` feature for cache integration
 //!
 //! - **`ipv6`** (optional)
-//!   - Enables IPv6 features for DHCPv6 coexistence
-//!   - Allows DHCP server to handle both DHCPv4 and DHCPv6 on same interface
+//!   - Enables IPv6 features for `DHCPv6` coexistence
+//!   - Allows DHCP server to handle both `DHCPv4` and `DHCPv6` on same interface
 //!   - C equivalent: `HAVE_DHCP6` macro
 //!
 //! - **`scripts`** (optional)
@@ -196,7 +196,7 @@
 //!
 //! This implementation conforms to the following IETF standards:
 //!
-//! - **RFC 2131**: Dynamic Host Configuration Protocol (complete DHCPv4 protocol)
+//! - **RFC 2131**: Dynamic Host Configuration Protocol (complete `DHCPv4` protocol)
 //!   - All message types: DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK, RELEASE, INFORM
 //!   - Complete state machine: Init → Selecting → Bound → Renewing → Rebinding
 //!   - DHCP relay agent support via GIADDR field
@@ -211,7 +211,7 @@
 //!   - Remote ID sub-option (identifies remote host)
 //!   - Subnet selection sub-option (specifies desired subnet)
 //!
-//! - **RFC 3527**: Link Selection Sub-option for DHCPv4 Relay Agent Option
+//! - **RFC 3527**: Link Selection Sub-option for `DHCPv4` Relay Agent Option
 //!   - Allows relay agent to specify subnet independent of GIADDR
 //!
 //! - **RFC 4578**: Dynamic Host Configuration Protocol (DHCP) Options for PXE
@@ -247,11 +247,11 @@
 //!
 //! ## Integration Points
 //!
-//! The DHCPv4 module integrates with other dnsmasq subsystems:
+//! The `DHCPv4` module integrates with other dnsmasq subsystems:
 //!
 //! - **Parent Module** (`crate::dhcp`):
 //!   - Shares common utilities via `dhcp::common` module
-//!   - Coordinates with DHCPv6 implementation (`dhcp::v6`) for dual-stack operation
+//!   - Coordinates with `DHCPv6` implementation (`dhcp::v6`) for dual-stack operation
 //!
 //! - **Lease Database** (`crate::dhcp::lease`):
 //!   - Stores active leases with persistent file storage
@@ -265,7 +265,7 @@
 //!
 //! - **Network Layer** (`crate::network::socket`):
 //!   - Uses socket abstractions for UDP I/O
-//!   - Handles platform-specific socket options (SO_REUSEADDR, SO_BROADCAST)
+//!   - Handles platform-specific socket options (`SO_REUSEADDR`, `SO_BROADCAST`)
 //!   - Provides interface enumeration for multi-homed servers
 //!
 //! - **Configuration** (`crate::config`):
@@ -275,7 +275,7 @@
 //!
 //! ## Testing Strategy
 //!
-//! The DHCPv4 implementation is validated through multiple test layers:
+//! The `DHCPv4` implementation is validated through multiple test layers:
 //!
 //! ### Unit Tests
 //! - Inline tests in each module using `#[cfg(test)]`
