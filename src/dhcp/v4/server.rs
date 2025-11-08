@@ -11,7 +11,6 @@
 //! Main `DHCPv4` server implementation, replacing `src/dhcp.c`.
 
 use super::protocol::{Dhcpv4Message, Dhcpv4MessageType};
-use super::state_machine::Dhcpv4StateMachine;
 use crate::dhcp::lease::{Lease, LeaseV4};
 use std::net::Ipv4Addr;
 
@@ -48,9 +47,6 @@ pub struct Dhcpv4Server {
     /// Server configuration
     config: Dhcpv4ServerConfig,
 
-    /// State machine
-    state_machine: Dhcpv4StateMachine,
-
     /// Active leases
     leases: Vec<Lease>,
 }
@@ -65,7 +61,6 @@ impl Dhcpv4Server {
     pub fn new(config: Dhcpv4ServerConfig) -> Self {
         Self {
             config,
-            state_machine: Dhcpv4StateMachine::new(),
             leases: Vec::new(),
         }
     }
