@@ -430,6 +430,8 @@ impl DhcpV6Server {
 /// ```no_run
 /// # use std::sync::Arc;
 /// # use tokio::sync::RwLock;
+/// # use dnsmasq::types::daemon_state::DaemonState;
+/// # use dnsmasq::dhcp::v6::server::dhcp6_init;
 /// # async fn example(daemon_state: Arc<RwLock<DaemonState>>) {
 /// let socket = dhcp6_init(&daemon_state).await.expect("DHCPv6 init failed");
 /// # }
