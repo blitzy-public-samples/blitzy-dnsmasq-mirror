@@ -207,9 +207,9 @@ pub struct Cli {
 
     /// Specify syslog facility for logging
     ///
-    /// Set syslog facility (KERN, USER, MAIL, DAEMON, AUTH, SYSLOG, LPR, NEWS,
-    /// UUCP, CRON, LOCAL0-LOCAL7). Defaults to DAEMON. Use LOG_LOCAL0 through
-    /// LOG_LOCAL7 for custom log routing.
+    /// Set syslog facility (`KERN`, `USER`, `MAIL`, `DAEMON`, `AUTH`, `SYSLOG`, `LPR`, `NEWS`,
+    /// `UUCP`, `CRON`, `LOCAL0-LOCAL7`). Defaults to `DAEMON`. Use `LOG_LOCAL0` through
+    /// `LOG_LOCAL7` for custom log routing.
     #[arg(short = '8', long = "log-facility", value_name = "FACILITY")]
     pub log_facility: Option<String>,
 
@@ -369,7 +369,7 @@ pub struct Cli {
     // =========================================================================
     /// Specify upstream DNS server(s)
     ///
-    /// Format: [/domain/]server[@source_address][#port]
+    /// Format: `[/domain/]server[@source_address][#port]`
     /// Examples:
     ///   --server=8.8.8.8           # Google DNS for all queries
     ///   --server=/example.com/1.1.1.1  # Cloudflare for example.com
@@ -541,11 +541,11 @@ pub struct Cli {
     /// Specify host (A/AAAA and PTR) records
     ///
     /// Create DNS A/AAAA and reverse PTR records for hosts.
-    /// Format: <name>,<address>[,<ttl>]
+    /// Format: `<name>,<address>[,<ttl>]`
     /// Examples:
-    ///   --host-record=example.com,192.168.1.1
-    ///   --host-record=example.com,192.168.1.1,3600
-    ///   --host-record=example.com,192.168.1.1,fe80::1
+    ///   `--host-record=example.com,192.168.1.1`
+    ///   `--host-record=example.com,192.168.1.1,3600`
+    ///   `--host-record=example.com,192.168.1.1,fe80::1`
     /// Can specify multiple addresses by using option multiple times with same name.
     #[arg(long = "host-record", value_name = "RECORD")]
     pub host_record: Vec<String>,
@@ -656,7 +656,7 @@ pub struct Cli {
     #[cfg(feature = "dhcp")]
     /// Specify network boot (PXE) parameters
     ///
-    /// Format: [tag:<tag>,]<filename>,[<servername>[,<server address>|<tftp_servername>]]
+    /// Format: `[tag:<tag>,]<filename>,[<servername>[,<server address>|<tftp_servername>]]`
     /// Examples:
     ///   --dhcp-boot=pxelinux.0
     ///   --dhcp-boot=pxelinux.0,bootserver,192.168.1.1
@@ -801,10 +801,10 @@ pub struct Cli {
     pub enable_ra: bool,
 
     #[cfg(feature = "dhcp-v6")]
-    /// Specify DHCPv6 DUID (DHCP Unique Identifier)
+    /// Specify `DHCPv6` `DUID` (DHCP Unique Identifier)
     ///
-    /// Set server DUID manually. Format varies by DUID type (DUID-LLT, DUID-EN,
-    /// DUID-LL). If not specified, automatically generated from hardware address.
+    /// Set server `DUID` manually. Format varies by DUID type (`DUID-LLT`, `DUID-EN`,
+    /// `DUID-LL`). If not specified, automatically generated from hardware address.
     #[arg(long = "dhcp-duid", value_name = "DUID")]
     pub dhcp_duid: Option<String>,
 
@@ -826,16 +826,16 @@ pub struct Cli {
     pub quiet_ra: bool,
 
     #[cfg(feature = "dhcp-v6")]
-    /// Suppress DHCPv6 logging
+    /// Suppress `DHCPv6` logging
     ///
-    /// Reduce DHCPv6 log verbosity. Similar to --quiet-dhcp but for IPv6.
+    /// Reduce `DHCPv6` log verbosity. Similar to `--quiet-dhcp` but for IPv6.
     #[arg(long = "quiet-dhcp6")]
     pub quiet_dhcp6: bool,
 
     #[cfg(feature = "dhcp")]
-    /// Suppress DHCPv4 logging
+    /// Suppress `DHCPv4` logging
     ///
-    /// Reduce DHCPv4 log verbosity. Useful in high-transaction environments
+    /// Reduce `DHCPv4` log verbosity. Useful in high-transaction environments
     /// to prevent log flooding. Critical events still logged.
     #[arg(long = "quiet-dhcp")]
     pub quiet_dhcp: bool,
@@ -1066,7 +1066,7 @@ pub struct Cli {
     /// Enable Linux connection tracking for DNS
     ///
     /// Use kernel connection tracking (conntrack) for loop detection and
-    /// source verification. Requires CONFIG_NETFILTER_CONNTRACK kernel option.
+    /// source verification. Requires `CONFIG_NETFILTER_CONNTRACK` kernel option.
     #[arg(long = "conntrack")]
     pub conntrack: bool,
 
@@ -1076,17 +1076,17 @@ pub struct Cli {
     #[cfg(feature = "dbus")]
     /// Enable D-Bus messaging interface
     ///
-    /// Activate D-Bus API for external control and monitoring. Optional
-    /// service name argument (default: uk.org.thekelleys.dnsmasq).
-    /// Allows NetworkManager and other tools to control dnsmasq.
+    /// Activate `D-Bus` API for external control and monitoring. Optional
+    /// service name argument (default: `uk.org.thekelleys.dnsmasq`).
+    /// Allows `NetworkManager` and other tools to control dnsmasq.
     #[arg(short = '1', long = "enable-dbus", num_args = 0..=1, default_missing_value = "uk.org.thekelleys.dnsmasq", value_name = "SERVICE")]
     pub enable_dbus: Option<String>,
 
     #[cfg(all(feature = "ubus", target_os = "linux"))]
-    /// Enable OpenWrt ubus messaging interface
+    /// Enable `OpenWrt` `ubus` messaging interface
     ///
-    /// Activate ubus API for OpenWrt integration. Optional object name argument
-    /// (default: dnsmasq). Provides LuCI web interface integration.
+    /// Activate `ubus` API for `OpenWrt` integration. Optional object name argument
+    /// (default: `dnsmasq`). Provides `LuCI` web interface integration.
     #[arg(long = "enable-ubus", num_args = 0..=1, default_missing_value = "dnsmasq", value_name = "OBJECT")]
     pub enable_ubus: Option<String>,
 }
@@ -1117,6 +1117,7 @@ impl Cli {
     /// - Invalid argument format (clap handles this automatically)
     /// - Required argument missing (if any were marked as required)
     /// - Value parsing fails (invalid IP, port out of range, etc.)
+    #[must_use]
     pub fn parse() -> Self {
         <Self as Parser>::parse()
     }
@@ -1154,7 +1155,7 @@ impl Cli {
     /// Validate CLI arguments for consistency
     ///
     /// Performs cross-argument validation that clap cannot express:
-    /// - Port range validation (min_port < max_port)
+    /// - Port range validation (`min_port` < `max_port`)
     /// - EDNS packet size limits (512-65535 bytes)
     /// - TTL value reasonableness
     /// - Conflicting option detection
@@ -1185,10 +1186,10 @@ impl Cli {
         // Validate EDNS packet size
         if let Some(size) = self.edns_packet_max {
             if size < 512 {
-                return Err(ConfigError::InvalidPort(size as u16));
+                return Err(ConfigError::InvalidPort(size.try_into().unwrap_or(u16::MAX)));
             }
             if size > 65535 {
-                return Err(ConfigError::InvalidPort(size as u16));
+                return Err(ConfigError::InvalidPort(size.try_into().unwrap_or(u16::MAX)));
             }
         }
 
@@ -1221,6 +1222,7 @@ impl Cli {
     /// let edns_size = cli.edns_packet_size();
     /// assert!(edns_size >= 512 && edns_size <= 65535);
     /// ```
+    #[must_use]
     pub fn edns_packet_size(&self) -> usize {
         self.edns_packet_max.unwrap_or(EDNS_PACKET_SIZE)
     }
@@ -1239,6 +1241,7 @@ impl Cli {
     ///     println!("Running in foreground mode");
     /// }
     /// ```
+    #[must_use]
     pub fn is_foreground(&self) -> bool {
         self.no_daemon || self.keep_in_foreground
     }
@@ -1257,6 +1260,7 @@ impl Cli {
     ///     println!("DNS service is disabled");
     /// }
     /// ```
+    #[must_use]
     pub fn is_dns_enabled(&self) -> bool {
         self.port != 0
     }
@@ -1273,6 +1277,7 @@ impl Cli {
     /// let cli = Cli::parse();
     /// println!("DNS port: {}", cli.dns_port());
     /// ```
+    #[must_use]
     pub fn dns_port(&self) -> u16 {
         self.port
     }

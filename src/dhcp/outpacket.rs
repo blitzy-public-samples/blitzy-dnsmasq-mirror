@@ -6,9 +6,9 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated 29 June, 2007.
 
-//! # DHCPv6 Option Assembly and Packet Construction
+//! # `DHCPv6` Option Assembly and Packet Construction
 //!
-//! This module provides memory-safe DHCPv6 packet construction using Type-Length-Value (TLV)
+//! This module provides memory-safe `DHCPv6` packet construction using `Type-Length-Value` (`TLV`)
 //! encoding per RFC 3315 Section 22.1. Replaces C implementation in `src/outpacket.c`.
 //!
 //! ## Purpose
@@ -29,7 +29,7 @@
 //!
 //! | C Function (outpacket.c) | Rust Method | Purpose |
 //! |--------------------------|-------------|---------|
-//! | `new_opt6(opt)` | `new_option(code)` | Begin DHCPv6 option with 16-bit code |
+//! | `new_opt6(opt)` | `new_option(code)` | Begin `DHCPv6` option with `16-bit` code |
 //! | `end_opt6(container)` | `end_option(pos)` | Finalize option by writing length field |
 //! | `put_opt6_char(val)` | `put_u8(val)` | Append 8-bit value |
 //! | `put_opt6_short(val)` | `put_u16(val)` | Append 16-bit value (network byte order) |
@@ -70,7 +70,7 @@
 //!
 //! ## RFC 3315 Compliance
 //!
-//! DHCPv6 option format (Section 22.1):
+//! `DHCPv6` option format (Section 22.1):
 //! ```text
 //! 0                   1                   2                   3
 //! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -91,7 +91,7 @@
 use byteorder::{BigEndian, WriteBytesExt};
 use std::io::Write;
 
-/// Errors that can occur during DHCPv6 packet construction
+/// Errors that can occur during `DHCPv6` packet construction
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PacketBuildError {
     /// Buffer size exceeded maximum limit
@@ -122,7 +122,7 @@ impl std::fmt::Display for PacketBuildError {
 
 impl std::error::Error for PacketBuildError {}
 
-/// DHCPv6 packet builder with automatic buffer management
+/// `DHCPv6` packet builder with automatic buffer management
 ///
 /// Provides memory-safe alternative to C's manual buffer management with `daemon->outpacket.iov_base`.
 /// Uses `Vec<u8>` for dynamic buffer growth, eliminating fixed-size limits and buffer overflow risks.
@@ -136,7 +136,7 @@ impl std::error::Error for PacketBuildError {}
 ///
 /// ## Thread Safety
 ///
-/// Not thread-safe (matches C implementation). Each DHCPv6 response construction uses
+/// Not thread-safe (matches C implementation). Each `DHCPv6` response construction uses
 /// dedicated builder instance in dnsmasq's single-threaded event loop model.
 pub struct OutPacketBuilder {
     /// Dynamic packet buffer with automatic growth
@@ -153,12 +153,12 @@ pub struct OutPacketBuilder {
 
     /// Maximum buffer size limit (safety bounds)
     ///
-    /// Prevents unbounded memory growth. Set to 64KB (typical DHCPv6 max packet size).
+    /// Prevents unbounded memory growth. Set to 64KB (typical `DHCPv6` max packet size).
     max_size: usize,
 }
 
 impl OutPacketBuilder {
-    /// Maximum packet size (64KB - typical DHCPv6 limit)
+    /// Maximum packet size (64KB - typical `DHCPv6` limit)
     const MAX_PACKET_SIZE: usize = 65535;
 
     /// Default initial capacity (typical Ethernet MTU)
@@ -180,6 +180,7 @@ impl OutPacketBuilder {
     /// let builder = OutPacketBuilder::new();
     /// assert_eq!(builder.len(), 0);
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buffer: Vec::with_capacity(Self::DEFAULT_CAPACITY),
@@ -199,6 +200,7 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// New builder with specified initial capacity
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buffer: Vec::with_capacity(capacity),
@@ -226,7 +228,7 @@ impl OutPacketBuilder {
         self.position = 0;
     }
 
-    /// Begin new DHCPv6 option with 16-bit option code
+    /// Begin new `DHCPv6` option with `16-bit` option code
     ///
     /// Corresponds to C's `new_opt6(opt)` (outpacket.c:439-451).
     ///
@@ -238,12 +240,15 @@ impl OutPacketBuilder {
     ///
     /// # Arguments
     ///
-    /// * `option_code` - 16-bit DHCPv6 option code per RFC 3315 (e.g., 3=IA_NA, 5=IAADDR)
+    /// * `option_code` - `16-bit` `DHCPv6` option code per RFC 3315 (e.g., 3=`IA_NA`, 5=`IAADDR`)
     ///
     /// # Returns
     ///
     /// - `Ok(position)` - Header position for `end_option()` call
-    /// - `Err(BufferOverflow)` - Insufficient space for header
+    ///
+    /// # Errors
+    ///
+    /// - `BufferOverflow` - Insufficient space for header
     ///
     /// # Example
     ///
@@ -266,7 +271,7 @@ impl OutPacketBuilder {
         Ok(start_pos)
     }
 
-    /// Finalize DHCPv6 option by calculating and writing length field
+    /// Finalize `DHCPv6` option by calculating and writing length field
     ///
     /// Corresponds to C's `end_opt6(container)` (outpacket.c:143-149).
     ///
@@ -280,8 +285,16 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Option successfully finalized
-    /// - `Err(OptionNotStarted)` - Invalid container position
-    /// - `Err(InvalidOptionNesting)` - Position beyond current buffer
+    ///
+    /// # Errors
+    ///
+    /// - `OptionNotStarted` - Invalid container position
+    /// - `InvalidOptionNesting` - Position beyond current buffer
+    ///
+    /// # Panics
+    ///
+    /// Panics if data length exceeds `u16::MAX` after validation (should never occur
+    /// due to preceding checks).
     ///
     /// # Example
     ///
@@ -312,8 +325,11 @@ impl OutPacketBuilder {
 
         // Update length field at container + 2 (after option code)
         let len_pos = container + 2;
-        self.buffer[len_pos] = (data_len >> 8) as u8;
-        self.buffer[len_pos + 1] = (data_len & 0xff) as u8;
+        // Safe: validated data_len <= u16::MAX above
+        let data_len_u16 = u16::try_from(data_len)
+            .expect("data_len validated to be <= u16::MAX");
+        self.buffer[len_pos] = (data_len_u16 >> 8) as u8;
+        self.buffer[len_pos + 1] = (data_len_u16 & 0xff) as u8;
 
         Ok(())
     }
@@ -332,7 +348,10 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Data successfully appended
-    /// - `Err(BufferOverflow)` - Insufficient space
+    ///
+    /// # Errors
+    ///
+    /// - `BufferOverflow` - Insufficient space
     ///
     /// # Example
     ///
@@ -363,7 +382,10 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Value successfully appended
-    /// - `Err(BufferOverflow)` - Insufficient space
+    ///
+    /// # Errors
+    ///
+    /// - `BufferOverflow` - Insufficient space
     ///
     /// # Example
     ///
@@ -394,7 +416,10 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Value successfully appended
-    /// - `Err(BufferOverflow)` - Insufficient space
+    ///
+    /// # Errors
+    ///
+    /// - `BufferOverflow` - Insufficient space
     ///
     /// # Example
     ///
@@ -428,7 +453,10 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Value successfully appended
-    /// - `Err(BufferOverflow)` - Insufficient space
+    ///
+    /// # Errors
+    ///
+    /// - `BufferOverflow` - Insufficient space
     ///
     /// # Example
     ///
@@ -452,7 +480,7 @@ impl OutPacketBuilder {
     ///
     /// Corresponds to C's `put_opt6_string(s)` (outpacket.c:849-852).
     ///
-    /// DHCPv6 strings are NOT null-terminated on wire (length explicit via option-len field).
+    /// `DHCPv6` strings are NOT null-terminated on wire (length explicit via `option-len` field).
     /// Used for status messages, domain names, and other text fields per RFC 3315.
     ///
     /// # Arguments
@@ -462,7 +490,10 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - String successfully appended
-    /// - `Err(BufferOverflow)` - Insufficient space
+    ///
+    /// # Errors
+    ///
+    /// - `BufferOverflow` - Insufficient space
     ///
     /// # Example
     ///
@@ -493,6 +524,7 @@ impl OutPacketBuilder {
     /// let packet = builder.build();
     /// assert_eq!(packet.len(), 4);
     /// ```
+    #[must_use]
     pub fn build(self) -> Vec<u8> {
         self.buffer
     }
@@ -517,6 +549,7 @@ impl OutPacketBuilder {
     /// let pos = builder.save_position();
     /// assert_eq!(pos, 2);
     /// ```
+    #[must_use]
     pub fn save_position(&self) -> usize {
         self.position
     }
@@ -535,7 +568,10 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Position successfully restored
-    /// - `Err(InvalidOptionNesting)` - Position beyond current buffer
+    ///
+    /// # Errors
+    ///
+    /// - `InvalidOptionNesting` - Position beyond current buffer
     ///
     /// # Example
     ///
@@ -563,6 +599,7 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// Number of bytes written to buffer
+    #[must_use]
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
@@ -572,6 +609,7 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// True if no data written
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
@@ -581,6 +619,7 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// Byte slice reference
+    #[must_use]
     pub fn as_slice(&self) -> &[u8] {
         &self.buffer
     }
@@ -596,7 +635,7 @@ impl OutPacketBuilder {
     /// # Returns
     ///
     /// - `Ok(())` - Capacity ensured
-    /// - `Err(BufferOverflow)` - Would exceed max_size limit
+    /// - `Err(BufferOverflow)` - Would exceed `max_size` limit
     fn ensure_capacity(&mut self, additional: usize) -> Result<(), PacketBuildError> {
         let required = self.buffer.len() + additional;
 
@@ -644,7 +683,7 @@ mod tests {
     #[test]
     fn test_put_u32_network_byte_order() {
         let mut builder = OutPacketBuilder::new();
-        builder.put_u32(0x12345678).unwrap();
+        builder.put_u32(0x1234_5678).unwrap();
         // Should be big-endian (network byte order)
         assert_eq!(builder.as_slice(), &[0x12, 0x34, 0x56, 0x78]);
     }
@@ -669,7 +708,7 @@ mod tests {
     fn test_simple_option() {
         let mut builder = OutPacketBuilder::new();
         let pos = builder.new_option(1).unwrap(); // OPTION6_CLIENTID = 1
-        builder.put_u32(0x12345678).unwrap();
+        builder.put_u32(0x1234_5678).unwrap();
         builder.end_option(pos).unwrap();
 
         let expected = vec![
@@ -686,7 +725,7 @@ mod tests {
 
         // Outer IA_NA option (OPTION6_IA_NA = 3)
         let ia_na_pos = builder.new_option(3).unwrap();
-        builder.put_u32(0x11111111).unwrap(); // IAID
+        builder.put_u32(0x1111_1111).unwrap(); // IAID
         builder.put_u32(3600).unwrap(); // T1
         builder.put_u32(7200).unwrap(); // T2
 
@@ -717,7 +756,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut builder = OutPacketBuilder::new();
-        builder.put_u32(0x12345678).unwrap();
+        builder.put_u32(0x1234_5678).unwrap();
         assert_eq!(builder.len(), 4);
 
         builder.clear();
@@ -766,7 +805,7 @@ mod tests {
     #[test]
     fn test_build_consumes_builder() {
         let mut builder = OutPacketBuilder::new();
-        builder.put_u32(0x12345678).unwrap();
+        builder.put_u32(0x1234_5678).unwrap();
 
         let packet = builder.build();
         assert_eq!(packet, vec![0x12, 0x34, 0x56, 0x78]);

@@ -6,10 +6,10 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated June, 2007.
 
-//! # DHCPv4 Server Implementation
+//! # `DHCPv4` Server Implementation
 //!
-//! This module provides the DHCPv4 server implementation, replacing C files:
-//! - `src/dhcp.c` - DHCPv4 server logic
+//! This module provides the `DHCPv4` server implementation, replacing C files:
+//! - `src/dhcp.c` - `DHCPv4` server logic
 //! - `src/rfc2131.c` - RFC 2131 protocol implementation
 //!
 //! ## RFC 2131 Compliance
@@ -22,11 +22,11 @@
 //!
 //! ## Architecture
 //!
-//! The DHCPv4 implementation is organized into:
+//! The `DHCPv4` implementation is organized into:
 //! - **server.rs** - Main server logic and message handling
 //! - **protocol.rs** - RFC 2131 packet parsing and serialization
-//! - **state_machine.rs** - Type-safe state transitions
-//! - **options.rs** - DHCPv4 option parsing
+//! - **`state_machine.rs`** - Type-safe state transitions
+//! - **options.rs** - `DHCPv4` option parsing
 
 pub mod options;
 pub mod protocol;

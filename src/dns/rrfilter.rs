@@ -90,9 +90,9 @@ where
     message.additional.retain(|rr| !predicate(rr));
 
     // Update header section counts to reflect removals
-    message.header.ancount = message.answers.len() as u16;
-    message.header.nscount = message.authority.len() as u16;
-    message.header.arcount = message.additional.len() as u16;
+    message.header.ancount = message.answers.len().try_into().unwrap_or(u16::MAX);
+    message.header.nscount = message.authority.len().try_into().unwrap_or(u16::MAX);
+    message.header.arcount = message.additional.len().try_into().unwrap_or(u16::MAX);
 }
 
 /// Filter records by record type
@@ -225,7 +225,7 @@ pub fn filter_additional(message: &mut DnsMessage) {
         .retain(|rr| matches!(rr, ResourceRecord::OPT { .. }));
 
     // Update header count
-    message.header.arcount = message.additional.len() as u16;
+    message.header.arcount = message.additional.len().try_into().unwrap_or(u16::MAX);
 }
 
 /// Strip DNSSEC records from the message
@@ -257,7 +257,7 @@ pub fn filter_additional(message: &mut DnsMessage) {
 ///
 /// # DNSSEC Record Types Removed
 ///
-/// - **RRSIG**: Digital signatures over RRsets
+/// - **`RRSIG`**: Digital signatures over `RRsets`
 /// - **DNSKEY**: Public keys for DNSSEC verification
 /// - **DS**: Delegation Signer records for chain of trust
 /// - **NSEC**: Next Secure records for authenticated denial
@@ -378,9 +378,9 @@ pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
     }
 
     // Update header section counts
-    message.header.ancount = message.answers.len() as u16;
-    message.header.nscount = message.authority.len() as u16;
-    message.header.arcount = message.additional.len() as u16;
+    message.header.ancount = message.answers.len().try_into().unwrap_or(u16::MAX);
+    message.header.nscount = message.authority.len().try_into().unwrap_or(u16::MAX);
+    message.header.arcount = message.additional.len().try_into().unwrap_or(u16::MAX);
 
     // Set TC bit if we truncated anything
     if truncated {
@@ -432,6 +432,7 @@ pub fn truncate_to_fit(message: &mut DnsMessage, max_size: usize) -> bool {
 /// This function is O(n) where n is the number of records and should be much
 /// faster than full serialization. Intended for quick size checks during
 /// truncation decisions.
+#[must_use]
 pub fn estimated_message_size(message: &DnsMessage) -> usize {
     // DNS header is fixed 12 bytes
     let mut size = 12;
@@ -469,7 +470,7 @@ pub fn estimated_message_size(message: &DnsMessage) -> usize {
 /// Remove duplicate resource records from the message
 ///
 /// Deduplicates identical resource records within each section (answer,
-/// authority, additional) while maintaining RRset semantics per RFC 1034.
+/// authority, additional) while maintaining `RRset` semantics per `RFC 1034`.
 /// Two records are considered identical if they have the same type, class,
 /// name, and rdata content.
 ///
@@ -486,22 +487,22 @@ pub fn estimated_message_size(message: &DnsMessage) -> usize {
 ///
 /// # RFC Compliance
 ///
-/// - RFC 1034 Section 3.6: RRset definition
-/// - RFC 2181 Section 5: RRsets and name compression
+/// - `RFC 1034 Section 3.6`: `RRset` definition
+/// - `RFC 2181 Section 5`: `RRsets` and name compression
 ///
-/// An RRset is a set of resource records with the same label, class, and type.
-/// Duplicate RRs within an RRset should be removed to avoid redundant data.
+/// An `RRset` is a set of resource records with the same label, class, and type.
+/// Duplicate RRs within an `RRset` should be removed to avoid redundant data.
 ///
 /// # Implementation Notes
 ///
-/// This function uses HashSet for O(1) average-case duplicate detection.
-/// Records are compared by value using PartialEq derived on ResourceRecord.
+/// This function uses `HashSet` for `O(1)` average-case duplicate detection.
+/// Records are compared by value using `PartialEq` derived on `ResourceRecord`.
 /// The first occurrence of each unique record is preserved, subsequent
 /// duplicates are removed.
 ///
 /// # Memory Safety
 ///
-/// Uses Rust's HashSet which handles memory management automatically,
+/// Uses Rust's `HashSet` which handles memory management automatically,
 /// eliminating the manual tracking and potential memory leaks in C's
 /// implementation approach.
 pub fn remove_duplicates(message: &mut DnsMessage) {
@@ -510,25 +511,25 @@ pub fn remove_duplicates(message: &mut DnsMessage) {
     message.answers.retain(|rr| {
         // Convert to a comparable format (just the record itself with PartialEq)
         // HashSet insertion returns false if element already existed
-        seen_answers.insert(format!("{:?}", rr))
+        seen_answers.insert(format!("{rr:?}"))
     });
 
     // Deduplicate authority
     let mut seen_authority = HashSet::new();
     message
         .authority
-        .retain(|rr| seen_authority.insert(format!("{:?}", rr)));
+        .retain(|rr| seen_authority.insert(format!("{rr:?}")));
 
     // Deduplicate additional
     let mut seen_additional = HashSet::new();
     message
         .additional
-        .retain(|rr| seen_additional.insert(format!("{:?}", rr)));
+        .retain(|rr| seen_additional.insert(format!("{rr:?}")));
 
     // Update header counts
-    message.header.ancount = message.answers.len() as u16;
-    message.header.nscount = message.authority.len() as u16;
-    message.header.arcount = message.additional.len() as u16;
+    message.header.ancount = message.answers.len().try_into().unwrap_or(u16::MAX);
+    message.header.nscount = message.authority.len().try_into().unwrap_or(u16::MAX);
+    message.header.arcount = message.additional.len().try_into().unwrap_or(u16::MAX);
 }
 
 // ============================================================================

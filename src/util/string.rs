@@ -60,7 +60,12 @@ pub enum StringError {
 
     /// String exceeds maximum allowed length
     #[error("String too long: {current} bytes (max {max})")]
-    StringTooLong { current: usize, max: usize },
+    StringTooLong {
+        /// Current length of the string
+        current: usize,
+        /// Maximum allowed length
+        max: usize,
+    },
 }
 
 /// Errors related to hexadecimal parsing
@@ -68,7 +73,12 @@ pub enum StringError {
 pub enum ParseError {
     /// Invalid hexadecimal digit encountered
     #[error("Invalid hex digit at position {position}: '{character}'")]
-    InvalidHexDigit { position: usize, character: char },
+    InvalidHexDigit {
+        /// Position in the input string
+        position: usize,
+        /// Invalid character found
+        character: char,
+    },
 
     /// Invalid format for hex string
     #[error("Invalid format: {0}")]
@@ -84,11 +94,17 @@ pub enum ParseError {
 pub enum DnsNameError {
     /// Label exceeds 63 bytes (RFC 1035 limit)
     #[error("Label too long: {length} bytes (max 63)")]
-    LabelTooLong { length: usize },
+    LabelTooLong {
+        /// Actual length of the label
+        length: usize,
+    },
 
     /// Total name exceeds 253 bytes (RFC 1035 limit)
     #[error("Name too long: {length} bytes (max 253)")]
-    NameTooLong { length: usize },
+    NameTooLong {
+        /// Total length of the name
+        length: usize,
+    },
 
     /// Invalid character in domain name
     #[error("Invalid character in domain name: '{0}'")]
@@ -140,6 +156,7 @@ pub enum IdnError {
 /// # RFC Compliance
 ///
 /// RFC 952 (hostname syntax), RFC 1123 (allows leading digit)
+#[must_use]
 pub fn is_legal_hostname(name: &str) -> bool {
     if name.is_empty() || name.len() > MAX_DOMAIN_NAME_LENGTH {
         return false;
@@ -196,6 +213,11 @@ pub fn is_legal_hostname(name: &str) -> bool {
 ///
 /// `Ok(())` on success, `Err(StringError)` if string is too long
 ///
+/// # Errors
+///
+/// Returns `StringError::StringTooLong` if the source string length is greater than or
+/// equal to `max_len`.
+///
 /// # Examples
 ///
 /// ```no_run
@@ -249,6 +271,7 @@ pub fn safe_copy(dest: &mut String, src: &str, max_len: usize) -> Result<(), Str
 /// # RFC Compliance
 ///
 /// RFC 1035 Section 3.1 (DNS names are case-insensitive)
+#[must_use]
 pub fn hostname_equal(a: &str, b: &str) -> bool {
     hostname_cmp(a, b) == Ordering::Equal
 }
@@ -282,6 +305,7 @@ pub fn hostname_equal(a: &str, b: &str) -> bool {
 /// # RFC Compliance
 ///
 /// RFC 1035 Section 3.1 (DNS names are case-insensitive)
+#[must_use]
 pub fn hostname_cmp(a: &str, b: &str) -> Ordering {
     let mut chars_a = a.chars();
     let mut chars_b = b.chars();
@@ -293,7 +317,7 @@ pub fn hostname_cmp(a: &str, b: &str) -> Ordering {
                 let c2_lower = c2.to_ascii_lowercase();
 
                 match c1_lower.cmp(&c2_lower) {
-                    Ordering::Equal => continue,
+                    Ordering::Equal => {}
                     other => return other,
                 }
             }
@@ -333,6 +357,7 @@ pub fn hostname_cmp(a: &str, b: &str) -> Ordering {
 /// # RFC Compliance
 ///
 /// RFC 1035 Section 3.1 (DNS hierarchical namespace)
+#[must_use]
 pub fn is_subdomain(child: &str, parent: &str) -> bool {
     // Convert to lowercase for case-insensitive comparison
     let child_lower = child.to_lowercase();
@@ -390,17 +415,16 @@ pub fn is_subdomain(child: &str, parent: &str) -> bool {
 /// assert!(wildcard_match("exact", "exact"));
 /// assert!(!wildcard_match("abc", "def"));
 /// ```
+#[must_use]
 pub fn wildcard_match(pattern: &str, text: &str) -> bool {
     let mut pattern_chars = pattern.chars();
     let mut text_chars = text.chars();
 
     loop {
         match (pattern_chars.next(), text_chars.next()) {
-            (Some('*'), _) => return true, // Wildcard matches rest
-            (Some(p), Some(t)) if p == t => continue,
-            (Some(_), Some(_)) => return false, // Mismatch
-            (None, None) => return true,        // Both exhausted
-            _ => return false,
+            (Some('*'), _) | (None, None) => return true, // Wildcard matches rest or both exhausted
+            (Some(p), Some(t)) if p == t => {}
+            _ => return false, // Mismatch or other cases
         }
     }
 }
@@ -429,6 +453,7 @@ pub fn wildcard_match(pattern: &str, text: &str) -> bool {
 /// assert!(wildcard_match_prefix("prefix*", "prefix-suffix", 6));
 /// assert!(wildcard_match_prefix("test", "test123", 4));
 /// ```
+#[must_use]
 pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bool {
     let mut pattern_chars = pattern.chars();
     let mut text_chars = text.chars();
@@ -436,13 +461,10 @@ pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bo
 
     while count < max_labels {
         match (pattern_chars.next(), text_chars.next()) {
-            (Some('*'), _) => return true,
+            (Some('*'), _) | (None, None) => return true,
             (Some(p), Some(t)) if p == t => {
                 count += 1;
-                continue;
             }
-            (Some(_), Some(_)) => return false,
-            (None, None) => return true,
             _ => return false,
         }
     }
@@ -465,6 +487,16 @@ pub fn wildcard_match_prefix(pattern: &str, text: &str, max_labels: usize) -> bo
 ///
 /// `Ok((bytes, wildcard_mask))` where `wildcard_mask` is `Some(mask)` if wildcards present,
 /// `Err(ParseError)` on parse failure
+///
+/// # Errors
+///
+/// - `ParseError::InvalidFormat` - if hex string without separator has odd length
+/// - `ParseError::InvalidHexDigit` - if non-hex character found (excluding wildcards)
+///
+/// # Panics
+///
+/// Panics if UTF-8 conversion fails on input chunks (should not occur with valid input
+/// since we're only processing ASCII hex digits).
 ///
 /// # Examples
 ///
@@ -565,6 +597,7 @@ pub fn parse_hex_string(
 ///
 /// assert!(compare_with_mask(&mac1, &mac2, &mask));
 /// ```
+#[must_use]
 pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
     if a.len() != b.len() || a.len() != mask.len() {
         return false;
@@ -581,7 +614,7 @@ pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
 
 /// Format socket address as human-readable string
 ///
-/// Converts `SocketAddr` (IPv4 or IPv6) to string representation. For IPv6 addresses,
+/// Converts `SocketAddr` (`IPv4` or `IPv6`) to string representation. For `IPv6` addresses,
 /// uses standard bracket notation with port.
 ///
 /// # Arguments
@@ -590,7 +623,7 @@ pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
 ///
 /// # Returns
 ///
-/// Formatted address string (e.g., "192.168.1.1:53" or "[2001:db8::1]:53")
+/// Formatted address string (e.g., "192.168.1.1:53" or "`[2001:db8::1]:53`")
 ///
 /// # Examples
 ///
@@ -601,6 +634,7 @@ pub fn compare_with_mask(a: &[u8], b: &[u8], mask: &[bool]) -> bool {
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 53);
 /// assert_eq!(format_socket_addr(&addr), "192.168.1.1:53");
 /// ```
+#[must_use]
 pub fn format_socket_addr(addr: &SocketAddr) -> String {
     // Rust's SocketAddr Display trait already handles this correctly
     addr.to_string()
@@ -620,6 +654,13 @@ pub fn format_socket_addr(addr: &SocketAddr) -> String {
 ///
 /// `Ok(Vec<u8>)` containing wire-format encoded name with terminating zero byte,
 /// `Err(DnsNameError)` if validation fails
+///
+/// # Errors
+///
+/// - `DnsNameError::EmptyLabel` - if any label (between dots) is empty
+/// - `DnsNameError::LabelTooLong` - if any label exceeds 63 characters
+/// - `DnsNameError::InvalidCharacter` - if label contains non-alphanumeric, non-hyphen, non-underscore characters
+/// - `DnsNameError::NameTooLong` - if total encoded name exceeds 255 bytes
 ///
 /// # Examples
 ///
@@ -661,7 +702,8 @@ pub fn encode_dns_name(domain: &str) -> Result<Vec<u8>, DnsNameError> {
             }
         }
 
-        // Write length byte
+        // Write length byte (safe: validated <= MAX_LABEL_LENGTH = 63)
+        #[allow(clippy::cast_possible_truncation)]
         result.push(label_bytes.len() as u8);
         // Write label bytes
         result.extend_from_slice(label_bytes);
@@ -697,6 +739,13 @@ pub fn encode_dns_name(domain: &str) -> Result<Vec<u8>, DnsNameError> {
 ///
 /// `Ok(String)` containing canonical ASCII domain name,
 /// `Err(IdnError)` on invalid names or conversion failure
+///
+/// # Errors
+///
+/// Returns `IdnError::ConversionFailed` if the IDN to ASCII conversion fails due to:
+/// - Invalid Unicode characters in the input
+/// - Non-conformant domain name format
+/// - Punycode encoding errors
 ///
 /// # Examples
 ///

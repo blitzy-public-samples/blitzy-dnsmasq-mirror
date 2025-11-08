@@ -1,9 +1,9 @@
 // Copyright (c) 2000-2024 dnsmasq contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-//! # DHCPv4 Options Parsing and Serialization
+//! # `DHCPv4` Options Parsing and Serialization
 //!
-//! This module implements type-safe DHCPv4 option parsing and serialization per RFC 2132.
+//! This module implements type-safe `DHCPv4` option parsing and serialization per RFC 2132.
 //! It replaces the option handling from C's rfc2131.c, dhcp-protocol.h, and dhcp-common.c
 //! with safe Rust using compile-time bounds checking.
 //!
@@ -39,38 +39,68 @@ pub type OptionCode = u8;
 
 /// Option code constants
 pub const OPTION_PAD: OptionCode = 0;
+/// `DHCPv4` option code for subnet mask
 pub const OPTION_NETMASK: OptionCode = 1;
+/// `DHCPv4` option code for router/gateway
 pub const OPTION_ROUTER: OptionCode = 3;
+/// `DHCPv4` option code for DNS server
 pub const OPTION_DNSSERVER: OptionCode = 6;
+/// `DHCPv4` option code for hostname
 pub const OPTION_HOSTNAME: OptionCode = 12;
+/// `DHCPv4` option code for domain name
 pub const OPTION_DOMAINNAME: OptionCode = 15;
+/// `DHCPv4` option code for broadcast address
 pub const OPTION_BROADCAST: OptionCode = 28;
+/// `DHCPv4` option code for vendor class
 pub const OPTION_VENDOR_CLASS_OPT: OptionCode = 43;
+/// `DHCPv4` option code for requested IP address
 pub const OPTION_REQUESTED_IP: OptionCode = 50;
+/// `DHCPv4` option code for lease time
 pub const OPTION_LEASE_TIME: OptionCode = 51;
+/// `DHCPv4` option code for option overload
 pub const OPTION_OVERLOAD: OptionCode = 52;
+/// `DHCPv4` option code for message type
 pub const OPTION_MESSAGE_TYPE: OptionCode = 53;
+/// `DHCPv4` option code for server identifier
 pub const OPTION_SERVER_IDENTIFIER: OptionCode = 54;
+/// `DHCPv4` option code for parameter request list
 pub const OPTION_REQUESTED_OPTIONS: OptionCode = 55;
+/// `DHCPv4` option code for error message
 pub const OPTION_MESSAGE: OptionCode = 56;
+/// `DHCPv4` option code for maximum message size
 pub const OPTION_MAXMESSAGE: OptionCode = 57;
+/// `DHCPv4` option code for renewal (T1) time
 pub const OPTION_T1: OptionCode = 58;
+/// `DHCPv4` option code for rebinding (T2) time
 pub const OPTION_T2: OptionCode = 59;
+/// `DHCPv4` option code for vendor identifier
 pub const OPTION_VENDOR_ID: OptionCode = 60;
+/// `DHCPv4` option code for client identifier
 pub const OPTION_CLIENT_ID: OptionCode = 61;
+/// `DHCPv4` option code for server name
 pub const OPTION_SNAME: OptionCode = 66;
+/// `DHCPv4` option code for boot filename
 pub const OPTION_FILENAME: OptionCode = 67;
+/// `DHCPv4` option code for user class
 pub const OPTION_USER_CLASS: OptionCode = 77;
+/// `DHCPv4` option code for rapid commit
 pub const OPTION_RAPID_COMMIT: OptionCode = 80;
+/// `DHCPv4` option code for client FQDN
 pub const OPTION_CLIENT_FQDN: OptionCode = 81;
+/// `DHCPv4` option code for relay agent information
 pub const OPTION_AGENT_ID: OptionCode = 82;
+/// `DHCPv4` option code for client system architecture
 pub const OPTION_ARCH: OptionCode = 93;
+/// `DHCPv4` option code for client machine identifier (UUID/GUID)
 pub const OPTION_PXE_UUID: OptionCode = 97;
+/// `DHCPv4` option code for subnet selection
 pub const OPTION_SUBNET_SELECT: OptionCode = 118;
+/// `DHCPv4` option code for domain search list
 pub const OPTION_DOMAIN_SEARCH: OptionCode = 119;
+/// `DHCPv4` option code for end of options marker
 pub const OPTION_END: OptionCode = 255;
 
-/// DHCPv4 option parsing and serialization errors
+/// `DHCPv4` option parsing and serialization errors
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum OptionError {
     /// Option code is outside valid range or reserved
@@ -79,13 +109,21 @@ pub enum OptionError {
 
     /// Option data doesn't match expected format for option type
     #[error("Malformed option data for option {code}: {reason}")]
-    MalformedOptionData { code: u8, reason: String },
+    MalformedOptionData {
+        /// Option code that had malformed data
+        code: u8,
+        /// Human-readable description of the malformation
+        reason: String,
+    },
 
     /// Option length exceeds RFC 2132 255-byte maximum or is too short
     #[error("Invalid option length for option {code}: got {actual}, expected {expected}")]
     InvalidOptionLength {
+        /// Option code with invalid length
         code: u8,
+        /// Actual length found
         actual: usize,
+        /// Expected length or range
         expected: String,
     },
 
@@ -95,24 +133,33 @@ pub enum OptionError {
 
     /// Unrecognized vendor-specific or experimental option code
     #[error("Unknown option code: {0}")]
-    UnknownOption(u8),
+    UnknownOption(
+        /// The unrecognized option code
+        u8,
+    ),
 
     /// Malformed IPv4 address in address-type option
     #[error("Invalid IP address in option {code}")]
-    InvalidIpAddress { code: u8 },
+    InvalidIpAddress {
+        /// Option code containing invalid IP
+        code: u8,
+    },
 
     /// Invalid UTF-8 in string option
     #[error("Invalid UTF-8 in option {code}")]
-    InvalidUtf8 { code: u8 },
+    InvalidUtf8 {
+        /// Option code containing invalid UTF-8
+        code: u8,
+    },
 
     /// Option not found in packet
     #[error("Option {0} not found")]
     OptionNotFound(u8),
 }
 
-/// DHCPv4 option types per RFC 2132
+/// `DHCPv4` option types per RFC 2132
 ///
-/// This enum represents all standard DHCPv4 options with type-safe variants.
+/// This enum represents all standard `DHCPv4` options with type-safe variants.
 /// Replaces C's manual pointer arithmetic and buffer handling with compile-time
 /// safety guarantees.
 #[derive(Debug, Clone, PartialEq)]
@@ -196,13 +243,18 @@ pub enum DhcpOption {
     End,
 
     /// Unknown or vendor-specific option
-    Unknown { code: u8, data: Vec<u8> },
+    Unknown {
+        /// Option code
+        code: u8,
+        /// Raw option data
+        data: Vec<u8>,
+    },
 }
 
 impl DhcpOption {
     /// Parse a single option from raw bytes
     ///
-    /// Implements safe parsing replacing C's option_find() and option_uint()
+    /// Implements safe parsing replacing C's `option_find()` and `option_uint()`
     /// functions with bounds-checked slice operations.
     ///
     /// # Arguments
@@ -249,7 +301,7 @@ impl DhcpOption {
             return Err(OptionError::InvalidOptionLength {
                 code,
                 actual: data.len() - 2,
-                expected: format!("at least {}", length),
+                expected: format!("at least {length}"),
             });
         }
 
@@ -466,12 +518,16 @@ impl DhcpOption {
 
     /// Serialize option to bytes in network format
     ///
-    /// Implements safe serialization replacing C's option_put() and option_put_string()
+    /// Implements safe serialization replacing C's `option_put()` and `option_put_string()`
     /// functions with bounds-checked buffer operations.
     ///
     /// # Returns
     ///
     /// Vector of bytes containing code, length, and data in network byte order
+    ///
+    /// # Panics
+    /// Panics if writing to the in-memory buffer fails (should never happen in practice)
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
@@ -489,14 +545,16 @@ impl DhcpOption {
             }
             DhcpOption::Router(addrs) => {
                 buf.push(OPTION_ROUTER);
-                buf.push((addrs.len() * 4) as u8);
+                let len = (addrs.len() * 4).min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
                 for addr in addrs {
                     buf.extend_from_slice(&addr.octets());
                 }
             }
             DhcpOption::DnsServer(addrs) => {
                 buf.push(OPTION_DNSSERVER);
-                buf.push((addrs.len() * 4) as u8);
+                let len = (addrs.len() * 4).min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
                 for addr in addrs {
                     buf.extend_from_slice(&addr.octets());
                 }
@@ -504,14 +562,16 @@ impl DhcpOption {
             DhcpOption::Hostname(name) => {
                 buf.push(OPTION_HOSTNAME);
                 let name_bytes = name.as_bytes();
-                buf.push(name_bytes.len().min(255) as u8);
-                buf.extend_from_slice(&name_bytes[..name_bytes.len().min(255)]);
+                let len = name_bytes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&name_bytes[..len]);
             }
             DhcpOption::DomainName(domain) => {
                 buf.push(OPTION_DOMAINNAME);
                 let domain_bytes = domain.as_bytes();
-                buf.push(domain_bytes.len().min(255) as u8);
-                buf.extend_from_slice(&domain_bytes[..domain_bytes.len().min(255)]);
+                let len = domain_bytes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&domain_bytes[..len]);
             }
             DhcpOption::Broadcast(addr) => {
                 buf.push(OPTION_BROADCAST);
@@ -520,8 +580,9 @@ impl DhcpOption {
             }
             DhcpOption::VendorClassOption(data) => {
                 buf.push(OPTION_VENDOR_CLASS_OPT);
-                buf.push(data.len().min(255) as u8);
-                buf.extend_from_slice(&data[..data.len().min(255)]);
+                let len = data.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&data[..len]);
             }
             DhcpOption::RequestedIpAddress(addr) => {
                 buf.push(OPTION_REQUESTED_IP);
@@ -550,14 +611,16 @@ impl DhcpOption {
             }
             DhcpOption::RequestedOptions(codes) => {
                 buf.push(OPTION_REQUESTED_OPTIONS);
-                buf.push(codes.len().min(255) as u8);
-                buf.extend_from_slice(&codes[..codes.len().min(255)]);
+                let len = codes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&codes[..len]);
             }
             DhcpOption::Message(msg) => {
                 buf.push(OPTION_MESSAGE);
                 let msg_bytes = msg.as_bytes();
-                buf.push(msg_bytes.len().min(255) as u8);
-                buf.extend_from_slice(&msg_bytes[..msg_bytes.len().min(255)]);
+                let len = msg_bytes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&msg_bytes[..len]);
             }
             DhcpOption::MaxMessageSize(size) => {
                 buf.push(OPTION_MAXMESSAGE);
@@ -577,30 +640,35 @@ impl DhcpOption {
             DhcpOption::VendorId(vendor) => {
                 buf.push(OPTION_VENDOR_ID);
                 let vendor_bytes = vendor.as_bytes();
-                buf.push(vendor_bytes.len().min(255) as u8);
-                buf.extend_from_slice(&vendor_bytes[..vendor_bytes.len().min(255)]);
+                let len = vendor_bytes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&vendor_bytes[..len]);
             }
             DhcpOption::ClientIdentifier(id) => {
                 buf.push(OPTION_CLIENT_ID);
-                buf.push(id.len().min(255) as u8);
-                buf.extend_from_slice(&id[..id.len().min(255)]);
+                let len = id.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&id[..len]);
             }
             DhcpOption::TftpServerName(name) => {
                 buf.push(OPTION_SNAME);
                 let name_bytes = name.as_bytes();
-                buf.push(name_bytes.len().min(255) as u8);
-                buf.extend_from_slice(&name_bytes[..name_bytes.len().min(255)]);
+                let len = name_bytes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&name_bytes[..len]);
             }
             DhcpOption::BootFilename(filename) => {
                 buf.push(OPTION_FILENAME);
                 let filename_bytes = filename.as_bytes();
-                buf.push(filename_bytes.len().min(255) as u8);
-                buf.extend_from_slice(&filename_bytes[..filename_bytes.len().min(255)]);
+                let len = filename_bytes.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&filename_bytes[..len]);
             }
             DhcpOption::RelayAgentInformation(data) => {
                 buf.push(OPTION_AGENT_ID);
-                buf.push(data.len().min(255) as u8);
-                buf.extend_from_slice(&data[..data.len().min(255)]);
+                let len = data.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&data[..len]);
             }
             DhcpOption::ClientArchitecture(arch) => {
                 buf.push(OPTION_ARCH);
@@ -609,13 +677,15 @@ impl DhcpOption {
             }
             DhcpOption::ClientUuid(uuid) => {
                 buf.push(OPTION_PXE_UUID);
-                buf.push(uuid.len().min(255) as u8);
-                buf.extend_from_slice(&uuid[..uuid.len().min(255)]);
+                let len = uuid.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&uuid[..len]);
             }
             DhcpOption::Unknown { code, data } => {
                 buf.push(*code);
-                buf.push(data.len().min(255) as u8);
-                buf.extend_from_slice(&data[..data.len().min(255)]);
+                let len = data.len().min(255);
+                buf.push(u8::try_from(len).unwrap_or(255));
+                buf.extend_from_slice(&data[..len]);
             }
         }
 
@@ -623,6 +693,7 @@ impl DhcpOption {
     }
 
     /// Get the option code for this option
+    #[must_use]
     pub fn to_code(&self) -> u8 {
         match self {
             DhcpOption::Pad => OPTION_PAD,
@@ -656,6 +727,10 @@ impl DhcpOption {
     }
 
     /// Create an option from an option code (for testing)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OptionError::InvalidOptionCode`] if the option code is not recognized (not PAD or END)
     pub fn from_code(code: u8) -> Result<DhcpOption, OptionError> {
         match code {
             OPTION_PAD => Ok(DhcpOption::Pad),
@@ -665,18 +740,20 @@ impl DhcpOption {
     }
 
     /// Get the length of the option data (excluding code and length bytes)
+    #[must_use]
     pub fn len(&self) -> usize {
         match self {
             DhcpOption::Pad | DhcpOption::End => 0,
             DhcpOption::SubnetMask(_)
             | DhcpOption::Broadcast(_)
             | DhcpOption::RequestedIpAddress(_)
-            | DhcpOption::ServerIdentifier(_) => 4,
-            DhcpOption::LeaseTime(_) | DhcpOption::T1(_) | DhcpOption::T2(_) => 4,
+            | DhcpOption::ServerIdentifier(_)
+            | DhcpOption::LeaseTime(_)
+            | DhcpOption::T1(_)
+            | DhcpOption::T2(_) => 4,
             DhcpOption::Overload(_) | DhcpOption::MessageType(_) => 1,
             DhcpOption::MaxMessageSize(_) | DhcpOption::ClientArchitecture(_) => 2,
-            DhcpOption::Router(addrs) => addrs.len() * 4,
-            DhcpOption::DnsServer(addrs) => addrs.len() * 4,
+            DhcpOption::Router(addrs) | DhcpOption::DnsServer(addrs) => addrs.len() * 4,
             DhcpOption::Hostname(s)
             | DhcpOption::DomainName(s)
             | DhcpOption::Message(s)
@@ -693,6 +770,7 @@ impl DhcpOption {
     }
 
     /// Check if the option has no data payload
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -700,7 +778,7 @@ impl DhcpOption {
 
 /// Parse all options from a DHCP packet
 ///
-/// Replaces C's option_find() and option_find1() with safe iteration over options.
+/// Replaces C's `option_find()` and `option_find1()` with safe iteration over options.
 ///
 /// # Arguments
 ///
@@ -713,6 +791,7 @@ impl DhcpOption {
 /// # Errors
 ///
 /// Malformed options are skipped rather than causing parse failure
+#[must_use]
 pub fn parse_options(data: &[u8]) -> Vec<DhcpOption> {
     let mut options = Vec::new();
     let mut offset = 0;
@@ -755,7 +834,7 @@ pub fn parse_options(data: &[u8]) -> Vec<DhcpOption> {
 
 /// Serialize multiple options to bytes
 ///
-/// Replaces C's do_options() with safe buffer construction.
+/// Replaces C's `do_options()` with safe buffer construction.
 ///
 /// # Arguments
 ///
@@ -764,6 +843,7 @@ pub fn parse_options(data: &[u8]) -> Vec<DhcpOption> {
 /// # Returns
 ///
 /// Vector of bytes containing serialized options
+#[must_use]
 pub fn serialize_options(options: &[DhcpOption]) -> Vec<u8> {
     let mut buf = Vec::new();
 
@@ -781,16 +861,17 @@ pub fn serialize_options(options: &[DhcpOption]) -> Vec<u8> {
 
 /// Check if an option code is in the requested options list
 ///
-/// Replaces C's in_list() function with safe slice contains() operation.
+/// Replaces C's `in_list()` function with safe slice `contains()` operation.
 ///
 /// # Arguments
 ///
 /// * `option_code` - Option code to check
-/// * `requested` - List of requested option codes (from OPTION_REQUESTED_OPTIONS)
+/// * `requested` - List of requested option codes (from `OPTION_REQUESTED_OPTIONS`)
 ///
 /// # Returns
 ///
 /// `true` if option is requested, `false` otherwise
+#[must_use]
 pub fn is_option_requested(option_code: u8, requested: &[u8]) -> bool {
     requested.contains(&option_code)
 }

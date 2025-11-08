@@ -68,7 +68,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Default port for Prometheus metrics HTTP endpoint
 ///
 /// Port 9153 is the standard port for DNS-related metrics in the Prometheus ecosystem,
-/// used by CoreDNS and other DNS servers. This avoids conflicts with dnsmasq's primary
+/// used by `CoreDNS` and other DNS servers. This avoids conflicts with dnsmasq's primary
 /// service ports (53 for DNS, 67/68 for DHCP).
 pub const DEFAULT_METRICS_PORT: u16 = 9153;
 
@@ -101,7 +101,7 @@ pub const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4";
 /// - Legacy protocols: BOOTP, PXE
 ///
 /// ### Lease Metrics
-/// - Allocation tracking for DHCPv4 and DHCPv6
+/// - Allocation tracking for `DHCPv4` and `DHCPv6`
 /// - Pruning statistics for expired/released leases
 ///
 /// ## Prometheus Naming Conventions
@@ -115,9 +115,9 @@ pub enum MetricLabel {
     /// DNS cache insertions counter
     ///
     /// Tracks successful additions of resource records to the DNS cache.
-    /// Incremented by cache_insert() operations.
+    /// Incremented by `cache_insert()` operations.
     ///
-    /// **C equivalent**: METRIC_DNS_CACHE_INSERTED
+    /// **C equivalent**: `METRIC_DNS_CACHE_INSERTED`
     DnsCacheInserted = 0,
 
     /// DNS cache evictions counter (live entries freed)
@@ -125,23 +125,23 @@ pub enum MetricLabel {
     /// Tracks removal of non-expired cache entries due to cache size limits.
     /// Incremented during LRU eviction when cache is full.
     ///
-    /// **C equivalent**: METRIC_DNS_CACHE_LIVE_FREED
+    /// **C equivalent**: `METRIC_DNS_CACHE_LIVE_FREED`
     DnsCacheLiveFreed = 1,
 
     /// DNS queries forwarded to upstream servers
     ///
     /// Tracks queries sent to upstream DNS servers after cache misses.
-    /// Incremented by forward_query() operations.
+    /// Incremented by `forward_query()` operations.
     ///
-    /// **C equivalent**: METRIC_DNS_QUERIES_FORWARDED
+    /// **C equivalent**: `METRIC_DNS_QUERIES_FORWARDED`
     DnsQueriesForwarded = 2,
 
     /// DNS authoritative answers counter
     ///
-    /// Tracks queries answered from local authoritative zones (requires HAVE_AUTH).
+    /// Tracks queries answered from local authoritative zones (requires `HAVE_AUTH`).
     /// Incremented by authoritative zone lookups.
     ///
-    /// **C equivalent**: METRIC_DNS_AUTH_ANSWERED
+    /// **C equivalent**: `METRIC_DNS_AUTH_ANSWERED`
     DnsAuthAnswered = 3,
 
     /// DNS local answers counter
@@ -149,15 +149,15 @@ pub enum MetricLabel {
     /// Tracks queries answered from /etc/hosts, --address, or --server configurations.
     /// Incremented when serving local data without cache or forwarding.
     ///
-    /// **C equivalent**: METRIC_DNS_LOCAL_ANSWERED
+    /// **C equivalent**: `METRIC_DNS_LOCAL_ANSWERED`
     DnsLocalAnswered = 4,
 
     /// BOOTP requests counter (legacy DHCP)
     ///
     /// Tracks BOOTP protocol requests (DHCP predecessor).
-    /// Incremented when processing BOOTREQUEST messages.
+    /// Incremented when processing `BOOTREQUEST` messages.
     ///
-    /// **C equivalent**: METRIC_BOOTP
+    /// **C equivalent**: `METRIC_BOOTP`
     Bootp = 5,
 
     /// PXE boot requests counter
@@ -165,148 +165,147 @@ pub enum MetricLabel {
     /// Tracks Pre-boot Execution Environment requests for network boot.
     /// Incremented when DHCP option 93 (client architecture) is present.
     ///
-    /// **C equivalent**: METRIC_PXE
+    /// **C equivalent**: `METRIC_PXE`
     Pxe = 6,
 
-    /// DHCPACK messages sent counter
+    /// `DHCPACK` messages sent counter
     ///
     /// Tracks acknowledgment messages confirming lease allocation or renewal.
-    /// Sent in response to DHCPREQUEST after address allocation.
+    /// Sent in response to `DHCPREQUEST` after address allocation.
     ///
-    /// **C equivalent**: METRIC_DHCPACK
+    /// **C equivalent**: `METRIC_DHCPACK`
     DhcpAck = 7,
 
-    /// DHCPDECLINE messages received counter
+    /// `DHCPDECLINE` messages received counter
     ///
     /// Tracks client rejection of offered addresses due to detected conflicts.
     /// Incremented when clients send DECLINE after ARP checks.
     ///
-    /// **C equivalent**: METRIC_DHCPDECLINE
+    /// **C equivalent**: `METRIC_DHCPDECLINE`
     DhcpDecline = 8,
 
-    /// DHCPDISCOVER messages received counter
+    /// `DHCPDISCOVER` messages received counter
     ///
     /// Tracks initial broadcast requests from DHCP clients seeking addresses.
     /// First message in DHCP 4-way handshake.
     ///
-    /// **C equivalent**: METRIC_DHCPDISCOVER
+    /// **C equivalent**: `METRIC_DHCPDISCOVER`
     DhcpDiscover = 9,
 
-    /// DHCPINFORM messages received counter
+    /// `DHCPINFORM` messages received counter
     ///
     /// Tracks requests from clients with manual addresses seeking configuration.
     /// Clients already have addresses but need additional parameters.
     ///
-    /// **C equivalent**: METRIC_DHCPINFORM
+    /// **C equivalent**: `METRIC_DHCPINFORM`
     DhcpInform = 10,
 
-    /// DHCPNAK messages sent counter
+    /// `DHCPNAK` messages sent counter
     ///
-    /// Tracks negative acknowledgments rejecting invalid DHCPREQUEST.
+    /// Tracks negative acknowledgments rejecting invalid `DHCPREQUEST`.
     /// Sent when requested address is invalid or lease has expired.
     ///
-    /// **C equivalent**: METRIC_DHCPNAK
+    /// **C equivalent**: `METRIC_DHCPNAK`
     DhcpNak = 11,
 
-    /// DHCPOFFER messages sent counter
+    /// `DHCPOFFER` messages sent counter
     ///
-    /// Tracks offers of IP addresses sent in response to DHCPDISCOVER.
+    /// Tracks offers of IP addresses sent in response to `DHCPDISCOVER`.
     /// Second message in DHCP 4-way handshake.
     ///
-    /// **C equivalent**: METRIC_DHCPOFFER
+    /// **C equivalent**: `METRIC_DHCPOFFER`
     DhcpOffer = 12,
 
-    /// DHCPRELEASE messages received counter
+    /// `DHCPRELEASE` messages received counter
     ///
     /// Tracks client notifications of lease termination.
     /// Allows early reclamation of addresses.
     ///
-    /// **C equivalent**: METRIC_DHCPRELEASE
+    /// **C equivalent**: `METRIC_DHCPRELEASE`
     DhcpRelease = 13,
 
-    /// DHCPREQUEST messages received counter
+    /// `DHCPREQUEST` messages received counter
     ///
     /// Tracks requests to accept offered addresses or renew/rebind existing leases.
     /// Third message in DHCP 4-way handshake.
     ///
-    /// **C equivalent**: METRIC_DHCPREQUEST
+    /// **C equivalent**: `METRIC_DHCPREQUEST`
     DhcpRequest = 14,
 
     /// DNS queries with no answer counter
     ///
-    /// Tracks queries resulting in NXDOMAIN or NODATA responses.
+    /// Tracks queries resulting in `NXDOMAIN` or `NODATA` responses.
     /// Used for negative caching statistics.
     ///
-    /// **C equivalent**: METRIC_NOANSWER
+    /// **C equivalent**: `METRIC_NOANSWER`
     NoAnswer = 15,
 
-    /// DHCPv4 leases allocated counter
+    /// `DHCPv4` leases allocated counter
     ///
     /// Tracks successful IPv4 address allocations from configured pools.
     /// Incremented when new leases are created or reused.
     ///
-    /// **C equivalent**: METRIC_LEASES_ALLOCATED_4
+    /// **C equivalent**: `METRIC_LEASES_ALLOCATED_4`
     LeasesAllocated4 = 16,
 
-    /// DHCPv4 leases pruned counter
+    /// `DHCPv4` leases pruned counter
     ///
-    /// Tracks removal of expired or released DHCPv4 leases.
+    /// Tracks removal of expired or released `DHCPv4` leases.
     /// Incremented during periodic lease cleanup.
     ///
-    /// **C equivalent**: METRIC_LEASES_PRUNED_4
+    /// **C equivalent**: `METRIC_LEASES_PRUNED_4`
     LeasesPruned4 = 17,
 
-    /// DHCPv6 leases allocated counter
+    /// `DHCPv6` leases allocated counter
     ///
     /// Tracks successful IPv6 address or prefix allocations.
-    /// Includes IA_NA, IA_TA, and IA_PD allocations.
+    /// Includes `IA_NA`, `IA_TA`, and `IA_PD` allocations.
     ///
-    /// **C equivalent**: METRIC_LEASES_ALLOCATED_6
+    /// **C equivalent**: `METRIC_LEASES_ALLOCATED_6`
     LeasesAllocated6 = 18,
 
-    /// DHCPv6 leases pruned counter
+    /// `DHCPv6` leases pruned counter
     ///
-    /// Tracks removal of expired or released DHCPv6 leases.
+    /// Tracks removal of expired or released `DHCPv6` leases.
     /// Incremented during periodic lease cleanup.
     ///
-    /// **C equivalent**: METRIC_LEASES_PRUNED_6
+    /// **C equivalent**: `METRIC_LEASES_PRUNED_6`
     LeasesPruned6 = 19,
 }
 
 impl MetricLabel {
     /// Total number of defined metrics
     ///
-    /// Equivalent to C's __METRIC_MAX sentinel value.
+    /// Equivalent to C's `__METRIC_MAX` sentinel value.
     /// Used for array sizing and iteration.
     pub const COUNT: usize = 20;
 
     /// Returns an iterator over all metric labels
     ///
     /// Provides compile-time enumeration of all metrics for export and reporting.
-    /// Replaces C's manual loop from 0 to __METRIC_MAX.
+    /// Replaces C's manual loop from 0 to `__METRIC_MAX`.
     pub fn iter() -> impl Iterator<Item = MetricLabel> {
-        use MetricLabel::*;
         [
-            DnsCacheInserted,
-            DnsCacheLiveFreed,
-            DnsQueriesForwarded,
-            DnsAuthAnswered,
-            DnsLocalAnswered,
-            Bootp,
-            Pxe,
-            DhcpAck,
-            DhcpDecline,
-            DhcpDiscover,
-            DhcpInform,
-            DhcpNak,
-            DhcpOffer,
-            DhcpRelease,
-            DhcpRequest,
-            NoAnswer,
-            LeasesAllocated4,
-            LeasesPruned4,
-            LeasesAllocated6,
-            LeasesPruned6,
+            MetricLabel::DnsCacheInserted,
+            MetricLabel::DnsCacheLiveFreed,
+            MetricLabel::DnsQueriesForwarded,
+            MetricLabel::DnsAuthAnswered,
+            MetricLabel::DnsLocalAnswered,
+            MetricLabel::Bootp,
+            MetricLabel::Pxe,
+            MetricLabel::DhcpAck,
+            MetricLabel::DhcpDecline,
+            MetricLabel::DhcpDiscover,
+            MetricLabel::DhcpInform,
+            MetricLabel::DhcpNak,
+            MetricLabel::DhcpOffer,
+            MetricLabel::DhcpRelease,
+            MetricLabel::DhcpRequest,
+            MetricLabel::NoAnswer,
+            MetricLabel::LeasesAllocated4,
+            MetricLabel::LeasesPruned4,
+            MetricLabel::LeasesAllocated6,
+            MetricLabel::LeasesPruned6,
         ]
         .iter()
         .copied()
@@ -322,6 +321,7 @@ impl MetricLabel {
     /// use dnsmasq::util::metrics::MetricLabel;
     /// assert_eq!(MetricLabel::DnsQueriesForwarded.as_str(), "dns_queries_forwarded");
     /// ```
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             MetricLabel::DnsCacheInserted => "dns_cache_inserted",
@@ -350,7 +350,7 @@ impl MetricLabel {
     /// Returns human-readable description for Prometheus HELP text
     ///
     /// Provides detailed explanation of each metric for monitoring dashboards and documentation.
-    fn help_text(&self) -> &'static str {
+    fn help_text(self) -> &'static str {
         match self {
             MetricLabel::DnsCacheInserted => "Number of DNS records inserted into cache",
             MetricLabel::DnsCacheLiveFreed => {
@@ -384,7 +384,7 @@ impl MetricLabel {
 
 /// Implements Display trait for automatic string conversion
 ///
-/// Enables using MetricLabel directly in format strings and string builders.
+/// Enables using `MetricLabel` directly in format strings and string builders.
 /// Delegates to `as_str()` for consistent naming.
 impl fmt::Display for MetricLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -416,7 +416,7 @@ impl fmt::Display for MetricLabel {
 /// concurrent access from multiple tasks.
 #[derive(Debug, Clone)]
 pub struct MetricsCollector {
-    /// Counter storage indexed by MetricLabel discriminant
+    /// Counter storage indexed by `MetricLabel` discriminant
     counters: [u64; MetricLabel::COUNT],
 }
 
@@ -428,6 +428,7 @@ impl MetricsCollector {
     /// use dnsmasq::util::metrics::MetricsCollector;
     /// let collector = MetricsCollector::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             counters: [0; MetricLabel::COUNT],
@@ -467,6 +468,7 @@ impl MetricsCollector {
     /// collector.increment(MetricLabel::DhcpAck, 42);
     /// assert_eq!(collector.get(MetricLabel::DhcpAck), 42);
     /// ```
+    #[must_use]
     pub fn get(&self, metric: MetricLabel) -> u64 {
         self.counters[metric as usize]
     }
@@ -512,6 +514,7 @@ impl MetricsCollector {
     /// let output = collector.export_prometheus();
     /// assert!(output.contains("dns_queries_forwarded 100"));
     /// ```
+    #[must_use]
     pub fn export_prometheus(&self) -> String {
         let mut output = String::with_capacity(4096);
 
@@ -521,15 +524,15 @@ impl MetricsCollector {
             let value = self.get(metric);
 
             // Write HELP comment
-            writeln!(&mut output, "# HELP {} {}", name, help)
+            writeln!(&mut output, "# HELP {name} {help}")
                 .expect("String write should never fail");
 
             // Write TYPE declaration (all metrics are counters)
-            writeln!(&mut output, "# TYPE {} counter", name)
+            writeln!(&mut output, "# TYPE {name} counter")
                 .expect("String write should never fail");
 
             // Write metric value
-            writeln!(&mut output, "{} {}", name, value).expect("String write should never fail");
+            writeln!(&mut output, "{name} {value}").expect("String write should never fail");
         }
 
         output
@@ -568,7 +571,7 @@ impl Default for MetricsCollector {
 /// ```
 #[derive(Debug)]
 pub struct AtomicMetricsCollector {
-    /// Atomic counter storage indexed by MetricLabel discriminant
+    /// Atomic counter storage indexed by `MetricLabel` discriminant
     counters: [AtomicU64; MetricLabel::COUNT],
 }
 
@@ -580,6 +583,7 @@ impl AtomicMetricsCollector {
     /// use dnsmasq::util::metrics::AtomicMetricsCollector;
     /// let collector = AtomicMetricsCollector::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         // Initialize array of AtomicU64 with zeroes using from_fn
         Self {
@@ -664,6 +668,7 @@ impl AtomicMetricsCollector {
     /// let output = collector.export_prometheus();
     /// assert!(output.contains("dns_queries_forwarded 100"));
     /// ```
+    #[must_use]
     pub fn export_prometheus(&self) -> String {
         let mut output = String::with_capacity(4096);
 
@@ -673,15 +678,15 @@ impl AtomicMetricsCollector {
             let value = self.get(metric);
 
             // Write HELP comment
-            writeln!(&mut output, "# HELP {} {}", name, help)
+            writeln!(&mut output, "# HELP {name} {help}")
                 .expect("String write should never fail");
 
             // Write TYPE declaration (all metrics are counters)
-            writeln!(&mut output, "# TYPE {} counter", name)
+            writeln!(&mut output, "# TYPE {name} counter")
                 .expect("String write should never fail");
 
             // Write metric value
-            writeln!(&mut output, "{} {}", name, value).expect("String write should never fail");
+            writeln!(&mut output, "{name} {value}").expect("String write should never fail");
         }
 
         output
@@ -716,6 +721,7 @@ impl Default for AtomicMetricsCollector {
 /// let name = metric_label(MetricLabel::DnsQueriesForwarded);
 /// assert_eq!(name, "dns_queries_forwarded");
 /// ```
+#[must_use]
 pub fn metric_label(metric: MetricLabel) -> &'static str {
     metric.as_str()
 }
@@ -776,7 +782,7 @@ mod tests {
     #[test]
     fn test_metric_label_display() {
         let metric = MetricLabel::DnsQueriesForwarded;
-        assert_eq!(format!("{}", metric), "dns_queries_forwarded");
+        assert_eq!(format!("{metric}"), "dns_queries_forwarded");
     }
 
     #[test]

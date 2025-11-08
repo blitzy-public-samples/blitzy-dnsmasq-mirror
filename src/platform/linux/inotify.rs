@@ -46,7 +46,7 @@
 //! use std::path::PathBuf;
 //!
 //! async fn monitor_config() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut watcher = InotifyWatcher::new().await?;
+//!     let mut watcher = InotifyWatcher::new()?;
 //!     
 //!     // Watch resolv files
 //!     watcher.watch_resolv_files(vec![
@@ -54,7 +54,7 @@
 //!     ]).await?;
 //!     
 //!     // Process events
-//!     while let Some(event) = watcher.next_event().await {
+//!     while let Some(event) = watcher.next_event() {
 //!         match event {
 //!             FileEvent::ResolvFileChanged(path) => {
 //!                 println!("Resolv file changed: {:?}", path);
@@ -105,6 +105,7 @@ pub struct DirFlags {
 
 impl DirFlags {
     /// Create flags for hosts directory
+    #[must_use]
     pub fn hosts() -> Self {
         Self {
             hosts: true,
@@ -114,6 +115,7 @@ impl DirFlags {
     }
 
     /// Create flags for DHCP hosts directory
+    #[must_use]
     pub fn dhcp_hosts() -> Self {
         Self {
             hosts: false,
@@ -123,6 +125,7 @@ impl DirFlags {
     }
 
     /// Create flags for DHCP options directory
+    #[must_use]
     pub fn dhcp_opts() -> Self {
         Self {
             hosts: false,
@@ -132,6 +135,7 @@ impl DirFlags {
     }
 
     /// Check if this matches a filter
+    #[must_use]
     pub fn matches(&self, filter: &DirFlags) -> bool {
         (!filter.hosts || self.hosts)
             && (!filter.dhcp_hosts || self.dhcp_hosts)
@@ -149,7 +153,9 @@ pub enum InotifyError {
     /// Failed to add watch for a file or directory
     #[error("failed to add watch for {path}: {source}")]
     WatchFailed {
+        /// Path that failed to be watched
         path: PathBuf,
+        /// Underlying I/O error
         #[source]
         source: io::Error,
     },
@@ -160,7 +166,10 @@ pub enum InotifyError {
 
     /// Required directory is missing
     #[error("directory {path} for resolv-file is missing, cannot poll")]
-    DirectoryMissing { path: PathBuf },
+    DirectoryMissing {
+        /// Path to the missing directory
+        path: PathBuf
+    },
 
     /// General I/O error
     #[error("I/O error: {0}")]
@@ -168,7 +177,10 @@ pub enum InotifyError {
 
     /// Path is not a directory
     #[error("{path} is not a directory")]
-    NotADirectory { path: PathBuf },
+    NotADirectory {
+        /// Path that is not a directory
+        path: PathBuf
+    },
 }
 
 /// Events emitted when monitored files change
@@ -209,7 +221,7 @@ pub struct InotifyWatcher {
 impl InotifyWatcher {
     /// Create a new inotify watcher
     ///
-    /// Initializes the inotify file descriptor with IN_NONBLOCK and IN_CLOEXEC flags.
+    /// Initializes the inotify file descriptor with `IN_NONBLOCK` and `IN_CLOEXEC` flags.
     ///
     /// # Errors
     ///
@@ -222,11 +234,11 @@ impl InotifyWatcher {
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// use dnsmasq::platform::linux::inotify::InotifyWatcher;
     ///
-    /// let watcher = InotifyWatcher::new().await?;
+    /// let watcher = InotifyWatcher::new()?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn new() -> Result<Self, InotifyError> {
+    pub fn new() -> Result<Self, InotifyError> {
         let inotify = Inotify::init().map_err(InotifyError::InitFailed)?;
 
         info!("Initialized inotify for configuration file monitoring");
@@ -242,8 +254,8 @@ impl InotifyWatcher {
     ///
     /// Sets up inotify watches on the directories containing resolv files.
     /// Follows symbolic links up to MAXSYMLINKS depth to find actual file
-    /// locations, then monitors parent directories for IN_CLOSE_WRITE and
-    /// IN_MOVED_TO events.
+    /// locations, then monitors parent directories for `IN_CLOSE_WRITE` and
+    /// `IN_MOVED_TO` events.
     ///
     /// # Arguments
     ///
@@ -253,7 +265,7 @@ impl InotifyWatcher {
     ///
     /// - [`InotifyError::TooManySymlinks`] if symlink chain exceeds MAXSYMLINKS
     /// - [`InotifyError::DirectoryMissing`] if parent directory doesn't exist
-    /// - [`InotifyError::WatchFailed`] if inotify_add_watch fails
+    /// - [`InotifyError::WatchFailed`] if `inotify_add_watch` fails
     ///
     /// # Example
     ///
@@ -262,7 +274,7 @@ impl InotifyWatcher {
     /// use dnsmasq::platform::linux::inotify::InotifyWatcher;
     /// use std::path::PathBuf;
     ///
-    /// let mut watcher = InotifyWatcher::new().await?;
+    /// let mut watcher = InotifyWatcher::new()?;
     /// watcher.watch_resolv_files(vec![
     ///     PathBuf::from("/etc/resolv.conf"),
     ///     PathBuf::from("/run/systemd/resolve/resolv.conf"),
@@ -341,12 +353,12 @@ impl InotifyWatcher {
     ///
     /// # Arguments
     ///
-    /// * `dirs` - List of (directory_path, flags) tuples to monitor
+    /// * `dirs` - List of (`directory_path`, flags) tuples to monitor
     ///
     /// # Errors
     ///
     /// Returns [`InotifyError::WatchFailed`] if directory doesn't exist or
-    /// inotify_add_watch fails. Errors are logged but don't prevent other
+    /// `inotify_add_watch` fails. Errors are logged but don't prevent other
     /// directories from being watched.
     ///
     /// # Example
@@ -356,7 +368,7 @@ impl InotifyWatcher {
     /// use dnsmasq::platform::linux::inotify::{InotifyWatcher, DirFlags};
     /// use std::path::PathBuf;
     ///
-    /// let mut watcher = InotifyWatcher::new().await?;
+    /// let mut watcher = InotifyWatcher::new()?;
     /// watcher.watch_dynamic_dirs(vec![
     ///     (PathBuf::from("/etc/dnsmasq.d/hosts"), DirFlags::hosts()),
     ///     (PathBuf::from("/etc/dnsmasq.d/dhcp-hosts"), DirFlags::dhcp_hosts()),
@@ -445,10 +457,10 @@ impl InotifyWatcher {
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// use dnsmasq::platform::linux::inotify::{InotifyWatcher, FileEvent};
     ///
-    /// let mut watcher = InotifyWatcher::new().await?;
+    /// let mut watcher = InotifyWatcher::new()?;
     /// // ... setup watches ...
     ///
-    /// while let Some(event) = watcher.next_event().await {
+    /// while let Some(event) = watcher.next_event() {
     ///     match event {
     ///         FileEvent::ResolvFileChanged(path) => {
     ///             println!("Reload DNS servers from: {:?}", path);
@@ -461,7 +473,7 @@ impl InotifyWatcher {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn next_event(&mut self) -> Option<FileEvent> {
+    pub fn next_event(&mut self) -> Option<FileEvent> {
         // Read events from inotify (non-blocking)
         let events = match self.inotify.read_events(&mut self.event_buffer) {
             Ok(events) => events,
@@ -480,9 +492,8 @@ impl InotifyWatcher {
             let wd_id = event.wd.get_watch_descriptor_id();
 
             // Get watch information
-            let watch_info = match self.watches.get(&wd_id) {
-                Some(info) => info,
-                None => continue,
+            let Some(watch_info) = self.watches.get(&wd_id) else {
+                continue;
             };
 
             // Get event name (filename that triggered event)
@@ -590,10 +601,9 @@ impl InotifyWatcher {
 
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            let file_name = entry.file_name();
-            let filename = match file_name.to_str() {
-                Some(name) => name,
-                None => continue,
+            let file_name_os = entry.file_name();
+            let Some(filename) = file_name_os.to_str() else {
+                continue;
             };
 
             // Filter out backup files, lock files, and dotfiles
@@ -602,9 +612,8 @@ impl InotifyWatcher {
             }
 
             // Only process regular files
-            let metadata = match fs::metadata(&path).await {
-                Ok(m) => m,
-                Err(_) => continue,
+            let Ok(metadata) = fs::metadata(&path).await else {
+                continue;
             };
 
             if metadata.is_file() {

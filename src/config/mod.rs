@@ -52,7 +52,7 @@
 //! use clap::Parser;
 //!
 //! let cli = Cli::parse();
-//! let config = load_config(cli)?;
+//! let config = load_config(&cli)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -64,7 +64,7 @@
 //!
 //! // Specify config file via CLI argument
 //! let cli = Cli::parse_from(&["dnsmasq", "--conf-file=/etc/dnsmasq.conf"]);
-//! let config = load_config(cli)?;
+//! let config = load_config(&cli)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -169,7 +169,7 @@ pub use types::AuthConfig;
 // HIGH-LEVEL CONFIGURATION LOADING
 // =============================================================================
 
-/// Convert parser::ConfigBuilder to types::Config
+/// Convert `parser::ConfigBuilder` to `types::Config`
 ///
 /// This internal helper converts the intermediate parsed configuration structure
 /// into the final configuration type, applying defaults and building the Config.
@@ -318,6 +318,13 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
 /// 2. Configuration file settings
 /// 3. Compiled-in defaults
 ///
+/// # Errors
+///
+/// Returns `ConfigError` if:
+/// - Configuration file cannot be read or parsed
+/// - Configuration validation fails (incompatible options, invalid values)
+/// - Required options are missing
+///
 /// # Examples
 ///
 /// ```no_run
@@ -325,7 +332,7 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
 /// use clap::Parser;
 ///
 /// let cli = Cli::parse();
-/// let config = load_config(cli)?;
+/// let config = load_config(&cli)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -333,7 +340,7 @@ fn convert_parsed_config(parsed: parser::ConfigBuilder) -> Result<Config, Config
 ///
 /// Replaces: `read_opts()` in src/option.c (lines 1000+)
 /// Behavior: Identical option processing and precedence to C version
-pub fn load_config(cli: Cli) -> Result<Config, ConfigError> {
+pub fn load_config(cli: &Cli) -> Result<Config, ConfigError> {
     // Start with default configuration
     let mut config = types::ConfigBuilder::new().build()?;
 
@@ -341,7 +348,7 @@ pub fn load_config(cli: Cli) -> Result<Config, ConfigError> {
     // cli.conf_file is Vec<PathBuf>, iterate over all specified files
     for conf_file in &cli.conf_file {
         let file_config_builder = parse_config_file(conf_file).map_err(|e| {
-            ConfigError::ValidationError(format!("Failed to parse config file: {}", e))
+            ConfigError::ValidationError(format!("Failed to parse config file: {e}"))
         })?;
         let file_config = convert_parsed_config(file_config_builder)?;
         config = merge_configs(config, file_config);
@@ -357,12 +364,12 @@ pub fn load_config(cli: Cli) -> Result<Config, ConfigError> {
     }
 
     // Apply CLI overrides (highest precedence)
-    apply_cli_overrides(&mut config, &cli);
+    apply_cli_overrides(&mut config, cli);
 
     // Perform comprehensive validation
     validate_config(&config).map_err(|errors| {
         // Convert Vec<ConfigError> to a single ConfigError
-        let error_msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        let error_msgs: Vec<String> = errors.iter().map(std::string::ToString::to_string).collect();
         ConfigError::ValidationError(format!(
             "Configuration validation failed:\n{}",
             error_msgs.join("\n")
@@ -406,7 +413,8 @@ pub fn load_config(cli: Cli) -> Result<Config, ConfigError> {
 ///
 /// # C Implementation Reference
 ///
-/// Replaces: Configuration precedence logic scattered throughout one_opt() in option.c
+/// Replaces: Configuration precedence logic scattered throughout `one_opt()` in option.c
+#[must_use]
 pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config {
     // DNS configuration merge (dns is not Option, it's always present)
     let dns_override = override_config.dns;
@@ -569,6 +577,11 @@ pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config
 /// - Interfaces must exist on the system
 /// - Ports must be in valid range (1-65535)
 ///
+/// # Errors
+///
+/// Returns a `Vec<ConfigError>` containing all validation errors found.
+/// Returns `Ok(())` if configuration is valid.
+///
 /// # Examples
 ///
 /// ```
@@ -588,7 +601,7 @@ pub fn merge_configs(mut base_config: Config, override_config: Config) -> Config
 ///
 /// # C Implementation Reference
 ///
-/// Replaces: Scattered validation in one_opt() and read_opts() in option.c
+/// Replaces: Scattered validation in `one_opt()` and `read_opts()` in option.c
 pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
     let mut errors = Vec::new();
 
@@ -870,13 +883,12 @@ fn load_conf_dir(conf_dir: &Path) -> Result<Vec<Config>, ConfigError> {
 
     // Collect and sort entries by name
     let mut conf_files: Vec<PathBuf> = entries
-        .filter_map(|entry| entry.ok())
+        .filter_map(std::result::Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
                 .and_then(|ext| ext.to_str())
-                .map(|ext| ext == "conf")
-                .unwrap_or(false)
+                .is_some_and(|ext| ext == "conf")
         })
         .collect();
 
@@ -922,8 +934,7 @@ fn check_dhcp_range_overlaps(ranges: &[DhcpRange]) -> Vec<ConfigError> {
                         // Check for overlap: range1.start <= range2.end && range2.start <= range1.end
                         if start1 <= end2 && start2 <= end1 {
                             errors.push(ConfigError::OverlappingRanges(format!(
-                                "{}-{} overlaps with {}-{}",
-                                start1, end1, start2, end2
+                                "{start1}-{end1} overlaps with {start2}-{end2}"
                             )));
                         }
                     }
@@ -934,8 +945,7 @@ fn check_dhcp_range_overlaps(ranges: &[DhcpRange]) -> Vec<ConfigError> {
                     {
                         if start1 <= end2 && start2 <= end1 {
                             errors.push(ConfigError::OverlappingRanges(format!(
-                                "{}-{} overlaps with {}-{}",
-                                start1, end1, start2, end2
+                                "{start1}-{end1} overlaps with {start2}-{end2}"
                             )));
                         }
                     }
@@ -998,6 +1008,11 @@ pub mod test_utils {
     use super::*;
 
     /// Create a minimal valid configuration for testing
+    ///
+    /// # Panics
+    ///
+    /// Panics if the default configuration builder fails to build.
+    #[must_use]
     pub fn minimal_config() -> Config {
         ConfigBuilder::new()
             .build()
@@ -1005,6 +1020,11 @@ pub mod test_utils {
     }
 
     /// Create a configuration with DNS enabled
+    ///
+    /// # Panics
+    ///
+    /// Panics if the DNS configuration builder fails to build.
+    #[must_use]
     pub fn dns_config() -> Config {
         let mut builder = ConfigBuilder::new();
         builder.dns(DnsConfig {
@@ -1015,7 +1035,12 @@ pub mod test_utils {
     }
 
     /// Create a configuration with DHCP enabled
+    ///
+    /// # Panics
+    ///
+    /// Panics if the DHCP configuration builder fails to build.
     #[cfg(feature = "dhcp")]
+    #[must_use]
     pub fn dhcp_config() -> Config {
         use std::net::Ipv4Addr;
         use std::time::Duration;

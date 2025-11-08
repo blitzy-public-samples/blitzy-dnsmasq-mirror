@@ -1,16 +1,16 @@
 // Copyright (c) 2000-2024 dnsmasq contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-//! # DHCPv4 Protocol Message Parsing and Serialization (RFC 2131)
+//! # `DHCPv4` Protocol Message Parsing and Serialization (RFC 2131)
 //!
-//! This module implements DHCPv4 packet parsing, validation, and serialization per RFC 2131.
+//! This module implements `DHCPv4` packet parsing, validation, and serialization per RFC 2131.
 //! It replaces the C implementation from `src/rfc2131.c`, `src/dhcp-protocol.h`, and related
 //! C functions with memory-safe Rust, eliminating buffer overflows, pointer arithmetic, and
 //! manual memory management.
 //!
 //! ## Key Features
 //!
-//! - Type-safe DHCPv4 packet structure matching RFC 2131's 236-byte fixed header
+//! - Type-safe `DHCPv4` packet structure matching RFC 2131's 236-byte fixed header
 //! - Comprehensive packet validation (operation code, hardware length, DHCP cookie)
 //! - Safe option parsing with bounds checking (no buffer overflows possible)
 //! - Message type identification (DISCOVER, OFFER, REQUEST, etc.)
@@ -37,7 +37,7 @@
 //! - `struct dhcp_packet` - Wire format → `DhcpPacket` struct
 //! - Message type constants (DHCPDISCOVER, etc.) → `MessageType` enum
 //! - Option codes → imported from options module
-//! - Protocol constants (DHCP_COOKIE, BOOTREQUEST, etc.) → constants module
+//! - Protocol constants (`DHCP_COOKIE`, `BOOTREQUEST`, etc.) → constants module
 //!
 //! ## Protocol Compliance
 //!
@@ -96,14 +96,14 @@ use crate::dhcp::v4::options::{
 use crate::types::addresses::AllAddr;
 use crate::types::errors::DnsmasqResult;
 
-/// Minimum DHCPv4 packet size in bytes (must be at least 300 bytes per RFC 2131)
+/// Minimum `DHCPv4` packet size in bytes (must be at least 300 bytes per RFC 2131)
 ///
 /// While RFC 2131 defines the minimum as 236 bytes (fixed header), Linux in-kernel
 /// DHCP clients ignore packets smaller than 300 bytes due to historical bugs. We enforce
 /// 300 bytes minimum with padding to ensure compatibility.
 const MIN_PACKET_SIZE: usize = 300;
 
-/// Fixed header size for DHCPv4 packets (236 bytes per RFC 2131 Section 2)
+/// Fixed header size for `DHCPv4` packets (236 bytes per RFC 2131 Section 2)
 ///
 /// Breakdown:
 /// - 4 bytes: op, htype, hlen, hops
@@ -116,13 +116,13 @@ const MIN_PACKET_SIZE: usize = 300;
 ///   Total: 236 bytes
 const DHCP_FIXED_HEADER_SIZE: usize = 236;
 
-/// Size of the options field in the basic DHCPv4 packet structure (312 bytes)
+/// Size of the options field in the basic `DHCPv4` packet structure (312 bytes)
 ///
 /// This is the minimum space allocated for options after the fixed 236-byte header.
 /// Options can extend into sname and file fields if Option 52 (overload) is used.
 const DHCP_OPTIONS_SIZE: usize = 312;
 
-/// Total minimum DHCPv4 packet structure size (548 bytes)
+/// Total minimum `DHCPv4` packet structure size (548 bytes)
 const DHCP_MIN_STRUCTURE_SIZE: usize = DHCP_FIXED_HEADER_SIZE + DHCP_OPTIONS_SIZE;
 
 /// Maximum client hardware address length (16 bytes per RFC 2131)
@@ -144,7 +144,7 @@ const OPTION_PAD: u8 = 0;
 // Error Types
 // ============================================================================
 
-/// Errors that can occur during DHCPv4 packet parsing and validation
+/// Errors that can occur during `DHCPv4` packet parsing and validation
 ///
 /// These errors represent violations of RFC 2131 packet format requirements
 /// or protocol constraints. All errors include context for debugging.
@@ -165,7 +165,7 @@ pub enum PacketError {
     #[error("Missing or invalid DHCP magic cookie (expected 0x63825363)")]
     MissingDhcpCookie,
 
-    /// Packet is too small to contain minimum DHCPv4 structure
+    /// Packet is too small to contain minimum `DHCPv4` structure
     ///
     /// Packets must be at least 300 bytes for compatibility with legacy
     /// implementations. RFC 2131 specifies 236-byte minimum, but practice
@@ -206,7 +206,7 @@ pub enum PacketError {
 // MessageType Enum
 // ============================================================================
 
-/// DHCPv4 message types as defined in RFC 2131
+/// `DHCPv4` message types as defined in RFC 2131
 ///
 /// These constants represent the values used in DHCP Option 53 (Message Type).
 /// The message type determines the purpose of the DHCP packet and the expected
@@ -286,7 +286,7 @@ pub enum MessageType {
 }
 
 impl MessageType {
-    /// Convert u8 wire format value to MessageType enum
+    /// Convert u8 wire format value to `MessageType` enum
     ///
     /// # Arguments
     /// * `value` - Raw message type value from DHCP Option 53
@@ -300,6 +300,7 @@ impl MessageType {
     /// let msg_type = MessageType::from_u8(1); // Some(MessageType::Discover)
     /// let invalid = MessageType::from_u8(99); // None
     /// ```
+    #[must_use]
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(MessageType::Discover),
@@ -314,7 +315,7 @@ impl MessageType {
         }
     }
 
-    /// Convert MessageType enum to u8 wire format value
+    /// Convert `MessageType` enum to u8 wire format value
     ///
     /// # Returns
     /// Raw message type value (1-8) for use in DHCP Option 53
@@ -323,6 +324,7 @@ impl MessageType {
     /// ```rust,ignore
     /// let value = MessageType::Offer.to_u8(); // 2
     /// ```
+    #[must_use]
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -355,7 +357,7 @@ pub struct ClientId {
 }
 
 impl ClientId {
-    /// Create ClientId from DHCP Option 61 (Client Identifier)
+    /// Create `ClientId` from DHCP Option 61 (Client Identifier)
     ///
     /// This is the preferred identification method. The option contains
     /// a type byte followed by unique identifier bytes.
@@ -369,13 +371,14 @@ impl ClientId {
     /// let option_bytes = vec![0x01, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
     /// let client_id = ClientId::from_option(&option_bytes);
     /// ```
+    #[must_use]
     pub fn from_option(option_data: &[u8]) -> Self {
         ClientId {
             data: option_data.to_vec(),
         }
     }
 
-    /// Create ClientId from hardware address (chaddr field fallback)
+    /// Create `ClientId` from hardware address (chaddr field fallback)
     ///
     /// Used when Option 61 is not present. Takes hardware address from
     /// the chaddr field, using only hlen bytes.
@@ -389,9 +392,12 @@ impl ClientId {
     /// let mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
     /// let client_id = ClientId::from_hardware_address(&mac, 6);
     /// ```
+    #[must_use]
     pub fn from_hardware_address(hw_addr: &[u8], hw_len: u8) -> Self {
+        // MAX_CHADDR_LEN is 16, which fits in u8, so this is safe
+        let max_len = u8::try_from(MAX_CHADDR_LEN).unwrap_or(16);
         ClientId {
-            data: hw_addr[..hw_len.min(MAX_CHADDR_LEN as u8) as usize].to_vec(),
+            data: hw_addr[..usize::from(hw_len.min(max_len))].to_vec(),
         }
     }
 
@@ -399,16 +405,19 @@ impl ClientId {
     ///
     /// # Returns
     /// Slice containing identifier bytes (Option 61 data or hardware address)
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
     }
 
     /// Get length of client identifier in bytes
+    #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
     /// Check if client identifier is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -418,9 +427,9 @@ impl ClientId {
 // DhcpPacket Structure
 // ============================================================================
 
-/// DHCPv4 packet structure matching RFC 2131 wire format
+/// `DHCPv4` packet structure matching RFC 2131 wire format
 ///
-/// This structure represents a complete DHCPv4 packet with the fixed 236-byte
+/// This structure represents a complete `DHCPv4` packet with the fixed 236-byte
 /// header plus variable-length options field. The layout matches the C struct
 /// `dhcp_packet` from `dhcp-protocol.h` but uses safe Rust types.
 ///
@@ -591,6 +600,7 @@ impl DhcpPacket {
     /// packet.set_op(BOOTREPLY);
     /// packet.set_xid(0x12345678);
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         let mut options = Vec::with_capacity(DHCP_OPTIONS_SIZE);
         // Add DHCP magic cookie
@@ -615,7 +625,7 @@ impl DhcpPacket {
         }
     }
 
-    /// Parse DHCPv4 packet from raw UDP payload bytes
+    /// Parse `DHCPv4` packet from raw UDP payload bytes
     ///
     /// This function validates the packet structure and extracts all fields.
     /// It replaces the C function `dhcp_reply()` packet parsing portion.
@@ -657,6 +667,7 @@ impl DhcpPacket {
     ///     }
     /// }
     /// ```
+    #[allow(clippy::similar_names)] // RFC 2131 field names: ciaddr, yiaddr, siaddr, giaddr, chaddr
     pub fn parse(data: &[u8]) -> Result<Self, PacketError> {
         // Validate minimum packet size (300 bytes for compatibility)
         if data.len() < MIN_PACKET_SIZE {
@@ -677,7 +688,9 @@ impl DhcpPacket {
         }
 
         // Validate hardware address length
-        if hlen > MAX_CHADDR_LEN as u8 {
+        // MAX_CHADDR_LEN is 16, which fits in u8
+        let max_len = u8::try_from(MAX_CHADDR_LEN).unwrap_or(16);
+        if hlen > max_len {
             return Err(PacketError::InvalidHardwareLength(hlen));
         }
 
@@ -746,8 +759,11 @@ impl DhcpPacket {
     ///
     /// # Returns
     ///
-    /// * `Ok(Vec<u8>)` - Serialized packet ready for UDP transmission
-    /// * `Err(PacketError)` - Serialization failed (I/O error)
+    /// Serialized packet ready for UDP transmission
+    ///
+    /// # Errors
+    ///
+    /// Returns `PacketError` if serialization fails (I/O error)
     ///
     /// # Wire Format
     ///
@@ -830,6 +846,7 @@ impl DhcpPacket {
     /// let size = packet.packet_size();
     /// println!("Packet will be {} bytes when serialized", size);
     /// ```
+    #[must_use]
     pub fn packet_size(&self) -> usize {
         let raw_size = DHCP_FIXED_HEADER_SIZE + self.options.len();
         raw_size.max(MIN_PACKET_SIZE)
@@ -844,6 +861,7 @@ impl DhcpPacket {
     /// The transaction ID is a random 32-bit value generated by the client
     /// to match requests with responses. Server copies this value from
     /// request to response.
+    #[must_use]
     pub fn get_xid(&self) -> u32 {
         self.xid
     }
@@ -856,11 +874,15 @@ impl DhcpPacket {
     /// # Returns
     ///
     /// Slice containing valid hardware address bytes (length = hlen)
+    #[must_use]
     pub fn get_chaddr(&self) -> &[u8] {
-        &self.chaddr[..self.hlen.min(MAX_CHADDR_LEN as u8) as usize]
+        // MAX_CHADDR_LEN is 16, which fits in u8
+        let max_len = u8::try_from(MAX_CHADDR_LEN).unwrap_or(16);
+        &self.chaddr[..usize::from(self.hlen.min(max_len))]
     }
 
     /// Get hardware address length in bytes
+    #[must_use]
     pub fn get_hlen(&self) -> u8 {
         self.hlen
     }
@@ -869,6 +891,7 @@ impl DhcpPacket {
     ///
     /// This is the client's current IP address, if the client is in
     /// RENEWING or REBINDING state. Zero in INIT/SELECTING states.
+    #[must_use]
     pub fn get_ciaddr(&self) -> Ipv4Addr {
         self.ciaddr
     }
@@ -877,6 +900,7 @@ impl DhcpPacket {
     ///
     /// This is the IP address offered or confirmed by the server.
     /// Zero in client requests.
+    #[must_use]
     pub fn get_yiaddr(&self) -> Ipv4Addr {
         self.yiaddr
     }
@@ -885,6 +909,7 @@ impl DhcpPacket {
     ///
     /// Address of next server for bootstrap (e.g., TFTP for network boot).
     /// May be zero if not needed.
+    #[must_use]
     pub fn get_siaddr(&self) -> Ipv4Addr {
         self.siaddr
     }
@@ -896,6 +921,7 @@ impl DhcpPacket {
     ///
     /// When non-zero, server uses this to determine client's network
     /// location and select appropriate address pool.
+    #[must_use]
     pub fn get_giaddr(&self) -> Ipv4Addr {
         self.giaddr
     }
@@ -904,6 +930,7 @@ impl DhcpPacket {
     ///
     /// Bit 15 (0x8000) is BROADCAST flag indicating client cannot receive
     /// unicast until configuration is complete. Other bits reserved.
+    #[must_use]
     pub fn get_flags(&self) -> u16 {
         self.flags
     }
@@ -912,26 +939,31 @@ impl DhcpPacket {
     ///
     /// Returns true if client requires broadcast responses (cannot receive
     /// unicast before configuration complete).
+    #[must_use]
     pub fn is_broadcast(&self) -> bool {
         (self.flags & 0x8000) != 0
     }
 
-    /// Get operation code (BOOTREQUEST=1 or BOOTREPLY=2)
+    /// Get operation code (`BOOTREQUEST`=1 or `BOOTREPLY`=2)
+    #[must_use]
     pub fn get_op(&self) -> u8 {
         self.op
     }
 
     /// Get hardware type (1=Ethernet, 6=IEEE 802, per RFC 1700)
+    #[must_use]
     pub fn get_htype(&self) -> u8 {
         self.htype
     }
 
     /// Get relay hop count (incremented by each relay agent)
+    #[must_use]
     pub fn get_hops(&self) -> u8 {
         self.hops
     }
 
     /// Get seconds elapsed since client began address acquisition
+    #[must_use]
     pub fn get_secs(&self) -> u16 {
         self.secs
     }
@@ -986,7 +1018,8 @@ impl DhcpPacket {
     /// Panics if addr length exceeds 16 bytes
     pub fn set_chaddr(&mut self, addr: &[u8]) {
         assert!(addr.len() <= MAX_CHADDR_LEN, "Hardware address too long");
-        self.hlen = addr.len() as u8;
+        // Safe because we assert that addr.len() <= MAX_CHADDR_LEN (16), which fits in u8
+        self.hlen = u8::try_from(addr.len()).expect("addr.len() <= 16");
         self.chaddr[..addr.len()].copy_from_slice(addr);
         // Zero remaining bytes
         self.chaddr[addr.len()..].fill(0);
@@ -1006,8 +1039,11 @@ impl DhcpPacket {
     ///
     /// # Returns
     ///
-    /// * `Ok(MessageType)` - Valid message type (DISCOVER, OFFER, etc.)
-    /// * `Err(PacketError::InvalidMessageType)` - Option 53 missing or invalid
+    /// Valid message type (DISCOVER, OFFER, etc.)
+    ///
+    /// # Errors
+    ///
+    /// Returns `PacketError::InvalidMessageType` if Option 53 is missing or invalid
     ///
     /// # Example
     ///
@@ -1043,7 +1079,7 @@ impl DhcpPacket {
     ///
     /// # Returns
     ///
-    /// ClientId containing either Option 61 data or hardware address
+    /// `ClientId` containing either Option 61 data or hardware address
     ///
     /// # Example
     ///
@@ -1052,6 +1088,7 @@ impl DhcpPacket {
     /// let client_id = packet.get_client_id();
     /// println!("Client ID: {:02x?}", client_id.as_bytes());
     /// ```
+    #[must_use]
     pub fn get_client_id(&self) -> ClientId {
         // Try Option 61 (Client Identifier) first
         if let Some(option_data) = self.find_option(OPTION_CLIENT_ID) {
@@ -1151,8 +1188,8 @@ impl DhcpPacket {
 
     /// Find a specific DHCP option and return full option bytes (code + length + data)
     ///
-    /// Similar to find_option but returns the complete option including the code
-    /// and length bytes, which is needed for DhcpOption::parse().
+    /// Similar to `find_option` but returns the complete option including the code
+    /// and length bytes, which is needed for `DhcpOption::parse()`.
     ///
     /// # Arguments
     ///
@@ -1229,6 +1266,7 @@ impl DhcpPacket {
     ///     println!("Server: {}", server_ip);
     /// }
     /// ```
+    #[must_use]
     pub fn get_option(&self, option_code: u8) -> Option<DhcpOption> {
         self.find_option_full(option_code)
             .and_then(|data| DhcpOption::parse(data).ok())
@@ -1255,6 +1293,7 @@ impl DhcpPacket {
     ///     }
     /// }
     /// ```
+    #[must_use]
     pub fn get_options(&self) -> Vec<DhcpOption> {
         let mut options = Vec::new();
 
@@ -1312,11 +1351,11 @@ impl DhcpPacket {
     ///
     /// ```rust,ignore
     /// let mut packet = DhcpPacket::new();
-    /// packet.set_option(DhcpOption::MessageType(MessageType::Offer as u8));
-    /// packet.set_option(DhcpOption::ServerIdentifier(server_ip));
-    /// packet.set_option(DhcpOption::LeaseTime(3600));
+    /// packet.set_option(&DhcpOption::MessageType(MessageType::Offer as u8));
+    /// packet.set_option(&DhcpOption::ServerIdentifier(server_ip));
+    /// packet.set_option(&DhcpOption::LeaseTime(3600));
     /// ```
-    pub fn set_option(&mut self, option: DhcpOption) {
+    pub fn set_option(&mut self, option: &DhcpOption) {
         // Serialize option to bytes
         let option_bytes = option.serialize();
 
@@ -1343,13 +1382,13 @@ impl Default for DhcpPacket {
 // Type Aliases for External API Consistency
 // ============================================================================
 
-/// Type alias for DHCPv4 message/packet structure
+/// Type alias for `DHCPv4` message/packet structure
 ///
 /// This provides a consistent naming convention across the codebase.
 /// External modules can import either `DhcpPacket` or `Dhcpv4Message`.
 pub type Dhcpv4Message = DhcpPacket;
 
-/// Type alias for DHCPv4 message type enum
+/// Type alias for `DHCPv4` message type enum
 ///
 /// This provides a consistent naming convention across the codebase.
 /// External modules can import either `MessageType` or `Dhcpv4MessageType`.
@@ -1377,7 +1416,7 @@ mod tests {
         packet[3] = 0;
 
         // Set transaction ID (0x12345678)
-        packet[4..8].copy_from_slice(&0x12345678u32.to_be_bytes());
+        packet[4..8].copy_from_slice(&0x1234_5678_u32.to_be_bytes());
 
         // Set DHCP magic cookie at offset 236
         packet[236..240].copy_from_slice(&DHCP_COOKIE.to_be_bytes());
@@ -1401,7 +1440,7 @@ mod tests {
         assert_eq!(packet.get_op(), 1);
         assert_eq!(packet.get_htype(), 1);
         assert_eq!(packet.get_hlen(), 6);
-        assert_eq!(packet.get_xid(), 0x12345678);
+        assert_eq!(packet.get_xid(), 0x1234_5678);
     }
 
     #[test]
@@ -1591,7 +1630,7 @@ mod tests {
     fn test_set_option() {
         let mut packet = DhcpPacket::new();
 
-        packet.set_option(DhcpOption::MessageType(MessageType::Offer as u8));
+        packet.set_option(&DhcpOption::MessageType(MessageType::Offer as u8));
 
         let msg_type = packet.get_message_type().unwrap();
         assert_eq!(msg_type, MessageType::Offer);
@@ -1635,7 +1674,7 @@ mod tests {
     fn test_packet_minimum_size_padding() {
         let mut packet = DhcpPacket::new();
         packet.set_op(BOOTREPLY);
-        packet.set_xid(0x12345678);
+        packet.set_xid(0x1234_5678);
 
         let serialized = packet.serialize().unwrap();
 

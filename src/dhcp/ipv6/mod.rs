@@ -27,19 +27,19 @@
 //!
 //! ### Router Advertisement (`radv` module)
 //!
-//! Implements ICMPv6 Router Advertisement transmission as specified in RFC 4861 Section 6.
+//! Implements `ICMPv6` Router Advertisement transmission as specified in `RFC 4861 Section 6`.
 //! Router Advertisements inform IPv6 clients about:
 //! - Available network prefixes for address autoconfiguration
 //! - Router lifetime and reachability
 //! - Maximum Transmission Unit (MTU) for the link
-//! - Managed (M) and Other (O) configuration flags for DHCPv6 coordination
+//! - Managed `(M)` and Other `(O)` configuration flags for `DHCPv6` coordination
 //! - Recursive DNS Server (RDNSS) options per RFC 6106
 //! - DNS Search List (DNSSL) options per RFC 6106
 //! - Router preferences and advertisement intervals
 //!
 //! The implementation supports both periodic unsolicited advertisements (sent to the
-//! all-nodes multicast address FF02::1) and solicited advertisements (triggered by
-//! Router Solicitation messages received on the all-routers multicast address FF02::2).
+//! all-nodes multicast address `FF02::1`) and solicited advertisements (triggered by
+//! Router Solicitation messages received on the all-routers multicast address `FF02::2`).
 //!
 //! ### SLAAC (`slaac` module)
 //!
@@ -47,7 +47,7 @@
 //! SLAAC enables hosts to automatically configure IPv6 addresses by:
 //! - Deriving interface identifiers from MAC addresses using Modified EUI-64 format (RFC 4291)
 //! - Combining interface identifiers with advertised prefixes
-//! - Performing Duplicate Address Detection (DAD) via ICMPv6 Echo Request/Reply
+//! - Performing Duplicate Address Detection `(DAD)` via `ICMPv6` Echo Request/Reply
 //! - Automatically registering confirmed addresses in the DNS cache
 //! - Managing address lifetimes (valid and preferred lifetimes)
 //!
@@ -68,7 +68,7 @@
 //!   - Appendix A: Modified EUI-64 interface identifier format
 //!   - Section 2.7.1: Link-local multicast addresses (all-nodes, all-routers)
 //!
-//! - **RFC 4443**: Internet Control Message Protocol (ICMPv6)
+//! - **`RFC 4443`**: Internet Control Message Protocol `(ICMPv6)`
 //!   - Echo Request/Reply for Duplicate Address Detection
 //!
 //! - **RFC 6106**: IPv6 Router Advertisement Options for DNS Configuration
@@ -84,9 +84,9 @@
 //!
 //! | C Source File | Rust Module | Description |
 //! |---------------|-------------|-------------|
-//! | `src/radv.c` | `radv.rs` | Router Advertisement transmission and ICMPv6 handling |
+//! | `src/radv.c` | `radv.rs` | Router Advertisement transmission and `ICMPv6` handling |
 //! | `src/slaac.c` | `slaac.rs` | SLAAC address generation and Duplicate Address Detection |
-//! | `src/radv-protocol.h` | `radv.rs` (types) | ICMPv6 packet structures and protocol constants |
+//! | `src/radv-protocol.h` | `radv.rs` (types) | `ICMPv6` packet structures and protocol constants |
 //!
 //! ### Key Functional Transformations
 //!
@@ -119,15 +119,15 @@
 //!   struct SlaacManager { ping_id: u16 }
 //!   ```
 //!
-//! ## Integration with DHCPv6
+//! ## Integration with `DHCPv6`
 //!
-//! Router Advertisement and SLAAC functionality integrates with the DHCPv6 subsystem
+//! Router Advertisement and SLAAC functionality integrates with the `DHCPv6` subsystem
 //! to provide comprehensive IPv6 address management:
 //!
 //! - **Stateless Configuration**: SLAAC with RA prefix advertisements (M=0, O=0 or O=1)
-//! - **Stateful Configuration**: DHCPv6 address assignment with RA as supplement (M=1)
+//! - **Stateful Configuration**: `DHCPv6` address assignment with RA as supplement `(M=1)`
 //! - **Prefix Delegation**: DHCPv6-PD with RA on delegated prefixes
-//! - **DNS Configuration**: RDNSS and DNSSL options coordinated with DHCPv6 options
+//! - **DNS Configuration**: `RDNSS` and `DNSSL` options coordinated with `DHCPv6` options
 //!
 //! ## Usage Examples
 //!
@@ -206,16 +206,16 @@
 //! ### Linux
 //! - Uses netlink for interface enumeration and configuration
 //! - Reads MTU from `/proc/sys/net/ipv6/conf/*/mtu`
-//! - Supports IPV6_TCLASS socket option for traffic class (IPTOS_CLASS_CS6)
+//! - Supports `IPV6_TCLASS` socket option for traffic class `(IPTOS_CLASS_CS6)`
 //!
-//! ### BSD (FreeBSD, OpenBSD, NetBSD, DragonFly)
+//! ### BSD (`FreeBSD`, `OpenBSD`, `NetBSD`, `DragonFly`)
 //! - Uses BPF for interface monitoring
 //! - MTU retrieved via SIOCGIFMTU ioctl
-//! - Supports IPV6_TCLASS or IPV6_USE_MIN_MTU depending on platform
+//! - Supports `IPV6_TCLASS` or `IPV6_USE_MIN_MTU` depending on platform
 //!
 //! ### macOS
 //! - Similar to BSD but with additional launchd integration
-//! - Interface enumeration via getifaddrs()
+//! - Interface enumeration via `getifaddrs()`
 //!
 //! ## Security Considerations
 //!
@@ -224,16 +224,16 @@
 //! - **Hop Limit Validation**: All received RA/RS messages must have hop limit 255
 //!   to prevent off-link injection attacks
 //! - **Source Address Validation**: Router Solicitations must come from link-local
-//!   addresses (fe80::/10)
+//!   addresses `(fe80::/10)`
 //! - **Rate Limiting**: Implements RFC 4861 rate limiting for RA transmission
-//!   (MIN_DELAY_BETWEEN_RAS = 3 seconds)
+//!   `(MIN_DELAY_BETWEEN_RAS = 3 seconds)`
 //!
 //! ### SLAAC Security
 //!
 //! - **Duplicate Address Detection**: Mandatory DAD prevents address conflicts
 //! - **Privacy Extensions**: Can be combined with RFC 4941 temporary addresses
 //!   (handled by kernel, not dnsmasq)
-//! - **Prefix Validation**: Only advertises prefixes from authorized DHCPv6 contexts
+//! - **Prefix Validation**: Only advertises prefixes from authorized `DHCPv6` contexts
 //!
 //! ## Threading and Concurrency
 //!
@@ -242,7 +242,7 @@
 //! - All functions are called from the main event loop context
 //! - No internal locking required (single-threaded execution)
 //! - Uses Tokio async I/O for non-blocking socket operations
-//! - ICMPv6 socket (`icmp6_fd`) managed by the network layer
+//! - `ICMPv6` socket `(icmp6_fd)` managed by the network layer
 //! - Timer-based periodic execution via return values scheduling next events
 //!
 //! ## Error Handling
@@ -250,7 +250,7 @@
 //! All public functions return `Result<T, Error>` types for comprehensive error handling:
 //!
 //! - I/O errors from socket operations
-//! - Protocol parsing errors for malformed ICMPv6 packets
+//! - Protocol parsing errors for malformed `ICMPv6` packets
 //! - Configuration errors for invalid prefix/lifetime combinations
 //! - Resource allocation failures
 //!
@@ -274,13 +274,13 @@
 //! - **Integration Tests**: Full RA/SLAAC protocol flow with virtual interfaces
 //! - **Property Tests**: RFC compliance verification with proptest
 //! - **Interoperability Tests**: Validation against Linux kernel IPv6 stack,
-//!   *BSD implementations, and other DHCPv6/RA servers (ISC DHCPv6, Dibbler)
+//!   *BSD implementations, and other `DHCPv6`/RA servers (`ISC DHCPv6`, Dibbler)
 //!
 //! ## See Also
 //!
 //! - [`radv`] module: Router Advertisement implementation details
 //! - [`slaac`] module: SLAAC implementation details
-//! - [`crate::dhcp::v6`]: DHCPv6 server for stateful configuration
+//! - [`crate::dhcp::v6`]: `DHCPv6` server for stateful configuration
 //! - [`crate::dns`]: DNS cache integration for SLAAC address registration
 
 // Conditionally compile this entire module only when IPv6 support is enabled.

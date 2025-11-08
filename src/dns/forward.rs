@@ -80,17 +80,26 @@ const MAX_CONCURRENT_QUERIES: usize = 5;
 
 /// DNSSEC flags for forward records
 pub const FREC_DO_QUESTION: u32 = 0x0001;
+/// DNSSEC AD (Authenticated Data) flag in query
 pub const FREC_AD_QUESTION: u32 = 0x0002;
+/// DNSSEC checking disabled flag
 pub const FREC_CHECKING_DISABLED: u32 = 0x0004;
+/// Forward record has pseudo-header
 pub const FREC_HAS_PHEADER: u32 = 0x0008;
+/// Query is for DNSKEY record
 pub const FREC_DNSKEY_QUERY: u32 = 0x0010;
+/// Query is for DS (Delegation Signer) record
 pub const FREC_DS_QUERY: u32 = 0x0020;
 
 /// Server flags indicating special properties
 pub const SERV_FROM_DBUS: u16 = 0x0001;
+/// Server is a literal IP address (not resolvable)
 pub const SERV_LITERAL_ADDRESS: u16 = 0x0002;
+/// Server from /etc/resolv.conf
 pub const SERV_USE_RESOLV: u16 = 0x0004;
+/// Server should not be used for rebind protection
 pub const SERV_NO_REBIND: u16 = 0x0008;
+/// Server has an associated domain
 pub const SERV_HAS_DOMAIN: u16 = 0x0010;
 
 /// Forward record tracking DNS query transaction state
@@ -102,20 +111,20 @@ pub const SERV_HAS_DOMAIN: u16 = 0x0010;
 ///
 /// ## Security
 ///
-/// The randomized_id field provides cryptographic randomization to prevent DNS
+/// The `randomized_id` field provides cryptographic randomization to prevent DNS
 /// cache poisoning attacks. Combined with random source port selection, this
 /// provides ~32 bits of entropy making attacks computationally infeasible.
 ///
 /// ## C Struct Reference
 ///
 /// Translated from C's `struct frec` (dnsmasq.h:2379-2403):
-/// - `frec_src.orig_id` → original_id
-/// - `new_id` → randomized_id
-/// - `frec_src.source` → source_addr
-/// - `sentto` → upstream_server
-/// - `time` → sent_at
-/// - `hash` → query_hash
-/// - `flags` → dnssec_flags
+/// - `frec_src.orig_id` → `original_id`
+/// - `new_id` → `randomized_id`
+/// - `frec_src.source` → `source_addr`
+/// - `sentto` → `upstream_server`
+/// - `time` → `sent_at`
+/// - `hash` → `query_hash`
+/// - `flags` → `dnssec_flags`
 #[derive(Debug, Clone)]
 pub struct ForwardRecord {
     /// Original query ID from the client (must be restored in response)
@@ -142,6 +151,7 @@ pub struct ForwardRecord {
 
 impl ForwardRecord {
     /// Create a new forward record for query tracking
+    #[must_use]
     pub fn new(
         original_id: u16,
         source_addr: SocketAddr,
@@ -161,11 +171,13 @@ impl ForwardRecord {
     }
 
     /// Check if this forward record has timed out
+    #[must_use]
     pub fn is_timed_out(&self, timeout_secs: u64) -> bool {
         self.sent_at.elapsed() > Duration::from_secs(timeout_secs)
     }
 
     /// Get the elapsed time since query was sent
+    #[must_use]
     pub fn elapsed(&self) -> Duration {
         self.sent_at.elapsed()
     }
@@ -193,18 +205,18 @@ impl ForwardRecord {
 /// ## C Struct Reference
 ///
 /// Translated from C's `struct server` (dnsmasq.h:1926-1944):
-/// - `addr` → addr
-/// - `flags` → flags
-/// - `domain` → domain (Option<String>)
-/// - `failed_queries` → failed_queries
-/// - `queries` → total_queries (not exposed in schema but tracked internally)
-/// - `forwardtime` → forwardtime (tracked via Instant)
+/// - `addr` → `addr`
+/// - `flags` → `flags`
+/// - `domain` → `domain` (`Option<String>`)
+/// - `failed_queries` → `failed_queries`
+/// - `queries` → `total_queries` (not exposed in schema but tracked internally)
+/// - `forwardtime` → `forwardtime` (tracked via `Instant`)
 #[derive(Debug, Clone)]
 pub struct Server {
     /// Server socket address (IP and port)
     pub addr: SocketAddr,
 
-    /// Server flags (SERV_FROM_DBUS, SERV_LITERAL_ADDRESS, etc.)
+    /// Server flags (`SERV_FROM_DBUS`, `SERV_LITERAL_ADDRESS`, etc.)
     pub flags: u16,
 
     /// Optional domain restriction (if present, server only handles these domains)
@@ -225,6 +237,7 @@ pub struct Server {
 
 impl Server {
     /// Create a new server configuration
+    #[must_use]
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
@@ -238,16 +251,21 @@ impl Server {
     }
 
     /// Create server from address string (parses IP:port)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DnsmasqError::Dns` if the address string cannot be parsed as a valid `SocketAddr`
     pub fn from_address(address: &str) -> Result<Self, DnsmasqError> {
         let addr = address.parse::<SocketAddr>().map_err(|e| {
             DnsmasqError::Dns(crate::types::errors::DnsError::ForwardError {
-                message: format!("Invalid server address '{}': {}", address, e),
+                message: format!("Invalid server address '{address}': {e}"),
             })
         })?;
         Ok(Self::new(addr))
     }
 
     /// Configure server with domain-specific routing
+    #[must_use]
     pub fn with_domains(mut self, domain: String) -> Self {
         self.domain = Some(domain);
         self.flags |= SERV_HAS_DOMAIN;
@@ -255,18 +273,21 @@ impl Server {
     }
 
     /// Configure server with interface binding
+    #[must_use]
     pub fn with_interface(mut self, interface: String) -> Self {
         self.interface = Some(interface);
         self
     }
 
     /// Mark server as configured via D-Bus
+    #[must_use]
     pub fn mark_as_from_dbus(mut self) -> Self {
         self.flags |= SERV_FROM_DBUS;
         self
     }
 
     /// Check if server was configured via D-Bus
+    #[must_use]
     pub fn is_from_dbus(&self) -> bool {
         (self.flags & SERV_FROM_DBUS) != 0
     }
@@ -278,7 +299,7 @@ impl Server {
             Some(server_domain) => {
                 // Match if query domain ends with server domain
                 domain_equal(query_domain, server_domain)
-                    || query_domain.ends_with(&format!(".{}", server_domain))
+                    || query_domain.ends_with(&format!(".{server_domain}"))
             }
         }
     }
@@ -328,6 +349,7 @@ pub struct ServerHealth {
 
 impl ServerHealth {
     /// Create new server health tracker
+    #[must_use]
     pub fn new() -> Self {
         Self {
             last_success: None,
@@ -343,10 +365,14 @@ impl ServerHealth {
         self.consecutive_failures = 0;
 
         // Update EWMA: new_avg = 0.8 * old_avg + 0.2 * new_sample
+        #[allow(clippy::cast_precision_loss)]
         let old_avg_ms = self.average_rtt.as_millis() as f64;
+        #[allow(clippy::cast_precision_loss)]
         let new_sample_ms = rtt.as_millis() as f64;
         let new_avg_ms = 0.8 * old_avg_ms + 0.2 * new_sample_ms;
-        self.average_rtt = Duration::from_millis(new_avg_ms as u64);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let rounded = new_avg_ms.round() as u64;
+        self.average_rtt = Duration::from_millis(rounded);
     }
 
     /// Record a failed query
@@ -356,13 +382,15 @@ impl ServerHealth {
     }
 
     /// Calculate server score for selection (higher is better)
+    #[must_use]
     pub fn score(&self) -> f64 {
         let mut score = 100.0;
 
         // Penalize consecutive failures exponentially
-        score -= (self.consecutive_failures as f64) * 10.0;
+        score -= f64::from(self.consecutive_failures) * 10.0;
 
         // Penalize slow average RTT
+        #[allow(clippy::cast_precision_loss)]
         let rtt_ms = self.average_rtt.as_millis() as f64;
         score -= rtt_ms / 10.0;
 
@@ -399,9 +427,9 @@ impl Default for ServerHealth {
 /// ## Usage
 ///
 /// Called when:
-/// - Servers are added via D-Bus SetServers method
-/// - Configuration is reloaded (SIGHUP signal)
-/// - Upstream resolvers change in /etc/resolv.conf
+/// - Servers are added via D-Bus `SetServers` method
+/// - Configuration is reloaded (`SIGHUP` signal)
+/// - Upstream resolvers change in `/etc/resolv.conf`
 pub fn add_update_server(servers: &mut Vec<Server>, new_server: Server) {
     // Check if server already exists (by address)
     if let Some(existing) = servers.iter_mut().find(|s| s.addr == new_server.addr) {
@@ -419,8 +447,8 @@ pub fn add_update_server(servers: &mut Vec<Server>, new_server: Server) {
 /// Mark servers matching criteria for deletion
 ///
 /// This function is used during server list updates to identify servers
-/// that should be removed. Typically called before cleanup_servers() to
-/// remove stale D-Bus servers or servers no longer in resolv.conf.
+/// that should be removed. Typically called before `cleanup_servers()` to
+/// remove stale D-Bus servers or servers no longer in `resolv.conf`.
 ///
 /// ## Usage
 ///
@@ -438,12 +466,12 @@ pub fn mark_servers(servers: &mut [Server], mark_flag: u16, set: bool) {
 
 /// Remove servers marked for deletion
 ///
-/// Cleans up servers that have been marked by mark_servers(). This two-phase
+/// Cleans up servers that have been marked by `mark_servers()`. This two-phase
 /// approach (mark, then cleanup) ensures atomicity during server list updates.
 ///
 /// ## Usage
 ///
-/// Called after mark_servers() to remove obsolete servers from the list.
+/// Called after `mark_servers()` to remove obsolete servers from the list.
 pub fn cleanup_servers(servers: &mut Vec<Server>, cleanup_flag: u16) -> usize {
     let initial_count = servers.len();
     servers.retain(|s| (s.flags & cleanup_flag) == 0);
@@ -474,9 +502,9 @@ pub fn cleanup_servers(servers: &mut Vec<Server>, cleanup_flag: u16) -> usize {
 /// - Response validation ensures query/response correlation
 /// - DNSSEC DO bit propagation when enabled
 ///
-/// ## Error Handling
+/// # Errors
 ///
-/// Returns errors for:
+/// Returns `DnsmasqError` for:
 /// - Forward record table exhaustion
 /// - No available upstream servers
 /// - Network transmission failures
@@ -496,8 +524,7 @@ pub async fn handle_query(
     let query_name = query
         .questions
         .first()
-        .map(|q| q.qname.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map_or_else(|| "unknown".to_string(), |q| q.qname.clone());
 
     debug!(
         "Handling query from {}: {} (ID: {})",
@@ -518,10 +545,10 @@ pub async fn handle_query(
         .collect();
 
     if selected_servers.is_empty() {
-        warn!("No upstream servers available for domain: {}", query_name);
+        warn!("No upstream servers available for domain: {query_name}");
         return Err(DnsmasqError::Dns(
             crate::types::errors::DnsError::ForwardError {
-                message: format!("No upstream servers available for domain: {}", query_name),
+                message: format!("No upstream servers available for domain: {query_name}"),
             },
         ));
     }
@@ -560,7 +587,7 @@ pub async fn handle_query(
 ///
 /// 1. Try primary server (first in list)
 /// 2. On timeout, try next server with exponential backoff delay
-/// 3. Continue until max_retries exhausted or success
+/// 3. Continue until `max_retries` exhausted or success
 /// 4. Return last error if all attempts fail
 ///
 /// ## Parameters
@@ -569,10 +596,12 @@ pub async fn handle_query(
 /// - `servers`: List of candidate upstream servers (pre-filtered by domain)
 /// - `max_retries`: Maximum number of forwarding attempts
 ///
-/// ## Returns
+/// # Errors
 ///
-/// - `Ok(DnsMessage)`: Successful response from upstream server
-/// - `Err(DnsmasqError)`: All retry attempts exhausted
+/// Returns `DnsmasqError` when all retry attempts are exhausted, including:
+/// - Network transmission failures
+/// - DNS protocol errors during serialization/parsing
+/// - Timeout waiting for responses from all servers
 ///
 /// ## C Function Reference
 ///
@@ -606,10 +635,10 @@ pub async fn forward_with_retry(
         let query_bytes = match forward_query.serialize() {
             Ok(bytes) => bytes,
             Err(e) => {
-                error!("Failed to serialize query: {}", e);
+                error!("Failed to serialize query: {e}");
                 last_error = Some(DnsmasqError::Dns(
                     crate::types::errors::DnsError::ProtocolError {
-                        message: format!("Serialization failed: {}", e),
+                        message: format!("Serialization failed: {e}"),
                     },
                 ));
                 continue;
@@ -646,17 +675,18 @@ pub async fn forward_with_retry(
                         return Ok(response);
                     }
                     Err(e) => {
-                        warn!("Failed to parse response: {}", e);
+                        warn!("Failed to parse response: {e}");
                         last_error = Some(DnsmasqError::Dns(
                             crate::types::errors::DnsError::ProtocolError {
-                                message: format!("Parse error: {}", e),
+                                message: format!("Parse error: {e}"),
                             },
                         ));
                     }
                 }
             }
             Err(e) => {
-                warn!("Query to {} failed: {}", server.addr, e);
+                let addr = server.addr;
+                warn!("Query to {addr} failed: {e}");
                 last_error = Some(e);
             }
         }
@@ -736,8 +766,7 @@ async fn send_udp_query(
                 Err(DnsmasqError::Dns(
                     crate::types::errors::DnsError::InvalidResponse {
                         message: format!(
-                            "Response from unexpected server: {} (expected: {})",
-                            response_addr, server_addr
+                            "Response from unexpected server: {response_addr} (expected: {server_addr})"
                         ),
                     },
                 ))
@@ -746,9 +775,13 @@ async fn send_udp_query(
         Ok(Err(e)) => Err(DnsmasqError::Network(
             crate::types::errors::NetworkError::ReceiveFailed { source: e },
         )),
-        Err(_) => Err(DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
-            timeout_ms: timeout_duration.as_millis() as u64,
-        })),
+        Err(_) => {
+            #[allow(clippy::cast_possible_truncation)]
+            let timeout_ms = timeout_duration.as_millis() as u64;
+            Err(DnsmasqError::Dns(crate::types::errors::DnsError::Timeout {
+                timeout_ms,
+            }))
+        }
     }
 }
 
@@ -761,7 +794,7 @@ async fn send_udp_query(
 ///
 /// ## Algorithm
 ///
-/// 1. Send query to all servers concurrently using tokio::select!
+/// 1. Send query to all servers concurrently using `tokio::select!`
 /// 2. Return first successful response
 /// 3. Cancel remaining pending queries
 /// 4. Update server health metrics for all attempts
@@ -771,10 +804,12 @@ async fn send_udp_query(
 /// - `query`: DNS message to forward
 /// - `servers`: List of all candidate upstream servers
 ///
-/// ## Returns
+/// # Errors
 ///
-/// - `Ok(DnsMessage)`: First successful response received
-/// - `Err(DnsmasqError)`: All servers failed or timed out
+/// Returns `DnsmasqError` when:
+/// - No upstream servers are available
+/// - All servers fail or timeout
+/// - DNS protocol errors occur during serialization/parsing
 ///
 /// ## C Function Reference
 ///
@@ -785,16 +820,13 @@ pub async fn forward_concurrent(
     servers: &[&Server],
 ) -> DnsmasqResult<DnsMessage> {
     if servers.is_empty() {
+        let domain = query
+            .questions
+            .first()
+            .map_or_else(|| "unknown".to_string(), |q| q.qname.clone());
         return Err(DnsmasqError::Dns(
             crate::types::errors::DnsError::ForwardError {
-                message: format!(
-                    "No upstream servers available for domain: {}",
-                    query
-                        .questions
-                        .first()
-                        .map(|q| q.qname.clone())
-                        .unwrap_or_else(|| "unknown".to_string())
-                ),
+                message: format!("No upstream servers available for domain: {domain}"),
             },
         ));
     }
@@ -833,7 +865,7 @@ pub async fn forward_concurrent(
                     })
                     .map_err(|e| {
                         DnsmasqError::Dns(crate::types::errors::DnsError::ProtocolError {
-                            message: format!("Failed to parse DNS response: {}", e),
+                            message: format!("Failed to parse DNS response: {e}"),
                         })
                     }),
                 Err(e) => Err(e),
@@ -875,10 +907,12 @@ pub async fn forward_concurrent(
 /// - `query`: DNS message to forward
 /// - `server_addr`: Upstream server socket address
 ///
-/// ## Returns
+/// # Errors
 ///
-/// - `Ok(DnsMessage)`: Parsed DNS response
-/// - `Err(DnsmasqError)`: Connection, timeout, or parsing error
+/// Returns `DnsmasqError` for:
+/// - TCP connection failures or timeouts
+/// - DNS protocol errors during serialization/parsing
+/// - Network I/O errors during transmission
 ///
 /// ## C Function Reference
 ///
@@ -908,13 +942,15 @@ pub async fn forward_tcp(query: &DnsMessage, server_addr: SocketAddr) -> Dnsmasq
     // Serialize query
     let query_bytes = query.serialize().map_err(|e| {
         DnsmasqError::Dns(crate::types::errors::DnsError::ProtocolError {
-            message: format!("Serialization failed: {}", e),
+            message: format!("Serialization failed: {e}"),
         })
     })?;
 
     // Prepare length-prefixed message
     let mut message_with_length = BytesMut::with_capacity(query_bytes.len() + 2);
-    message_with_length.extend_from_slice(&(query_bytes.len() as u16).to_be_bytes());
+    #[allow(clippy::cast_possible_truncation)]
+    let length_prefix = query_bytes.len() as u16;
+    message_with_length.extend_from_slice(&length_prefix.to_be_bytes());
     message_with_length.extend_from_slice(&query_bytes);
 
     // Send query with length prefix
@@ -969,11 +1005,11 @@ pub async fn forward_tcp(query: &DnsMessage, server_addr: SocketAddr) -> Dnsmasq
     // Parse response
     let response = DnsMessage::parse(&response_buf).map_err(|e| {
         DnsmasqError::Dns(crate::types::errors::DnsError::ProtocolError {
-            message: format!("Parse error: {}", e),
+            message: format!("Parse error: {e}"),
         })
     })?;
 
-    info!("Received TCP response from {}", server_addr);
+    info!("Received TCP response from {server_addr}");
     Ok(response)
 }
 
@@ -985,13 +1021,13 @@ mod tests {
     fn test_forward_record_creation() {
         let source = "127.0.0.1:12345".parse().unwrap();
         let upstream = "8.8.8.8:53".parse().unwrap();
-        let record = ForwardRecord::new(1234, source, upstream, 0xdeadbeef, FREC_DO_QUESTION);
+        let record = ForwardRecord::new(1234, source, upstream, 0xdead_beef, FREC_DO_QUESTION);
 
         assert_eq!(record.original_id, 1234);
         assert_ne!(record.randomized_id, 1234); // Should be randomized
         assert_eq!(record.source_addr, source);
         assert_eq!(record.upstream_server, upstream);
-        assert_eq!(record.query_hash, 0xdeadbeef);
+        assert_eq!(record.query_hash, 0xdead_beef);
         assert_eq!(record.dnssec_flags, FREC_DO_QUESTION);
     }
 
@@ -1041,13 +1077,13 @@ mod tests {
         let addr = "8.8.8.8:53".parse().unwrap();
 
         // Add new server
-        let server1 = Server::new(addr);
-        add_update_server(&mut servers, server1);
+        let new_server = Server::new(addr);
+        add_update_server(&mut servers, new_server);
         assert_eq!(servers.len(), 1);
 
         // Update existing server
-        let server2 = Server::new(addr).with_domains("example.com".to_string());
-        add_update_server(&mut servers, server2);
+        let updated_server = Server::new(addr).with_domains("example.com".to_string());
+        add_update_server(&mut servers, updated_server);
         assert_eq!(servers.len(), 1);
         assert!(servers[0].domain.is_some());
     }

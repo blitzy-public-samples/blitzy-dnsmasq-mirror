@@ -102,7 +102,7 @@ pub const EDNS_PACKET_SIZE: usize = 4096;
 /// **Use case**: Fallback when larger EDNS0 sizes fail or for clients not supporting EDNS0
 /// **Guarantees**: Delivery across NAT, VPN, tunnel, and IPv6-over-IPv4 networks without fragmentation
 ///
-/// **Reference**: https://dnsflagday.net/2020/
+/// **Reference**: <https://dnsflagday.net/2020/>
 /// **Source**: config.h line 233 `#define SAFE_PKTSZ 1232`
 pub const SAFE_PACKET_SIZE: usize = 1232;
 
@@ -157,7 +157,7 @@ pub const FORWARD_TEST_INTERVAL: usize = 50;
 
 /// Time interval between upstream server health tests (seconds)
 ///
-/// Even if FORWARD_TEST_INTERVAL queries haven't occurred, send a test query
+/// Even if `FORWARD_TEST_INTERVAL` queries haven't occurred, send a test query
 /// after this many seconds to verify upstream server health.
 ///
 /// **Default**: 20 seconds
@@ -269,14 +269,14 @@ pub const DECLINE_BACKOFF_SECS: u64 = 600;
 
 /// Maximum DHCP packet size
 ///
-/// Upper limit for DHCP packet size including all options. DHCPv6 packets can
+/// Upper limit for DHCP packet size including all options. `DHCPv6` packets can
 /// be large due to extensive option chains.
 ///
 /// **Default**: 16384 bytes (16KB)
 /// **Source**: config.h line 625 `#define DHCP_PACKET_MAX 16384`
 pub const DHCP_PACKET_MAX: usize = 16384;
 
-/// Default DHCPv4 lease time (seconds)
+/// Default `DHCPv4` lease time (seconds)
 ///
 /// Default duration for IPv4 DHCP leases when not explicitly configured.
 /// Clients must renew before expiration or lose their address assignment.
@@ -292,16 +292,16 @@ pub const DHCP_PACKET_MAX: usize = 16384;
 /// **Source**: config.h line 676 `#define DEFLEASE 3600`
 pub const DEFAULT_LEASE_TIME_V4_SECS: u64 = 3600;
 
-/// Default DHCPv6 lease time (seconds)
+/// Default `DHCPv6` lease time (seconds)
 ///
-/// Default duration for IPv6 DHCP leases (both IA_NA and IA_TA address types).
+/// Default duration for IPv6 DHCP leases (both `IA_NA` and `IA_TA` address types).
 /// IPv6 leases typically longer than IPv4 due to SLAAC alternatives.
 ///
 /// **Default**: 86400 seconds (24 hours)
 /// **RFC**: RFC 8415 Section 7.7
 /// **Rationale**: Longer than IPv4 due to larger address space and SLAAC coexistence
 ///
-/// **Runtime override**: Configurable per DHCPv6 range
+/// **Runtime override**: Configurable per `DHCPv6` range
 /// **Source**: config.h line 689 `#define DEFLEASE6 86400`
 pub const DEFAULT_LEASE_TIME_V6_SECS: u64 = 86400;
 
@@ -497,7 +497,7 @@ pub const SOA_RETRY_SECS: u64 = 180;
 /// **RFC**: RFC 1035 Section 3.3.13
 /// **Source**: config.h line 850 `#define SOA_EXPIRY 1209600`
 #[cfg(feature = "auth-dns")]
-pub const SOA_EXPIRY_SECS: u64 = 1209600;
+pub const SOA_EXPIRY_SECS: u64 = 1_209_600;
 
 // =============================================================================
 // LOOP DETECTION CONSTANTS (feature-gated)
@@ -571,6 +571,9 @@ pub const DEFAULT_PID_FILE: &str = "/var/run/dnsmasq.pid";
 #[cfg(target_os = "android")]
 pub const DEFAULT_LEASE_FILE: &str = "/data/misc/dhcp/dnsmasq.leases";
 
+/// Default DHCP lease file path for Linux (non-Android)
+///
+/// **Source**: config.h lines 1489-1510
 #[cfg(all(target_os = "linux", not(target_os = "android")))]
 pub const DEFAULT_LEASE_FILE: &str = "/var/lib/misc/dnsmasq.leases";
 
@@ -681,7 +684,7 @@ pub const DEFAULT_GROUP: &str = "dip";
 
 /// D-Bus service name for dnsmasq
 ///
-/// Well-known D-Bus service name used for NetworkManager integration and
+/// Well-known D-Bus service name used for `NetworkManager` integration and
 /// external control interface.
 ///
 /// **Default**: "uk.org.thekelleys.dnsmasq"
@@ -702,13 +705,13 @@ pub const DBUS_OBJECT_PATH: &str = "/uk/org/thekelleys/dnsmasq";
 // UBUS CONSTANTS (feature-gated, OpenWrt-specific)
 // =============================================================================
 
-/// OpenWrt ubus service name
+/// `OpenWrt` ubus service name
 ///
-/// Service identifier for OpenWrt's ubus IPC system, used for integration
-/// with OpenWrt's network management infrastructure.
+/// Service identifier for `OpenWrt`'s ubus IPC system, used for integration
+/// with `OpenWrt`'s network management infrastructure.
 ///
 /// **Default**: "dnsmasq"
-/// **Platform**: OpenWrt only
+/// **Platform**: `OpenWrt` only
 /// **Source**: config.h line 902 `#define DNSMASQ_UBUS_NAME`
 #[cfg(feature = "ubus")]
 pub const UBUS_SERVICE_NAME: &str = "dnsmasq";

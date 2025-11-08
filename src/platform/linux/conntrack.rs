@@ -97,7 +97,7 @@ use tracing::{debug, warn};
 // that provides full conntrack GET query functionality
 #[allow(non_camel_case_types)]
 mod ffi {
-    use super::*;
+    use super::c_int;
     use std::ffi::c_void;
 
     pub type nfct_handle = c_void;
@@ -196,15 +196,15 @@ pub enum ConntrackError {
 
     /// Permission denied accessing conntrack subsystem
     ///
-    /// This error occurs when the process lacks CAP_NET_ADMIN capability
+    /// This error occurs when the process lacks `CAP_NET_ADMIN` capability
     /// required to access the netfilter connection tracking table. Typically
     /// happens when:
     /// - dnsmasq has dropped privileges after binding to ports
-    /// - Process is running as unprivileged user without CAP_NET_ADMIN
-    /// - SELinux or AppArmor policies deny conntrack access
+    /// - Process is running as unprivileged user without `CAP_NET_ADMIN`
+    /// - `SELinux` or `AppArmor` policies deny conntrack access
     ///
     /// To resolve, either:
-    /// - Run dnsmasq with CAP_NET_ADMIN capability using systemd CapabilityBoundingSet
+    /// - Run dnsmasq with `CAP_NET_ADMIN` capability using systemd `CapabilityBoundingSet`
     /// - Configure capability retention after privilege drop
     /// - Run as root (not recommended for production)
     #[error("Permission denied accessing conntrack (requires CAP_NET_ADMIN): {0}")]
@@ -214,8 +214,8 @@ pub enum ConntrackError {
     ///
     /// This error indicates an attempt to query conntrack for an unsupported
     /// protocol or address family. Currently supports:
-    /// - IPv4 (AF_INET) with TCP or UDP
-    /// - IPv6 (AF_INET6) with TCP or UDP
+    /// - IPv4 (`AF_INET`) with TCP or UDP
+    /// - IPv6 (`AF_INET6`) with TCP or UDP
     ///
     /// This error should not occur during normal operation as dnsmasq only
     /// uses supported address families.
@@ -223,17 +223,52 @@ pub enum ConntrackError {
     UnsupportedProtocol(String),
 }
 
+/// Data structure passed to callback
+struct CallbackData {
+    mark: Arc<Mutex<Option<u32>>>,
+}
+
+/// C callback function for conntrack query
+///
+/// # Safety
+///
+/// This function is called by the C library with pointers that must be valid.
+/// The data pointer is expected to point to a valid `CallbackData` structure.
+extern "C" fn conntrack_callback(
+    _msg_type: ffi::nf_conntrack_msg_type,
+    ct: *const ffi::nf_conntrack,
+    data: *mut c_void,
+) -> c_int {
+    // SAFETY: data pointer is guaranteed to be valid CallbackData we passed to nfct_callback_register
+    unsafe {
+        if data.is_null() || ct.is_null() {
+            return ffi::NFCT_CB_CONTINUE;
+        }
+
+        let callback_data = &mut *data.cast::<CallbackData>();
+
+        // Extract the mark attribute from the conntrack entry
+        let mark = ffi::nfct_get_attr_u32(ct, ffi::ATTR_MARK);
+
+        if let Ok(mut result) = callback_data.mark.lock() {
+            *result = Some(mark);
+        }
+    }
+
+    ffi::NFCT_CB_CONTINUE
+}
+
 /// Query netfilter conntrack for firewall mark associated with incoming connection
 ///
 /// Queries the Linux netfilter connection tracking table to retrieve the firewall
 /// mark (set by iptables MARK target) associated with an incoming DNS query connection.
 /// Constructs a conntrack query based on the source address (peer), destination address
-/// (local), destination port, and protocol (TCP/UDP), then retrieves the ATTR_MARK
+/// (local), destination port, and protocol (TCP/UDP), then retrieves the `ATTR_MARK`
 /// value if a matching conntrack entry exists. This mark can then be applied to upstream
 /// DNS queries to enable policy-based routing where queries inherit the routing policy
 /// of the originating client network.
 ///
-/// The function handles both IPv4 (AF_INET) and IPv6 (AF_INET6) connections, setting
+/// The function handles both IPv4 (`AF_INET`) and IPv6 (`AF_INET6`) connections, setting
 /// appropriate conntrack attributes for each protocol family. Uses async I/O to avoid
 /// blocking the main event loop during conntrack query operations.
 ///
@@ -245,8 +280,8 @@ pub enum ConntrackError {
 /// * `local` - Destination IP address where dnsmasq received the query (local
 ///   interface address). Must be IPv4 or IPv6 matching the family in `peer`.
 ///
-/// * `is_tcp` - Protocol flag: `true` for TCP connections (IPPROTO_TCP),
-///   `false` for UDP connections (IPPROTO_UDP). Used to match the correct
+/// * `is_tcp` - Protocol flag: `true` for TCP connections (`IPPROTO_TCP`),
+///   `false` for UDP connections (`IPPROTO_UDP`). Used to match the correct
 ///   conntrack entry for the connection.
 ///
 /// # Returns
@@ -257,7 +292,7 @@ pub enum ConntrackError {
 ///
 /// # Errors
 ///
-/// * `ConntrackError::PermissionDenied` - Process lacks CAP_NET_ADMIN capability
+/// * `ConntrackError::PermissionDenied` - Process lacks `CAP_NET_ADMIN` capability
 /// * `ConntrackError::IoError` - Netlink communication failure
 /// * `ConntrackError::QueryFailed` - No conntrack entry found or mark unavailable
 /// * `ConntrackError::UnsupportedProtocol` - Unsupported address family
@@ -265,14 +300,14 @@ pub enum ConntrackError {
 /// # Requirements
 ///
 /// * Linux kernel with netfilter conntrack module loaded
-/// * CAP_NET_ADMIN capability for conntrack table access
+/// * `CAP_NET_ADMIN` capability for conntrack table access
 /// * Matching conntrack entry must exist (connection tracked by netfilter)
 /// * Firewall mark must be set on connection (via iptables MARK target)
 ///
 /// # Notes
 ///
 /// Typically dnsmasq drops to unprivileged user after initialization, so conntrack
-/// functionality may only be available if dnsmasq retains CAP_NET_ADMIN or runs
+/// functionality may only be available if dnsmasq retains `CAP_NET_ADMIN` or runs
 /// as root (not recommended for security). First query failure logs error message,
 /// subsequent failures use debug-level logging to avoid log spam.
 ///
@@ -306,41 +341,6 @@ pub enum ConntrackError {
 ///
 /// Linux-only. Function is not available on other platforms (gated by
 /// `#[cfg(target_os = "linux")]`).
-/// Data structure passed to callback
-struct CallbackData {
-    mark: Arc<Mutex<Option<u32>>>,
-}
-
-/// C callback function for conntrack query
-///
-/// # Safety
-///
-/// This function is called by the C library with pointers that must be valid.
-/// The data pointer is expected to point to a valid CallbackData structure.
-extern "C" fn conntrack_callback(
-    _msg_type: ffi::nf_conntrack_msg_type,
-    ct: *const ffi::nf_conntrack,
-    data: *mut c_void,
-) -> c_int {
-    // SAFETY: data pointer is guaranteed to be valid CallbackData we passed to nfct_callback_register
-    unsafe {
-        if data.is_null() || ct.is_null() {
-            return ffi::NFCT_CB_CONTINUE;
-        }
-
-        let callback_data = &mut *(data as *mut CallbackData);
-
-        // Extract the mark attribute from the conntrack entry
-        let mark = ffi::nfct_get_attr_u32(ct, ffi::ATTR_MARK);
-
-        if let Ok(mut result) = callback_data.mark.lock() {
-            *result = Some(mark);
-        }
-    }
-
-    ffi::NFCT_CB_CONTINUE
-}
-
 pub async fn get_incoming_mark(
     peer: SocketAddr,
     local: IpAddr,
@@ -350,6 +350,28 @@ pub async fn get_incoming_mark(
     // This prevents the potentially blocking libnetfilter_conntrack calls
     // from stalling the Tokio async runtime's main event loop
     tokio::task::spawn_blocking(move || {
+        // DNS standard port (destination port for incoming queries)
+        const DNS_PORT: u16 = 53;
+
+        // RAII guards for cleanup - defined at top to avoid "items after statements" lint
+        struct HandleGuard(*mut ffi::nfct_handle);
+        impl Drop for HandleGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    ffi::nfct_close(self.0);
+                }
+            }
+        }
+
+        struct CtGuard(*mut ffi::nf_conntrack);
+        impl Drop for CtGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    ffi::nfct_destroy(self.0);
+                }
+            }
+        }
+
         // Shared state for callback result using Arc<Mutex<Option<u32>>>
         // This replaces the C implementation's static gotit variable with
         // a thread-safe, scoped alternative that doesn't rely on global state
@@ -366,9 +388,6 @@ pub async fn get_incoming_mark(
 
         // Extract port from peer address for source port attribute
         let peer_port = peer.port();
-
-        // DNS standard port (destination port for incoming queries)
-        const DNS_PORT: u16 = 53;
 
         // Determine address family and extract addresses
         let (is_ipv6, ipv4_peer, ipv6_peer, ipv4_local, ipv6_local) = match (peer.ip(), local) {
@@ -395,23 +414,13 @@ pub async fn get_incoming_mark(
                 let err = std::io::Error::last_os_error();
                 if err.raw_os_error() == Some(libc::EPERM) {
                     return Err(ConntrackError::PermissionDenied(format!(
-                        "Cannot access conntrack table: {}. Process requires CAP_NET_ADMIN capability.",
-                        err
+                        "Cannot access conntrack table: {err}. Process requires CAP_NET_ADMIN capability."
                     )));
-                } else {
-                    return Err(ConntrackError::IoError(err));
                 }
+                return Err(ConntrackError::IoError(err));
             }
 
             // Ensure handle is closed on drop using a guard
-            struct HandleGuard(*mut ffi::nfct_handle);
-            impl Drop for HandleGuard {
-                fn drop(&mut self) {
-                    unsafe {
-                        ffi::nfct_close(self.0);
-                    }
-                }
-            }
             let _handle_guard = HandleGuard(handle);
 
             // Create conntrack query object and set attributes
@@ -424,14 +433,6 @@ pub async fn get_incoming_mark(
             }
 
             // Ensure ct is destroyed on drop
-            struct CtGuard(*mut ffi::nf_conntrack);
-            impl Drop for CtGuard {
-                fn drop(&mut self) {
-                    unsafe {
-                        ffi::nfct_destroy(self.0);
-                    }
-                }
-            }
             let _ct_guard = CtGuard(ct);
 
             // Set layer 4 protocol (TCP or UDP)
@@ -449,11 +450,11 @@ pub async fn get_incoming_mark(
                 ffi::nfct_set_attr_u8(ct, ffi::ATTR_L3PROTO, 10);
 
                 if let Some(peer_v6) = ipv6_peer {
-                    ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_SRC, peer_v6.octets().as_ptr() as *const c_void);
+                    ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_SRC, peer_v6.octets().as_ptr().cast::<c_void>());
                 }
 
                 if let Some(local_v6) = ipv6_local {
-                    ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_DST, local_v6.octets().as_ptr() as *const c_void);
+                    ffi::nfct_set_attr(ct, ffi::ATTR_IPV6_DST, local_v6.octets().as_ptr().cast::<c_void>());
                 }
             } else {
                 // IPv4 connection (AF_INET = 2 per POSIX standard)
@@ -481,7 +482,7 @@ pub async fn get_incoming_mark(
                 handle,
                 ffi::nf_conntrack_msg_type::NFCT_T_ALL,
                 conntrack_callback,
-                &mut callback_data as *mut _ as *mut c_void,
+                std::ptr::addr_of_mut!(callback_data).cast::<c_void>(),
             );
 
             if ret < 0 {
@@ -497,27 +498,24 @@ pub async fn get_incoming_mark(
                 let err = std::io::Error::last_os_error();
                 if err.raw_os_error() == Some(libc::EPERM) {
                     return Err(ConntrackError::PermissionDenied(format!(
-                        "Conntrack query denied: {}. Ensure CAP_NET_ADMIN capability is retained after privilege drop.",
-                        err
+                        "Conntrack query denied: {err}. Ensure CAP_NET_ADMIN capability is retained after privilege drop."
                     )));
                 } else if err.raw_os_error() == Some(libc::ENOENT) {
                     return Err(ConntrackError::QueryFailed(format!(
                         "No conntrack entry found for {}:{} -> {} (proto {})",
                         peer.ip(), peer_port, local, if is_tcp { "TCP" } else { "UDP" }
                     )));
-                } else {
-                    return Err(ConntrackError::QueryFailed(format!(
-                        "Conntrack query failed: {}",
-                        err
-                    )));
                 }
+                return Err(ConntrackError::QueryFailed(format!(
+                    "Conntrack query failed: {err}"
+                )));
             }
 
             // Extract mark from callback result
             let mark = mark_result
                 .lock()
                 .map_err(|e| ConntrackError::IoError(std::io::Error::other(
-                    format!("Mutex lock poisoned: {}", e),
+                    format!("Mutex lock poisoned: {e}"),
                 )))?
                 .ok_or_else(|| {
                     ConntrackError::QueryFailed(
@@ -540,7 +538,7 @@ pub async fn get_incoming_mark(
     .await
     .map_err(|e| {
         ConntrackError::IoError(std::io::Error::other(
-            format!("Tokio task join error: {}", e),
+            format!("Tokio task join error: {e}"),
         ))
     })?
 }

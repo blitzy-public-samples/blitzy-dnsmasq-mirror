@@ -91,7 +91,7 @@ async fn test_linux_netlink_initialization() {
 
     // Attempt to create netlink socket
     // May fail with permission error in CI, which is acceptable per C implementation behavior
-    let result = NetlinkSocket::new().await;
+    let result = NetlinkSocket::new();
 
     match result {
         Ok(socket) => {
@@ -136,7 +136,7 @@ async fn test_linux_netlink_initialization() {
 async fn test_linux_netlink_address_events() {
     use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-    let socket_result = NetlinkSocket::new().await;
+    let socket_result = NetlinkSocket::new();
     if socket_result.is_err() {
         println!("Skipping netlink event test - no permissions");
         return;
@@ -192,7 +192,7 @@ async fn test_linux_netlink_address_events() {
 async fn test_linux_netlink_event_deduplication() {
     use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-    let socket_result = NetlinkSocket::new().await;
+    let socket_result = NetlinkSocket::new();
     if socket_result.is_err() {
         println!("Skipping event deduplication test - no permissions");
         return;
@@ -426,7 +426,7 @@ async fn test_cross_platform_interface_index_name_mapping() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             if let Ok(interfaces) = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await
@@ -487,7 +487,7 @@ async fn test_cross_platform_interface_flags() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             if let Ok(interfaces) = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await
@@ -521,7 +521,7 @@ async fn test_cross_platform_address_family_filtering() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             if let Ok(interfaces) = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await
@@ -735,7 +735,7 @@ async fn test_interface_enumeration_performance() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             let _ = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await;
@@ -781,7 +781,7 @@ async fn test_event_delivery_latency() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(_socket) = NetlinkSocket::new().await {
+        if let Ok(_socket) = NetlinkSocket::new() {
             println!("Linux netlink socket ready for event monitoring");
             // In real usage, events would arrive asynchronously
         }
@@ -815,7 +815,7 @@ async fn test_interface_without_addresses() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             if let Ok(interfaces) = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await
@@ -844,7 +844,7 @@ async fn test_interface_removal_during_enumeration() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             // Multiple rapid enumerations might catch transient interfaces
             for _ in 0..3 {
                 let _ = socket
@@ -870,7 +870,7 @@ async fn test_permission_denied_handling() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        let result = NetlinkSocket::new().await;
+        let result = NetlinkSocket::new();
         match result {
             Ok(_) => println!("Netlink socket created (have permissions)"),
             Err(e) => println!("Netlink permission denied (expected in CI): {}", e),
@@ -938,7 +938,7 @@ async fn test_interface_record_completeness() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             if let Ok(interfaces) = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await
@@ -966,7 +966,7 @@ async fn test_interface_mtu_values() {
     {
         use dnsmasq::platform::linux::netlink::NetlinkSocket;
 
-        if let Ok(socket) = NetlinkSocket::new().await {
+        if let Ok(socket) = NetlinkSocket::new() {
             if let Ok(interfaces) = socket
                 .enumerate_interfaces(LinuxAddressFamily::Unspec)
                 .await

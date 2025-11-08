@@ -124,7 +124,7 @@ pub enum DnsmasqError {
 
 /// Result type alias for dnsmasq operations
 ///
-/// This is a convenience alias for Result<T, DnsmasqError> used throughout
+/// This is a convenience alias for Result<T, `DnsmasqError`> used throughout
 /// the codebase to reduce boilerplate and improve readability.
 ///
 /// # Examples
@@ -461,11 +461,11 @@ pub enum NetworkError {
 ///
 /// Covers errors in command-line argument parsing, configuration file
 /// parsing, option validation, and configuration conflicts. These replace
-/// C's die() calls and return code checks in option.c.
+/// C's `die()` calls and return code checks in option.c.
 ///
 /// # Configuration Error Handling
 ///
-/// C code calls die() on configuration errors (terminates process):
+/// C code calls `die()` on configuration errors (terminates process):
 /// ```c
 /// // C pattern (from option.c)
 /// if (invalid_option)

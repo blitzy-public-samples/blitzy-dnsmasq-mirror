@@ -55,15 +55,15 @@
 //! ### Core Features
 //!
 //! - **`dns`** (default): DNS forwarding, caching, and authoritative server
-//! - **`dhcp`** (default): DHCPv4 and DHCPv6 server functionality
+//! - **`dhcp`** (default): `DHCPv4` and `DHCPv6` server functionality
 //! - **`tftp`** (default): TFTP server for PXE network boot
 //!
 //! ### Optional Features
 //!
 //! - **`dnssec`**: DNSSEC validation with cryptographic signature verification
 //! - **`auth-dns`**: Authoritative DNS server for local domains
-//! - **`ipv6`**: Full IPv6 support including DHCPv6, SLAAC, and Router Advertisements
-//! - **`dbus`**: D-Bus integration for NetworkManager and systemd
+//! - **`ipv6`**: Full IPv6 support including `DHCPv6`, SLAAC, and Router Advertisements
+//! - **`dbus`**: D-Bus integration for `NetworkManager` and systemd
 //! - **`conntrack`**: Linux connection tracking integration
 //! - **`ipset`**: Linux ipset integration for firewall rules
 //! - **`nftables`**: nftables set manipulation
@@ -157,7 +157,7 @@
 //! ## Platform Support
 //!
 //! - **Linux**: Full support including netlink, inotify, ipset, nftables, conntrack
-//! - **BSD**: FreeBSD, OpenBSD, NetBSD, DragonFly BSD with BPF interface
+//! - **BSD**: FreeBSD, OpenBSD, NetBSD, `DragonFly` BSD with BPF interface
 //! - **macOS**: Full support with launchd integration
 //! - **Solaris**: Generic POSIX fallback implementation
 //!

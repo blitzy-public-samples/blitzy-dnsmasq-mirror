@@ -241,7 +241,7 @@ pub use conntrack::{ConntrackError, get_incoming_mark};
 ///
 /// This error type wraps errors from all Linux-specific subsystems (netlink,
 /// inotify, ipset, nftables, conntrack) into a unified error hierarchy. It
-/// integrates with the main PlatformError type from `src/platform/mod.rs`.
+/// integrates with the main `PlatformError` type from `src/platform/mod.rs`.
 ///
 /// # C Implementation Context
 ///
@@ -308,7 +308,7 @@ pub enum LinuxPlatformError {
 /// Linux platform implementation with netlink, inotify, ipset, nftables, and conntrack
 ///
 /// This structure aggregates all Linux-specific subsystems and implements the
-/// NetworkPlatform trait from `src/platform/mod.rs`. It provides the richest
+/// `NetworkPlatform` trait from `src/platform/mod.rs`. It provides the richest
 /// feature set among all platform implementations.
 ///
 /// # C Implementation Context
@@ -334,15 +334,15 @@ pub enum LinuxPlatformError {
 ///
 /// # Thread Safety
 ///
-/// LinuxPlatform is designed for use in dnsmasq's single-threaded async event loop.
+/// `LinuxPlatform` is designed for use in dnsmasq's single-threaded async event loop.
 /// It does not implement Send/Sync as it's not intended to be shared across threads.
 /// All operations are non-blocking or use timeouts to prevent event loop starvation.
 ///
 /// # Resource Management
 ///
 /// All resources (sockets, file descriptors) are automatically cleaned up when
-/// LinuxPlatform is dropped (RAII pattern). The C implementation requires manual
-/// cleanup in daemon_stop().
+/// `LinuxPlatform` is dropped (RAII pattern). The C implementation requires manual
+/// cleanup in `daemon_stop()`.
 pub struct LinuxPlatform {
     /// Netlink socket for interface monitoring (always present)
     netlink: Arc<NetlinkSocket>,
@@ -380,7 +380,7 @@ impl LinuxPlatform {
     ///
     /// # Errors
     ///
-    /// Returns LinuxPlatformError::Netlink if netlink socket creation fails.
+    /// Returns `LinuxPlatformError::Netlink` if netlink socket creation fails.
     ///
     /// # Examples
     ///
@@ -393,8 +393,9 @@ impl LinuxPlatform {
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(clippy::unused_async)]
     pub async fn new() -> Result<Self, LinuxPlatformError> {
-        let netlink = NetlinkSocket::new().await?;
+        let netlink = NetlinkSocket::new()?;
 
         Ok(Self {
             netlink: Arc::new(netlink),
@@ -409,8 +410,9 @@ impl LinuxPlatform {
 
     /// Get reference to netlink socket
     ///
-    /// Returns the underlying NetlinkSocket for direct access to netlink operations.
+    /// Returns the underlying `NetlinkSocket` for direct access to netlink operations.
     /// This is useful for advanced use cases that need to send custom netlink messages.
+    #[must_use]
     pub fn get_netlink(&self) -> &NetlinkSocket {
         &self.netlink
     }
@@ -425,7 +427,7 @@ impl LinuxPlatform {
     /// This method is only available when the "inotify" feature is enabled.
     #[cfg(feature = "inotify")]
     pub fn get_inotify(&self) -> Option<&InotifyWatcher> {
-        self.inotify.as_ref().map(|arc| arc.as_ref())
+        self.inotify.as_ref().map(std::convert::AsRef::as_ref)
     }
 
     /// Get reference to ipset manager (if available)
@@ -438,7 +440,7 @@ impl LinuxPlatform {
     /// This method is only available when the "ipset" feature is enabled.
     #[cfg(feature = "ipset")]
     pub fn get_ipset(&self) -> Option<&IpsetManager> {
-        self.ipset.as_ref().map(|arc| arc.as_ref())
+        self.ipset.as_ref().map(std::convert::AsRef::as_ref)
     }
 
     /// Get reference to nftables manager (if available)
@@ -450,8 +452,9 @@ impl LinuxPlatform {
     ///
     /// This method is only available when the "nftables" feature is enabled.
     #[cfg(feature = "nftables")]
+    #[must_use]
     pub fn get_nftset(&self) -> Option<&NftablesManager> {
-        self.nftset.as_ref().map(|arc| arc.as_ref())
+        self.nftset.as_ref().map(std::convert::AsRef::as_ref)
     }
 
     /// Process accumulated network events
@@ -461,7 +464,7 @@ impl LinuxPlatform {
     ///
     /// # C Implementation Context
     ///
-    /// The C code uses nl_multicast_state() to track event processing state:
+    /// The C code uses `nl_multicast_state()` to track event processing state:
     /// ```c
     /// static enum { FIRSTstate, SECONDstate, NORMALstate } nl_multicast_state = FIRSTstate;
     /// ```
@@ -478,14 +481,14 @@ impl LinuxPlatform {
 impl NetworkPlatform for LinuxPlatform {
     /// Enumerate all network interfaces using netlink
     ///
-    /// Sends RTM_GETLINK and RTM_GETADDR dump requests to enumerate all network
+    /// Sends `RTM_GETLINK` and `RTM_GETADDR` dump requests to enumerate all network
     /// interfaces and their assigned IP addresses. This is significantly more
-    /// efficient than the BSD getifaddrs() approach as it requires only two
+    /// efficient than the BSD `getifaddrs()` approach as it requires only two
     /// netlink round-trips regardless of interface count.
     ///
     /// # C Implementation Context
     ///
-    /// Replaces iface_enumerate() from netlink.c:
+    /// Replaces `iface_enumerate()` from netlink.c:
     /// ```c
     /// int iface_enumerate(int family, void *parm, int (*callback)()) {
     ///     // Send RTM_GETLINK/RTM_GETADDR dump requests
@@ -528,13 +531,13 @@ impl NetworkPlatform for LinuxPlatform {
 
     /// Initialize interface change monitoring via netlink multicast
     ///
-    /// Subscribes to netlink multicast groups (RTMGRP_IPV4_IFADDR, RTMGRP_IPV6_IFADDR,
-    /// RTMGRP_IPV4_ROUTE, RTMGRP_IPV6_ROUTE) to receive asynchronous notifications
+    /// Subscribes to netlink multicast groups (`RTMGRP_IPV4_IFADDR`, `RTMGRP_IPV6_IFADDR`,
+    /// `RTMGRP_IPV4_ROUTE`, `RTMGRP_IPV6_ROUTE`) to receive asynchronous notifications
     /// when network configuration changes.
     ///
     /// # C Implementation Context
     ///
-    /// The C code subscribes during netlink_init():
+    /// The C code subscribes during `netlink_init()`:
     /// ```c
     /// addr.nl_groups = RTMGRP_IPV4_ROUTE | RTMGRP_IPV4_IFADDR |
     ///                  RTMGRP_IPV6_ROUTE | RTMGRP_IPV6_IFADDR;
@@ -565,7 +568,7 @@ impl NetworkPlatform for LinuxPlatform {
     ///
     /// # C Implementation Context
     ///
-    /// The C code uses if_indextoname() with SIOCGIFNAME ioctl:
+    /// The C code uses `if_indextoname()` with `SIOCGIFNAME` ioctl:
     /// ```c
     /// char ifname[IF_NAMESIZE];
     /// if (if_indextoname(index, ifname) == NULL)
@@ -594,7 +597,7 @@ impl NetworkPlatform for LinuxPlatform {
 
 /// Initialize Linux platform with all available features
 ///
-/// This function creates a fully initialized LinuxPlatform instance with all
+/// This function creates a fully initialized `LinuxPlatform` instance with all
 /// optional features (inotify, ipset, nftables, conntrack) enabled based on
 /// compile-time feature flags. If initialization of any optional feature fails,
 /// it logs a warning but continues without that feature (graceful degradation).
@@ -650,11 +653,11 @@ impl NetworkPlatform for LinuxPlatform {
 /// ```
 pub async fn init() -> Result<LinuxPlatform, LinuxPlatformError> {
     // Initialize netlink (required)
-    let netlink = NetlinkSocket::new().await?;
+    let netlink = NetlinkSocket::new()?;
 
     // Initialize inotify (optional)
     #[cfg(feature = "inotify")]
-    let inotify = match InotifyWatcher::new().await {
+    let inotify = match InotifyWatcher::new() {
         Ok(watcher) => {
             tracing::info!("inotify file monitoring initialized");
             Some(Arc::new(watcher))

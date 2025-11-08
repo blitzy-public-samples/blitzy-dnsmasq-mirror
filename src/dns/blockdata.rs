@@ -84,12 +84,12 @@ use crate::types::errors::DnsmasqError;
 /// Block size for DNSSEC data storage
 ///
 /// Chosen to minimize fragmentation when storing typical DNSSEC key sizes.
-/// Corresponds to KEYBLOCK_LEN constant in C (src/config.h:253).
+/// Corresponds to `KEYBLOCK_LEN` constant in C (src/config.h:253).
 const BLOCK_SIZE: usize = 40;
 
 /// Default number of blocks to expand pool by when exhausted
 ///
-/// Corresponds to the expansion size used in C's blockdata_expand() calls.
+/// Corresponds to the expansion size used in C's `blockdata_expand()` calls.
 const EXPANSION_SIZE: usize = 50;
 
 /// Error types for block data operations
@@ -133,7 +133,7 @@ pub type BlockDataResult<T> = Result<T, BlockDataError>;
 /// Single block in a block chain
 ///
 /// Represents one block in a linked list of blocks, each containing up to
-/// BLOCK_SIZE bytes of data. This structure replaces C's `struct blockdata`
+/// `BLOCK_SIZE` bytes of data. This structure replaces C's `struct blockdata`
 /// (dnsmasq.h:460-463) which used a fixed-size array and raw next pointer.
 ///
 /// # Memory Layout
@@ -149,7 +149,7 @@ pub type BlockDataResult<T> = Result<T, BlockDataError>;
 /// Rust version uses Box<> for heap allocation and Option<Box<>> for safe
 /// null pointer alternative, with Vec<u8> for flexible data storage.
 pub struct BlockData {
-    /// Variable-length data stored in this block (up to BLOCK_SIZE bytes)
+    /// Variable-length data stored in this block (up to `BLOCK_SIZE` bytes)
     ///
     /// Replaces C's fixed-size `unsigned char key[KEYBLOCK_LEN]` array.
     /// Using Vec<u8> provides flexibility and automatic bounds checking.
@@ -171,7 +171,8 @@ impl BlockData {
     ///
     /// # Returns
     ///
-    /// New BlockData instance with copied data and no next block
+    /// New `BlockData` instance with copied data and no next block
+    #[must_use]
     pub fn new(data: Vec<u8>) -> Self {
         Self { data, next: None }
     }
@@ -181,7 +182,7 @@ impl BlockData {
 ///
 /// Provides insight into block data pool usage, helping identify memory
 /// consumption patterns and potential leaks. Corresponds to the statistics
-/// logged by C's blockdata_report() function (blockdata.c:231-237).
+/// logged by C's `blockdata_report()` function (blockdata.c:231-237).
 #[derive(Debug, Clone, Copy)]
 pub struct BlockDataStats {
     /// Current number of blocks in use (allocated from pool)
@@ -252,7 +253,7 @@ impl BlockDataPool {
     ///
     /// # Returns
     ///
-    /// New BlockDataPool instance with statistics reset to zero
+    /// New `BlockDataPool` instance with statistics reset to zero
     ///
     /// # C Reference
     ///
@@ -342,6 +343,10 @@ impl BlockDataPool {
     /// let mut pool = BlockDataPool::new(0, false);
     /// pool.expand_pool(50)?;  // Add 50 blocks to pool
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `BlockDataError::AllocationFailed` if memory allocation fails.
     pub fn expand_pool(&mut self, count: usize) -> BlockDataResult<()> {
         // Attempt to allocate new blocks
         // In C, whine_malloc() would log error and return NULL on failure
@@ -371,8 +376,8 @@ impl BlockDataPool {
     /// Allocate block chain from byte slice
     ///
     /// Creates a chain of blocks to hold the given data, allocating blocks from
-    /// the pool. If the pool is exhausted, automatically expands by EXPANSION_SIZE
-    /// blocks. Each block holds up to BLOCK_SIZE bytes.
+    /// the pool. If the pool is exhausted, automatically expands by `EXPANSION_SIZE`
+    /// blocks. Each block holds up to `BLOCK_SIZE` bytes.
     ///
     /// Corresponds to C's `blockdata_alloc()` and `blockdata_alloc_real()` functions
     /// (blockdata.c:299-406).
@@ -425,6 +430,11 @@ impl BlockDataPool {
     /// let chain = pool.allocate(&data)?;
     /// // chain automatically freed when dropped
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `BlockDataError::AllocationFailed` if memory allocation fails or
+    /// pool expansion fails when exhausted.
     pub fn allocate(&mut self, data: &[u8]) -> BlockDataResult<Box<BlockData>> {
         if data.is_empty() {
             return Ok(Box::new(BlockData {
@@ -434,7 +444,7 @@ impl BlockDataPool {
         }
 
         let mut head: Option<Box<BlockData>> = None;
-        let mut tail: *mut Option<Box<BlockData>> = &mut head;
+        let mut tail: *mut Option<Box<BlockData>> = std::ptr::addr_of_mut!(head);
         let mut remaining = data;
 
         while !remaining.is_empty() {
@@ -468,7 +478,7 @@ impl BlockDataPool {
             unsafe {
                 *tail = Some(block);
                 if let Some(ref mut last) = *tail {
-                    tail = &mut last.next;
+                    tail = std::ptr::addr_of_mut!(last.next);
                 }
             }
         }
@@ -541,6 +551,7 @@ impl BlockDataPool {
     /// let retrieved = pool.retrieve(&chain);
     /// assert_eq!(data, retrieved);
     /// ```
+    #[must_use]
     pub fn retrieve(&self, chain: &BlockData) -> Vec<u8> {
         let mut result = Vec::new();
         let mut current = Some(chain);
@@ -557,7 +568,7 @@ impl BlockDataPool {
     ///
     /// Allocates a block chain and populates it by reading len bytes from an async
     /// file handle. This is the async equivalent of C's `blockdata_read()` function,
-    /// using Tokio's async I/O instead of blocking read() syscalls.
+    /// using Tokio's async I/O instead of blocking `read()` syscalls.
     ///
     /// Corresponds to C's `blockdata_read()` function (blockdata.c:673-676).
     ///
@@ -590,6 +601,11 @@ impl BlockDataPool {
     /// let mut file = File::open("data.bin").await?;
     /// let chain = pool.read_from(&mut file, 256).await?;
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `BlockDataError::IoError` if file read fails or
+    /// `BlockDataError::AllocationFailed` if memory allocation fails.
     pub async fn read_from(
         &mut self,
         file: &mut tokio::fs::File,
@@ -600,7 +616,7 @@ impl BlockDataPool {
         file.read_exact(&mut buffer)
             .await
             .map_err(|e| BlockDataError::IoError {
-                message: format!("Failed to read {} bytes from file", len),
+                message: format!("Failed to read {len} bytes from file"),
                 source: e,
             })?;
 
@@ -612,7 +628,7 @@ impl BlockDataPool {
     ///
     /// Writes all data from a block chain to an async file handle. This is the
     /// async equivalent of C's `blockdata_write()` function, using Tokio's async
-    /// I/O instead of blocking write() syscalls.
+    /// I/O instead of blocking `write()` syscalls.
     ///
     /// Corresponds to C's `blockdata_write()` function (blockdata.c:605-613).
     ///
@@ -645,6 +661,10 @@ impl BlockDataPool {
     /// let mut file = File::create("output.bin").await?;
     /// pool.write_to(&chain, &mut file).await?;
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the file fails.
     pub async fn write_to(
         &self,
         chain: &BlockData,
@@ -674,7 +694,7 @@ impl BlockDataPool {
     ///
     /// # Returns
     ///
-    /// BlockDataStats containing count, high_water_mark, and allocated
+    /// `BlockDataStats` containing `count`, `high_water_mark`, and `allocated`
     ///
     /// # C Reference
     ///
@@ -717,7 +737,7 @@ impl BlockDataPool {
     /// Return block chain to free pool
     ///
     /// Internal method to return a chain of blocks to the free list for reuse.
-    /// This is called automatically by the Drop implementation for BlockData.
+    /// This is called automatically by the Drop implementation for `BlockData`.
     ///
     /// Corresponds to C's `blockdata_free()` function (blockdata.c:453-465).
     ///

@@ -64,7 +64,7 @@
 //! };
 //!
 //! let mut server = TftpServer::new(config);
-//! server.bind().await?;
+//! server.bind()?;
 //! server.run().await?;
 //! # Ok(())
 //! # }
@@ -90,8 +90,8 @@ use crate::tftp::transfer::{TftpFile, Transfer, TransferError, TransferOptions};
 use crate::types::daemon_state::DaemonState;
 use crate::util::logging::LogConfig;
 
-/// TFTP unique root directory mode for --tftp-unique-root option
-/// C reference: OPT_TFTP_APREF_IP, OPT_TFTP_APREF_MAC flags
+/// TFTP unique root directory mode for `--tftp-unique-root` option
+/// C reference: `OPT_TFTP_APREF_IP`, `OPT_TFTP_APREF_MAC` flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UniqueRootMode {
     /// Use client IP address as subdirectory
@@ -110,14 +110,14 @@ pub enum UniqueRootMode {
 /// # C Source Reference
 ///
 /// Replaces configuration parsing from `src/option.c` for TFTP options:
-/// - --enable-tftp → implicit in server creation
-/// - --tftp-root=<path> → root_dir
-/// - --tftp-secure → secure_mode
-/// - --tftp-single-port → single_port
-/// - --tftp-no-blocksize → affects max_blocksize validation
-/// - --tftp-lowercase → lowercase_filenames
-/// - --tftp-unique-root=<mode> → unique_root_mode
-/// - --tftp-port-range=<start>-<end> → port_range
+/// - `--enable-tftp` → implicit in server creation
+/// - `--tftp-root=<path>` → `root_dir`
+/// - `--tftp-secure` → `secure_mode`
+/// - `--tftp-single-port` → `single_port`
+/// - `--tftp-no-blocksize` → affects `max_blocksize` validation
+/// - `--tftp-lowercase` → `lowercase_filenames`
+/// - `--tftp-unique-root=<mode>` → `unique_root_mode`
+/// - `--tftp-port-range=<start>-<end>` → `port_range`
 #[derive(Debug, Clone)]
 pub struct TftpConfig {
     /// TFTP root directory for serving files
@@ -125,35 +125,35 @@ pub struct TftpConfig {
     pub root_dir: PathBuf,
 
     /// Secure mode: files must be owned by dnsmasq user
-    /// C reference: option_bool(OPT_TFTP_SECURE)
+    /// C reference: `option_bool(OPT_TFTP_SECURE)`
     pub secure_mode: bool,
 
     /// Single-port mode: all transfers via port 69
-    /// C reference: option_bool(OPT_SINGLE_PORT)
+    /// C reference: `option_bool(OPT_SINGLE_PORT)`
     pub single_port: bool,
 
     /// Maximum negotiated block size in bytes (RFC 2348)
-    /// C reference: transfer->blocksize after negotiation
+    /// C reference: `transfer->blocksize` after negotiation
     pub max_blocksize: u16,
 
     /// Port range for multi-port mode (start..end)
-    /// C reference: daemon->start_tftp_port, daemon->end_tftp_port
+    /// C reference: `daemon->start_tftp_port`, `daemon->end_tftp_port`
     pub port_range: Option<Range<u16>>,
 
     /// Convert filenames to lowercase
-    /// C reference: option_bool(OPT_TFTP_LC)
+    /// C reference: `option_bool(OPT_TFTP_LC)`
     pub lowercase_filenames: bool,
 
     /// Unique root mode for client-specific subdirectories
-    /// C reference: option_bool(OPT_TFTP_APREF_IP), option_bool(OPT_TFTP_APREF_MAC)
+    /// C reference: `option_bool(OPT_TFTP_APREF_IP)`, `option_bool(OPT_TFTP_APREF_MAC)`
     pub unique_root_mode: Option<UniqueRootMode>,
 
     /// MTU override for block size calculation
-    /// C reference: daemon->tftp_mtu
+    /// C reference: `daemon->tftp_mtu`
     pub mtu: Option<u16>,
 
     /// Disable blocksize negotiation
-    /// C reference: option_bool(OPT_TFTP_NOBLOCK)
+    /// C reference: `option_bool(OPT_TFTP_NOBLOCK)`
     pub no_blocksize: bool,
 }
 
@@ -161,13 +161,13 @@ impl Default for TftpConfig {
     /// Create default TFTP configuration
     ///
     /// Defaults match C implementation's behavior when no options are specified:
-    /// - root_dir: "/var/ftpd" (or platform-specific default)
-    /// - secure_mode: false
-    /// - single_port: false
-    /// - max_blocksize: 1468 (fits in Ethernet MTU with overhead)
-    /// - port_range: None (use ephemeral ports)
-    /// - lowercase_filenames: false
-    /// - unique_root_mode: None
+    /// - `root_dir`: "/var/ftpd" (or platform-specific default)
+    /// - `secure_mode`: false
+    /// - `single_port`: false
+    /// - `max_blocksize`: 1468 (fits in Ethernet MTU with overhead)
+    /// - `port_range`: None (use ephemeral ports)
+    /// - `lowercase_filenames`: false
+    /// - `unique_root_mode`: None
     fn default() -> Self {
         TftpConfig {
             root_dir: PathBuf::from("/var/ftpd"),
@@ -185,6 +185,7 @@ impl Default for TftpConfig {
 
 impl TftpConfig {
     /// Create a new TFTP configuration with specified root directory
+    #[must_use]
     pub fn new(root_dir: PathBuf) -> Self {
         TftpConfig {
             root_dir,
@@ -234,26 +235,26 @@ impl From<TransferError> for ServerError {
 ///
 /// This structure maintains the TFTP server state including:
 /// - Listener socket on port 69
-/// - HashMap of active transfers indexed by client SocketAddr
+/// - `HashMap` of active transfers indexed by client `SocketAddr`
 /// - Server configuration
 /// - Optional integration with DHCP state for MAC-based prefixes
 ///
 /// # Concurrency Model
 ///
 /// The server uses async/await with Tokio for non-blocking I/O, replacing C's
-/// poll()-based event loop. Active transfers are stored in a HashMap protected
-/// by Arc<RwLock<>> for safe concurrent access from multiple async tasks.
+/// `poll()`-based event loop. Active transfers are stored in a `HashMap` protected
+/// by `Arc<RwLock<>>` for safe concurrent access from multiple async tasks.
 ///
 /// # C Source Reference
 ///
 /// Replaces global state from C implementation:
-/// - listener socket from struct listener in daemon->listeners
-/// - transfer list from daemon->tftp_trans linked list
+/// - listener socket from `struct listener` in `daemon->listeners`
+/// - transfer list from `daemon->tftp_trans` linked list
 pub struct TftpServer {
     /// Server configuration
     config: TftpConfig,
 
-    /// Listener socket (None until bind() is called)
+    /// Listener socket (None until `bind()` is called)
     listener: Option<Arc<UdpSocket>>,
 
     /// Active transfers indexed by client address
@@ -275,6 +276,7 @@ impl TftpServer {
     /// # Returns
     ///
     /// Initialized server instance (not yet bound to socket)
+    #[must_use]
     pub fn new(config: TftpConfig) -> Self {
         TftpServer {
             config,
@@ -287,18 +289,22 @@ impl TftpServer {
     /// Bind the TFTP server to UDP port 69
     ///
     /// Creates and configures the listener socket with platform-specific options:
-    /// - SO_REUSEADDR for address reuse
-    /// - IP_PKTINFO (Linux) / IP_RECVDSTADDR (BSD) for destination interface detection
-    /// - IP_MTU_DISCOVER=IP_PMTUDISC_DONT (Linux) to disable path MTU discovery
+    /// - `SO_REUSEADDR` for address reuse
+    /// - `IP_PKTINFO` (Linux) / `IP_RECVDSTADDR` (BSD) for destination interface detection
+    /// - `IP_MTU_DISCOVER=IP_PMTUDISC_DONT` (Linux) to disable path MTU discovery
     ///
     /// # Returns
     ///
-    /// Ok(()) if binding succeeds, Err(ServerError::BindError) otherwise
+    /// `Ok(())` if binding succeeds
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServerError::BindError` if socket creation or binding fails
     ///
     /// # C Source Reference
     ///
     /// Translates socket creation from `create_bound_listeners()` in network.c
-    pub async fn bind(&mut self) -> Result<(), ServerError> {
+    pub fn bind(&mut self) -> Result<(), ServerError> {
         let addr = SocketAddr::from(([0, 0, 0, 0], 69));
 
         // Create socket using socket2 for advanced options
@@ -331,8 +337,8 @@ impl TftpServer {
                     fd,
                     libc::IPPROTO_IP,
                     IP_MTU_DISCOVER,
-                    &optval as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                    (&raw const optval).cast::<libc::c_void>(),
+                    u32::try_from(std::mem::size_of::<libc::c_int>()).unwrap_or(0),
                 );
             }
 
@@ -343,8 +349,8 @@ impl TftpServer {
                     fd,
                     libc::IPPROTO_IP,
                     libc::IP_PKTINFO,
-                    &optval as *const _ as *const libc::c_void,
-                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                    (&raw const optval).cast::<libc::c_void>(),
+                    u32::try_from(std::mem::size_of::<libc::c_int>()).unwrap_or(0),
                 );
             }
         }
@@ -377,7 +383,11 @@ impl TftpServer {
     ///
     /// # Returns
     ///
-    /// Ok(()) on clean shutdown, Err(ServerError) on fatal error
+    /// `Ok(())` on clean shutdown
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServerError` on fatal error
     ///
     /// # C Source Reference
     ///
@@ -438,7 +448,11 @@ impl TftpServer {
     ///
     /// # Returns
     ///
-    /// Ok(()) if request handled successfully, Err(ServerError) on failure
+    /// `Ok(())` if request handled successfully
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServerError` on failure
     ///
     /// # C Source Reference
     ///
@@ -456,7 +470,7 @@ impl TftpServer {
                 // Not an RRQ packet, send error
                 let err = ErrorPacket::new(
                     TftpErrorCode::IllegalOperation,
-                    format!("Expected RRQ, got different opcode from {}", client_addr),
+                    format!("Expected RRQ, got different opcode from {client_addr}"),
                 );
                 let _ = socket.send_to(&err.serialize(), client_addr).await;
                 return Ok(());
@@ -465,7 +479,7 @@ impl TftpServer {
                 // Parse error, send error packet
                 let err = ErrorPacket::new(
                     TftpErrorCode::IllegalOperation,
-                    format!("Malformed packet from {}: {}", client_addr, e),
+                    format!("Malformed packet from {client_addr}: {e}"),
                 );
                 let _ = socket.send_to(&err.serialize(), client_addr).await;
                 return Ok(());
@@ -481,7 +495,7 @@ impl TftpServer {
         {
             let err = ErrorPacket::new(
                 TftpErrorCode::IllegalOperation,
-                format!("Unsupported transfer mode from {}", client_addr),
+                format!("Unsupported transfer mode from {client_addr}"),
             );
             let _ = socket.send_to(&err.serialize(), client_addr).await;
             return Ok(());
@@ -574,12 +588,13 @@ impl TftpServer {
                 );
 
                 let err_code = match e {
-                    ServerError::FilePermissionError(_) => TftpErrorCode::AccessViolation,
-                    ServerError::PathTraversalError(_) => TftpErrorCode::AccessViolation,
+                    ServerError::FilePermissionError(_) | ServerError::PathTraversalError(_) => {
+                        TftpErrorCode::AccessViolation
+                    }
                     _ => TftpErrorCode::FileNotFound,
                 };
 
-                let err = ErrorPacket::new(err_code, format!("{}", e));
+                let err = ErrorPacket::new(err_code, format!("{e}"));
                 let _ = socket.send_to(&err.serialize(), client_addr).await;
                 return Err(e);
             }
@@ -693,7 +708,13 @@ impl TftpServer {
     ///
     /// # Returns
     ///
-    /// Ok(()) if polling succeeds, Err(ServerError) on error
+    /// # Returns
+    ///
+    /// `Ok(())` if polling succeeds
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServerError` if transfer polling encounters an error
     ///
     /// # C Source Reference
     ///
@@ -734,7 +755,13 @@ impl TftpServer {
     ///
     /// # Returns
     ///
-    /// Ok(TftpFile) if file is accessible, Err(ServerError) otherwise
+    /// # Returns
+    ///
+    /// `Ok(TftpFile)` if file is accessible
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServerError::FilePermissionError` if file is not accessible, not found, or violates security restrictions
     ///
     /// # Security
     ///
@@ -750,16 +777,17 @@ impl TftpServer {
         // Canonicalize path to resolve symlinks and check for traversal
         let canonical = tokio::fs::canonicalize(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                ServerError::FilePermissionError(format!("File not found: {}", path.display()))
+                let path_display = path.display();
+                ServerError::FilePermissionError(format!("File not found: {path_display}"))
             } else {
-                ServerError::FilePermissionError(format!("Cannot access file: {}", e))
+                ServerError::FilePermissionError(format!("Cannot access file: {e}"))
             }
         })?;
 
         // Ensure canonical path is still under root directory
         let canonical_root = tokio::fs::canonicalize(&self.config.root_dir)
             .await
-            .map_err(|e| ServerError::ConfigError(format!("Invalid TFTP root directory: {}", e)))?;
+            .map_err(|e| ServerError::ConfigError(format!("Invalid TFTP root directory: {e}")))?;
 
         if !canonical.starts_with(&canonical_root) {
             return Err(ServerError::PathTraversalError(format!(
@@ -786,7 +814,7 @@ impl TftpServer {
 /// Standalone request handler function for integration with event loop
 ///
 /// This function provides a convenient entry point for handling TFTP requests
-/// from the main event loop without requiring a TftpServer instance.
+/// from the main event loop without requiring a `TftpServer` instance.
 ///
 /// # Arguments
 ///
@@ -797,7 +825,11 @@ impl TftpServer {
 ///
 /// # Returns
 ///
-/// Ok(()) if request handled successfully, Err(ServerError) on failure
+/// `Ok(())` if request handled successfully
+///
+/// # Errors
+///
+/// Returns `ServerError` if request handling fails
 pub async fn handle_request(
     data: &[u8],
     client_addr: SocketAddr,

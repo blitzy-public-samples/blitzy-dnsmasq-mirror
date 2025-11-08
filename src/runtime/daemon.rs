@@ -42,23 +42,23 @@
 //! The daemon follows defense-in-depth principles:
 //!
 //! - **Privilege Separation**: Drops root privileges immediately after binding ports
-//! - **Capability Management**: On Linux, uses capabilities (CAP_NET_BIND_SERVICE, CAP_NET_RAW)
-//! - **Atomic PID File**: Uses O_EXCL to prevent symlink attacks (CVE mitigation)
+//! - **Capability Management**: On Linux, uses capabilities (`CAP_NET_BIND_SERVICE`, `CAP_NET_RAW`)
+//! - **Atomic PID File**: Uses `O_EXCL` to prevent symlink attacks (`CVE` mitigation)
 //! - **Safe File Ownership**: Changes PID file ownership to target user before dropping root
-//! - **Session Isolation**: Creates new session with setsid() for proper daemonization
+//! - **Session Isolation**: Creates new session with `setsid()` for proper daemonization
 //!
 //! # Platform Support
 //!
 //! - **Linux**: Full support including capabilities and keepcaps
 //! - **BSD/macOS**: Full support with standard POSIX privilege dropping
-//! - **Solaris**: Privilege sets via priv_str_to_set (platform-specific code)
+//! - **Solaris**: Privilege sets via `priv_str_to_set` (platform-specific code)
 //!
 //! # C Source Reference
 //!
 //! Translated from `src/dnsmasq.c`:
 //! - Lines 787-817: Double-fork daemonization pattern
-//! - Lines 820-878: PID file creation with O_EXCL security
-//! - Lines 883-893: stdout/stderr redirection to /dev/null
+//! - Lines 820-878: PID file creation with `O_EXCL` security
+//! - Lines 883-893: `stdout`/`stderr` redirection to `/dev/null`
 //! - Lines 908-980: Privilege dropping with capabilities (Linux) and privilege sets (Solaris)
 //!
 //! # Usage Example
@@ -132,8 +132,8 @@ use crate::types::{DnsmasqError, DnsmasqResult, SystemError};
 ///
 /// # Source Reference
 ///
-/// Replaces C's send_event() error reporting (dnsmasq.c lines 789, 813, 875, 918, 956, 963, 974)
-/// with structured Rust error types using thiserror.
+/// Replaces C's `send_event()` error reporting (`dnsmasq.c` lines 789, 813, 875, 918, 956, 963, 974)
+/// with structured Rust error types using `thiserror`.
 #[derive(Error, Debug)]
 pub enum DaemonError {
     /// Fork system call failed during daemonization
@@ -149,7 +149,9 @@ pub enum DaemonError {
     /// Common causes: permission denied, disk full, path does not exist.
     #[error("PID file operation failed: {path}: {source}")]
     PidFileError {
+        /// Path to the PID file that failed
         path: PathBuf,
+        /// Underlying I/O error
         #[source]
         source: std::io::Error,
     },
@@ -160,26 +162,34 @@ pub enum DaemonError {
     /// rather than continue running with elevated privileges.
     #[error("Failed to drop privileges: {operation}")]
     PrivilegeDropFailed {
+        /// Description of the operation that failed (e.g., "setuid", "setgid")
         operation: String,
+        /// Underlying system error
         #[source]
         source: nix::errno::Errno,
     },
 
     /// User lookup failed during privilege dropping
     ///
-    /// The specified username does not exist in /etc/passwd or NSS.
+    /// The specified username does not exist in `/etc/passwd` or NSS.
     #[error("User not found: {username}")]
-    UserNotFound { username: String },
+    UserNotFound {
+        /// Username that could not be found
+        username: String
+    },
 
     /// Group lookup failed during privilege dropping
     ///
-    /// The specified group name does not exist in /etc/group or NSS.
+    /// The specified group name does not exist in `/etc/group` or NSS.
     #[error("Group not found: {groupname}")]
-    GroupNotFound { groupname: String },
+    GroupNotFound {
+        /// Group name that could not be found
+        groupname: String
+    },
 
     /// Linux capability operations failed
     ///
-    /// Platform-specific error for CAP_SET failures on Linux.
+    /// Platform-specific error for `CAP_SET` failures on Linux.
     /// Only occurs on Linux with capabilities support.
     #[error("Capability operation failed")]
     CapabilityError(#[source] nix::errno::Errno),
@@ -193,7 +203,7 @@ pub enum DaemonError {
 
     /// File descriptor redirection failed
     ///
-    /// Indicates dup2() call failed when redirecting stdout/stderr to /dev/null.
+    /// Indicates `dup2()` call failed when redirecting stdout/stderr to `/dev/null`.
     #[error("Failed to redirect file descriptors to /dev/null")]
     RedirectionFailed(#[source] nix::errno::Errno),
 }
@@ -210,7 +220,7 @@ pub enum DaemonError {
 ///
 /// # Members Exposed
 ///
-/// Per schema: daemonize, debug, pid_file
+/// Per schema: daemonize, debug, `pid_file`
 ///
 /// # Source Reference
 ///
@@ -235,7 +245,7 @@ pub struct DaemonConfig {
     /// Path to PID file
     ///
     /// If None, no PID file is written.
-    /// Corresponds to daemon->runfile in C version (dnsmasq.c line 820).
+    /// Corresponds to `daemon->runfile` in C version (`dnsmasq.c` line 820).
     pub pid_file: Option<PathBuf>,
 }
 
@@ -246,7 +256,7 @@ pub struct DaemonConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: user, group, drop_after_bind
+/// Per schema: user, group, `drop_after_bind`
 ///
 /// # Security Implications
 ///
@@ -259,18 +269,18 @@ pub struct DaemonConfig {
 /// Replaces C's global variables:
 /// - `ent_pw` (passwd entry) → `user`
 /// - `gp` (group entry) → `group`
-/// - Privilege dropping logic (dnsmasq.c lines 914-965)
+/// - Privilege dropping logic (`dnsmasq.c` lines 914-965)
 #[derive(Debug, Clone)]
 pub struct PrivilegeConfig {
     /// User to drop privileges to
     ///
-    /// Username string looked up via getpwnam().
+    /// Username string looked up via `getpwnam()`.
     /// If None, privileges are not dropped.
     pub user: Option<String>,
 
     /// Group to drop privileges to
     ///
-    /// Group name string looked up via getgrnam().
+    /// Group name string looked up via `getgrnam()`.
     /// If None, user's primary group is used.
     pub group: Option<String>,
 
@@ -302,12 +312,12 @@ impl Default for PrivilegeConfig {
 ///
 /// # Security
 ///
-/// PID file creation uses O_EXCL flag to prevent symlink attacks
-/// (see dnsmasq.c lines 826-843 for security rationale).
+/// PID file creation uses `O_EXCL` flag to prevent symlink attacks
+/// (see `dnsmasq.c` lines 826-843 for security rationale).
 ///
 /// # Source Reference
 ///
-/// Replaces C's manual PID file management (dnsmasq.c lines 820-878)
+/// Replaces C's manual PID file management (`dnsmasq.c` lines 820-878)
 /// with RAII pattern ensuring automatic cleanup.
 ///
 /// # Example
@@ -325,7 +335,8 @@ impl PidFile {
     ///
     /// # Members Exposed
     ///
-    /// Per schema: path()
+    /// Per schema: `path()`
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -340,7 +351,7 @@ impl Drop for PidFile {
     ///
     /// # Source Reference
     ///
-    /// C version relies on manual unlink() or shell scripts for cleanup.
+    /// C version relies on manual `unlink()` or shell scripts for cleanup.
     /// This provides automatic cleanup via RAII.
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_file(&self.path) {
@@ -362,10 +373,10 @@ impl Drop for PidFile {
 ///
 /// Implements the classic Unix daemonization sequence:
 ///
-/// 1. **First fork()**: Parent exits, child continues
-/// 2. **setsid()**: Create new session, detach from controlling terminal
-/// 3. **Second fork()**: Parent exits, child becomes daemon
-/// 4. **Redirect I/O**: Connect stdin/stdout/stderr to /dev/null (unless debug mode)
+/// 1. **First `fork()`**: Parent exits, child continues
+/// 2. **`setsid()`**: Create new session, detach from controlling terminal
+/// 3. **Second `fork()`**: Parent exits, child becomes daemon
+/// 4. **Redirect I/O**: Connect `stdin`/`stdout`/`stderr` to `/dev/null` (unless debug mode)
 ///
 /// # Arguments
 ///
@@ -374,14 +385,21 @@ impl Drop for PidFile {
 /// # Returns
 ///
 /// * `Ok(())` - Successfully daemonized (or skipped if not requested)
-/// * `Err(DaemonError)` - Fork or setsid failed
+/// * `Err(DaemonError)` - Fork or `setsid` failed
+///
+/// # Errors
+///
+/// Returns `DaemonError` if:
+/// - `fork()` system call fails
+/// - `setsid()` fails to create new session
+/// - I/O redirection to `/dev/null` fails
 ///
 /// # Behavior
 ///
 /// - If `config.debug` is true, daemonization is skipped
 /// - If daemonization succeeds, this function returns in the child process
 /// - Parent processes exit cleanly after successful fork
-/// - I/O redirection to /dev/null is skipped in debug mode
+/// - I/O redirection to `/dev/null` is skipped in debug mode
 ///
 /// # Safety
 ///
@@ -390,9 +408,9 @@ impl Drop for PidFile {
 ///
 /// # Source Reference
 ///
-/// Translates C code from dnsmasq.c:
+/// Translates C code from `dnsmasq.c`:
 /// - Lines 787-817: Double-fork pattern
-/// - Lines 883-893: I/O redirection to /dev/null
+/// - Lines 883-893: I/O redirection to `/dev/null`
 ///
 /// # Example
 ///
@@ -406,7 +424,7 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
     // Check debug mode from logging config
     let debug = config.logging.log_file.is_some(); // Simplified: actual debug flag would be in CLI
     
-    // Skip daemonization in debug mode (matches C line 783: if (!option_bool(OPT_NO_DAEMON)))
+    // Skip daemonization in debug mode (matches C line 783: `if (!option_bool(OPT_NO_DAEMON))`)
     if debug {
         info!("Running in debug mode, staying in foreground");
         return Ok(());
@@ -427,7 +445,7 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
     info!("Forking to background");
 
     // First fork: parent exits, child continues
-    // Matches C code dnsmasq.c lines 787-804
+    // Matches C code `dnsmasq.c` lines 787-804
     match unsafe { fork() }.map_err(DaemonError::ForkFailed)? {
         ForkResult::Parent { child: _ } => {
             // Parent process: exit cleanly (C line 803: _exit(EC_GOOD))
@@ -440,13 +458,13 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
     }
 
     // Create new session and detach from controlling terminal
-    // Matches C code dnsmasq.c line 810: setsid()
+    // Matches C code `dnsmasq.c` line 810: `setsid()`
     setsid().map_err(DaemonError::SessionCreationFailed)?;
 
-    debug!("Created new session with setsid()");
+    debug!("Created new session with `setsid()`");
 
     // Second fork: parent exits, child becomes daemon
-    // Matches C code dnsmasq.c lines 812-816
+    // Matches C code `dnsmasq.c` lines 812-816
     // This prevents daemon from re-acquiring a controlling terminal
     match unsafe { fork() }.map_err(DaemonError::ForkFailed)? {
         ForkResult::Parent { child: _ } => {
@@ -460,8 +478,8 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
 
     info!("Daemonization complete, running in background as PID {}", getpid());
 
-    // Redirect stdin/stdout/stderr to /dev/null unless in debug mode
-    // Matches C code dnsmasq.c lines 883-893
+    // Redirect `stdin`/`stdout`/`stderr` to `/dev/null` unless in debug mode
+    // Matches C code `dnsmasq.c` lines 883-893
     if !debug {
         redirect_standard_streams()?;
     }
@@ -469,7 +487,7 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
     Ok(())
 }
 
-/// Redirect stdin, stdout, and stderr to /dev/null
+/// Redirect `stdin`, `stdout`, and `stderr` to `/dev/null`
 ///
 /// Called during daemonization to disconnect from the terminal.
 /// Ensures no output is accidentally written to the controlling terminal
@@ -478,11 +496,11 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
 /// # Returns
 ///
 /// * `Ok(())` - Successfully redirected all standard streams
-/// * `Err(DaemonError::RedirectionFailed)` - Failed to open /dev/null or dup2
+/// * `Err(DaemonError::RedirectionFailed)` - Failed to open `/dev/null` or `dup2`
 ///
 /// # Source Reference
 ///
-/// Translates C code from dnsmasq.c lines 886-893:
+/// Translates C code from `dnsmasq.c` lines 886-893:
 /// ```c
 /// int nullfd = open("/dev/null", O_RDWR);
 /// dup2(nullfd, STDOUT_FILENO);
@@ -493,7 +511,7 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
 fn redirect_standard_streams() -> Result<(), DaemonError> {
     use std::os::unix::io::IntoRawFd;
 
-    // Open /dev/null for reading and writing
+    // Open `/dev/null` for reading and writing
     let null_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -503,19 +521,19 @@ fn redirect_standard_streams() -> Result<(), DaemonError> {
 
     let null_fd = null_file.into_raw_fd();
 
-    // Redirect stdin (fd 0)
+    // Redirect `stdin` (fd 0)
     dup2(null_fd, 0).map_err(DaemonError::RedirectionFailed)?;
 
-    // Redirect stdout (fd 1)
+    // Redirect `stdout` (fd 1)
     dup2(null_fd, 1).map_err(DaemonError::RedirectionFailed)?;
 
-    // Redirect stderr (fd 2)
+    // Redirect `stderr` (fd 2)
     dup2(null_fd, 2).map_err(DaemonError::RedirectionFailed)?;
 
-    // Close the original /dev/null fd (we've duplicated it to 0, 1, 2)
+    // Close the original `/dev/null` fd (we've duplicated it to 0, 1, 2)
     close(null_fd).map_err(DaemonError::RedirectionFailed)?;
 
-    debug!("Redirected stdin/stdout/stderr to /dev/null");
+    debug!("Redirected `stdin`/`stdout`/`stderr` to `/dev/null`");
 
     Ok(())
 }
@@ -532,10 +550,10 @@ fn redirect_standard_streams() -> Result<(), DaemonError> {
 ///
 /// # Sequence
 ///
-/// 1. Lookup target user and group (getpwnam/getgrnam)
-/// 2. Clear supplementary groups (setgroups)
-/// 3. Set group ID (setgid)
-/// 4. Set user ID (setuid)
+/// 1. Lookup target user and group (`getpwnam`/`getgrnam`)
+/// 2. Clear supplementary groups (`setgroups`)
+/// 3. Set group ID (`setgid`)
+/// 4. Set user ID (`setuid`)
 /// 5. Platform-specific capability management (Linux/Solaris)
 ///
 /// # Arguments
@@ -545,7 +563,14 @@ fn redirect_standard_streams() -> Result<(), DaemonError> {
 /// # Returns
 ///
 /// * `Ok(())` - Successfully dropped privileges
-/// * `Err(DaemonError)` - User/group not found or setuid/setgid failed
+/// * `Err(DaemonError)` - User/group not found or `setuid`/`setgid` failed
+///
+/// # Errors
+///
+/// Returns `DaemonError` if:
+/// - Target user or group not found in system database
+/// - `setgid()` or `setuid()` system calls fail
+/// - Platform-specific capability operations fail (Linux/Solaris)
 ///
 /// # Security
 ///
@@ -557,16 +582,16 @@ fn redirect_standard_streams() -> Result<(), DaemonError> {
 ///
 /// # Platform-Specific Behavior
 ///
-/// - **Linux**: Uses capabilities to retain CAP_NET_BIND_SERVICE if needed
-/// - **Solaris**: Configures privilege sets via priv_str_to_set
+/// - **Linux**: Uses capabilities to retain `CAP_NET_BIND_SERVICE` if needed
+/// - **Solaris**: Configures privilege sets via `priv_str_to_set`
 /// - **Other Unix**: Standard POSIX privilege dropping only
 ///
 /// # Source Reference
 ///
-/// Translates C code from dnsmasq.c lines 908-980:
-/// - Lines 914-920: Clear supplementary groups and setgid
-/// - Lines 922-965: setuid with platform-specific capability handling
-/// - Lines 967-977: Linux capability cleanup (CAP_SETUID removal)
+/// Translates C code from `dnsmasq.c` lines 908-980:
+/// - Lines 914-920: Clear supplementary groups and `setgid`
+/// - Lines 922-965: `setuid` with platform-specific capability handling
+/// - Lines 967-977: Linux capability cleanup (`CAP_SETUID` removal)
 ///
 /// # Example
 ///
@@ -590,18 +615,15 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
 
     // If no user specified, don't drop privileges
     // Matches C line 922: if (ent_pw && ent_pw->pw_uid != 0)
-    let target_user = match user {
-        Some(username) => username,
-        None => {
-            info!("No user specified, continuing as root (not recommended)");
-            return Ok(());
-        }
+    let Some(target_user) = user else {
+        info!("No user specified, continuing as root (not recommended)");
+        return Ok(());
     };
 
     // Lookup target user
     let user_entry = User::from_name(target_user)
         .map_err(|e| DaemonError::PrivilegeDropFailed {
-            operation: format!("lookup user {}", target_user),
+            operation: format!("lookup user {target_user}"),
             source: e,
         })?
         .ok_or_else(|| DaemonError::UserNotFound {
@@ -618,7 +640,7 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
     let target_gid = if let Some(groupname) = group {
         let group_entry = Group::from_name(groupname)
             .map_err(|e| DaemonError::PrivilegeDropFailed {
-                operation: format!("lookup group {}", groupname),
+                operation: format!("lookup group {groupname}"),
                 source: e,
             })?
             .ok_or_else(|| DaemonError::GroupNotFound {
@@ -634,7 +656,7 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
         "Dropping privileges to user {} (uid={}) group {} (gid={})",
         target_user,
         user_entry.uid,
-        group.map(|s| s.as_str()).unwrap_or("<user's primary group>"),
+        group.map_or("<user's primary group>", std::string::String::as_str),
         target_gid
     );
 
@@ -662,7 +684,7 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
     // Set group ID
     // Matches C line 916: setgid(gp->gr_gid)
     setgid(target_gid).map_err(|e| DaemonError::PrivilegeDropFailed {
-        operation: format!("setgid to {}", target_gid),
+        operation: format!("setgid to {target_gid}"),
         source: e,
     })?;
 
@@ -688,8 +710,8 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
 
 /// Setup Linux capabilities before dropping privileges
 ///
-/// Configures capabilities to retain CAP_NET_BIND_SERVICE after setuid.
-/// Uses prctl(PR_SET_KEEPCAPS) to prevent capability loss on setuid.
+/// Configures capabilities to retain `CAP_NET_BIND_SERVICE` after setuid.
+/// Uses `prctl(PR_SET_KEEPCAPS)` to prevent capability loss on setuid.
 ///
 /// # Platform
 ///
@@ -763,7 +785,7 @@ fn setup_solaris_privileges() -> Result<(), DaemonError> {
 
 /// Cleanup Linux capabilities after dropping privileges
 ///
-/// Removes CAP_SETUID capability after setuid completes.
+/// Removes `CAP_SETUID` capability after setuid completes.
 /// This prevents the daemon from changing UIDs again.
 ///
 /// # Platform
@@ -779,6 +801,7 @@ fn setup_solaris_privileges() -> Result<(), DaemonError> {
 /// if (capset(hdr, data) == -1) { ... }
 /// ```
 #[cfg(target_os = "linux")]
+#[allow(clippy::unnecessary_wraps)] // Will return errors when full capability cleanup is implemented
 fn cleanup_linux_capabilities() -> Result<(), DaemonError> {
     // Remove CAP_SETUID capability now that we've dropped privileges
     // This prevents the daemon from changing UIDs again
@@ -797,8 +820,8 @@ fn cleanup_linux_capabilities() -> Result<(), DaemonError> {
 
 /// Create PID file with atomic write and ownership management
 ///
-/// Creates a PID file containing the daemon's process ID. Uses O_EXCL
-/// flag to prevent symlink attacks (CVE mitigation). Changes ownership
+/// Creates a PID file containing the daemon's process ID. Uses `O_EXCL`
+/// flag to prevent symlink attacks (`CVE` mitigation). Changes ownership
 /// to the target user before dropping privileges so the daemon can
 /// remove the file on shutdown.
 ///
@@ -811,11 +834,18 @@ fn cleanup_linux_capabilities() -> Result<(), DaemonError> {
 /// * `Ok(PidFile)` - RAII handle that removes PID file on drop
 /// * `Err(DaemonError::PidFileError)` - Failed to create or write PID file
 ///
+/// # Errors
+///
+/// Returns `DaemonError::PidFileError` if:
+/// - PID file creation fails (filesystem errors, permission denied)
+/// - Writing PID to file fails (disk full, I/O errors)
+/// - File already exists with `O_EXCL` flag set (stale PID file)
+///
 /// # Security
 ///
-/// Uses O_EXCL flag to ensure atomic creation, preventing race conditions
+/// Uses `O_EXCL` flag to ensure atomic creation, preventing race conditions
 /// where an attacker could replace the PID file with a symlink between
-/// unlink() and open() calls. See dnsmasq.c lines 826-843 for detailed
+/// `unlink()` and `open()` calls. See `dnsmasq.c` lines 826-843 for detailed
 /// security rationale.
 ///
 /// # Ownership
@@ -826,11 +856,11 @@ fn cleanup_linux_capabilities() -> Result<(), DaemonError> {
 ///
 /// # Source Reference
 ///
-/// Translates C code from dnsmasq.c lines 820-878:
-/// - Line 824: sprintf(daemon->namebuff, "%d\n", (int) getpid())
-/// - Line 845: unlink(daemon->runfile)
-/// - Line 847: open() with O_WRONLY|O_CREAT|O_TRUNC|O_EXCL
-/// - Line 861: fchown(fd, ent_pw->pw_uid, ent_pw->pw_gid)
+/// Translates C code from `dnsmasq.c` lines 820-878:
+/// - Line 824: `sprintf(daemon->namebuff, "%d\n", (int) getpid())`
+/// - Line 845: `unlink(daemon->runfile)`
+/// - Line 847: `open()` with `O_WRONLY|O_CREAT|O_TRUNC|O_EXCL`
+/// - Line 861: `fchown(fd, ent_pw->pw_uid, ent_pw->pw_gid)`
 ///
 /// # Example
 ///
@@ -842,15 +872,12 @@ fn cleanup_linux_capabilities() -> Result<(), DaemonError> {
 /// ```
 pub fn create_pid_file(config: &Config) -> DnsmasqResult<PidFile> {
     // Check if PID file path is configured
-    let pid_path = match &config.files.pid_file {
-        Some(path) => path,
-        None => {
-            debug!("No PID file configured, skipping creation");
-            // Return a dummy PidFile that won't try to clean up
-            return Ok(PidFile {
-                path: PathBuf::new(),
-            });
-        }
+    let Some(pid_path) = &config.files.pid_file else {
+        debug!("No PID file configured, skipping creation");
+        // Return a dummy PidFile that won't try to clean up
+        return Ok(PidFile {
+            path: PathBuf::new(),
+        });
     };
 
     info!("Creating PID file: {:?}", pid_path);
@@ -881,7 +908,7 @@ pub fn create_pid_file(config: &Config) -> DnsmasqResult<PidFile> {
     // Write current PID to file
     // Matches C line 824: sprintf(daemon->namebuff, "%d\n", (int) getpid())
     let pid = getpid();
-    writeln!(file, "{}", pid).map_err(|e| DaemonError::PidFileError {
+    writeln!(file, "{pid}").map_err(|e| DaemonError::PidFileError {
         path: pid_path.clone(),
         source: e,
     })?;
@@ -975,16 +1002,16 @@ mod tests {
 // ERROR CONVERSIONS
 // =============================================================================
 
-/// Convert DaemonError to SystemError for integration with top-level error handling
+/// Convert `DaemonError` to `SystemError` for integration with top-level error handling
 ///
-/// This implementation allows DaemonError to automatically convert to DnsmasqError
-/// via the SystemError intermediary, enabling the use of ? operator in functions
-/// that return DnsmasqResult.
+/// This implementation allows `DaemonError` to automatically convert to `DnsmasqError`
+/// via the `SystemError` intermediary, enabling the use of `?` operator in functions
+/// that return `DnsmasqResult`.
 impl From<DaemonError> for SystemError {
     fn from(err: DaemonError) -> Self {
         match err {
             DaemonError::ForkFailed(errno) => SystemError::DaemonizationFailed {
-                message: format!("fork() system call failed: {}", errno),
+                message: format!("fork() system call failed: {errno}"),
                 source: std::io::Error::from_raw_os_error(errno as i32),
             },
             DaemonError::PidFileError { path, source } => SystemError::PidFileError {
@@ -993,37 +1020,37 @@ impl From<DaemonError> for SystemError {
                 source: Some(source),
             },
             DaemonError::PrivilegeDropFailed { operation, source } => SystemError::DaemonizationFailed {
-                message: format!("Privilege drop failed during {}: {}", operation, source),
+                message: format!("Privilege drop failed during {operation}: {source}"),
                 source: std::io::Error::from_raw_os_error(source as i32),
             },
             DaemonError::UserNotFound { username } => SystemError::DaemonizationFailed {
-                message: format!("User '{}' not found in system user database", username),
+                message: format!("User '{username}' not found in system user database"),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, "user not found"),
             },
             DaemonError::GroupNotFound { groupname } => SystemError::DaemonizationFailed {
-                message: format!("Group '{}' not found in system group database", groupname),
+                message: format!("Group '{groupname}' not found in system group database"),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, "group not found"),
             },
             DaemonError::CapabilityError(errno) => SystemError::DaemonizationFailed {
-                message: format!("Linux capability operation failed: {}", errno),
+                message: format!("Linux capability operation failed: {errno}"),
                 source: std::io::Error::from_raw_os_error(errno as i32),
             },
             DaemonError::SessionCreationFailed(errno) => SystemError::DaemonizationFailed {
-                message: format!("setsid() failed to create new session: {}", errno),
+                message: format!("setsid() failed to create new session: {errno}"),
                 source: std::io::Error::from_raw_os_error(errno as i32),
             },
             DaemonError::RedirectionFailed(errno) => SystemError::DaemonizationFailed {
-                message: format!("Failed to redirect standard file descriptors: {}", errno),
+                message: format!("Failed to redirect standard file descriptors: {errno}"),
                 source: std::io::Error::from_raw_os_error(errno as i32),
             },
         }
     }
 }
 
-/// Convert DaemonError directly to DnsmasqError
+/// Convert `DaemonError` directly to `DnsmasqError`
 ///
-/// This enables the ? operator to work seamlessly in functions returning DnsmasqResult.
-/// The conversion goes through SystemError as an intermediary.
+/// This enables the `?` operator to work seamlessly in functions returning `DnsmasqResult`.
+/// The conversion goes through `SystemError` as an intermediary.
 impl From<DaemonError> for DnsmasqError {
     fn from(err: DaemonError) -> Self {
         DnsmasqError::System(SystemError::from(err))

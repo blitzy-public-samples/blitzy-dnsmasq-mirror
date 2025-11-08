@@ -5,22 +5,22 @@
 //! IPv6 Router Advertisement (RA) implementation per RFC 4861
 //!
 //! This module implements IPv6 Router Advertisement functionality for periodic
-//! and solicited ICMPv6 Router Advertisement transmission. It handles RA packet
+//! and solicited `ICMPv6` Router Advertisement transmission. It handles `RA` packet
 //! construction with prefix information options, Managed/Other configuration flags
-//! for DHCPv6 coordination, router lifetime and priority settings, advertisement
-//! interval options, and MTU announcements.
+//! for `DHCPv6` coordination, router lifetime and priority settings, advertisement
+//! interval options, and `MTU` announcements.
 //!
 //! # Overview
 //!
 //! Key responsibilities:
-//! - ICMPv6 raw socket initialization with Router Solicitation packet filters
+//! - `ICMPv6` raw socket initialization with Router Solicitation packet filters
 //! - Router Advertisement packet construction per RFC 4861 Section 4.2
 //! - Prefix Information option encoding per RFC 4861 Section 4.6.2
-//! - Periodic unsolicited RA transmission with configurable intervals
-//! - Solicited RA response to Router Solicitation messages
+//! - Periodic unsolicited `RA` transmission with configurable intervals
+//! - Solicited `RA` response to Router Solicitation messages
 //! - Interface aliasing support for bridged interfaces
-//! - MTU option with platform-specific retrieval
-//! - RDNSS (Recursive DNS Server) option per RFC 6106
+//! - `MTU` option with platform-specific retrieval
+//! - `RDNSS` (Recursive DNS Server) option per RFC 6106
 //!
 //! # RFC Compliance
 //!
@@ -32,8 +32,8 @@
 //!
 //! # Architecture
 //!
-//! The module uses Tokio for async I/O operations, replacing C's synchronous
-//! sendto()/recvfrom() with async socket operations. All packet construction
+//! The module uses `Tokio` for async I/O operations, replacing C's synchronous
+//! `sendto()`/`recvfrom()` with async socket operations. All packet construction
 //! uses safe Rust with byteorder crate for network byte order encoding,
 //! eliminating buffer overflow risks present in C's manual buffer management.
 //!
@@ -41,15 +41,15 @@
 //!
 //! Translates:
 //! - `src/radv.c` (1,795 lines) - Router Advertisement transmission logic
-//! - `src/radv-protocol.h` (379 lines) - ICMPv6 protocol structures
+//! - `src/radv-protocol.h` (379 lines) - `ICMPv6` protocol structures
 //!
 //! # Memory Safety
 //!
 //! All C buffer manipulation is replaced with:
-//! - Vec<u8> for automatic capacity management (replaces daemon->outpacket)
+//! - `Vec<u8>` for automatic capacity management (replaces `daemon->outpacket`)
 //! - Slice bounds checking (replaces manual buffer expansion)
-//! - Type-safe protocol structures with #[repr(C)] for wire format
-//! - Result types for error handling (replaces die() calls and errno)
+//! - Type-safe protocol structures with `#[repr(C)]` for wire format
+//! - Result types for error handling (replaces `die()` calls and `errno`)
 
 use std::net::{Ipv6Addr, SocketAddr};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -80,38 +80,38 @@ use crate::util::time::monotonic_time;
 // CONSTANTS
 // =============================================================================
 
-/// IPv6 multicast address for all-nodes group (FF02::1) per RFC 4291 Section 2.7.1
+/// IPv6 multicast address for all-nodes group (`FF02::1`) per RFC 4291 Section 2.7.1
 ///
 /// Router Advertisement messages are sent to this address to reach all IPv6-capable
 /// nodes on the local link. All IPv6 nodes automatically join this multicast group.
 pub const ALL_NODES: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1);
 
-/// IPv6 multicast address for all-routers group (FF02::2) per RFC 4291 Section 2.7.1
+/// IPv6 multicast address for all-routers group (`FF02::2`) per RFC 4291 Section 2.7.1
 ///
 /// Hosts send Router Solicitation messages to this address to request immediate
 /// Router Advertisement from local routers. Only nodes configured as IPv6 routers
 /// join this multicast group.
 pub const ALL_ROUTERS: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 2);
 
-/// ICMPv6 type: Router Advertisement (RFC 4861)
+/// `ICMPv6` type: Router Advertisement (RFC 4861)
 const ND_ROUTER_ADVERT: u8 = 134;
 
-/// ICMPv6 type: Router Solicitation (RFC 4861)
+/// `ICMPv6` type: Router Solicitation (RFC 4861)
 const ND_ROUTER_SOLICIT: u8 = 133;
 
-/// ICMPv6 type: Echo Reply (RFC 4443)
+/// `ICMPv6` type: Echo Reply (RFC 4443)
 const ICMP6_ECHO_REPLY: u8 = 129;
 
-/// ICMPv6 option type: Source Link-Layer Address
+/// `ICMPv6` option type: Source Link-Layer Address
 const ICMP6_OPT_SOURCE_MAC: u8 = 1;
 
-/// ICMPv6 option type: Prefix Information (RFC 4861 Section 4.6.2)
+/// `ICMPv6` option type: Prefix Information (RFC 4861 Section 4.6.2)
 const ICMP6_OPT_PREFIX: u8 = 3;
 
-/// ICMPv6 option type: MTU (RFC 4861 Section 4.6.4)
+/// `ICMPv6` option type: `MTU` (RFC 4861 Section 4.6.4)
 const ICMP6_OPT_MTU: u8 = 5;
 
-/// ICMPv6 option type: Advertisement Interval (RFC 6275 Section 7.3)
+/// `ICMPv6` option type: Advertisement Interval (RFC 6275 Section 7.3)
 const ICMP6_OPT_ADV_INTERVAL: u8 = 7;
 
 /// Traffic class for router-to-router communication (CS6 - Class Selector 6)
@@ -138,7 +138,7 @@ const RA_SHORT_PERIOD_MAX_INTERVAL: u64 = 20;
 // PLATFORM-SPECIFIC SOCKET OPTION CONSTANTS
 // =============================================================================
 
-/// IPv6 socket options for ICMPv6 filtering and hop limit configuration
+/// IPv6 socket options for `ICMPv6` filtering and hop limit configuration
 #[cfg(target_os = "linux")]
 mod libc_constants {
     pub const IPPROTO_ICMPV6: i32 = libc::IPPROTO_ICMPV6;
@@ -149,26 +149,26 @@ mod libc_constants {
     pub const ICMP6_FILTER: i32 = 1; // From linux/icmpv6.h
 }
 
-/// ICMPv6 filter structure for controlling which ICMP types to receive
-/// Corresponds to struct icmp6_filter from netinet/icmp6.h
+/// `ICMPv6` filter structure for controlling which ICMP types to receive
+/// Corresponds to struct `icmp6_filter` from `netinet/icmp6.h`
 #[repr(C)]
 struct Icmp6Filter {
     icmp6_filt: [u32; 8],
 }
 
 impl Icmp6Filter {
-    /// Create a filter that blocks all ICMP6 types
+    /// Create a filter that blocks all `ICMP6` types
     fn new_block_all() -> Self {
         Icmp6Filter {
-            icmp6_filt: [0xffffffff; 8],
+            icmp6_filt: [0xffff_ffff; 8],
         }
     }
 
-    /// Allow a specific ICMP6 type through the filter
-    /// Implements ICMP6_FILTER_SETPASS macro logic
+    /// Allow a specific `ICMP6` type through the filter
+    /// Implements `ICMP6_FILTER_SETPASS` macro logic
     fn set_pass(&mut self, icmp6_type: u8) {
-        let idx = (icmp6_type as usize) >> 5;
-        let bit = (icmp6_type as u32) & 31;
+        let idx = usize::from(icmp6_type) >> 5;
+        let bit = u32::from(icmp6_type) & 31;
         self.icmp6_filt[idx] &= !(1 << bit);
     }
 }
@@ -179,11 +179,11 @@ impl Icmp6Filter {
 
 /// Router Advertisement operation errors
 ///
-/// Provides structured error handling for RA initialization, packet construction,
-/// and transmission, replacing C's die() calls and errno-based error handling.
+/// Provides structured error handling for `RA` initialization, packet construction,
+/// and transmission, replacing C's `die()` calls and errno-based error handling.
 #[derive(Error, Debug)]
 pub enum RadVError {
-    /// Failed to create ICMPv6 socket
+    /// Failed to create `ICMPv6` socket
     #[error("Failed to create ICMPv6 socket: {0}")]
     SocketCreation(String),
 
@@ -199,7 +199,7 @@ pub enum RadVError {
     #[error("Failed to send Router Advertisement: {0}")]
     SendFailed(String),
 
-    /// Failed to receive ICMPv6 packet
+    /// Failed to receive `ICMPv6` packet
     #[error("Failed to receive ICMPv6 packet: {0}")]
     ReceiveFailed(String),
 
@@ -227,18 +227,18 @@ pub type RadVResult<T> = Result<T, RadVError>;
 // PROTOCOL STRUCTURES
 // =============================================================================
 
-/// ICMPv6 Router Advertisement message structure per RFC 4861 Section 4.2
+/// `ICMPv6` Router Advertisement message structure per RFC 4861 Section 4.2
 ///
-/// Wire-format structure for ICMPv6 Router Advertisement messages (type 134).
-/// This structure is followed by zero or more ICMPv6 options including
-/// prefix information, MTU, RDNSS, and Advertisement Interval options.
+/// Wire-format structure for `ICMPv6` Router Advertisement messages (type 134).
+/// This structure is followed by zero or more `ICMPv6` options including
+/// prefix information, `MTU`, `RDNSS`, and Advertisement Interval options.
 ///
 /// # Memory Layout
 ///
 /// - 16 bytes total structure size
 /// - Network byte order (big-endian) for all multi-byte fields
 /// - No padding required (naturally aligned)
-/// - #[repr(C)] ensures C-compatible memory layout
+/// - `#[repr(C)]` ensures C-compatible memory layout
 ///
 /// # RFC Compliance
 ///
@@ -246,20 +246,20 @@ pub type RadVResult<T> = Result<T, RadVError>;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct RaPacket {
-    /// ICMPv6 message type: 134 (Router Advertisement)
+    /// `ICMPv6` message type: 134 (Router Advertisement)
     pub type_: u8,
-    /// ICMPv6 code: 0 for Router Advertisement
+    /// `ICMPv6` code: 0 for Router Advertisement
     pub code: u8,
-    /// ICMPv6 checksum (calculated by kernel)
+    /// `ICMPv6` checksum (calculated by kernel)
     pub checksum: u16,
     /// Current Hop Limit: suggested value for outgoing IPv6 packets (0 = unspecified)
     pub hop_limit: u8,
-    /// RA flags: M-bit (0x80) managed address config, O-bit (0x40) other config
-    /// M-bit=1 indicates DHCPv6 for addresses, O-bit=1 indicates DHCPv6 for other config
+    /// `RA` flags: M-bit (0x80) managed address config, O-bit (0x40) other config
+    /// M-bit=1 indicates `DHCPv6` for addresses, O-bit=1 indicates `DHCPv6` for other config
     pub flags: u8,
     /// Router lifetime in seconds (0-9000), 0 = not a default router (network byte order)
     pub lifetime: u16,
-    /// Reachable time in milliseconds for NUD (0 = unspecified, network byte order)
+    /// Reachable time in milliseconds for `NUD` (0 = unspecified, network byte order)
     pub reachable_time: u32,
     /// Retransmission timer in milliseconds (0 = unspecified, network byte order)
     pub retrans_time: u32,
@@ -271,12 +271,13 @@ impl RaPacket {
     /// # Arguments
     ///
     /// * `hop_limit` - Current hop limit value for IPv6 packets
-    /// * `flags` - M/O flags for DHCPv6 coordination
+    /// * `flags` - M/O flags for `DHCPv6` coordination
     /// * `lifetime` - Router lifetime in seconds (network byte order)
     ///
     /// # Returns
     ///
-    /// A new RaPacket with all fields initialized
+    /// A new `RaPacket` with all fields initialized
+    #[must_use]
     pub fn new(hop_limit: u8, flags: u8, lifetime: u16) -> Self {
         RaPacket {
             type_: ND_ROUTER_ADVERT,
@@ -290,7 +291,7 @@ impl RaPacket {
         }
     }
 
-    /// Serializes the RA packet to bytes in network byte order
+    /// Serializes the `RA` packet to bytes in network byte order
     ///
     /// # Arguments
     ///
@@ -299,6 +300,10 @@ impl RaPacket {
     /// # Returns
     ///
     /// Result indicating success or packet construction error
+    ///
+    /// # Errors
+    ///
+    /// Returns `RadVError::PacketConstruction` if writing to the buffer fails
     pub fn serialize(&self, buf: &mut Vec<u8>) -> RadVResult<()> {
         buf.push(self.type_);
         buf.push(self.code);
@@ -319,14 +324,14 @@ impl RaPacket {
 /// Prefix Information option structure per RFC 4861 Section 4.6.2
 ///
 /// Used in Router Advertisements to advertise IPv6 prefixes for Stateless
-/// Address Autoconfiguration (SLAAC). Contains prefix length, on-link and
+/// Address Autoconfiguration (`SLAAC`). Contains prefix length, on-link and
 /// autonomous flags, valid and preferred lifetimes, and the prefix itself.
 ///
 /// # Memory Layout
 ///
 /// - 32 bytes total structure size
 /// - Network byte order (big-endian) for all multi-byte fields
-/// - #[repr(C)] ensures C-compatible memory layout
+/// - `#[repr(C)]` ensures C-compatible memory layout
 ///
 /// # RFC Compliance
 ///
@@ -340,7 +345,7 @@ pub struct PrefixOpt {
     pub len: u8,
     /// Prefix length in bits (0-128)
     pub prefix_len: u8,
-    /// Flags: L-bit (0x80) on-link, A-bit (0x40) autonomous (SLAAC)
+    /// Flags: L-bit (0x80) on-link, A-bit (0x40) autonomous (`SLAAC`)
     pub flags: u8,
     /// Valid lifetime in seconds (0xffffffff = infinity, network byte order)
     pub valid_lifetime: u32,
@@ -365,7 +370,8 @@ impl PrefixOpt {
     ///
     /// # Returns
     ///
-    /// A new PrefixOpt with all fields initialized
+    /// A new `PrefixOpt` with all fields initialized
+    #[must_use]
     pub fn new(
         prefix: Ipv6Addr,
         prefix_len: u8,
@@ -394,6 +400,10 @@ impl PrefixOpt {
     /// # Returns
     ///
     /// Result indicating success or packet construction error
+    ///
+    /// # Errors
+    ///
+    /// Returns `RadVError::PacketConstruction` if writing to the buffer fails
     pub fn serialize(&self, buf: &mut Vec<u8>) -> RadVResult<()> {
         buf.push(self.type_);
         buf.push(self.len);
@@ -416,9 +426,9 @@ impl PrefixOpt {
 
 /// Parameters for Router Advertisement construction
 ///
-/// Replaces C's `struct ra_param` from radv.c. Contains all context needed
-/// for building an RA packet including interface information, timing parameters,
-/// DHCPv6 coordination flags, and prefix lifetimes.
+/// Replaces C's `struct ra_param` from `radv.c`. Contains all context needed
+/// for building an `RA` packet including interface information, timing parameters,
+/// `DHCPv6` coordination flags, and prefix lifetimes.
 struct RaParam {
     /// Current timestamp for lifetime calculations
     now: Duration,
@@ -438,24 +448,24 @@ struct RaParam {
     link_local: Option<Ipv6Addr>,
     /// Global IPv6 address
     link_global: Option<Ipv6Addr>,
-    /// ULA (Unique Local Address) IPv6 address
+    /// `ULA` (Unique Local Address) IPv6 address
     ula: Option<Ipv6Addr>,
     /// Global address preferred time
     glob_pref_time: u32,
     /// Link-local preferred time
     link_pref_time: u32,
-    /// ULA preferred time
+    /// `ULA` preferred time
     ula_pref_time: u32,
     /// Advertisement interval in seconds
     adv_interval: u32,
     /// Router priority
     prio: u8,
-    /// Found matching DHCPv6 context
+    /// Found matching `DHCPv6` context
     found_context: Option<DhcpContext>,
 }
 
 impl RaParam {
-    /// Creates a new RaParam with default values
+    /// Creates a new `RaParam` with default values
     fn new(now: Duration, interface_index: u32, interface_name: String) -> Self {
         RaParam {
             now,
@@ -471,7 +481,7 @@ impl RaParam {
             glob_pref_time: 0,
             link_pref_time: 0,
             ula_pref_time: 0,
-            adv_interval: RA_INTERVAL_DEFAULT as u32,
+            adv_interval: RA_INTERVAL_DEFAULT,
             prio: 0,
             found_context: None,
         }
@@ -482,17 +492,17 @@ impl RaParam {
 // ROUTER ADVERTISEMENT FUNCTIONS
 // =============================================================================
 
-/// Initialize ICMPv6 socket for Router Advertisement transmission
+/// Initialize `ICMPv6` socket for Router Advertisement transmission
 ///
-/// Creates and configures an ICMPv6 raw socket with appropriate packet filters
+/// Creates and configures an `ICMPv6` raw socket with appropriate packet filters
 /// for receiving Router Solicitation messages and optionally Echo Reply messages
-/// (for SLAAC address verification). Sets socket options for hop limit (255),
+/// (for `SLAAC` address verification). Sets socket options for hop limit (255),
 /// traffic class priority, and packet info retrieval.
 ///
 /// # Arguments
 ///
 /// * `state` - Mutable reference to daemon state for storing socket descriptor
-/// * `now` - Current timestamp for scheduling initial RA transmission
+/// * `now` - Current timestamp for scheduling initial `RA` transmission
 ///
 /// # Returns
 ///
@@ -500,16 +510,16 @@ impl RaParam {
 ///
 /// # Side Effects
 ///
-/// - Creates ICMPv6 raw socket and stores in daemon state
-/// - Reads current hop limit from kernel via getsockopt
-/// - Calls ra_start_unsolicited() if daemon is configured for RA
+/// - Creates `ICMPv6` raw socket and stores in daemon state
+/// - Reads current hop limit from kernel via `getsockopt`
+/// - Calls `ra_start_unsolicited()` if daemon is configured for `RA`
 ///
 /// # RFC Compliance
 ///
 /// Implements RFC 4861 Section 6.1.2:
 /// - Source address must be link-local (enforced by kernel routing)
 /// - Hop limit set to 255
-/// - Responds to Router Solicitations (ICMPv6 type 133)
+/// - Responds to Router Solicitations (`ICMPv6` type 133)
 ///
 /// # Errors
 ///
@@ -537,8 +547,8 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
     
     #[cfg(target_os = "linux")]
     {
-        use libc_constants::*;
-        let fd = socket.as_raw_fd();
+        use libc_constants::{ICMP6_FILTER, IPPROTO_ICMPV6, IPPROTO_IPV6, 
+                              IPV6_MULTICAST_HOPS, IPV6_TCLASS, IPV6_UNICAST_HOPS};
         
         // Helper function for setting socket options with error handling
         fn set_sockopt(fd: RawFd, level: i32, optname: i32, optval: &i32) -> Result<(), RadVError> {
@@ -547,12 +557,13 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
             // 2. level and optname are valid constants from Linux kernel headers
             // 3. optval is a valid i32 reference with correct size passed to setsockopt
             // 4. This is platform-specific FFI code which is permitted per Section 0.7.2
+            #[allow(clippy::cast_possible_truncation)]
             let result = unsafe {
                 libc::setsockopt(
                     fd,
                     level,
                     optname,
-                    optval as *const _ as *const libc::c_void,
+                    (&raw const *optval).cast::<libc::c_void>(),
                     std::mem::size_of::<i32>() as libc::socklen_t,
                 )
             };
@@ -564,6 +575,8 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
                 Ok(())
             }
         }
+        
+        let fd = socket.as_raw_fd();
         
         // Set unicast hop limit (RFC 4861 requires 255)
         set_sockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hop_limit)?;
@@ -584,12 +597,13 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
         // 2. IPPROTO_ICMPV6 and ICMP6_FILTER are valid constants
         // 3. filter is a valid Icmp6Filter structure matching kernel expectations
         // 4. This is platform-specific FFI code which is permitted per Section 0.7.2
+        #[allow(clippy::cast_possible_truncation)]
         let result = unsafe {
             libc::setsockopt(
                 fd,
                 IPPROTO_ICMPV6,
                 ICMP6_FILTER,
-                &filter as *const _ as *const libc::c_void,
+                (&raw const filter).cast::<libc::c_void>(),
                 std::mem::size_of::<Icmp6Filter>() as libc::socklen_t,
             )
         };
@@ -619,21 +633,25 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
 
 /// Schedule unsolicited Router Advertisement transmission
 ///
-/// Initializes or resets RA transmission timers for DHCPv6 contexts to trigger
+/// Initializes or resets `RA` transmission timers for `DHCPv6` contexts to trigger
 /// periodic unsolicited Router Advertisements per RFC 4861 Section 6.2.4.
-/// When called with a specific context, schedules RA for that context only.
-/// When called with None, schedules RAs for all active DHCPv6 contexts with
+/// When called with a specific context, schedules `RA` for that context only.
+/// When called with `None`, schedules RAs for all active `DHCPv6` contexts with
 /// randomized initial delays (0-5 seconds) to avoid thundering herd.
 ///
 /// # Arguments
 ///
 /// * `state` - Mutable reference to daemon state
-/// * `now` - Current timestamp for calculating RA transmission times
-/// * `context` - Specific DHCPv6 context to schedule, or None for all contexts
+/// * `now` - Current timestamp for calculating `RA` transmission times
+/// * `context` - Specific `DHCPv6` context to schedule, or `None` for all contexts
 ///
 /// # Returns
 ///
 /// Result indicating success or scheduling error
+///
+/// # Errors
+///
+/// Returns `RadVError` if scheduling operations fail
 ///
 /// # RFC Compliance
 ///
@@ -644,9 +662,9 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
 ///
 /// # Side Effects
 ///
-/// - Modifies context ra_time for scheduled contexts
-/// - Sets context ra_short_period_start to enable fast initial RAs
-/// - Uses random_u16() for randomization of initial delays
+/// - Modifies context `ra_time` for scheduled contexts
+/// - Sets context `ra_short_period_start` to enable fast initial RAs
+/// - Uses `random_u16()` for randomization of initial delays
 ///
 /// # Example
 ///
@@ -657,7 +675,7 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
 /// // Re-schedule RA after address change on specific context
 /// ra_start_unsolicited(&mut state, monotonic_time(), Some(context)).await?;
 /// ```
-pub async fn ra_start_unsolicited(
+pub fn ra_start_unsolicited(
     state: &mut DaemonState,
     now: Duration,
     context: Option<DhcpContext>,
@@ -683,19 +701,19 @@ pub async fn ra_start_unsolicited(
     Ok(())
 }
 
-/// Process incoming ICMPv6 Router Solicitation and Echo Reply packets
+/// Process incoming `ICMPv6` Router Solicitation and Echo Reply packets
 ///
-/// Receives and handles ICMPv6 packets, processing Router Solicitation (RS)
+/// Receives and handles `ICMPv6` packets, processing Router Solicitation (`RS`)
 /// messages by sending solicited Router Advertisements, and Echo Reply messages
-/// for SLAAC address verification. Extracts source address and interface index
+/// for `SLAAC` address verification. Extracts source address and interface index
 /// from ancillary data, validates interface configuration, checks against
-/// dhcp-except exclusions, and optionally extracts source MAC for logging.
+/// `dhcp-except` exclusions, and optionally extracts source `MAC` for logging.
 ///
 /// # Arguments
 ///
 /// * `state` - Reference to daemon state
-/// * `now` - Current timestamp for RA construction
-/// * `packet` - Received ICMPv6 packet data
+/// * `now` - Current timestamp for `RA` construction
+/// * `packet` - Received `ICMPv6` packet data
 /// * `src_addr` - Source address of the packet
 /// * `if_index` - Interface index where packet was received
 ///
@@ -703,18 +721,22 @@ pub async fn ra_start_unsolicited(
 ///
 /// Result indicating success or packet processing error
 ///
+/// # Errors
+///
+/// Returns `RadVError` if packet processing or transmission fails
+///
 /// # RFC Compliance
 ///
 /// Implements RFC 4861 Section 6.2.6 (Processing Router Solicitations):
-/// - Validates source address (may be unspecified during DAD)
-/// - Sends unicast RA to specified source or multicast to all-nodes
-/// - Extracts source link-layer address from RS options (type 1)
-/// - Processes Router Solicitation (ICMPv6 type 133)
+/// - Validates source address (may be unspecified during `DAD`)
+/// - Sends unicast `RA` to specified source or multicast to all-nodes
+/// - Extracts source link-layer address from `RS` options (type 1)
+/// - Processes Router Solicitation (`ICMPv6` type 133)
 ///
 /// # Side Effects
 ///
-/// - Calls send_ra() which transmits RA packets
-/// - Logs RS reception with interface name and source MAC
+/// - Calls `send_ra()` which transmits `RA` packets
+/// - Logs `RS` reception with interface name and source `MAC`
 ///
 /// # Example
 ///
@@ -745,7 +767,7 @@ pub async fn icmp6_packet(
 
     // Get interface name
     let interface_name = index_to_name(if_index).await
-        .map_err(|_| RadVError::InterfaceError(format!("Invalid interface index: {}", if_index)))?;
+        .map_err(|_| RadVError::InterfaceError(format!("Invalid interface index: {if_index}")))?;
 
     match icmp_type {
         ICMP6_ECHO_REPLY => {
@@ -787,10 +809,10 @@ pub async fn icmp6_packet(
             );
 
             // Determine destination address (unicast if source specified, else multicast)
-            let dest = if src_addr != Ipv6Addr::UNSPECIFIED {
-                Some(src_addr)
-            } else {
+            let dest = if src_addr.is_unspecified() {
                 None // Will use ALL_NODES multicast
+            } else {
+                Some(src_addr)
             };
 
             // Send solicited Router Advertisement
@@ -806,11 +828,11 @@ pub async fn icmp6_packet(
 
 /// Send Router Advertisement packet
 ///
-/// Constructs and transmits an ICMPv6 Router Advertisement packet with prefix
-/// information options, router lifetime, M/O flags for DHCPv6 coordination,
-/// MTU option, and RDNSS options. Enumerates interface addresses to construct
+/// Constructs and transmits an `ICMPv6` Router Advertisement packet with prefix
+/// information options, router lifetime, M/O flags for `DHCPv6` coordination,
+/// `MTU` option, and `RDNSS` options. Enumerates interface addresses to construct
 /// prefix options with appropriate autonomous/managed flags and valid/preferred
-/// lifetimes from DHCPv6 contexts.
+/// lifetimes from `DHCPv6` contexts.
 ///
 /// # Arguments
 ///
@@ -818,27 +840,31 @@ pub async fn icmp6_packet(
 /// * `now` - Current timestamp for lifetime calculations
 /// * `if_index` - Interface index for packet transmission
 /// * `if_name` - Interface name for logging
-/// * `dest` - Destination address (Some for solicited unicast, None for unsolicited multicast)
+/// * `dest` - Destination address (`Some` for solicited unicast, `None` for unsolicited multicast)
 ///
 /// # Returns
 ///
 /// Result indicating success or transmission error
+///
+/// # Errors
+///
+/// Returns `RadVError` if packet construction or transmission fails
 ///
 /// # RFC Compliance
 ///
 /// Implements RFC 4861 Sections 4.2 and 6.2.3:
 /// - Hop limit 255, Router Lifetime in seconds
 /// - Prefix Information Option format (Section 4.6.2)
-/// - M and O flags for DHCPv6 coordination
+/// - M and O flags for `DHCPv6` coordination
 /// - Advertisement Interval Option (RFC 6275 Section 7.3)
-/// - RDNSS Option (RFC 6106)
-/// - MTU Option (Section 4.6.4)
+/// - `RDNSS` Option (RFC 6106)
+/// - `MTU` Option (Section 4.6.4)
 ///
 /// # Side Effects
 ///
-/// - Transmits ICMPv6 RA packet via socket
-/// - Logs RTR-ADVERT messages per prefix
-/// - May read /proc/sys/net/ipv6/conf/*/mtu on Linux
+/// - Transmits `ICMPv6` `RA` packet via socket
+/// - Logs `RTR-ADVERT` messages per prefix
+/// - May read `/proc/sys/net/ipv6/conf/*/mtu` on Linux
 ///
 /// # Example
 ///
@@ -887,7 +913,7 @@ pub async fn send_ra(
     ra.serialize(&mut packet_buf)?;
 
     // Add prefix options
-    add_prefix_options(state, if_index, &mut param, &mut packet_buf).await?;
+    add_prefix_options(state, if_index, &mut param, &mut packet_buf)?;
 
     // Add MTU option if configured
     add_mtu_option(if_name, &mut packet_buf).await?;
@@ -928,7 +954,7 @@ pub async fn send_ra(
 
 /// Execute periodic Router Advertisement transmission
 ///
-/// Checks all DHCPv6 contexts for scheduled RA transmission times and sends
+/// Checks all `DHCPv6` contexts for scheduled `RA` transmission times and sends
 /// Router Advertisements for overdue contexts. Implements both short period
 /// (frequent RAs during first 60 seconds) and normal period transmission
 /// intervals per RFC 4861 Section 6.2.4.
@@ -942,17 +968,21 @@ pub async fn send_ra(
 ///
 /// Result indicating success or transmission error
 ///
+/// # Errors
+///
+/// Returns `RadVError` if transmission or rescheduling fails
+///
 /// # RFC Compliance
 ///
 /// Implements RFC 4861 Section 6.2.4:
-/// - MinRtrAdvInterval to MaxRtrAdvInterval (200-600 seconds)
+/// - `MinRtrAdvInterval` to `MaxRtrAdvInterval` (200-600 seconds)
 /// - Short period fast RAs (5-20 seconds during first 60 seconds)
 /// - Randomized intervals to prevent synchronization
 ///
 /// # Side Effects
 ///
-/// - Calls send_ra() for overdue contexts
-/// - Reschedules next RA transmission
+/// - Calls `send_ra()` for overdue contexts
+/// - Reschedules next `RA` transmission
 /// - Transitions from short period to normal period
 ///
 /// # Example
@@ -986,10 +1016,10 @@ pub async fn periodic_ra(state: &mut DaemonState, now: Duration) -> RadVResult<(
 // HELPER FUNCTIONS
 // =============================================================================
 
-/// Calculate router lifetime based on DHCPv6 context lease times
+/// Calculate router lifetime based on `DHCPv6` context lease times
 ///
-/// Returns the router lifetime value to advertise in RA packets, based on
-/// DHCPv6 context configuration and lease times.
+/// Returns the router lifetime value to advertise in `RA` packets, based on
+/// `DHCPv6` context configuration and lease times.
 fn calc_router_lifetime(state: &DaemonState, if_name: &str) -> u16 {
     // Default router lifetime: 1800 seconds (30 minutes)
     // RFC 4861 specifies 0-9000 seconds range
@@ -997,9 +1027,9 @@ fn calc_router_lifetime(state: &DaemonState, if_name: &str) -> u16 {
     1800u16
 }
 
-/// Calculate M (Managed) and O (Other) flags for DHCPv6 coordination
+/// Calculate M (Managed) and O (Other) flags for `DHCPv6` coordination
 ///
-/// Returns tuple of (managed, other) flags based on DHCPv6 contexts
+/// Returns tuple of (managed, other) flags based on `DHCPv6` contexts
 /// associated with the interface.
 fn calc_mo_flags(state: &DaemonState, if_index: u32) -> (bool, bool) {
     // M-bit: Addresses available via DHCPv6
@@ -1012,7 +1042,7 @@ fn calc_mo_flags(state: &DaemonState, if_index: u32) -> (bool, bool) {
 ///
 /// Enumerates interface addresses and constructs prefix information options
 /// with appropriate lifetimes and flags.
-async fn add_prefix_options(
+fn add_prefix_options(
     state: &DaemonState,
     if_index: u32,
     param: &mut RaParam,
@@ -1049,7 +1079,7 @@ async fn add_mtu_option(if_name: &str, buf: &mut Vec<u8>) -> RadVResult<()> {
     #[cfg(target_os = "linux")]
     {
         // Read MTU from /proc filesystem
-        let mtu_path = format!("/proc/sys/net/ipv6/conf/{}/mtu", if_name);
+        let mtu_path = format!("/proc/sys/net/ipv6/conf/{if_name}/mtu");
         if let Ok(mtu_str) = tokio::fs::read_to_string(&mtu_path).await {
             if let Ok(mtu) = mtu_str.trim().parse::<u32>() {
                 // Add MTU option: type(1) + len(1) + reserved(2) + mtu(4) = 8 bytes
@@ -1102,7 +1132,7 @@ fn calc_next_ra_interval(ctx: &DhcpContext, now: Duration) -> Duration {
 
     // Normal period: MinRtrAdvInterval to MaxRtrAdvInterval (200-600 seconds)
     let range_secs = MAX_RTR_ADV_INTERVAL - MIN_RTR_ADV_INTERVAL;
-    let rand_secs = (random_u16() as u64 % range_secs) + MIN_RTR_ADV_INTERVAL;
+    let rand_secs = (u64::from(random_u16()) % range_secs) + MIN_RTR_ADV_INTERVAL;
     Duration::from_secs(rand_secs)
 }
 

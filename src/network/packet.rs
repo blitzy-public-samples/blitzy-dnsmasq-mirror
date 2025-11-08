@@ -60,7 +60,7 @@
 //! ```c
 //! daemon->addrbuff2 = safe_malloc(ADDRSTRLEN);
 //! ```
-//! Becomes separate AddressBuffer type (out of scope for this module).
+//! Becomes separate `AddressBuffer` type (out of scope for this module).
 //!
 //! # Memory Safety Improvements
 //!
@@ -232,7 +232,7 @@ pub enum Protocol {
         edns_size: usize,
     },
 
-    /// DHCP protocol (DHCPv4 or DHCPv6)
+    /// DHCP protocol (`DHCPv4` or `DHCPv6`)
     ///
     /// Fixed buffer size of 1500 bytes (standard MTU)
     Dhcp,
@@ -259,6 +259,7 @@ impl Protocol {
     /// let dhcp_size = Protocol::Dhcp.buffer_size();
     /// assert_eq!(dhcp_size, 1500);
     /// ```
+    #[must_use]
     pub fn buffer_size(&self) -> usize {
         match self {
             // DNS: EDNS size + maximum domain name + RR fixed fields
@@ -276,6 +277,7 @@ impl Protocol {
     }
 
     /// Get protocol name for debugging
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Protocol::Dns { .. } => "DNS",
@@ -303,7 +305,7 @@ pub struct EdnsConfig {
     /// This value is included in the EDNS0 OPT pseudo-RR to tell upstream servers
     /// the maximum response size we can accept without TCP fallback.
     ///
-    /// **Default**: 4096 bytes (EDNS_PKTSZ)
+    /// **Default**: 4096 bytes (`EDNS_PKTSZ`)
     /// **RFC**: RFC 6891 Section 6.2.5
     ///
     /// # C Reference
@@ -338,9 +340,12 @@ impl EdnsConfig {
     /// assert_eq!(config.max_udp_size, 4096);
     /// assert_eq!(config.do_bit, false);
     /// ```
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn new(max_udp_size: u16) -> Self {
         Self {
             // Clamp to valid range (512-4096)
+            // Safe: DNS_PACKET_SIZE (512) and EDNS_PKTSZ (4096) are both within u16::MAX
             max_udp_size: max_udp_size
                 .max(DNS_PACKET_SIZE as u16)
                 .min(EDNS_PKTSZ as u16),
@@ -360,8 +365,11 @@ impl EdnsConfig {
     /// let config = EdnsConfig::with_dnssec(4096);
     /// assert_eq!(config.do_bit, true);
     /// ```
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn with_dnssec(max_udp_size: u16) -> Self {
         Self {
+            // Safe: DNS_PACKET_SIZE (512) and EDNS_PKTSZ (4096) are both within u16::MAX
             max_udp_size: max_udp_size
                 .max(DNS_PACKET_SIZE as u16)
                 .min(EDNS_PKTSZ as u16),
@@ -370,13 +378,16 @@ impl EdnsConfig {
     }
 
     /// Get buffer size required for this EDNS configuration
+    #[must_use]
     pub fn buffer_size(&self) -> usize {
         (self.max_udp_size as usize) + MAX_DOMAIN_NAME + RRFIXEDSZ
     }
 }
 
 impl Default for EdnsConfig {
+    #[allow(clippy::cast_possible_truncation)]
     fn default() -> Self {
+        // Safe: EDNS_PKTSZ (4096) is within u16::MAX
         Self::new(EDNS_PKTSZ as u16)
     }
 }
@@ -392,8 +403,8 @@ impl Default for EdnsConfig {
 /// protocol and can be reused to reduce allocation overhead.
 ///
 /// # Thread Safety
-/// PacketBuffer is Send + Sync, allowing transfer between threads and shared access
-/// (with appropriate synchronization like Mutex).
+/// `PacketBuffer` is Send + Sync, allowing transfer between threads and shared access
+/// (with appropriate synchronization like `Mutex`).
 ///
 /// # Memory Management
 /// - Buffer allocated on creation with protocol-appropriate size
@@ -427,11 +438,11 @@ impl PacketBuffer {
     /// * `protocol` - Protocol type determining buffer size
     ///
     /// # Returns
-    /// New PacketBuffer with capacity for protocol
+    /// New `PacketBuffer` with capacity for protocol
     ///
     /// # Panics
-    /// Panics if memory allocation fails (matching C's safe_malloc behavior which
-    /// calls die() on OOM)
+    /// Panics if memory allocation fails (matching C's `safe_malloc` behavior which
+    /// calls `die()` on OOM)
     ///
     /// # Examples
     /// ```
@@ -440,6 +451,7 @@ impl PacketBuffer {
     /// let buffer = PacketBuffer::new(Protocol::Dns { edns_size: 512 });
     /// assert!(buffer.capacity() >= 512);
     /// ```
+    #[must_use]
     pub fn new(protocol: Protocol) -> Self {
         let size = protocol.buffer_size();
         let data = Vec::with_capacity(size);
@@ -462,6 +474,7 @@ impl PacketBuffer {
     /// let data = buffer.as_slice();
     /// // Parse packet from data
     /// ```
+    #[must_use]
     pub fn as_slice(&self) -> &[u8] {
         &self.data
     }
@@ -535,11 +548,13 @@ impl PacketBuffer {
     ///
     /// # Returns
     /// Number of bytes in buffer
+    #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
     /// Check if buffer is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -550,11 +565,13 @@ impl PacketBuffer {
     ///
     /// # Returns
     /// Buffer capacity in bytes
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.data.capacity()
     }
 
     /// Get protocol this buffer is sized for
+    #[must_use]
     pub fn protocol(&self) -> Protocol {
         self.protocol
     }
@@ -597,7 +614,7 @@ unsafe impl Sync for PacketBuffer {}
 /// (dnsmasq.c lines 317-322)
 ///
 /// # Memory Layout
-/// - Name buffers: 2 * MAX_DOMAIN_NAME (2050 bytes each) for escaped name storage
+/// - Name buffers: 2 * `MAX_DOMAIN_NAME` (2050 bytes each) for escaped name storage
 /// - RR status: Initially 64 u16 entries (128 bytes), can grow dynamically
 ///
 /// Total initial size: ~6.3 KB
@@ -606,8 +623,8 @@ unsafe impl Sync for PacketBuffer {}
 pub struct DnssecBuffers {
     /// Buffer for escaped domain names (C: daemon->namebuff)
     ///
-    /// Size doubled to accommodate NAME_ESCAPE escaping where special characters
-    /// (\000, '.', NAME_ESCAPE) are escaped in presentation format.
+    /// Size doubled to accommodate `NAME_ESCAPE` escaping where special characters
+    /// (`\000`, `.`, `NAME_ESCAPE`) are escaped in presentation format.
     pub namebuff: Vec<u8>,
 
     /// Buffer for key names during validation (C: daemon->keyname)
@@ -630,7 +647,7 @@ impl DnssecBuffers {
     /// Allocates all buffers with initial sizes matching C implementation.
     ///
     /// # Returns
-    /// New DnssecBuffers instance
+    /// New `DnssecBuffers` instance
     ///
     /// # Examples
     /// ```
@@ -642,6 +659,7 @@ impl DnssecBuffers {
     /// assert_eq!(buffers.namebuff.capacity(), 2050);
     /// # }
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             // C: daemon->namebuff = safe_malloc(MAXDNAME * 2)
@@ -727,6 +745,7 @@ impl PacketBufferPool {
     ///
     /// let pool = PacketBufferPool::new(10);
     /// ```
+    #[must_use]
     pub fn new(max_pool_size: usize) -> Self {
         Self {
             dns_buffers: Vec::with_capacity(max_pool_size),
@@ -745,7 +764,7 @@ impl PacketBufferPool {
     /// * `protocol` - Protocol type for buffer sizing
     ///
     /// # Returns
-    /// PacketBuffer ready for use
+    /// `PacketBuffer` ready for use
     ///
     /// # Examples
     /// ```
@@ -799,6 +818,7 @@ impl PacketBufferPool {
     }
 
     /// Get current number of cached buffers
+    #[must_use]
     pub fn size(&self) -> usize {
         self.dns_buffers.len() + self.dhcp_buffers.len() + self.tftp_buffers.len()
     }
@@ -924,7 +944,7 @@ impl PacketWriter for tokio::net::TcpStream {
 
 /// Create a Cursor for reading from buffer
 ///
-/// Helper function to create a std::io::Cursor for sequential buffer reading.
+/// Helper function to create a `std::io::Cursor` for sequential buffer reading.
 ///
 /// # Arguments
 /// * `buf` - Buffer to wrap in Cursor
@@ -940,13 +960,14 @@ impl PacketWriter for tokio::net::TcpStream {
 /// let mut cursor = cursor_from_buffer(&data);
 /// assert_eq!(cursor.position(), 0);
 /// ```
+#[must_use]
 pub fn cursor_from_buffer(buf: &[u8]) -> Cursor<&[u8]> {
     Cursor::new(buf)
 }
 
 /// Create a mutable Cursor for writing to buffer
 ///
-/// Helper function to create a std::io::Cursor for sequential buffer writing.
+/// Helper function to create a `std::io::Cursor` for sequential buffer writing.
 ///
 /// # Arguments
 /// * `buf` - Mutable buffer to wrap in Cursor
@@ -1124,16 +1145,16 @@ mod tests {
             required: 100,
             available: 50,
         };
-        assert!(format!("{}", err).contains("required 100 bytes"));
+        assert!(format!("{err}").contains("required 100 bytes"));
 
         let err = PacketError::AllocationFailed { size: 1024 };
-        assert!(format!("{}", err).contains("1024 bytes"));
+        assert!(format!("{err}").contains("1024 bytes"));
 
         let err = PacketError::InvalidSize {
             size: 10,
             min_size: 12,
         };
-        assert!(format!("{}", err).contains("10 bytes"));
+        assert!(format!("{err}").contains("10 bytes"));
     }
 
     #[test]

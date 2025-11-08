@@ -16,7 +16,7 @@
 //!
 //! - **RSA**: RSA/SHA-256 (algorithm 8), RSA/SHA-512 (algorithm 10)
 //! - **ECDSA**: ECDSA P-256/SHA-256 (algorithm 13), ECDSA P-384/SHA-384 (algorithm 14)
-//! - **EdDSA**: Ed25519 (algorithm 15), Ed448 (algorithm 16)
+//! - **`EdDSA`**: Ed25519 (algorithm 15), Ed448 (algorithm 16)
 //!
 //! Note: RSA/SHA-1 algorithms (5, 7) are deliberately excluded per RFC 6944 deprecation.
 //! DSA algorithms (3, 6) and RSA/MD5 (1) are not supported per RFC 8624.
@@ -33,7 +33,7 @@
 //! - RFC 4034: DNSSEC Resource Records
 //! - RFC 5702: SHA-2 algorithms for DNSSEC
 //! - RFC 6605: ECDSA for DNSSEC
-//! - RFC 8080: EdDSA for DNSSEC
+//! - RFC 8080: `EdDSA` for DNSSEC
 //! - RFC 8624: Algorithm implementation requirements
 //!
 //! # Source Mapping
@@ -71,6 +71,7 @@ pub enum Algorithm {
 
 impl Algorithm {
     /// Convert from u8 algorithm number, returning None for unsupported algorithms
+    #[must_use]
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             8 => Some(Algorithm::RsaSha256),
@@ -89,7 +90,7 @@ impl Algorithm {
 /// These hash algorithms are used for DS records, NSEC3 hashing, and
 /// signature verification digest computation.
 ///
-/// Source: C implementation hash selection in hash_find(), src/crypto.c lines 1282-1309
+/// Source: C implementation hash selection in `hash_find()`, src/crypto.c lines 1282-1309
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashFunction {
     /// SHA-1 (for DS records and NSEC3 only, not for signatures)
@@ -143,7 +144,7 @@ pub enum CryptoError {
 ///
 /// Parsed RSA public key in RFC 3110 format with exponent and modulus.
 ///
-/// Source: C implementation in dnsmasq_rsa_verify(), src/crypto.c lines 479-529
+/// Source: C implementation in `dnsmasq_rsa_verify()`, src/crypto.c lines 479-529
 #[derive(Debug, Clone)]
 pub struct RsaPublicKey {
     /// RSA public exponent
@@ -156,7 +157,7 @@ pub struct RsaPublicKey {
 ///
 /// Parsed ECDSA public key in RFC 6605 format with X and Y coordinates.
 ///
-/// Source: C implementation in dnsmasq_ecdsa_verify(), src/crypto.c lines 584-656
+/// Source: C implementation in `dnsmasq_ecdsa_verify()`, src/crypto.c lines 584-656
 #[derive(Debug, Clone)]
 pub struct EcdsaPublicKey {
     /// X coordinate of the public key point
@@ -183,7 +184,7 @@ pub struct EcdsaSignature {
 /// This trait abstracts hash operations for different algorithms, allowing
 /// dynamic selection of hash functions while maintaining type safety.
 ///
-/// Source: Replaces C's nettle_hash function pointers, src/crypto.c lines 335-343
+/// Source: Replaces C's `nettle_hash` function pointers, src/crypto.c lines 335-343
 pub trait Hasher {
     /// Update the hash context with additional data
     fn update(&mut self, data: &[u8]);
@@ -275,7 +276,11 @@ impl Hasher for Sha512Hasher {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
-/// Source: C implementation hash_init(), src/crypto.c lines 392-427
+/// # Errors
+///
+/// Returns `CryptoError::HashInitializationFailed` if hash context creation fails
+///
+/// Source: C implementation `hash_init()`, src/crypto.c lines 392-427
 pub fn hash_init(hash_type: HashFunction) -> Result<Box<dyn Hasher>, CryptoError> {
     match hash_type {
         HashFunction::Sha1 => Ok(Box::new(Sha1Hasher {
@@ -295,7 +300,7 @@ pub fn hash_init(hash_type: HashFunction) -> Result<Box<dyn Hasher>, CryptoError
 
 /// Find hash algorithm by name
 ///
-/// Maps hash algorithm names (case-insensitive) to HashFunction enums.
+/// Maps hash algorithm names (case-insensitive) to `HashFunction` enums.
 ///
 /// # Arguments
 ///
@@ -303,7 +308,7 @@ pub fn hash_init(hash_type: HashFunction) -> Result<Box<dyn Hasher>, CryptoError
 ///
 /// # Returns
 ///
-/// The corresponding HashFunction, or None if the name is not recognized
+/// The corresponding `HashFunction`, or None if the name is not recognized
 ///
 /// # Example
 ///
@@ -313,7 +318,8 @@ pub fn hash_init(hash_type: HashFunction) -> Result<Box<dyn Hasher>, CryptoError
 /// assert!(sha256.is_some());
 /// ```
 ///
-/// Source: C implementation hash_find(), src/crypto.c lines 1282-1309
+/// Source: C implementation `hash_find()`, src/crypto.c lines 1282-1309
+#[must_use]
 pub fn find_hash_algorithm(name: &str) -> Option<HashFunction> {
     let name_lower = name.to_lowercase();
     match name_lower.as_str() {
@@ -346,15 +352,14 @@ pub fn find_hash_algorithm(name: &str) -> Option<HashFunction> {
 /// assert_eq!(hash_name, "sha-256");
 /// ```
 ///
-/// Source: C implementation algo_digest_name(), src/crypto.c lines 1152-1171
+/// Source: C implementation `algo_digest_name()`, src/crypto.c lines 1152-1171
+#[must_use]
 pub fn algorithm_digest_name(algorithm: Algorithm) -> &'static str {
     match algorithm {
-        Algorithm::RsaSha256 => "sha-256",
+        Algorithm::RsaSha256 | Algorithm::EcdsaP256Sha256 => "sha-256",
         Algorithm::RsaSha512 => "sha-512",
-        Algorithm::EcdsaP256Sha256 => "sha-256",
         Algorithm::EcdsaP384Sha384 => "sha-384",
-        Algorithm::Ed25519 => "", // EdDSA operates on full message
-        Algorithm::Ed448 => "",   // EdDSA operates on full message
+        Algorithm::Ed25519 | Algorithm::Ed448 => "", // EdDSA operates on full message
     }
 }
 
@@ -385,7 +390,8 @@ pub fn algorithm_digest_name(algorithm: Algorithm) -> &'static str {
 /// assert_eq!(hash_name, Some("sha-256"));
 /// ```
 ///
-/// Source: C implementation ds_digest_name(), src/crypto.c lines 1068-1078
+/// Source: C implementation `ds_digest_name()`, src/crypto.c lines 1068-1078
+#[must_use]
 pub fn ds_digest_algorithm_name(digest_type: u8) -> Option<&'static str> {
     match digest_type {
         1 => Some("sha-1"),
@@ -416,7 +422,8 @@ pub fn ds_digest_algorithm_name(digest_type: u8) -> Option<&'static str> {
 /// assert_eq!(hash_name, Some("sha-1"));
 /// ```
 ///
-/// Source: C implementation nsec3_digest_name(), src/crypto.c lines 1219-1226
+/// Source: C implementation `nsec3_digest_name()`, src/crypto.c lines 1219-1226
+#[must_use]
 pub fn nsec3_hash_algorithm_name(digest_type: u8) -> Option<&'static str> {
     match digest_type {
         1 => Some("sha-1"),
@@ -439,7 +446,7 @@ pub fn nsec3_hash_algorithm_name(digest_type: u8) -> Option<&'static str> {
 ///
 /// Parsed RSA public key, or error if format is invalid
 ///
-/// Source: C implementation dnsmasq_rsa_verify() key parsing, src/crypto.c lines 499-514
+/// Source: C implementation `dnsmasq_rsa_verify()` key parsing, src/crypto.c lines 499-514
 fn parse_rsa_public_key(key_data: &[u8]) -> Result<RsaPublicKey, CryptoError> {
     if key_data.len() < 3 {
         return Err(CryptoError::KeyTooShort);
@@ -477,8 +484,8 @@ fn parse_rsa_public_key(key_data: &[u8]) -> Result<RsaPublicKey, CryptoError> {
 /// Parse ECDSA public key from DNSKEY RDATA format
 ///
 /// Extracts ECDSA public key point coordinates from RFC 6605 format:
-/// - X coordinate (coord_len bytes)
-/// - Y coordinate (coord_len bytes)
+/// - X coordinate (`coord_len` bytes)
+/// - Y coordinate (`coord_len` bytes)
 ///
 /// # Arguments
 ///
@@ -489,7 +496,7 @@ fn parse_rsa_public_key(key_data: &[u8]) -> Result<RsaPublicKey, CryptoError> {
 ///
 /// Parsed ECDSA public key, or error if format is invalid
 ///
-/// Source: C implementation dnsmasq_ecdsa_verify() key parsing, src/crypto.c lines 646-650
+/// Source: C implementation `dnsmasq_ecdsa_verify()` key parsing, src/crypto.c lines 646-650
 fn parse_ecdsa_public_key(
     key_data: &[u8],
     coord_len: usize,
@@ -507,8 +514,8 @@ fn parse_ecdsa_public_key(
 /// Parse ECDSA signature from RRSIG format
 ///
 /// Extracts ECDSA signature components from wire format:
-/// - R component (component_len bytes)
-/// - S component (component_len bytes)
+/// - R component (`component_len` bytes)
+/// - S component (`component_len` bytes)
 ///
 /// # Arguments
 ///
@@ -519,7 +526,7 @@ fn parse_ecdsa_public_key(
 ///
 /// Parsed ECDSA signature, or error if format is invalid
 ///
-/// Source: C implementation dnsmasq_ecdsa_verify() signature parsing, src/crypto.c lines 652-653
+/// Source: C implementation `dnsmasq_ecdsa_verify()` signature parsing, src/crypto.c lines 652-653
 fn parse_ecdsa_signature(
     sig_data: &[u8],
     component_len: usize,
@@ -557,7 +564,7 @@ fn parse_ecdsa_signature(
 /// - exponent bytes (big-endian)
 /// - modulus bytes (big-endian)
 ///
-/// Source: C implementation dnsmasq_rsa_verify(), src/crypto.c lines 479-529
+/// Source: C implementation `dnsmasq_rsa_verify()`, src/crypto.c lines 479-529
 fn verify_rsa_signature(
     public_key: &[u8],
     signature: &[u8],
@@ -620,7 +627,7 @@ fn verify_rsa_signature(
 /// - R component (t bytes)
 /// - S component (t bytes)
 ///
-/// Source: C implementation dnsmasq_ecdsa_verify(), src/crypto.c lines 584-656
+/// Source: C implementation `dnsmasq_ecdsa_verify()`, src/crypto.c lines 584-656
 fn verify_ecdsa_signature(
     public_key: &[u8],
     signature: &[u8],
@@ -668,23 +675,23 @@ fn verify_ecdsa_signature(
     }
 }
 
-/// Verify EdDSA signature
+/// Verify `EdDSA` signature
 ///
-/// Verifies EdDSA signatures (Ed25519, Ed448) using ring's EdDSA primitives.
-/// EdDSA operates on the complete message, not a pre-computed digest.
+/// Verifies `EdDSA` signatures (`Ed25519`, `Ed448`) using ring's `EdDSA` primitives.
+/// `EdDSA` operates on the complete message, not a pre-computed digest.
 ///
 /// # Arguments
 ///
 /// * `public_key` - Raw public key bytes from DNSKEY
 /// * `signature` - Signature bytes from RRSIG
 /// * `message` - Complete message data (not a digest)
-/// * `algorithm` - EdDSA algorithm variant
+/// * `algorithm` - `EdDSA` algorithm variant
 ///
 /// # Returns
 ///
 /// Ok(true) if signature is valid, Ok(false) or Err if invalid
 ///
-/// Source: C implementation dnsmasq_eddsa_verify(), src/crypto.c lines 806-847
+/// Source: C implementation `dnsmasq_eddsa_verify()`, src/crypto.c lines 806-847
 fn verify_eddsa_signature(
     public_key: &[u8],
     signature: &[u8],
@@ -731,7 +738,7 @@ fn verify_eddsa_signature(
 /// * `algorithm` - DNSSEC algorithm identifier
 /// * `public_key` - Raw public key bytes from DNSKEY record
 /// * `signature` - Signature bytes from RRSIG record
-/// * `message` - Message data to verify (digest for RSA/ECDSA, full message for EdDSA)
+/// * `message` - Message data to verify (digest for `RSA`/`ECDSA`, full message for `EdDSA`)
 ///
 /// # Returns
 ///
@@ -755,12 +762,18 @@ fn verify_eddsa_signature(
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
+/// # Errors
+///
+/// Returns `CryptoError::UnsupportedAlgorithm` if the algorithm is not supported.
+/// Returns `CryptoError::InvalidKeyFormat` if the public key is malformed.
+/// Returns `CryptoError::InvalidSignatureFormat` if the signature is malformed.
+///
 /// # Security
 ///
 /// This function uses constant-time operations provided by the ring crate
 /// to prevent timing side-channel attacks.
 ///
-/// Source: C implementation verify(), src/crypto.c lines 994-1007
+/// Source: C implementation `verify()`, src/crypto.c lines 994-1007
 pub fn verify_signature(
     algorithm: Algorithm,
     public_key: &[u8],

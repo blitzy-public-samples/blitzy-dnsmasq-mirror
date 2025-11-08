@@ -9,7 +9,7 @@
 //! Signal handling for daemon lifecycle management
 //!
 //! This module replaces C's self-pipe pattern for async-signal-safe operation
-//! (sig_handler() function in dnsmasq.c lines 1536-1583) with Tokio's signal
+//! (`sig_handler()` function in dnsmasq.c lines 1536-1583) with Tokio's signal
 //! handlers, providing safe async signal delivery without manual pipe management.
 //!
 //! # C Implementation Background
@@ -22,7 +22,7 @@
 //!
 //! Tokio's signal infrastructure handles async-signal-safety internally, allowing
 //! us to eliminate manual pipe management. Signal streams are multiplexed using
-//! tokio::select! into a single event channel consumed by the main event loop.
+//! `tokio::select!` into a single event channel consumed by the main event loop.
 //!
 //! # Signal Mapping
 //!
@@ -34,7 +34,7 @@
 //! - **SIGTERM (15)** → `SignalEvent::Terminate` - Graceful shutdown with lease flush
 //! - **SIGINT (2)** → `SignalEvent::TimeCheck` or immediate exit in debug mode
 //! - **SIGCHLD (17)** → `SignalEvent::ChildExited` - Helper process terminated
-//! - **SIGALRM (14)** → `SignalEvent::TimerExpired` - Timer expiration (replaced by tokio::time)
+//! - **SIGALRM (14)** → `SignalEvent::TimerExpired` - Timer expiration (replaced by `tokio::time`)
 //!
 //! # Example Usage
 //!
@@ -77,28 +77,28 @@ use tracing::info;
 
 /// Signal events that can occur during daemon operation
 ///
-/// These events correspond to C's EVENT_* constants defined in dnsmasq.h:
-/// - EVENT_RELOAD (1) → Reload
-/// - EVENT_DUMP (2) → DumpCache
-/// - EVENT_REOPEN (6) → ReopenLog
-/// - EVENT_TERM (4) → Terminate
-/// - EVENT_TIME (26) → TimeCheck
-/// - EVENT_CHILD (5) → ChildExited
-/// - EVENT_ALARM (3) → TimerExpired
+/// These events correspond to C's `EVENT_*` constants defined in dnsmasq.h:
+/// - `EVENT_RELOAD` (1) → `Reload`
+/// - `EVENT_DUMP` (2) → `DumpCache`
+/// - `EVENT_REOPEN` (6) → `ReopenLog`
+/// - `EVENT_TERM` (4) → `Terminate`
+/// - `EVENT_TIME` (26) → `TimeCheck`
+/// - `EVENT_CHILD` (5) → `ChildExited`
+/// - `EVENT_ALARM` (3) → `TimerExpired`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalEvent {
-    /// SIGTERM received - initiate graceful shutdown with DHCP lease flush
+    /// `SIGTERM` received - initiate graceful shutdown with DHCP lease flush
     ///
-    /// Corresponds to C's EVENT_TERM. The daemon should:
+    /// Corresponds to C's `EVENT_TERM`. The daemon should:
     /// 1. Stop accepting new requests
     /// 2. Flush DHCP lease database to disk
     /// 3. Close all sockets gracefully
     /// 4. Exit with status code 0
     Terminate,
 
-    /// SIGHUP received - reload configuration without restarting
+    /// `SIGHUP` received - reload configuration without restarting
     ///
-    /// Corresponds to C's EVENT_RELOAD. The daemon should:
+    /// Corresponds to C's `EVENT_RELOAD`. The daemon should:
     /// 1. Re-parse configuration files (dnsmasq.conf, /etc/hosts, /etc/resolv.conf)
     /// 2. Flush DNS cache
     /// 3. Re-read DHCP host declarations
@@ -106,48 +106,48 @@ pub enum SignalEvent {
     /// 5. Continue operation with new configuration
     Reload,
 
-    /// SIGUSR1 received - dump DNS cache statistics to logs
+    /// `SIGUSR1` received - dump DNS cache statistics to logs
     ///
-    /// Corresponds to C's EVENT_DUMP. The daemon should log:
+    /// Corresponds to C's `EVENT_DUMP`. The daemon should log:
     /// - Cache size and utilization
     /// - Cache hit/miss ratios
     /// - Currently cached entries
     /// - Upstream server statistics
     DumpCache,
 
-    /// SIGUSR2 received - reopen log files for log rotation
+    /// `SIGUSR2` received - reopen log files for log rotation
     ///
-    /// Corresponds to C's EVENT_REOPEN. The daemon should:
+    /// Corresponds to C's `EVENT_REOPEN`. The daemon should:
     /// 1. Close current log file handles
     /// 2. Reopen log files (allows logrotate to work)
     /// 3. Continue logging to new file
     ReopenLog,
 
-    /// SIGINT received in non-debug mode - trigger DNSSEC time check
+    /// `SIGINT` received in non-debug mode - trigger DNSSEC time check
     ///
-    /// Corresponds to C's EVENT_TIME. Used to:
+    /// Corresponds to C's `EVENT_TIME`. Used to:
     /// - Check if system time has progressed sufficiently for DNSSEC validation
     /// - Re-validate DNSSEC signatures after time sync
     ///
-    /// Note: In debug mode (cfg!(debug_assertions)), SIGINT causes immediate exit
+    /// Note: In debug mode (`cfg!(debug_assertions)`), `SIGINT` causes immediate exit
     TimeCheck,
 
-    /// SIGCHLD received - child process (DHCP helper script) exited
+    /// `SIGCHLD` received - child process (DHCP helper script) exited
     ///
-    /// Corresponds to C's EVENT_CHILD. The daemon should:
-    /// 1. Reap zombie processes using waitpid() or tokio::process::Child::wait()
+    /// Corresponds to C's `EVENT_CHILD`. The daemon should:
+    /// 1. Reap zombie processes using `waitpid()` or `tokio::process::Child::wait()`
     /// 2. Check exit status of DHCP lease-change scripts
     /// 3. Log any script failures
     ChildExited,
 
-    /// Timer expired (replaces C's SIGALRM-based timers)
+    /// Timer expired (replaces C's `SIGALRM`-based timers)
     ///
-    /// Corresponds to C's EVENT_ALARM. Used for:
+    /// Corresponds to C's `EVENT_ALARM`. Used for:
     /// - DHCP lease expiration checks
     /// - DNS query timeouts
     /// - Periodic maintenance tasks
     ///
-    /// In Rust, timers are handled via tokio::time rather than SIGALRM,
+    /// In Rust, timers are handled via `tokio::time` rather than `SIGALRM`,
     /// but this event maintains API compatibility
     TimerExpired,
 }
@@ -160,12 +160,12 @@ pub enum SignalError {
     /// Failed to set up signal handler for a specific signal
     ///
     /// This can occur if:
-    /// - Signal is already handled by another handler (SIG_IGN, SIG_DFL overridden)
+    /// - Signal is already handled by another handler (`SIG_IGN`, `SIG_DFL` overridden)
     /// - System resources exhausted (file descriptors)
     /// - Platform doesn't support the signal
     #[error("Signal setup failed for {signal}: {source}")]
     SignalSetupFailed {
-        /// Name of the signal (e.g., "SIGHUP", "SIGTERM")
+        /// Name of the signal (e.g., "`SIGHUP`", "`SIGTERM`")
         signal: String,
         /// Underlying I/O error from signal registration
         source: std::io::Error,
@@ -186,7 +186,7 @@ pub enum SignalError {
 
     /// Timer-related error
     ///
-    /// Errors from tokio::time operations (sleep, interval scheduling)
+    /// Errors from `tokio::time` operations (sleep, interval scheduling)
     #[error("Timer error: {0}")]
     TimerError(String),
 
@@ -199,7 +199,7 @@ pub enum SignalError {
 
 /// Signal handler that multiplexes POSIX signals into async events
 ///
-/// This struct wraps a tokio::sync::mpsc::Receiver that delivers SignalEvents
+/// This struct wraps a `tokio::sync::mpsc::Receiver` that delivers `SignalEvent`s
 /// from the signal multiplexer task. It provides a clean async API for
 /// receiving signals in the main event loop.
 ///
@@ -257,11 +257,11 @@ impl SignalHandler {
 
 /// Set up signal handlers for all daemon lifecycle signals
 ///
-/// Creates Tokio signal streams for POSIX signals (SIGHUP, SIGUSR1, SIGUSR2,
-/// SIGTERM, SIGINT, SIGCHLD, SIGALRM) and spawns a background task that
+/// Creates Tokio signal streams for POSIX signals (`SIGHUP`, `SIGUSR1`, `SIGUSR2`,
+/// `SIGTERM`, `SIGINT`, `SIGCHLD`, `SIGALRM`) and spawns a background task that
 /// multiplexes them into a single event stream.
 ///
-/// This replaces C's sig_handler() function and self-pipe pattern with Tokio's
+/// This replaces C's `sig_handler()` function and self-pipe pattern with Tokio's
 /// safe async signal infrastructure.
 ///
 /// # Returns
@@ -280,7 +280,7 @@ impl SignalHandler {
 /// # Platform Compatibility
 ///
 /// This function is Unix-specific and will not compile on Windows. For Windows
-/// support, use tokio::signal::windows::ctrl_c() and ctrl_break().
+/// support, use `tokio::signal::windows::ctrl_c()` and `ctrl_break()`.
 ///
 /// # Example
 ///
@@ -360,7 +360,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
             // Use tokio::select! to wait on all signal streams concurrently
             // First signal to arrive gets processed
             tokio::select! {
-                Some(_) = sighup.recv() => {
+                Some(()) = sighup.recv() => {
                     info!("SIGHUP received - triggering configuration reload");
                     if sender.send(SignalEvent::Reload).await.is_err() {
                         info!("Signal receiver dropped - shutting down signal handler");
@@ -368,7 +368,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
                     }
                 }
 
-                Some(_) = sigusr1.recv() => {
+                Some(()) = sigusr1.recv() => {
                     info!("SIGUSR1 received - triggering DNS cache dump");
                     if sender.send(SignalEvent::DumpCache).await.is_err() {
                         info!("Signal receiver dropped - shutting down signal handler");
@@ -376,7 +376,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
                     }
                 }
 
-                Some(_) = sigusr2.recv() => {
+                Some(()) = sigusr2.recv() => {
                     info!("SIGUSR2 received - triggering log file reopen");
                     if sender.send(SignalEvent::ReopenLog).await.is_err() {
                         info!("Signal receiver dropped - shutting down signal handler");
@@ -384,7 +384,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
                     }
                 }
 
-                Some(_) = sigterm.recv() => {
+                Some(()) = sigterm.recv() => {
                     info!("SIGTERM received - triggering graceful shutdown");
                     if sender.send(SignalEvent::Terminate).await.is_err() {
                         info!("Signal receiver dropped - shutting down signal handler");
@@ -392,7 +392,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
                     }
                 }
 
-                Some(_) = sigint.recv() => {
+                Some(()) = sigint.recv() => {
                     // Debug mode: exit immediately on SIGINT (Ctrl-C)
                     // This matches C behavior in dnsmasq.c lines 1572-1573
                     if cfg!(debug_assertions) {
@@ -407,7 +407,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
                     }
                 }
 
-                Some(_) = sigchld.recv() => {
+                Some(()) = sigchld.recv() => {
                     info!("SIGCHLD received - child process terminated");
                     if sender.send(SignalEvent::ChildExited).await.is_err() {
                         info!("Signal receiver dropped - shutting down signal handler");
@@ -415,7 +415,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
                     }
                 }
 
-                Some(_) = sigalrm.recv() => {
+                Some(()) = sigalrm.recv() => {
                     info!("SIGALRM received - timer expired (legacy alarm support)");
                     if sender.send(SignalEvent::TimerExpired).await.is_err() {
                         info!("Signal receiver dropped - shutting down signal handler");
@@ -437,7 +437,7 @@ pub fn setup_signal_handlers() -> Result<SignalHandler, SignalError> {
 ///
 /// This function provides a clean API for scheduling one-shot timers that
 /// deliver `SignalEvent::TimerExpired` when they expire. It replaces C's
-/// send_alarm() function which used alarm(2) and SIGALRM.
+/// `send_alarm()` function which used `alarm(2)` and `SIGALRM`.
 ///
 /// # Arguments
 ///
@@ -470,7 +470,7 @@ pub async fn schedule_timer(duration: Duration) -> SignalEvent {
 ///
 /// This function creates a `tokio::time::Interval` that can be polled
 /// repeatedly to receive periodic timer events. It replaces C's pattern
-/// of repeatedly calling alarm() for periodic tasks.
+/// of repeatedly calling `alarm()` for periodic tasks.
 ///
 /// # Arguments
 ///
@@ -496,13 +496,14 @@ pub async fn schedule_timer(duration: Duration) -> SignalEvent {
 ///     }
 /// }
 /// ```
+#[must_use]
 pub fn create_interval_timer(period: Duration) -> tokio::time::Interval {
     interval(period)
 }
 
 /// Create a `Sleep` future that can be cancelled
 ///
-/// Returns a tokio::time::Sleep future that completes after the specified
+/// Returns a `tokio::time::Sleep` future that completes after the specified
 /// duration. Unlike `schedule_timer`, this allows the caller to cancel the
 /// timer by dropping the returned future.
 ///
@@ -550,7 +551,7 @@ mod tests {
     #[test]
     fn test_signal_event_debug() {
         let event = SignalEvent::Reload;
-        let debug_str = format!("{:?}", event);
+        let debug_str = format!("{event:?}");
         assert!(debug_str.contains("Reload"));
     }
 
@@ -582,9 +583,7 @@ mod tests {
         let elapsed = start.elapsed();
         assert!(
             elapsed >= duration,
-            "Timer should wait at least {:?}, but only waited {:?}",
-            duration,
-            elapsed
+            "Timer should wait at least {duration:?}, but only waited {elapsed:?}"
         );
         assert!(
             elapsed < duration + Duration::from_millis(100),
@@ -616,10 +615,10 @@ mod tests {
         let sleep = create_cancellable_timer(Duration::from_millis(100));
 
         tokio::select! {
-            _ = sleep => {
+            () = sleep => {
                 // Timer completed normally
             }
-            _ = tokio::time::sleep(Duration::from_millis(200)) => {
+            () = tokio::time::sleep(Duration::from_millis(200)) => {
                 panic!("Cancellable timer should complete before fallback");
             }
         }
@@ -631,8 +630,8 @@ mod tests {
         let cancel_signal = tokio::time::sleep(Duration::from_millis(50));
 
         let cancelled = tokio::select! {
-            _ = sleep => false,
-            _ = cancel_signal => true,
+            () = sleep => false,
+            () = cancel_signal => true,
         };
 
         assert!(cancelled, "Timer should be cancelled by early signal");
@@ -641,7 +640,7 @@ mod tests {
     #[test]
     fn test_signal_error_display() {
         let error = SignalError::InvalidSignal("SIGUSR3".to_string());
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Invalid signal"));
         assert!(display.contains("SIGUSR3"));
     }
@@ -649,7 +648,7 @@ mod tests {
     #[test]
     fn test_signal_error_stream_closed() {
         let error = SignalError::SignalStreamClosed;
-        let display = format!("{}", error);
+        let display = format!("{error}");
         assert!(display.contains("Signal stream closed"));
     }
 

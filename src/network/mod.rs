@@ -186,28 +186,28 @@ pub type Result<T> = std::result::Result<T, NetworkError>;
 /// Both UDP and TCP DNS queries use this port.
 pub const DNS_PORT: u16 = 53;
 
-/// DHCPv4 server port (UDP)
+/// `DHCPv4` server port (UDP)
 ///
-/// Server-side port for DHCPv4 protocol as defined in RFC 2131.
+/// Server-side port for `DHCPv4` protocol as defined in RFC 2131.
 /// DHCP servers listen on this port for client requests.
 pub const DHCP_SERVER_PORT: u16 = 67;
 
-/// DHCPv4 client port (UDP)
+/// `DHCPv4` client port (UDP)
 ///
-/// Client-side port for DHCPv4 protocol as defined in RFC 2131.
+/// Client-side port for `DHCPv4` protocol as defined in RFC 2131.
 /// DHCP clients receive responses on this port.
 pub const DHCP_CLIENT_PORT: u16 = 68;
 
-/// DHCPv6 server port (UDP)
+/// `DHCPv6` server port (UDP)
 ///
-/// Server-side port for DHCPv6 protocol as defined in RFC 3315.
-/// DHCPv6 servers listen on this port for client messages.
+/// Server-side port for `DHCPv6` protocol as defined in RFC 3315.
+/// `DHCPv6` servers listen on this port for client messages.
 pub const DHCP6_SERVER_PORT: u16 = 547;
 
-/// DHCPv6 client port (UDP)
+/// `DHCPv6` client port (UDP)
 ///
-/// Client-side port for DHCPv6 protocol as defined in RFC 3315.
-/// DHCPv6 clients receive responses on this port.
+/// Client-side port for `DHCPv6` protocol as defined in RFC 3315.
+/// `DHCPv6` clients receive responses on this port.
 pub const DHCP6_CLIENT_PORT: u16 = 546;
 
 /// TFTP port (UDP)

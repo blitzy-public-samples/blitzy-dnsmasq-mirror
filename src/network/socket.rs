@@ -15,12 +15,12 @@
 //! # Overview
 //!
 //! Key functionalities:
-//! - UDP/TCP socket creation and binding for DNS, DHCP, TFTP services
+//! - `UDP`/`TCP` socket creation and binding for DNS, DHCP, TFTP services
 //! - Interface-specific and wildcard binding strategies
-//! - Socket option configuration (SO_REUSEADDR, SO_BINDTODEVICE, IP_BOUND_IF)
+//! - Socket option configuration (`SO_REUSEADDR`, `SO_BINDTODEVICE`, `IP_BOUND_IF`)
 //! - Source port randomization for DNS queries (security against cache poisoning)
-//! - DHCP broadcast socket support with SO_BROADCAST
-//! - TCP listener management for DNS-over-TCP
+//! - DHCP broadcast socket support with `SO_BROADCAST`
+//! - `TCP` listener management for DNS-over-`TCP`
 //! - Platform-specific socket configuration (Linux, BSD, macOS)
 //!
 //! # Architecture
@@ -32,9 +32,9 @@
 //!
 //! # Platform Support
 //!
-//! - **Linux**: SO_BINDTODEVICE, IP_FREEBIND, netlink-based interface monitoring
-//! - **BSD/macOS**: IP_BOUND_IF, SO_REUSEPORT_LB (load balancing)
-//! - **All platforms**: SO_REUSEADDR, SO_BROADCAST, IP_PKTINFO/IPV6_RECVPKTINFO
+//! - **Linux**: `SO_BINDTODEVICE`, `IP_FREEBIND`, netlink-based interface monitoring
+//! - **BSD/macOS**: `IP_BOUND_IF`, `SO_REUSEPORT_LB` (load balancing)
+//! - **All platforms**: `SO_REUSEADDR`, `SO_BROADCAST`, `IP_PKTINFO`/`IPV6_RECVPKTINFO`
 //!
 //! # Usage Example
 //!
@@ -89,14 +89,14 @@ use nix::libc::{AF_INET, AF_INET6, IPPROTO_IP, IPPROTO_IPV6, if_nametoindex};
 /// while DHCP and TFTP are UDP-only protocols.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Protocol {
-    /// DNS protocol (UDP or TCP)
+    /// DNS protocol (`UDP` or `TCP`)
     Dns {
-        /// True if TCP socket, false for UDP
+        /// True if `TCP` socket, false for `UDP`
         tcp: bool,
     },
-    /// DHCPv4 protocol (UDP port 67)
+    /// `DHCPv4` protocol (`UDP` port 67)
     Dhcpv4,
-    /// DHCPv6 protocol (UDP port 547)
+    /// `DHCPv6` protocol (`UDP` port 547)
     Dhcpv6,
     /// TFTP protocol (UDP port 69)
     Tftp,
@@ -197,7 +197,7 @@ pub enum SocketError {
 
 /// Packet information extracted from received packets
 ///
-/// Contains metadata extracted from IP_PKTINFO (IPv4) or IPV6_RECVPKTINFO (IPv6)
+/// Contains metadata extracted from `IP_PKTINFO` (`IPv4`) or `IPV6_RECVPKTINFO` (`IPv6`)
 /// ancillary data. Used for determining the destination address and arrival interface.
 ///
 /// # Fields
@@ -272,6 +272,10 @@ impl RandomSocketPool {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `SocketError` if socket creation fails for any IPv4 or IPv6 socket in the pool.
     pub async fn new(pool_size: usize) -> Result<Self, SocketError> {
         let mut ipv4_sockets = Vec::with_capacity(pool_size);
         let mut ipv6_sockets = Vec::with_capacity(pool_size);
@@ -336,13 +340,13 @@ impl RandomSocketPool {
 
 /// Address family enumeration
 ///
-/// Simple enumeration for specifying IPv4 or IPv6 address family in function
+/// Simple enumeration for specifying `IPv4` or `IPv6` address family in function
 /// parameters. Used throughout the module for family-specific operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressFamily {
-    /// IPv4 address family (AF_INET)
+    /// `IPv4` address family (`AF_INET`)
     Ipv4,
-    /// IPv6 address family (AF_INET6)
+    /// `IPv6` address family (`AF_INET6`)
     Ipv6,
 }
 
@@ -374,6 +378,7 @@ impl ListenerManager {
     ///
     /// let manager = ListenerManager::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             listeners: Arc::new(RwLock::new(Vec::new())),
@@ -393,11 +398,15 @@ impl ListenerManager {
     ///
     /// ```rust,no_run
     /// # use dnsmasq::network::socket::{ListenerManager, SocketListener};
-    /// # async fn example(manager: &ListenerManager, listener: SocketListener) {
-    /// manager.add_listener(listener).await;
+    /// # fn example(manager: &ListenerManager, listener: SocketListener) {
+    /// manager.add_listener(listener);
     /// # }
     /// ```
-    pub async fn add_listener(&self, listener: SocketListener) {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
+    pub fn add_listener(&self, listener: SocketListener) {
         let mut listeners = self.listeners.write().unwrap();
         listeners.push(listener);
     }
@@ -416,11 +425,15 @@ impl ListenerManager {
     /// ```rust,no_run
     /// # use dnsmasq::network::socket::ListenerManager;
     /// # use std::net::SocketAddr;
-    /// # async fn example(manager: &ListenerManager, addr: SocketAddr) {
-    /// manager.remove_listener(&addr).await;
+    /// # fn example(manager: &ListenerManager, addr: SocketAddr) {
+    /// manager.remove_listener(&addr);
     /// # }
     /// ```
-    pub async fn remove_listener(&self, addr: &SocketAddr) {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
+    pub fn remove_listener(&self, addr: &SocketAddr) {
         let mut listeners = self.listeners.write().unwrap();
         listeners.retain(|l| &l.addr != addr);
     }
@@ -443,13 +456,18 @@ impl ListenerManager {
     /// ```rust,no_run
     /// # use dnsmasq::network::socket::ListenerManager;
     /// # use std::net::SocketAddr;
-    /// # async fn example(manager: &ListenerManager, addr: SocketAddr) {
-    /// if let Some(listener) = manager.find_listener(&addr).await {
+    /// # fn example(manager: &ListenerManager, addr: SocketAddr) {
+    /// if let Some(listener) = manager.find_listener(&addr) {
     ///     println!("Found listener socket: {:?}", listener.local_addr());
     /// }
     /// # }
     /// ```
-    pub async fn find_listener(&self, addr: &SocketAddr) -> Option<Arc<UdpSocket>> {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
+    #[must_use]
+    pub fn find_listener(&self, addr: &SocketAddr) -> Option<Arc<UdpSocket>> {
         let listeners = self.listeners.read().unwrap();
         listeners
             .iter()
@@ -471,6 +489,14 @@ impl ListenerManager {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `SocketError` if listener creation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock).
     pub async fn refresh_listeners(&self) -> Result<(), SocketError> {
         // Recreate all listeners (without holding the lock)
         let new_listeners = create_bound_listeners(false).await?;
@@ -502,7 +528,7 @@ impl Default for ListenerManager {
 /// 2. Apply interface filters (--interface, --except-interface)
 /// 3. Create UDP sockets for DNS (port 53), DHCP (port 67/547), TFTP (port 69)
 /// 4. Create TCP listeners for DNS-over-TCP
-/// 5. Configure socket options (SO_REUSEADDR, SO_BINDTODEVICE, etc.)
+/// 5. Configure socket options (`SO_REUSEADDR`, `SO_BINDTODEVICE`, etc.)
 /// 6. Return vector of all successfully created listeners
 ///
 /// # Arguments
@@ -513,6 +539,14 @@ impl Default for ListenerManager {
 ///
 /// Returns `Ok(Vec<SocketListener>)` with all created listeners, or `Err(SocketError)`
 /// if socket creation fails and `dienow` is false.
+///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation or binding fails and `dienow` is false.
+///
+/// # Panics
+///
+/// Panics if `dienow` is true and socket creation or binding fails.
 ///
 /// # Example
 ///
@@ -541,7 +575,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
         }
         Err(e) => {
             if dienow {
-                panic!("Failed to bind DNS UDP socket: {}", e);
+                panic!("Failed to bind DNS UDP socket: {e}");
             } else {
                 return Err(e);
             }
@@ -560,16 +594,14 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
             });
         }
         Err(e) => {
-            if dienow {
-                panic!("Failed to bind DNS UDP IPv6 socket: {}", e);
-            }
+            assert!(!dienow, "Failed to bind DNS UDP IPv6 socket: {e}");
         }
     }
 
     // DHCP listener (feature-gated)
     #[cfg(feature = "dhcp")]
     {
-        match create_dhcp_socket().await {
+        match create_dhcp_socket() {
             Ok(socket) => {
                 listeners.push(SocketListener {
                     socket: Arc::new(socket),
@@ -580,9 +612,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
                 });
             }
             Err(e) => {
-                if dienow {
-                    panic!("Failed to bind DHCP socket: {}", e);
-                }
+                assert!(!dienow, "Failed to bind DHCP socket: {e}");
             }
         }
     }
@@ -601,9 +631,7 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
                 });
             }
             Err(e) => {
-                if dienow {
-                    panic!("Failed to bind TFTP socket: {}", e);
-                }
+                assert!(!dienow, "Failed to bind TFTP socket: {e}");
             }
         }
     }
@@ -614,19 +642,23 @@ pub async fn create_bound_listeners(dienow: bool) -> Result<Vec<SocketListener>,
 /// Bind UDP socket to specific network interface
 ///
 /// Creates a UDP socket bound to a specific network interface using platform-specific
-/// socket options. On Linux, uses SO_BINDTODEVICE; on BSD/macOS, uses IP_BOUND_IF.
+/// socket options. On Linux, uses `SO_BINDTODEVICE`; on BSD/macOS, uses `IP_BOUND_IF`.
 /// This ensures packets are only received on the specified interface.
 ///
 /// # Platform Support
 ///
-/// - **Linux**: Uses SO_BINDTODEVICE socket option via nix crate
-/// - **BSD/macOS**: Uses IP_BOUND_IF socket option with interface index
+/// - **Linux**: Uses `SO_BINDTODEVICE` socket option via nix crate
+/// - **BSD/macOS**: Uses `IP_BOUND_IF` socket option with interface index
 /// - **Other**: Falls back to basic bind without interface restriction
 ///
 /// # Arguments
 ///
 /// * `addr` - Socket address (IP and port) to bind to
-/// * `interface` - Network interface name (e.g., "eth0", "wlan0")
+/// * `interface` - Network interface name (e.g., `eth0`, `wlan0`)
+///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation fails, interface cannot be found, or binding fails.
 ///
 /// # Returns
 ///
@@ -719,13 +751,17 @@ pub async fn bind_to_interface(
 /// Bind UDP socket to wildcard address (0.0.0.0 or ::)
 ///
 /// Creates a UDP socket bound to the wildcard address for the specified port.
-/// Accepts connections on all network interfaces. Configures SO_REUSEADDR to
+/// Accepts connections on all network interfaces. Configures `SO_REUSEADDR` to
 /// allow multiple bindings to the same port (e.g., for IPv4 and IPv6).
 ///
 /// # Arguments
 ///
 /// * `port` - Port number to bind to (e.g., 53 for DNS, 67 for DHCP)
 /// * `ipv6` - If true, bind to IPv6 wildcard (::), else IPv4 (0.0.0.0)
+///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation or binding fails.
 ///
 /// # Returns
 ///
@@ -788,6 +824,10 @@ pub async fn bind_wildcard(port: u16, ipv6: bool) -> Result<UdpSocket, SocketErr
 ///
 /// * `family` - Address family (IPv4 or IPv6) for socket creation
 ///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation or binding fails.
+///
 /// # Returns
 ///
 /// Returns `Ok(UdpSocket)` with OS-assigned random port, or `Err(SocketError)`
@@ -816,12 +856,16 @@ pub async fn create_random_source_socket(family: AddressFamily) -> Result<UdpSoc
 /// Create TCP listener for DNS-over-TCP
 ///
 /// Creates a TCP listener for handling DNS queries that exceed the 512-byte UDP
-/// limit or require reliable delivery. Configures SO_REUSEADDR and sets maximum
+/// limit or require reliable delivery. Configures `SO_REUSEADDR` and sets maximum
 /// connection limit to prevent resource exhaustion.
 ///
 /// # Arguments
 ///
 /// * `addr` - Socket address (IP and port) to bind to, typically port 53
+///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation or binding fails.
 ///
 /// # Returns
 ///
@@ -834,14 +878,14 @@ pub async fn create_random_source_socket(family: AddressFamily) -> Result<UdpSoc
 /// use dnsmasq::network::socket::create_tcp_listener;
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 53);
-/// let listener = create_tcp_listener(addr).await?;
+/// let listener = create_tcp_listener(addr)?;
 /// println!("TCP listener on {}", listener.addr);
 /// # Ok(())
 /// # }
 /// ```
-pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, SocketError> {
+pub fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, SocketError> {
     let domain = if addr.is_ipv4() {
         Domain::IPV4
     } else {
@@ -880,8 +924,12 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
 /// Create DHCP socket with broadcast support
 ///
 /// Creates a UDP socket specifically configured for DHCP server operation.
-/// Sets SO_BROADCAST to enable sending to 255.255.255.255, which is required
+/// Sets `SO_BROADCAST` to enable sending to 255.255.255.255, which is required
 /// for DHCP DISCOVER/OFFER exchange before the client has an IP address.
+///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation or broadcast option configuration fails.
 ///
 /// # Returns
 ///
@@ -899,13 +947,13 @@ pub async fn create_tcp_listener(addr: SocketAddr) -> Result<TcpSocketListener, 
 /// use dnsmasq::network::socket::create_dhcp_socket;
 ///
 /// # #[cfg(feature = "dhcp")]
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let socket = create_dhcp_socket().await?;
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let socket = create_dhcp_socket()?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "dhcp")]
-pub async fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
+pub fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SocketProtocol::UDP))
         .map_err(SocketError::CreationFailed)?;
 
@@ -947,6 +995,10 @@ pub async fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
 /// * `addr` - Source address to bind to
 /// * `interface` - Optional interface name for additional interface binding
 ///
+/// # Errors
+///
+/// Returns `SocketError` if interface binding fails.
+///
 /// # Returns
 ///
 /// Returns `Ok(())` on success, or `Err(SocketError)` if binding fails.
@@ -961,11 +1013,11 @@ pub async fn create_dhcp_socket() -> Result<UdpSocket, SocketError> {
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let socket = UdpSocket::bind("0.0.0.0:0").await?;
 /// let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 0);
-/// bind_local(&socket, &addr, Some("eth0")).await?;
+/// bind_local(&socket, &addr, Some("eth0"))?;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn bind_local(
+pub fn bind_local(
     socket: &UdpSocket,
     addr: &SocketAddr,
     interface: Option<&str>,
@@ -997,7 +1049,7 @@ pub async fn bind_local(
 
 /// Extract packet information from received packet metadata
 ///
-/// Parses IP_PKTINFO (IPv4) or IPV6_RECVPKTINFO (IPv6) ancillary data from
+/// Parses `IP_PKTINFO` (IPv4) or `IPV6_RECVPKTINFO` (IPv6) ancillary data from
 /// received packets to extract destination address and arrival interface.
 /// This information is essential for determining which interface received
 /// the packet and responding on the correct interface.
@@ -1015,7 +1067,8 @@ pub async fn bind_local(
 /// # Note
 ///
 /// This is a placeholder implementation. Full implementation would parse
-/// cmsg (control message) data using nix crate or libc bindings.
+/// `cmsg` (control message) data using nix crate or libc bindings.
+#[must_use]
 pub fn extract_packet_info(_msg: &()) -> PacketInfo {
     // Placeholder implementation
     // Full implementation would parse ancillary data (cmsg) from recvmsg()
@@ -1028,11 +1081,11 @@ pub fn extract_packet_info(_msg: &()) -> PacketInfo {
     }
 }
 
-/// Create ICMPv6 socket for Router Advertisement and neighbor discovery
+/// Create `ICMPv6` socket for Router Advertisement and neighbor discovery
 ///
-/// Creates a raw ICMPv6 socket for sending Router Advertisement messages
-/// and performing IPv6 neighbor discovery. Requires elevated privileges
-/// (CAP_NET_RAW on Linux or root).
+/// Creates a raw `ICMPv6` socket for sending Router Advertisement messages
+/// and performing `IPv6` neighbor discovery. Requires elevated privileges
+/// (`CAP_NET_RAW` on Linux or root).
 ///
 /// # Returns
 ///
@@ -1047,8 +1100,12 @@ pub fn extract_packet_info(_msg: &()) -> PacketInfo {
 ///
 /// # Platform Support
 ///
-/// Supported on all Unix platforms with ICMPv6 support. Not available
+/// Supported on all Unix platforms with `ICMPv6` support. Not available
 /// on Windows.
+///
+/// # Errors
+///
+/// Returns `SocketError` if socket creation fails or privileges are insufficient.
 ///
 /// # Example
 ///
@@ -1087,6 +1144,9 @@ pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
     }
 }
 
+/// Test module for socket operations
+///
+/// Contains unit tests for socket creation, binding, and configuration.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod tests {
     use super::*;
@@ -1139,16 +1199,16 @@ pub mod tests {
             tftp_ok: false,
         };
 
-        manager.add_listener(listener).await;
+        manager.add_listener(listener);
 
-        let found = manager.find_listener(&addr).await;
+        let found = manager.find_listener(&addr);
         assert!(found.is_some());
     }
 
     #[tokio::test]
     async fn test_create_tcp_listener() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        let result = create_tcp_listener(addr).await;
+        let result = create_tcp_listener(addr);
         assert!(result.is_ok());
 
         let listener = result.unwrap();

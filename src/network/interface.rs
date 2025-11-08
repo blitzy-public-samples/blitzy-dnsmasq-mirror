@@ -49,7 +49,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant};
 
 use bitflags::bitflags;
@@ -204,7 +204,7 @@ impl InterfaceCache {
         Self {
             interfaces: HashMap::new(),
             index_to_name_map: HashMap::new(),
-            last_update: Instant::now() - Duration::from_secs(3600), // Force initial update
+            last_update: Instant::now().checked_sub(Duration::from_secs(3600)).unwrap(), // Force initial update
             update_interval: Duration::from_secs(5),
         }
     }
@@ -235,13 +235,13 @@ impl InterfaceCache {
 
     /// Get interface name by index
     fn get_name_by_index(&self, index: u32) -> Option<&str> {
-        self.index_to_name_map.get(&index).map(|s| s.as_str())
+        self.index_to_name_map.get(&index).map(std::string::String::as_str)
     }
 }
 
 /// Global interface cache instance
-static INTERFACE_CACHE: once_cell::sync::Lazy<Arc<RwLock<InterfaceCache>>> =
-    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(InterfaceCache::new())));
+static INTERFACE_CACHE: LazyLock<Arc<RwLock<InterfaceCache>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(InterfaceCache::new())));
 
 /// Convert network interface index to interface name
 ///
@@ -263,6 +263,17 @@ static INTERFACE_CACHE: once_cell::sync::Lazy<Arc<RwLock<InterfaceCache>>> =
 /// - `Ok(String)` - Interface name on success
 /// - `Err(InterfaceError::InvalidIndex)` - Index is 0 or not found
 /// - `Err(InterfaceError::EnumerationFailed)` - System call failed
+///
+/// # Errors
+///
+/// Returns `InterfaceError::InvalidIndex` if the index is 0 (reserved).
+/// Returns `InterfaceError::EnumerationFailed` if the task spawn fails.
+/// Returns `InterfaceError::NotFound` if no interface with the given index exists.
+///
+/// # Panics
+///
+/// Panics if the cache lock is poisoned (only occurs if another thread panicked
+/// while holding the lock).
 ///
 /// # Examples
 ///
@@ -296,8 +307,7 @@ pub async fn index_to_name(index: u32) -> Result<String, InterfaceError> {
         .await
         .map_err(|e| {
             InterfaceError::EnumerationFailed(std::io::Error::other(format!(
-                "Task join error: {}",
-                e
+                "Task join error: {e}"
             )))
         })?
 }
@@ -353,6 +363,16 @@ fn index_to_name_blocking(index: u32) -> Result<String, InterfaceError> {
 /// - `Err(InterfaceError::NotFound)` - Interface name not found
 /// - `Err(InterfaceError::EnumerationFailed)` - System call failed
 ///
+/// # Errors
+///
+/// Returns `InterfaceError::NotFound` if no interface with the given name exists.
+/// Returns `InterfaceError::EnumerationFailed` if the task spawn fails or system call fails.
+///
+/// # Panics
+///
+/// Panics if the cache lock is poisoned (only occurs if another thread panicked
+/// while holding the lock).
+///
 /// # Examples
 ///
 /// ```rust,no_run
@@ -382,8 +402,7 @@ pub async fn name_to_index(name: &str) -> Result<u32, InterfaceError> {
         .await
         .map_err(|e| {
             InterfaceError::EnumerationFailed(std::io::Error::other(format!(
-                "Task join error: {}",
-                e
+                "Task join error: {e}"
             )))
         })?
 }
@@ -435,6 +454,16 @@ fn name_to_index_blocking(name: &str) -> Result<u32, InterfaceError> {
 /// - `Ok(Vec<InterfaceRecord>)` - List of all discovered interfaces
 /// - `Err(InterfaceError)` - Enumeration failed
 ///
+/// # Errors
+///
+/// Returns `InterfaceError::EnumerationFailed` if the task spawn fails or
+/// platform-specific enumeration fails.
+///
+/// # Panics
+///
+/// Panics if the cache lock is poisoned (only occurs if another thread panicked
+/// while holding the lock).
+///
 /// # Examples
 ///
 /// ```rust,no_run
@@ -454,8 +483,7 @@ pub async fn enumerate_interfaces() -> Result<Vec<InterfaceRecord>, InterfaceErr
         .await
         .map_err(|e| {
             InterfaceError::EnumerationFailed(std::io::Error::other(format!(
-                "Task join error: {}",
-                e
+                "Task join error: {e}"
             )))
         })??;
 
@@ -566,9 +594,9 @@ pub fn is_interface_allowed(
 ///
 /// # Platform Implementation
 ///
-/// - **Linux**: netlink RTM_NEWLINK/RTM_DELLINK messages
-/// - **BSD**: kqueue with EVFILT_NETDEV
-/// - **Solaris**: polling with SIOCGLIFCONF
+/// - **Linux**: netlink `RTM_NEWLINK`/`RTM_DELLINK` messages
+/// - **BSD**: kqueue with `EVFILT_NETDEV`
+/// - **Solaris**: polling with `SIOCGLIFCONF`
 ///
 /// # Returns
 ///
@@ -621,17 +649,16 @@ pub async fn watch_interfaces() -> impl Stream<Item = InterfaceEvent> {
 
                     // Detect added interfaces
                     for (name, iface) in &current {
-                        if !last_interfaces.contains_key(name) {
-                            let _ = tx.send(InterfaceEvent::Added(iface.clone()));
-                        } else {
+                        if let Some(old_iface) = last_interfaces.get(name) {
                             // Check for address changes
-                            let old_iface = &last_interfaces[name];
                             if old_iface.addresses != iface.addresses {
                                 let _ = tx.send(InterfaceEvent::AddressChanged {
                                     name: name.clone(),
                                     addresses: iface.addresses.clone(),
                                 });
                             }
+                        } else {
+                            let _ = tx.send(InterfaceEvent::Added(iface.clone()));
                         }
                     }
 
@@ -645,7 +672,7 @@ pub async fn watch_interfaces() -> impl Stream<Item = InterfaceEvent> {
                     last_interfaces = current;
                 }
                 Err(e) => {
-                    eprintln!("Interface enumeration error: {}", e);
+                    eprintln!("Interface enumeration error: {e}");
                 }
             }
         }
@@ -657,8 +684,9 @@ pub async fn watch_interfaces() -> impl Stream<Item = InterfaceEvent> {
 // Platform-specific implementations
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::*;
+    use super::{InterfaceError, InterfaceFlags, InterfaceRecord};
     use nix::sys::socket::SockaddrLike;
+    use std::net::{IpAddr, SocketAddr};
     use std::os::unix::io::AsRawFd;
 
     /// Linux SIOCGIFNAME ioctl for index-to-name translation
@@ -678,7 +706,10 @@ mod linux {
         let mut ifr: ifreq = unsafe { mem::zeroed() };
         // Set interface index in the union - use ifru_ifindex which is the correct field
         unsafe {
-            ifr.ifr_ifru.ifru_ifindex = index as i32;
+            #[allow(clippy::cast_possible_wrap)]
+            {
+                ifr.ifr_ifru.ifru_ifindex = index as i32;
+            }
         }
 
         let result = unsafe { ioctl(fd, SIOCGIFNAME, &mut ifr) };
@@ -714,7 +745,7 @@ mod linux {
         let mut ifr: ifreq = unsafe { mem::zeroed() };
         let name_bytes = name.as_bytes();
         ifr.ifr_name[..name_bytes.len()]
-            .copy_from_slice(unsafe { std::mem::transmute::<&[u8], &[i8]>(name_bytes) });
+            .copy_from_slice(unsafe { &*(std::ptr::from_ref::<[u8]>(name_bytes) as *const [i8]) });
 
         let result = unsafe { ioctl(fd, SIOCGIFINDEX, &mut ifr) };
         unsafe { nix::libc::close(fd) };
@@ -723,6 +754,7 @@ mod linux {
             return Err(InterfaceError::NotFound(name.to_string()));
         }
 
+        #[allow(clippy::cast_sign_loss)]
         let index = unsafe { ifr.ifr_ifru.ifru_ifindex as u32 };
         Ok(index)
     }
@@ -774,15 +806,14 @@ mod linux {
     fn if_nametoindex(name: &str) -> u32 {
         use std::ffi::CString;
 
-        let c_name = match CString::new(name) {
-            Ok(s) => s,
-            Err(_) => return 0,
+        let Ok(c_name) = CString::new(name) else {
+            return 0;
         };
 
         unsafe { nix::libc::if_nametoindex(c_name.as_ptr()) }
     }
 
-    /// Convert nix interface flags to our InterfaceFlags
+    /// Convert nix interface flags to our `InterfaceFlags`
     fn convert_flags(flags: nix::net::if_::InterfaceFlags) -> InterfaceFlags {
         let mut result = InterfaceFlags::empty();
 
@@ -802,7 +833,7 @@ mod linux {
         result
     }
 
-    /// Convert SockaddrStorage to SocketAddr
+    /// Convert `SockaddrStorage` to `SocketAddr`
     fn sockaddr_to_socketaddr(addr: &nix::sys::socket::SockaddrStorage) -> Option<SocketAddr> {
         if let Some(sin) = addr.as_sockaddr_in() {
             let ip = sin.ip();
@@ -903,7 +934,7 @@ mod bsd {
         unsafe { libc::if_nametoindex(c_name.as_ptr()) }
     }
 
-    /// Convert nix interface flags to our InterfaceFlags
+    /// Convert nix interface flags to our `InterfaceFlags`
     fn convert_flags(flags: nix::net::if_::InterfaceFlags) -> InterfaceFlags {
         let mut result = InterfaceFlags::empty();
 
@@ -923,7 +954,7 @@ mod bsd {
         result
     }
 
-    /// Convert SockaddrStorage to SocketAddr
+    /// Convert `SockaddrStorage` to `SocketAddr`
     fn sockaddr_to_socketaddr(addr: &nix::sys::socket::SockaddrStorage) -> Option<SocketAddr> {
         use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -1000,10 +1031,8 @@ mod solaris {
     }
 }
 
-// Add once_cell dependency for lazy static initialization
-use once_cell::sync::Lazy;
-
 #[cfg(any(test, feature = "test-utils"))]
+/// Test utilities and unit tests for network interface module
 pub mod tests {
     use super::*;
 

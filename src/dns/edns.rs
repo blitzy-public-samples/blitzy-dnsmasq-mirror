@@ -172,12 +172,13 @@ pub struct ClientSubnetInfo {
     pub source_prefix: u8,
     /// Number of significant bits in scope (response from server)
     pub scope_prefix: u8,
-    /// Client IP address (truncated to source_prefix bits)
+    /// Client IP address (truncated to `source_prefix` bits)
     pub address: IpAddr,
 }
 
 impl ClientSubnetInfo {
     /// Create new client subnet info for IPv4 address
+    #[must_use]
     pub fn new_v4(addr: Ipv4Addr, prefix_len: u8) -> Self {
         Self {
             family: 1,
@@ -188,6 +189,7 @@ impl ClientSubnetInfo {
     }
 
     /// Create new client subnet info for IPv6 address
+    #[must_use]
     pub fn new_v6(addr: Ipv6Addr, prefix_len: u8) -> Self {
         Self {
             family: 2,
@@ -198,6 +200,10 @@ impl ClientSubnetInfo {
     }
 
     /// Parse client subnet info from wire format
+    ///
+    /// # Errors
+    ///
+    /// Returns `EdnsError` if the data is malformed or too short.
     pub fn from_bytes(data: &[u8]) -> EdnsResult<Self> {
         if data.len() < 4 {
             return Err(EdnsError::PacketTooShort {
@@ -209,12 +215,12 @@ impl ClientSubnetInfo {
         let mut cursor = Cursor::new(data);
         let family = cursor
             .read_u16::<NetworkEndian>()
-            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read family: {}", e)))?;
+            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read family: {e}")))?;
         let source_prefix = cursor.read_u8().map_err(|e| {
-            EdnsError::MalformedOption(format!("Failed to read source prefix: {}", e))
+            EdnsError::MalformedOption(format!("Failed to read source prefix: {e}"))
         })?;
         let scope_prefix = cursor.read_u8().map_err(|e| {
-            EdnsError::MalformedOption(format!("Failed to read scope prefix: {}", e))
+            EdnsError::MalformedOption(format!("Failed to read scope prefix: {e}"))
         })?;
 
         let address = match family {
@@ -246,8 +252,7 @@ impl ClientSubnetInfo {
             }
             _ => {
                 return Err(EdnsError::InvalidAddress(format!(
-                    "Unsupported address family: {}",
-                    family
+                    "Unsupported address family: {family}"
                 )));
             }
         };
@@ -261,6 +266,7 @@ impl ClientSubnetInfo {
     }
 
     /// Serialize client subnet info to wire format
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = BytesMut::new();
         buf.put_u16(self.family);
@@ -309,6 +315,7 @@ pub struct ExtendedErrorInfo {
 
 impl ExtendedErrorInfo {
     /// Create new extended error info
+    #[must_use]
     pub fn new(info_code: u16, extra_text: String) -> Self {
         Self {
             info_code,
@@ -317,6 +324,10 @@ impl ExtendedErrorInfo {
     }
 
     /// Parse extended error info from wire format
+    ///
+    /// # Errors
+    ///
+    /// Returns `EdnsError` if the data is malformed or too short.
     pub fn from_bytes(data: &[u8]) -> EdnsResult<Self> {
         if data.len() < 2 {
             return Err(EdnsError::PacketTooShort {
@@ -328,11 +339,11 @@ impl ExtendedErrorInfo {
         let mut cursor = Cursor::new(data);
         let info_code = cursor
             .read_u16::<NetworkEndian>()
-            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read info code: {}", e)))?;
+            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read info code: {e}")))?;
 
         let extra_text = if data.len() > 2 {
             String::from_utf8(data[2..].to_vec()).map_err(|e| {
-                EdnsError::MalformedOption(format!("Invalid UTF-8 in extra text: {}", e))
+                EdnsError::MalformedOption(format!("Invalid UTF-8 in extra text: {e}"))
             })?
         } else {
             String::new()
@@ -345,6 +356,7 @@ impl ExtendedErrorInfo {
     }
 
     /// Serialize extended error info to wire format
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = BytesMut::new();
         buf.put_u16(self.info_code);
@@ -395,6 +407,7 @@ impl OptRecord {
     /// - Version: 0 (only supported version)
     /// - DNSSEC OK: false
     /// - No options
+    #[must_use]
     pub fn new() -> Self {
         Self {
             udp_payload_size: 1232, // RFC 6891 recommended minimum for IPv6
@@ -406,18 +419,21 @@ impl OptRecord {
     }
 
     /// Set the UDP payload size (builder pattern)
+    #[must_use]
     pub fn with_udp_size(mut self, size: u16) -> Self {
         self.udp_payload_size = size;
         self
     }
 
     /// Set DNSSEC OK flag (builder pattern)
+    #[must_use]
     pub fn with_dnssec_ok(mut self, value: bool) -> Self {
         self.dnssec_ok = value;
         self
     }
 
     /// Add an EDNS option (builder pattern)
+    #[must_use]
     pub fn with_option(mut self, option: EdnsOption) -> Self {
         self.options.push(option);
         self
@@ -427,7 +443,11 @@ impl OptRecord {
     ///
     /// Expects the RDATA section of an OPT record (after NAME, TYPE, CLASS, TTL, RDLEN).
     /// The CLASS and TTL fields should be parsed externally and passed to construct the
-    /// OptRecord structure.
+    /// `OptRecord` structure.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EdnsError` if the version is unsupported or the RDATA is malformed.
     pub fn from_bytes(udp_payload_size: u16, ttl_bytes: u32, rdata: &[u8]) -> EdnsResult<Self> {
         // Extract extended RCODE, version, and flags from TTL field
         let extended_rcode = ((ttl_bytes >> 24) & 0xFF) as u8;
@@ -454,19 +474,20 @@ impl OptRecord {
 
     /// Serialize OPT record to wire format
     ///
-    /// Returns (udp_payload_size for CLASS, ttl_bytes, rdata)
+    /// Returns `(udp_payload_size` for CLASS, `ttl_bytes`, `rdata)`
+    #[must_use]
     pub fn to_bytes(&self) -> (u16, u32, Vec<u8>) {
         // Construct TTL field: extended_rcode | version | flags
         let flags = if self.dnssec_ok { 0x8000u16 } else { 0u16 };
         let ttl_bytes =
-            ((self.extended_rcode as u32) << 24) | ((self.version as u32) << 16) | (flags as u32);
+            (u32::from(self.extended_rcode) << 24) | (u32::from(self.version) << 16) | u32::from(flags);
 
         // Serialize all options
         let mut rdata = BytesMut::new();
         for option in &self.options {
             let option_data = option.to_bytes();
             rdata.put_u16(option.code());
-            rdata.put_u16(option_data.len() as u16);
+            rdata.put_u16(u16::try_from(option_data.len()).unwrap_or(u16::MAX));
             rdata.extend_from_slice(&option_data);
         }
 
@@ -474,16 +495,20 @@ impl OptRecord {
     }
 
     /// Parse EDNS options from RDATA
+    ///
+    /// # Errors
+    ///
+    /// Returns `EdnsError` if the RDATA is malformed or too short.
     fn parse_options(mut rdata: &[u8]) -> EdnsResult<Vec<EdnsOption>> {
         let mut options = Vec::new();
 
         while rdata.len() >= 4 {
             let mut cursor = Cursor::new(rdata);
             let code = cursor.read_u16::<NetworkEndian>().map_err(|e| {
-                EdnsError::MalformedOption(format!("Failed to read option code: {}", e))
+                EdnsError::MalformedOption(format!("Failed to read option code: {e}"))
             })?;
             let length = cursor.read_u16::<NetworkEndian>().map_err(|e| {
-                EdnsError::MalformedOption(format!("Failed to read option length: {}", e))
+                EdnsError::MalformedOption(format!("Failed to read option length: {e}"))
             })?;
 
             if rdata.len() < 4 + length as usize {
@@ -541,10 +566,10 @@ pub mod option_codes {
 ///
 /// # Option Categories
 ///
-/// - **Geographic**: ClientSubnet for location-aware responses
-/// - **Security**: Cookie for transaction authentication, ExtendedError for detailed diagnostics
+/// - **Geographic**: `ClientSubnet` for location-aware responses
+/// - **Security**: Cookie for transaction authentication, `ExtendedError` for detailed diagnostics
 /// - **Privacy**: Padding for traffic analysis resistance
-/// - **DNSSEC**: KeyTag for algorithm signaling
+/// - **DNSSEC**: `KeyTag` for algorithm signaling
 /// - **Device Tracking**: Umbrella and NOM options for device identification
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EdnsOption {
@@ -606,6 +631,7 @@ pub enum EdnsOption {
 
 impl EdnsOption {
     /// Get the option code for this option
+    #[must_use]
     pub fn code(&self) -> u16 {
         match self {
             EdnsOption::ClientSubnet(_) => option_codes::CLIENT_SUBNET,
@@ -618,6 +644,10 @@ impl EdnsOption {
     }
 
     /// Parse EDNS option from option code and data
+    ///
+    /// # Errors
+    ///
+    /// Returns `EdnsError` if the data is malformed or too short for the specified option type.
     pub fn from_code_and_data(code: u16, data: &[u8]) -> EdnsResult<Self> {
         match code {
             option_codes::CLIENT_SUBNET => {
@@ -626,9 +656,9 @@ impl EdnsOption {
             }
             option_codes::COOKIE => {
                 if data.len() < 8 {
+                    let len = data.len();
                     return Err(EdnsError::MalformedOption(format!(
-                        "Cookie too short: {} bytes (need at least 8)",
-                        data.len()
+                        "Cookie too short: {len} bytes (need at least 8)"
                     )));
                 }
                 let mut client = [0u8; 8];
@@ -647,9 +677,9 @@ impl EdnsOption {
             }
             option_codes::UMBRELLA => {
                 if data.len() < 4 {
+                    let len = data.len();
                     return Err(EdnsError::MalformedOption(format!(
-                        "Umbrella option too short: {} bytes (need at least 4)",
-                        data.len()
+                        "Umbrella option too short: {len} bytes (need at least 4)"
                     )));
                 }
                 let device_id = data[0..4].to_vec();
@@ -663,8 +693,7 @@ impl EdnsOption {
             _ => {
                 // Unknown option - preserve as-is for forwarding
                 debug!(
-                    "Unknown EDNS option code {}, preserving {} bytes",
-                    code,
+                    "Unknown EDNS option code {code}, preserving {} bytes",
                     data.len()
                 );
                 Ok(EdnsOption::Unknown {
@@ -676,6 +705,7 @@ impl EdnsOption {
     }
 
     /// Serialize EDNS option to wire format (without code and length headers)
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             EdnsOption::ClientSubnet(info) => info.to_bytes(),
@@ -731,6 +761,7 @@ impl EdnsOption {
 ///     println!("UDP payload size: {}", opt.udp_payload_size);
 /// }
 /// ```
+#[must_use]
 pub fn find_opt_record(additional: &[ResourceRecord]) -> Option<&ResourceRecord> {
     additional
         .iter()
@@ -765,7 +796,7 @@ pub fn add_opt_record(
     additional: &mut Vec<ResourceRecord>,
     udp_payload_size: u16,
     dnssec_ok: bool,
-    options: Vec<EdnsOption>,
+    options: &[EdnsOption],
 ) {
     // Remove existing OPT record if present
     additional.retain(|rr| !matches!(rr, ResourceRecord::OPT { .. }));
@@ -779,10 +810,10 @@ pub fn add_opt_record(
         data: {
             // Serialize options
             let mut buf = BytesMut::new();
-            for option in &options {
+            for option in options {
                 let option_data = option.to_bytes();
                 buf.put_u16(option.code());
-                buf.put_u16(option_data.len() as u16);
+                buf.put_u16(u16::try_from(option_data.len()).unwrap_or(0));
                 buf.extend_from_slice(&option_data);
             }
             buf.to_vec()
@@ -827,6 +858,7 @@ pub fn add_opt_record(
 ///     }
 /// }));
 /// ```
+#[must_use]
 pub fn max_udp_payload(opt_payload_size: Option<u16>) -> usize {
     if let Some(size) = opt_payload_size {
         // Cap at reasonable maximum to prevent abuse
@@ -871,6 +903,7 @@ pub fn max_udp_payload(opt_payload_size: Option<u16>) -> usize {
 ///     // Include DNSSEC records in response
 /// }
 /// ```
+#[must_use]
 pub fn supports_dnssec(dnssec_ok: Option<bool>) -> bool {
     dnssec_ok.unwrap_or(false)
 }
@@ -1081,7 +1114,7 @@ mod tests {
         let mut additional = Vec::new();
 
         // Add OPT record
-        add_opt_record(&mut additional, 4096, true, vec![]);
+        add_opt_record(&mut additional, 4096, true, &[]);
         assert_eq!(additional.len(), 1);
         match &additional[0] {
             ResourceRecord::OPT {
@@ -1096,7 +1129,7 @@ mod tests {
         }
 
         // Replace existing OPT record
-        add_opt_record(&mut additional, 1232, false, vec![]);
+        add_opt_record(&mut additional, 1232, false, &[]);
         assert_eq!(additional.len(), 1);
         match &additional[0] {
             ResourceRecord::OPT {
@@ -1149,7 +1182,7 @@ mod tests {
 
     #[test]
     fn test_edns_error_unsupported_version() {
-        let result = OptRecord::from_bytes(4096, 0x00010000, &[]);
+        let result = OptRecord::from_bytes(4096, 0x0001_0000, &[]);
         assert!(result.is_err());
         match result.unwrap_err() {
             EdnsError::UnsupportedVersion(v) => assert_eq!(v, 1),

@@ -8,37 +8,37 @@
 
 //! # DHCP Lease Database Management
 //!
-//! This module provides in-memory DHCP lease management for both DHCPv4 and DHCPv6,
+//! This module provides in-memory DHCP lease management for both `DHCPv4` and `DHCPv6`,
 //! translating the C implementation from `src/lease.c` (approximately 1,700 lines).
 //!
 //! ## Purpose
 //!
 //! Manages active DHCP leases with the following capabilities:
-//! - **Lease allocation**: Creates new lease entries for DHCPv4 and DHCPv6 clients
-//! - **Efficient lookups**: O(1) HashMap-based searches by IP, MAC, client ID, or DUID
+//! - **Lease allocation**: Creates new lease entries for `DHCPv4` and `DHCPv6` clients
+//! - **Efficient lookups**: O(1) `HashMap`-based searches by IP, MAC, client ID, or DUID
 //! - **Expiration tracking**: Automatic lease expiry with monotonic time handling
 //! - **Hostname management**: DNS cache integration for hostname-to-IP mapping
 //! - **Configuration integration**: Static host reservations override DHCP-supplied names
-//! - **Persistent storage**: Atomic file updates via LeaseStore integration
+//! - **Persistent storage**: Atomic file updates via `LeaseStore` integration
 //! - **Script execution**: Lease-change events trigger external scripts (add/del/old)
 //!
 //! ## Memory Safety Improvements Over C
 //!
 //! - **No manual allocation**: Rust ownership eliminates malloc/free bugs
-//! - **No linked list traversal**: HashMap provides O(1) lookups vs O(n) C list iteration
+//! - **No linked list traversal**: `HashMap` provides O(1) lookups vs O(n) C list iteration
 //! - **Bounds checking**: Slice access is automatically validated
-//! - **Thread safety**: RwLock enables safe concurrent access if needed
-//! - **Type safety**: Separate LeaseV4/LeaseV6 types prevent mixing protocols
+//! - **Thread safety**: `RwLock` enables safe concurrent access if needed
+//! - **Type safety**: Separate `LeaseV4`/`LeaseV6` types prevent mixing protocols
 //!
 //! ## C Source Mapping
 //!
 //! | C Function | Rust Equivalent | Lines | Purpose |
 //! |------------|-----------------|-------|---------|
-//! | `lease4_allocate()` | `lease4_allocate()` | 221-281 | Allocate DHCPv4 lease |
-//! | `lease6_allocate()` | `lease6_allocate()` | 404-471 | Allocate DHCPv6 lease |
+//! | `lease4_allocate()` | `lease4_allocate()` | 221-281 | Allocate `DHCPv4` lease |
+//! | `lease6_allocate()` | `lease6_allocate()` | 404-471 | Allocate `DHCPv6` lease |
 //! | `lease_find_by_client()` | `lease_find_by_client()` | 159-219 | Find by client ID/MAC |
 //! | `lease_find_by_addr()` | `lease_find_by_addr()` | 142-157 | Find by IPv4 address |
-//! | `lease6_find()` | `lease6_find()` | 1335-1357 | Find by DUID+IAID+addr |
+//! | `lease6_find()` | `lease6_find()` | 1335-1357 | Find by `DUID`+`IAID`+addr |
 //! | `lease_set_hwaddr()` | `Lease::set_hwaddr()` | Various | Update hardware address |
 //! | `lease_set_hostname()` | `Lease::set_hostname()` | Various | Update hostname |
 //! | `lease_set_expires()` | `Lease::set_expires()` | Various | Set expiration time |
@@ -48,12 +48,12 @@
 //!
 //! ## Dependencies
 //!
-//! - **LeaseStore**: Persistent storage with atomic file updates
-//! - **DaemonState**: Access to configuration, lease limits, DUID
-//! - **DhcpConfig**: Static host reservations and DHCP parameters
-//! - **DnsCache**: Hostname-to-IP mapping integration
-//! - **AllAddr**: Universal IP address container
-//! - **monotonic_time**: Consistent timestamp source for expiry tracking
+//! - **`LeaseStore`**: Persistent storage with atomic file updates
+//! - **`DaemonState`**: Access to configuration, lease limits, `DUID`
+//! - **`DhcpConfig`**: Static host reservations and DHCP parameters
+//! - **`DnsCache`**: Hostname-to-IP mapping integration
+//! - **`AllAddr`**: Universal IP address container
+//! - **`monotonic_time`**: Consistent timestamp source for expiry tracking
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -73,8 +73,8 @@ use crate::util::time::monotonic_time;
 /// Lease state tracking for script execution and file updates.
 ///
 /// Tracks lease lifecycle through state transitions to determine when to trigger
-/// lease-change scripts and database writes. Corresponds to C's LEASE_NEW and
-/// LEASE_CHANGED flags (dnsmasq.h).
+/// lease-change scripts and database writes. Corresponds to C's `LEASE_NEW` and
+/// `LEASE_CHANGED` flags (dnsmasq.h).
 ///
 /// ## State Transitions
 ///
@@ -103,9 +103,9 @@ pub enum LeaseState {
     Expired,
 }
 
-/// DHCPv4 lease entry.
+/// `DHCPv4` lease entry.
 ///
-/// Represents a single DHCPv4 lease with client hardware address, client identifier,
+/// Represents a single `DHCPv4` lease with client hardware address, client identifier,
 /// IP address, hostname, and expiration time. Corresponds to C's `struct dhcp_lease`
 /// for IPv4 (dnsmasq.h:799-829).
 ///
@@ -133,15 +133,15 @@ pub struct LeaseV4 {
     pub state: LeaseState,
 }
 
-/// DHCPv6 lease entry.
+/// `DHCPv6` lease entry.
 ///
-/// Represents a single DHCPv6 lease with DUID, IAID, IPv6 address, hostname, and
+/// Represents a single `DHCPv6` lease with `DUID`, `IAID`, IPv6 address, hostname, and
 /// expiration time. Corresponds to C's `struct dhcp_lease` for IPv6.
 ///
 /// ## Fields
 ///
 /// - `addr`: IPv6 address assigned to client
-/// - `duid`: DHCP Unique Identifier (client ID for DHCPv6)
+/// - `duid`: DHCP Unique Identifier (client ID for `DHCPv6`)
 /// - `iaid`: Identity Association Identifier
 /// - `hostname`: Client hostname (optional)
 /// - `expires`: Lease expiration time (seconds since Unix epoch)
@@ -165,32 +165,32 @@ pub struct LeaseV6 {
     pub state: LeaseState,
 }
 
-/// DHCPv6 lease type.
+/// `DHCPv6` lease type.
 ///
 /// Distinguishes between Temporary Addresses (TA) and Non-temporary Addresses (NA)
-/// as defined in RFC 3315. Corresponds to C's LEASE_TA and LEASE_NA flags.
+/// as defined in RFC 3315. Corresponds to C's `LEASE_TA` and `LEASE_NA` flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaseType {
-    /// Temporary Address (LEASE_TA in C)
+    /// Temporary Address (`LEASE_TA` in C)
     TemporaryAddress,
-    /// Non-temporary Address (LEASE_NA in C)
+    /// Non-temporary Address (`LEASE_NA` in C)
     NonTemporaryAddress,
 }
 
-/// Combined lease representation supporting both DHCPv4 and DHCPv6.
+/// Combined lease representation supporting both `DHCPv4` and `DHCPv6`.
 ///
 /// This enum allows uniform handling of both protocol versions while maintaining
 /// type safety. Methods provide protocol-agnostic access to common fields.
 #[derive(Debug, Clone)]
 pub enum Lease {
-    /// DHCPv4 lease
+    /// `DHCPv4` lease
     V4(LeaseV4),
-    /// DHCPv6 lease
+    /// `DHCPv6` lease
     V6(LeaseV6),
 }
 
 impl Lease {
-    /// Create new DHCPv4 lease.
+    /// Create new `DHCPv4` lease.
     ///
     /// Initializes lease with New state and provided parameters.
     ///
@@ -201,6 +201,7 @@ impl Lease {
     /// * `client_id` - Optional client identifier
     /// * `hostname` - Optional hostname
     /// * `expires` - Expiration timestamp
+    #[must_use]
     pub fn new(
         addr: Ipv4Addr,
         hwaddr: Vec<u8>,
@@ -218,17 +219,20 @@ impl Lease {
         })
     }
 
-    /// Check if this is a DHCPv4 lease.
+    /// Check if this is a `DHCPv4` lease.
+    #[must_use]
     pub fn is_v4(&self) -> bool {
         matches!(self, Lease::V4(_))
     }
 
-    /// Check if this is a DHCPv6 lease.
+    /// Check if this is a `DHCPv6` lease.
+    #[must_use]
     pub fn is_v6(&self) -> bool {
         matches!(self, Lease::V6(_))
     }
 
     /// Get lease expiration time.
+    #[must_use]
     pub fn expires(&self) -> u64 {
         match self {
             Lease::V4(lease) => lease.expires,
@@ -272,12 +276,14 @@ impl Lease {
     /// # Returns
     ///
     /// `true` if lease has expired, `false` otherwise
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         let now = monotonic_time();
         self.expires() < now
     }
 
     /// Get lease hostname.
+    #[must_use]
     pub fn hostname(&self) -> Option<&str> {
         match self {
             Lease::V4(lease) => lease.hostname.as_deref(),
@@ -314,11 +320,12 @@ impl Lease {
         }
     }
 
-    /// Get hardware address (DHCPv4 only).
+    /// Get hardware address (`DHCPv4` only).
     ///
     /// # Returns
     ///
     /// Hardware address slice for V4 leases, None for V6 leases
+    #[must_use]
     pub fn hwaddr(&self) -> Option<&[u8]> {
         match self {
             Lease::V4(lease) => Some(&lease.hwaddr),
@@ -326,7 +333,7 @@ impl Lease {
         }
     }
 
-    /// Set hardware address (DHCPv4 only).
+    /// Set hardware address (`DHCPv4` only).
     ///
     /// Updates hardware address and marks lease as Changed.
     /// Corresponds to C's `lease_set_hwaddr()`.
@@ -349,7 +356,8 @@ impl Lease {
     ///
     /// # Returns
     ///
-    /// IP address as IpAddr enum (V4 or V6)
+    /// IP address as `IpAddr` enum (V4 or V6)
+    #[must_use]
     pub fn ip_addr(&self) -> IpAddr {
         match self {
             Lease::V4(lease) => IpAddr::V4(lease.addr),
@@ -358,6 +366,7 @@ impl Lease {
     }
 
     /// Get lease state.
+    #[must_use]
     pub fn state(&self) -> LeaseState {
         match self {
             Lease::V4(lease) => lease.state,
@@ -386,19 +395,19 @@ impl Lease {
 
 /// In-memory DHCP lease database with efficient lookups.
 ///
-/// Manages all active DHCP leases for both DHCPv4 and DHCPv6 using HashMap-based
+/// Manages all active DHCP leases for both `DHCPv4` and `DHCPv6` using `HashMap`-based
 /// storage for O(1) lookup performance. Replaces C's linked list traversal with
 /// direct hash table access.
 ///
 /// ## Storage Strategy
 ///
-/// - **v4_by_ip**: IPv4 address → LeaseV4 (primary DHCPv4 index)
-/// - **v6_by_ip**: IPv6 address → LeaseV6 (primary DHCPv6 index)
-/// - Both maps use Arc<RwLock<>> for thread-safe access
+/// - **`v4_by_ip`**: IPv4 address → `LeaseV4` (primary `DHCPv4` index)
+/// - **`v6_by_ip`**: IPv6 address → `LeaseV6` (primary `DHCPv6` index)
+/// - Both maps use `Arc<RwLock<>>` for thread-safe access
 ///
 /// ## Lookup Performance
 ///
-/// | Operation | C (linked list) | Rust (HashMap) |
+/// | Operation | C (linked list) | Rust (`HashMap`) |
 /// |-----------|----------------|----------------|
 /// | Find by IP | O(n) | O(1) |
 /// | Find by MAC | O(n) | O(n)* |
@@ -406,17 +415,17 @@ impl Lease {
 /// | Add lease | O(1) | O(1) |
 /// | Remove lease | O(n) | O(1) |
 ///
-/// *Secondary index could be added for O(1) MAC/DUID lookups if needed
+/// *Secondary index could be added for O(1) `MAC`/`DUID` lookups if needed
 ///
 /// ## C Source Reference
 ///
 /// Replaces C's global `leases` linked list and related management functions:
-/// - `static struct dhcp_lease *leases` → HashMap storage
+/// - `static struct dhcp_lease *leases` → `HashMap` storage
 /// - `leases_left` counter → tracked separately
 pub struct LeaseDatabase {
-    /// DHCPv4 leases indexed by IPv4 address
+    /// `DHCPv4` leases indexed by IPv4 address
     v4_by_ip: Arc<RwLock<HashMap<Ipv4Addr, LeaseV4>>>,
-    /// DHCPv6 leases indexed by IPv6 address
+    /// `DHCPv6` leases indexed by IPv6 address
     v6_by_ip: Arc<RwLock<HashMap<Ipv6Addr, LeaseV6>>>,
     /// Maximum number of leases (from daemon->dhcp_max)
     max_leases: usize,
@@ -431,7 +440,8 @@ impl LeaseDatabase {
     ///
     /// # Returns
     ///
-    /// New LeaseDatabase instance with empty lease maps
+    /// New `LeaseDatabase` instance with empty lease maps
+    #[must_use]
     pub fn new(max_leases: usize) -> Self {
         Self {
             v4_by_ip: Arc::new(RwLock::new(HashMap::new())),
@@ -440,17 +450,21 @@ impl LeaseDatabase {
         }
     }
 
-    /// Add DHCPv4 lease to database.
+    /// Add `DHCPv4` lease to database.
     ///
-    /// Inserts lease into v4_by_ip map. If lease with same IP exists, it is replaced.
+    /// Inserts lease into `v4_by_ip` map. If lease with same IP exists, it is replaced.
     ///
     /// # Arguments
     ///
     /// * `lease` - Lease to add
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Ok if added successfully, Err if database is full
+    /// Returns error if database is full (`max_leases` reached)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
     pub fn add_lease(&self, lease: Lease) -> Result<(), DnsmasqError> {
         match lease {
             Lease::V4(v4_lease) => {
@@ -487,6 +501,11 @@ impl LeaseDatabase {
     /// # Returns
     ///
     /// Removed lease if it existed, None otherwise
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn remove_lease(&self, addr: IpAddr) -> Option<Lease> {
         match addr {
             IpAddr::V4(ipv4) => {
@@ -500,7 +519,7 @@ impl LeaseDatabase {
         }
     }
 
-    /// Find DHCPv4 lease by hardware address (MAC).
+    /// Find `DHCPv4` lease by hardware address (MAC).
     ///
     /// Performs linear search through v4 leases. Corresponds to C's
     /// `lease_find_by_client()` for MAC address matching.
@@ -512,6 +531,11 @@ impl LeaseDatabase {
     /// # Returns
     ///
     /// Cloned lease if found, None otherwise
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn find_by_mac(&self, hwaddr: &[u8]) -> Option<Lease> {
         let leases = self.v4_by_ip.read().unwrap();
         for lease in leases.values() {
@@ -522,7 +546,7 @@ impl LeaseDatabase {
         None
     }
 
-    /// Find DHCPv4 lease by IP address.
+    /// Find `DHCPv4` lease by IP address.
     ///
     /// Corresponds to C's `lease_find_by_addr()`.
     ///
@@ -533,6 +557,11 @@ impl LeaseDatabase {
     /// # Returns
     ///
     /// Cloned lease if found, None otherwise
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn find_by_ip(&self, addr: IpAddr) -> Option<Lease> {
         match addr {
             IpAddr::V4(ipv4) => {
@@ -548,11 +577,16 @@ impl LeaseDatabase {
 
     /// Get all active leases.
     ///
-    /// Returns combined list of DHCPv4 and DHCPv6 leases.
+    /// Returns combined list of `DHCPv4` and `DHCPv6` leases.
     ///
     /// # Returns
     ///
     /// Vector of all leases
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn get_all_leases(&self) -> Vec<Lease> {
         let mut all_leases = Vec::new();
 
@@ -575,17 +609,21 @@ impl LeaseDatabase {
 
     /// Save lease database to file.
     ///
-    /// Converts in-memory leases to LeaseEntry format and writes atomically
-    /// via LeaseStore. Corresponds to C's `lease_update_file()`.
+    /// Converts in-memory leases to `LeaseEntry` format and writes atomically
+    /// via `LeaseStore`. Corresponds to C's `lease_update_file()`.
     ///
     /// # Arguments
     ///
     /// * `path` - Path to lease file
-    /// * `duid` - Server DUID for DHCPv6 (if present)
+    /// * `duid` - Server `DUID` for `DHCPv6` (if present)
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Ok on success, Err on I/O failure
+    /// Returns error on I/O failure (unable to write lease file)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
     pub fn save<P: AsRef<std::path::Path>>(
         &self,
         path: P,
@@ -642,9 +680,13 @@ impl LeaseDatabase {
     ///
     /// * `path` - Path to lease file
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Loaded database and optional server DUID
+    /// Returns error on I/O failure or parse error in lease file
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
     pub fn load<P: AsRef<std::path::Path>>(
         path: P,
         max_leases: usize,
@@ -690,6 +732,11 @@ impl LeaseDatabase {
     }
 
     /// Get total number of active leases.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn len(&self) -> usize {
         let v4_count = self.v4_by_ip.read().unwrap().len();
         let v6_count = self.v6_by_ip.read().unwrap().len();
@@ -697,19 +744,29 @@ impl LeaseDatabase {
     }
 
     /// Check if database is empty.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Get number of available lease slots.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lock is poisoned (another thread panicked while holding the lock)
+    #[must_use]
     pub fn available(&self) -> usize {
         self.max_leases.saturating_sub(self.len())
     }
 }
 
-/// Allocate new DHCPv4 lease.
+/// Allocate new `DHCPv4` lease.
 ///
-/// Creates and adds new DHCPv4 lease to database. Corresponds to C's
+/// Creates and adds new `DHCPv4` lease to database. Corresponds to C's
 /// `lease4_allocate()` (lease.c:221-281).
 ///
 /// # Arguments
@@ -719,9 +776,13 @@ impl LeaseDatabase {
 /// * `hwaddr` - Client hardware address (MAC)
 /// * `client_id` - Optional client identifier
 ///
-/// # Returns
+/// # Errors
 ///
-/// New lease if allocation successful, error if database is full or address already allocated
+/// Returns error if database is full or address already allocated
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
 ///
 /// # C Source Reference
 ///
@@ -753,7 +814,7 @@ pub fn lease4_allocate(
     // Check if address is already allocated
     if database.find_by_ip(IpAddr::V4(addr)).is_some() {
         return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
-            message: format!("Address {} already allocated", addr),
+            message: format!("Address {addr} already allocated"),
             source: None,
         }));
     }
@@ -781,9 +842,9 @@ pub fn lease4_allocate(
     Ok(lease)
 }
 
-/// Allocate new DHCPv6 lease.
+/// Allocate new `DHCPv6` lease.
 ///
-/// Creates and adds new DHCPv6 lease to database. Corresponds to C's
+/// Creates and adds new `DHCPv6` lease to database. Corresponds to C's
 /// `lease6_allocate()` (lease.c:404-471).
 ///
 /// # Arguments
@@ -794,9 +855,13 @@ pub fn lease4_allocate(
 /// * `iaid` - Identity Association Identifier
 /// * `lease_type` - TA or NA lease type
 ///
-/// # Returns
+/// # Errors
 ///
-/// New lease if allocation successful, error if database is full or address already allocated
+/// Returns error if database is full or address already allocated
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
 ///
 /// # C Source Reference
 ///
@@ -830,7 +895,7 @@ pub fn lease6_allocate(
     // Check if address is already allocated
     if database.find_by_ip(IpAddr::V6(addr)).is_some() {
         return Err(DnsmasqError::Dhcp(DhcpError::DatabaseError {
-            message: format!("Address {} already allocated", addr),
+            message: format!("Address {addr} already allocated"),
             source: None,
         }));
     }
@@ -861,7 +926,7 @@ pub fn lease6_allocate(
 
 /// Find DHCP lease by client identifier or MAC address.
 ///
-/// Searches for DHCPv4 lease matching client ID (if provided) or hardware address.
+/// Searches for `DHCPv4` lease matching client ID (if provided) or hardware address.
 /// Corresponds to C's `lease_find_by_client()` (lease.c:159-219).
 ///
 /// # Arguments
@@ -873,6 +938,10 @@ pub fn lease6_allocate(
 /// # Returns
 ///
 /// Cloned lease if found, None otherwise
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
 ///
 /// # C Source Reference
 ///
@@ -894,6 +963,7 @@ pub fn lease6_allocate(
 ///   return NULL;
 /// }
 /// ```
+#[must_use]
 pub fn lease_find_by_client(
     database: &LeaseDatabase,
     hwaddr: Option<&[u8]>,
@@ -926,7 +996,7 @@ pub fn lease_find_by_client(
 
 /// Find DHCP lease by IP address.
 ///
-/// Searches for lease with specified IP address. Works for both DHCPv4 and DHCPv6.
+/// Searches for lease with specified IP address. Works for both `DHCPv4` and `DHCPv6`.
 /// Corresponds to C's `lease_find_by_addr()` (lease.c:142-157).
 ///
 /// # Arguments
@@ -937,6 +1007,10 @@ pub fn lease_find_by_client(
 /// # Returns
 ///
 /// Cloned lease if found, None otherwise
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
 ///
 /// # C Source Reference
 ///
@@ -950,13 +1024,14 @@ pub fn lease_find_by_client(
 ///   return NULL;
 /// }
 /// ```
+#[must_use]
 pub fn lease_find_by_addr(database: &LeaseDatabase, addr: IpAddr) -> Option<Lease> {
     database.find_by_ip(addr)
 }
 
-/// Find DHCPv6 lease by DUID, IAID, and address.
+/// Find `DHCPv6` lease by DUID, IAID, and address.
 ///
-/// Searches for DHCPv6 lease matching all three parameters. Corresponds to C's
+/// Searches for `DHCPv6` lease matching all three parameters. Corresponds to C's
 /// `lease6_find()` (lease.c:1335-1357).
 ///
 /// # Arguments
@@ -970,6 +1045,10 @@ pub fn lease_find_by_addr(database: &LeaseDatabase, addr: IpAddr) -> Option<Leas
 /// # Returns
 ///
 /// Cloned lease if found, None otherwise
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
 ///
 /// # C Source Reference
 ///
@@ -991,6 +1070,7 @@ pub fn lease_find_by_addr(database: &LeaseDatabase, addr: IpAddr) -> Option<Leas
 ///   return NULL;
 /// }
 /// ```
+#[must_use]
 pub fn lease6_find(
     database: &LeaseDatabase,
     duid: &[u8],
@@ -1024,6 +1104,10 @@ pub fn lease6_find(
 ///
 /// Number of leases removed
 ///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
+///
 /// # C Source Reference
 ///
 /// ```c
@@ -1050,6 +1134,7 @@ pub fn lease6_find(
 ///   }
 /// }
 /// ```
+#[must_use]
 pub fn lease_prune(
     database: &LeaseDatabase,
     mut dns_cache: Option<&mut DnsCache>,
@@ -1130,6 +1215,10 @@ pub fn lease_prune(
 ///
 /// Number of leases updated
 ///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
+///
 /// # C Source Reference
 ///
 /// ```c
@@ -1146,6 +1235,7 @@ pub fn lease_prune(
 ///   }
 /// }
 /// ```
+#[must_use]
 pub fn lease_update_from_configs(
     database: &LeaseDatabase,
     daemon: &DaemonState,
@@ -1259,11 +1349,19 @@ pub fn lease_update_from_configs(
 ///
 /// * `database` - Lease database
 /// * `path` - Path to lease file
-/// * `duid` - Server DUID for DHCPv6 (optional)
+/// * `duid` - Server DUID for `DHCPv6` (optional)
 ///
 /// # Returns
 ///
 /// Ok on success, Err on I/O failure
+///
+/// # Errors
+///
+/// Returns error on I/O failure when writing to lease file
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned (another thread panicked while holding the lock)
 ///
 /// # C Source Reference
 ///

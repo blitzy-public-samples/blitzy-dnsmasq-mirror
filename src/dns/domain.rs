@@ -74,7 +74,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SynthFormat {
     /// Indexed format: prefix + numeric index (e.g., "host42")
-    /// Index is calculated as offset from start_ip
+    /// Index is calculated as offset from `start_ip`
     Indexed,
 
     /// IP-based format: prefix + encoded IP (e.g., "10-0-0-1")
@@ -229,6 +229,7 @@ pub struct ConditionalDomain {
 /// assert!(domain_equal("EXAMPLE.COM.", "example.com"));
 /// assert!(!domain_equal("example.com", "test.com"));
 /// ```
+#[must_use]
 pub fn domain_equal(a: &str, b: &str) -> bool {
     // Strip trailing dots from both names
     let a_trimmed = a.trim_end_matches('.');
@@ -244,9 +245,9 @@ pub fn domain_equal(a: &str, b: &str) -> bool {
 /// pattern. If a match is found, extracts and returns the embedded IP address.
 ///
 /// Supports two formats:
-/// - **Indexed**: `host42.example.com` → start_ip + 42
+/// - **Indexed**: `host42.example.com` → `start_ip` + 42
 /// - **IP-based**: `10-0-0-1.example.com` → 10.0.0.1 (IPv4)
-/// - **IP-based IPv6**: `2001-db8--1.example.com` → 2001:db8::1
+/// - **IP-based IPv6**: `2001-db8--1.example.com` → `2001:db8::1`
 ///
 /// # C Source Reference
 ///
@@ -283,6 +284,7 @@ pub fn domain_equal(a: &str, b: &str) -> bool {
 /// let ip = parse_synthetic_domain("192-168-1-100.example.com", &synth_domains);
 /// assert_eq!(ip, Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))));
 /// ```
+#[must_use]
 pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Option<IpAddr> {
     let name_lower = name.to_lowercase();
 
@@ -299,7 +301,9 @@ pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Opti
         let hostname_part = &name_lower[..prefix_end];
 
         // Extract the numeric/IP portion after the prefix
-        let data_part = if !config.prefix.is_empty() {
+        let data_part = if config.prefix.is_empty() {
+            hostname_part
+        } else {
             let prefix_lower = config.prefix.to_lowercase();
             // Check if prefix matches and strip it
             if let Some(stripped) = hostname_part.strip_prefix(&prefix_lower as &str) {
@@ -307,8 +311,6 @@ pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Opti
             } else {
                 continue;
             }
-        } else {
-            hostname_part
         };
 
         match config.format {
@@ -375,6 +377,7 @@ pub fn parse_synthetic_domain(name: &str, synth_domains: &[SynthDomain]) -> Opti
 /// );
 /// assert_eq!(name, Some("host42.example.com".to_string()));
 /// ```
+#[must_use]
 pub fn generate_synthetic_domain(ip: IpAddr, synth_domains: &[SynthDomain]) -> Option<String> {
     for config in synth_domains {
         if !is_ip_in_range(&ip, &config.start_ip, &config.end_ip) {
@@ -452,6 +455,7 @@ pub fn generate_synthetic_domain(ip: IpAddr, synth_domains: &[SynthDomain]) -> O
 /// let domain = select_domain_v4(Ipv4Addr::new(10, 0, 1, 50), &cond_domains);
 /// assert_eq!(domain, Some("internal.example.com"));
 /// ```
+#[must_use]
 pub fn select_domain_v4(addr: Ipv4Addr, cond_domains: &[ConditionalDomain]) -> Option<&str> {
     for config in cond_domains {
         for network in &config.networks {
@@ -506,6 +510,7 @@ pub fn select_domain_v4(addr: Ipv4Addr, cond_domains: &[ConditionalDomain]) -> O
 /// );
 /// assert_eq!(domain, Some("internal.example.com"));
 /// ```
+#[must_use]
 pub fn select_domain_v6(addr: Ipv6Addr, cond_domains: &[ConditionalDomain]) -> Option<&str> {
     for config in cond_domains {
         for network in &config.networks {
@@ -544,6 +549,7 @@ pub fn select_domain_v6(addr: Ipv6Addr, cond_domains: &[ConditionalDomain]) -> O
 /// assert!(wildcard_match("example.com", "example.com")); // Exact match
 /// assert!(wildcard_match("example.com", "foo.example.com")); // Suffix match
 /// ```
+#[must_use]
 pub fn wildcard_match(pattern: &str, domain: &str) -> bool {
     let pattern_lower = pattern.to_lowercase();
     let domain_lower = domain.to_lowercase();
@@ -577,7 +583,7 @@ pub fn wildcard_match(pattern: &str, domain: &str) -> bool {
         }
 
         // Check if domain ends with "." + pattern (suffix match)
-        let pattern_with_dot = format!(".{}", pattern_lower);
+        let pattern_with_dot = format!(".{pattern_lower}");
         domain_lower.ends_with(&pattern_with_dot)
     }
 }
@@ -603,9 +609,9 @@ fn is_in_network_v4(addr: Ipv4Addr, network: Ipv4Addr, prefix_len: u8) -> bool {
     let addr_bits = u32::from(addr);
     let network_bits = u32::from(network);
     let mask = if prefix_len == 32 {
-        0xFFFFFFFF
+        0xFFFF_FFFF
     } else {
-        0xFFFFFFFF << (32 - prefix_len)
+        0xFFFF_FFFF << (32 - prefix_len)
     };
 
     (addr_bits & mask) == (network_bits & mask)
@@ -648,7 +654,7 @@ fn is_in_network_v6(addr: Ipv6Addr, network: Ipv6Addr, prefix_len: u8) -> bool {
 
 /// Parse IP address from hostname format (dashes instead of dots/colons)
 ///
-/// Converts "192-168-1-100" → "192.168.1.100" or "2001-db8--1" → "2001:db8::1"
+/// Converts "192-168-1-100" → "192.168.1.100" or "2001-db8--1" → `2001:db8::1`
 ///
 /// # C Source Reference
 ///
@@ -671,7 +677,7 @@ fn parse_ip_from_hostname(hostname: &str, hint_ip: &IpAddr) -> Option<IpAddr> {
                 let parts: Vec<&str> = ip_str.split("::ffff:").collect();
                 if parts.len() == 2 {
                     let ipv4_part = parts[1].replace('-', ".");
-                    ip_str = format!("::ffff:{}", ipv4_part);
+                    ip_str = format!("::ffff:{ipv4_part}");
                 }
             } else {
                 // Double dash represents :: (compression)
@@ -682,7 +688,7 @@ fn parse_ip_from_hostname(hostname: &str, hint_ip: &IpAddr) -> Option<IpAddr> {
 
             // Handle leading colon
             if ip_str.starts_with(':') && !ip_str.starts_with("::") {
-                ip_str = format!("0{}", ip_str);
+                ip_str = format!("0{ip_str}");
             }
 
             ip_str.parse::<Ipv6Addr>().ok().map(IpAddr::V6)
@@ -692,7 +698,7 @@ fn parse_ip_from_hostname(hostname: &str, hint_ip: &IpAddr) -> Option<IpAddr> {
 
 /// Format IP address as hostname (dots/colons replaced with dashes)
 ///
-/// Converts "192.168.1.100" → "192-168-1-100" or "2001:db8::1" → "2001-db8--1"
+/// Converts "192.168.1.100" → "192-168-1-100" or `2001:db8::1` → "2001-db8--1"
 ///
 /// # C Source Reference
 ///
@@ -709,7 +715,7 @@ fn format_ip_as_hostname(ip: &IpAddr) -> String {
 
             // Handle leading colon by prepending 0
             let ip_str = if ip_str.starts_with(':') && !ip_str.starts_with("::") {
-                format!("0{}", ip_str)
+                format!("0{ip_str}")
             } else {
                 ip_str
             };
@@ -750,12 +756,13 @@ fn add_to_ip(base: &IpAddr, offset: u64) -> Option<IpAddr> {
     match base {
         IpAddr::V4(addr) => {
             let base_val = u32::from(*addr);
-            let result = base_val.checked_add(offset as u32)?;
+            let offset_u32: u32 = offset.try_into().ok()?;
+            let result = base_val.checked_add(offset_u32)?;
             Some(IpAddr::V4(Ipv4Addr::from(result)))
         }
         IpAddr::V6(addr) => {
             let base_val = u128::from(*addr);
-            let result = base_val.checked_add(offset as u128)?;
+            let result = base_val.checked_add(u128::from(offset))?;
             Some(IpAddr::V6(Ipv6Addr::from(result)))
         }
     }
@@ -770,7 +777,7 @@ fn calculate_ip_offset(start: &IpAddr, ip: &IpAddr) -> Option<u64> {
             let start_val = u32::from(*start);
             let ip_val = u32::from(*ip);
             if ip_val >= start_val {
-                Some((ip_val - start_val) as u64)
+                Some(u64::from(ip_val - start_val))
             } else {
                 None
             }
@@ -781,11 +788,7 @@ fn calculate_ip_offset(start: &IpAddr, ip: &IpAddr) -> Option<u64> {
             if ip_val >= start_val {
                 let offset = ip_val - start_val;
                 // Only return if offset fits in u64
-                if offset <= u64::MAX as u128 {
-                    Some(offset as u64)
-                } else {
-                    None
-                }
+                offset.try_into().ok()
             } else {
                 None
             }

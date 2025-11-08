@@ -202,7 +202,7 @@ pub fn init_rng() {
 ///
 /// Replaces C's `rand16()` which extracted 16-bit words from the SURF cipher
 /// output buffer. The Rust implementation uses `ThreadRng` which implements
-/// ChaCha20 for cryptographic quality randomness.
+/// `ChaCha20` for cryptographic quality randomness.
 ///
 /// # Examples
 ///
@@ -220,6 +220,7 @@ pub fn init_rng() {
 /// # Thread Safety
 ///
 /// Thread-safe. Uses thread-local RNG instance.
+#[must_use]
 pub fn random_u16() -> u16 {
     thread_rng().gen()
 }
@@ -246,6 +247,7 @@ pub fn random_u16() -> u16 {
 /// # Thread Safety
 ///
 /// Thread-safe. Uses thread-local RNG instance.
+#[must_use]
 pub fn random_u32() -> u32 {
     thread_rng().gen()
 }
@@ -271,6 +273,7 @@ pub fn random_u32() -> u32 {
 /// # Thread Safety
 ///
 /// Thread-safe. Uses thread-local RNG instance.
+#[must_use]
 pub fn random_u64() -> u64 {
     thread_rng().gen()
 }
@@ -313,6 +316,7 @@ pub fn random_u64() -> u64 {
 ///
 /// Thread-safe. Uses thread-local RNG instance.
 #[inline]
+#[must_use]
 pub fn generate_dns_id() -> u16 {
     random_u16()
 }
@@ -366,6 +370,7 @@ pub fn generate_dns_id() -> u16 {
 /// # Thread Safety
 ///
 /// Thread-safe. Uses thread-local RNG instance.
+#[must_use]
 pub fn random_port() -> u16 {
     thread_rng().gen_range(PORT_RANDOM_MIN..=PORT_RANDOM_MAX)
 }
@@ -398,18 +403,18 @@ pub fn random_port() -> u16 {
 ///
 /// # Security Notes
 ///
-/// - **RSAMD5** (algorithm 1): Deprecated due to MD5 weaknesses, included for historical zones
-/// - **RSASHA1** (algorithms 5, 7): Legacy support, SHA-1 considered weak for new deployments
-/// - **RSASHA256/512** (algorithms 8, 10): Widely deployed, recommended for RSA-based DNSSEC
-/// - **ECDSA** (algorithms 13, 14): Modern elliptic curve algorithms, smaller keys and signatures
-/// - **EdDSA** (algorithm 15): Ed25519, fastest signature verification with strong security
+/// - **`RSAMD5`** (algorithm 1): Deprecated due to MD5 weaknesses, included for historical zones
+/// - **`RSASHA1`** (algorithms 5, 7): Legacy support, SHA-1 considered weak for new deployments
+/// - **`RSASHA256`/`RSASHA512`** (algorithms 8, 10): Widely deployed, recommended for RSA-based DNSSEC
+/// - **`ECDSA`** (algorithms 13, 14): Modern elliptic curve algorithms, smaller keys and signatures
+/// - **`EdDSA`** (algorithm 15): Ed25519, fastest signature verification with strong security
 ///
-/// # RFC References
+/// # `RFC` References
 ///
 /// - **RFC 4034**: DNSSEC resource records (original algorithms)
 /// - **RFC 5702**: SHA-2 algorithms for DNSSEC (algorithms 8, 10)
 /// - **RFC 6605**: ECDSA for DNSSEC (algorithms 13, 14)
-/// - **RFC 8080**: EdDSA for DNSSEC (algorithm 15: Ed25519, 16: Ed448)
+/// - **RFC 8080**: `EdDSA` for DNSSEC (algorithm 15: `Ed25519`, 16: `Ed448`)
 ///
 /// # Examples
 ///
@@ -441,16 +446,16 @@ pub enum DnssecAlgorithm {
     /// RSA/SHA-512 (algorithm 10) - Recommended RSA variant
     RsaSha512,
 
-    /// ECDSA Curve P-256 with SHA-256 (algorithm 13) - Recommended
+    /// `ECDSA` Curve `P-256` with SHA-256 (algorithm 13) - Recommended
     EcdsaP256Sha256,
 
-    /// ECDSA Curve P-384 with SHA-384 (algorithm 14) - Recommended
+    /// `ECDSA` Curve `P-384` with SHA-384 (algorithm 14) - Recommended
     EcdsaP384Sha384,
 
-    /// Ed25519 (algorithm 15) - Modern EdDSA, recommended
+    /// `Ed25519` (algorithm 15) - Modern `EdDSA`, recommended
     Ed25519,
 
-    /// Ed448 (algorithm 16) - Optional EdDSA variant
+    /// `Ed448` (algorithm 16) - Optional `EdDSA` variant
     Ed448,
 }
 
@@ -473,6 +478,7 @@ impl DnssecAlgorithm {
     /// assert_eq!(DnssecAlgorithm::Ed25519.to_u8(), 15);
     /// # }
     /// ```
+    #[must_use]
     pub fn to_u8(self) -> u8 {
         match self {
             DnssecAlgorithm::RsaMd5 => 1,
@@ -531,7 +537,7 @@ impl TryFrom<u8> for DnssecAlgorithm {
             15 => Ok(DnssecAlgorithm::Ed25519),
             16 => Ok(DnssecAlgorithm::Ed448),
             _ => Err(DnssecError::CryptoError {
-                message: format!("Unsupported DNSSEC algorithm: {}", value),
+                message: format!("Unsupported DNSSEC algorithm: {value}"),
             }),
         }
     }
@@ -567,7 +573,7 @@ impl std::fmt::Display for DnssecAlgorithm {
             DnssecAlgorithm::Ed25519 => "ED25519",
             DnssecAlgorithm::Ed448 => "ED448",
         };
-        write!(f, "{}", name)
+        f.write_str(name)
     }
 }
 
@@ -582,12 +588,12 @@ impl std::fmt::Display for DnssecAlgorithm {
 ///
 /// Verifies a cryptographic signature over DNS message data using the specified
 /// DNSSEC algorithm and public key. This function dispatches to algorithm-specific
-/// verification implementations based on the algorithm type (RSA, ECDSA, or EdDSA).
+/// verification implementations based on the algorithm type (`RSA`, `ECDSA`, or `EdDSA`).
 ///
 /// # Arguments
 ///
 /// - `algo`: DNSSEC algorithm identifier from DNSKEY/RRSIG record
-/// - `key`: Public key bytes in algorithm-specific wire format (RFC 3110 for RSA, RFC 6605 for ECDSA, RFC 8080 for EdDSA)
+/// - `key`: Public key bytes in algorithm-specific wire format (RFC 3110 for `RSA`, RFC 6605 for `ECDSA`, RFC 8080 for `EdDSA`)
 /// - `data`: Message data that was signed (typically canonicalized RRSET)
 /// - `signature`: Signature bytes in algorithm-specific wire format
 ///
@@ -605,7 +611,7 @@ impl std::fmt::Display for DnssecAlgorithm {
 ///
 /// - **RSA** (algorithms 1, 5, 8, 10): → `verify_rsa_signature()`
 /// - **ECDSA** (algorithms 13, 14): → `verify_ecdsa_signature()`
-/// - **EdDSA** (algorithm 15): → `verify_ed25519_signature()`
+/// - **`EdDSA`** (algorithm 15): → `verify_ed25519_signature()`
 /// - **Ed448** (algorithm 16): Not yet implemented
 ///
 /// # Examples
@@ -638,7 +644,7 @@ impl std::fmt::Display for DnssecAlgorithm {
 /// - **RFC 4034 Section 3**: RRSIG RDATA format and verification
 /// - **RFC 3110**: RSA key format
 /// - **RFC 6605**: ECDSA key format
-/// - **RFC 8080**: EdDSA key format
+/// - **RFC 8080**: `EdDSA` key format
 ///
 /// # Thread Safety
 ///
@@ -803,28 +809,25 @@ pub fn verify_rsa_signature(
             )
             .map_err(|_| DnssecError::CryptoError {
                 message: format!(
-                    "RSA-SHA1 signature verification failed for algorithm {}",
-                    algo
+                    "RSA-SHA1 signature verification failed for algorithm {algo}"
                 ),
             }),
         DnssecAlgorithm::RsaSha256 => public_key
             .verify(&signature::RSA_PKCS1_2048_8192_SHA256, data, signature)
             .map_err(|_| DnssecError::CryptoError {
                 message: format!(
-                    "RSA-SHA256 signature verification failed for algorithm {}",
-                    algo
+                    "RSA-SHA256 signature verification failed for algorithm {algo}"
                 ),
             }),
         DnssecAlgorithm::RsaSha512 => public_key
             .verify(&signature::RSA_PKCS1_2048_8192_SHA512, data, signature)
             .map_err(|_| DnssecError::CryptoError {
                 message: format!(
-                    "RSA-SHA512 signature verification failed for algorithm {}",
-                    algo
+                    "RSA-SHA512 signature verification failed for algorithm {algo}"
                 ),
             }),
         _ => Err(DnssecError::CryptoError {
-            message: format!("Algorithm {} is not RSA", algo),
+            message: format!("Algorithm {algo} is not RSA"),
         }),
     }
 }
@@ -915,7 +918,7 @@ pub fn verify_ecdsa_signature(
         DnssecAlgorithm::EcdsaP384Sha384 => 96, // 48 bytes X + 48 bytes Y
         _ => {
             return Err(DnssecError::CryptoError {
-                message: format!("Algorithm {} is not ECDSA", algo),
+                message: format!("Algorithm {algo} is not ECDSA"),
             });
         }
     };
@@ -923,8 +926,7 @@ pub fn verify_ecdsa_signature(
     if key.len() != expected_key_len {
         return Err(DnssecError::CryptoError {
             message: format!(
-                "ECDSA key length mismatch: expected {} bytes, got {}",
-                expected_key_len,
+                "ECDSA key length mismatch: expected {expected_key_len} bytes, got {}",
                 key.len()
             ),
         });
@@ -950,7 +952,7 @@ pub fn verify_ecdsa_signature(
     public_key
         .verify(data, signature)
         .map_err(|_| DnssecError::CryptoError {
-            message: format!("ECDSA signature verification failed for algorithm {}", algo),
+            message: format!("ECDSA signature verification failed for algorithm {algo}"),
         })
 }
 
@@ -1005,7 +1007,7 @@ pub fn verify_ecdsa_signature(
 ///
 /// # C Source Mapping
 ///
-/// - `src/crypto.c::dnsmasq_eddsa_verify()` - EdDSA verification with nettle
+/// - `src/crypto.c::dnsmasq_eddsa_verify()` - `EdDSA` verification with nettle
 ///
 /// # Examples
 ///
@@ -1108,6 +1110,7 @@ pub fn verify_ed25519_signature(
 /// - **RFC 4034 Appendix A**: DS record digest algorithm numbers
 /// - **RFC 4509**: SHA-256 for DS records
 /// - **RFC 5702**: SHA-2 algorithms for DNSSEC
+#[must_use]
 pub fn hash_for_algorithm(algo: DnssecAlgorithm) -> &'static Algorithm {
     match algo {
         DnssecAlgorithm::RsaMd5 | DnssecAlgorithm::RsaSha1 => &SHA1_FOR_LEGACY_USE_ONLY,
@@ -1189,12 +1192,10 @@ mod tests {
             let port = random_port();
             assert!(
                 port >= PORT_RANDOM_MIN,
-                "Port {} below minimum {}",
-                port,
-                PORT_RANDOM_MIN
+                "Port {port} below minimum {PORT_RANDOM_MIN}"
             );
             // PORT_RANDOM_MAX is u16::MAX, so no need to check upper bound
-            assert!(port >= 1024, "Port {} is privileged (<1024)", port);
+            assert!(port >= 1024, "Port {port} is privileged (<1024)");
         }
     }
 
@@ -1217,9 +1218,7 @@ mod tests {
         for (i, &count) in counts.iter().enumerate() {
             assert!(
                 count > 50 && count < 150,
-                "Bucket {} has suspicious count: {}",
-                i,
-                count
+                "Bucket {i} has suspicious count: {count}"
             );
         }
     }

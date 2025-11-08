@@ -76,7 +76,8 @@ pub enum TftpOpcode {
 }
 
 impl TftpOpcode {
-    /// Convert u16 to TftpOpcode, returning None for invalid opcodes
+    /// Convert `u16` to `TftpOpcode`, returning `None` for invalid opcodes
+    #[must_use]
     pub fn from_u16(value: u16) -> Option<Self> {
         match value {
             1 => Some(TftpOpcode::RRQ),
@@ -89,7 +90,8 @@ impl TftpOpcode {
         }
     }
 
-    /// Convert TftpOpcode to u16
+    /// Convert `TftpOpcode` to `u16`
+    #[must_use]
     pub fn to_u16(self) -> u16 {
         self as u16
     }
@@ -114,7 +116,8 @@ pub enum TftpErrorCode {
 }
 
 impl TftpErrorCode {
-    /// Convert u16 to TftpErrorCode, returning None for invalid codes
+    /// Convert `u16` to `TftpErrorCode`, returning `None` for invalid codes
+    #[must_use]
     pub fn from_u16(value: u16) -> Option<Self> {
         match value {
             0 => Some(TftpErrorCode::NotDefined),
@@ -127,7 +130,8 @@ impl TftpErrorCode {
         }
     }
 
-    /// Convert TftpErrorCode to u16
+    /// Convert `TftpErrorCode` to `u16`
+    #[must_use]
     pub fn to_u16(self) -> u16 {
         self as u16
     }
@@ -154,8 +158,7 @@ impl FromStr for TransferMode {
             "octet" => Ok(TransferMode::Octet),
             "mail" => Ok(TransferMode::Mail),
             _ => Err(ProtocolError::InvalidOptions(format!(
-                "Invalid transfer mode: {}",
-                s
+                "Invalid transfer mode: {s}"
             ))),
         }
     }
@@ -163,6 +166,7 @@ impl FromStr for TransferMode {
 
 impl TransferMode {
     /// Convert transfer mode to string
+    #[must_use]
     pub fn to_str(&self) -> &'static str {
         match self {
             TransferMode::Netascii => "netascii",
@@ -231,7 +235,8 @@ impl RequestPacket {
     /// * `mode` - Transfer mode (netascii, octet, mail)
     ///
     /// # Returns
-    /// A RequestPacket with no options
+    /// A `RequestPacket` with no options
+    #[must_use]
     pub fn new(opcode: TftpOpcode, filename: String, mode: TransferMode) -> Self {
         RequestPacket {
             opcode,
@@ -248,6 +253,7 @@ impl RequestPacket {
     /// * `filename` - File to transfer
     /// * `mode` - Transfer mode
     /// * `options` - Map of option name to value (e.g., "blksize" -> "1468")
+    #[must_use]
     pub fn with_options(
         opcode: TftpOpcode,
         filename: String,
@@ -268,7 +274,13 @@ impl RequestPacket {
     /// * `data` - Raw packet bytes starting with opcode
     ///
     /// # Returns
-    /// Parsed RequestPacket or ProtocolError
+    /// Parsed `RequestPacket` or `ProtocolError`
+    ///
+    /// # Errors
+    /// Returns error if packet is malformed, opcode is invalid, or required fields are missing
+    ///
+    /// # Panics
+    /// Panics if opcode validation fails unexpectedly after successful `from_u16` check
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < 4 {
             return Err(ProtocolError::MalformedPacket(
@@ -282,11 +294,12 @@ impl RequestPacket {
             .map_err(|e| ProtocolError::ParseError(e.to_string()))?;
 
         let opcode = match TftpOpcode::from_u16(opcode) {
-            Some(TftpOpcode::RRQ) | Some(TftpOpcode::WRQ) => TftpOpcode::from_u16(opcode).unwrap(),
+            Some(TftpOpcode::RRQ | TftpOpcode::WRQ) => TftpOpcode::from_u16(opcode).unwrap(),
             _ => return Err(ProtocolError::InvalidOpcode(opcode)),
         };
 
-        let pos = cursor.position() as usize;
+        let pos = usize::try_from(cursor.position())
+            .map_err(|e| ProtocolError::ParseError(format!("Position overflow: {e}")))?;
         let rest = &data[pos..];
 
         // Parse null-terminated strings
@@ -306,7 +319,7 @@ impl RequestPacket {
         })?;
 
         let mode = TransferMode::from_str(&mode_str).map_err(|_| {
-            ProtocolError::InvalidOptions(format!("Invalid transfer mode: {}", mode_str))
+            ProtocolError::InvalidOptions(format!("Invalid transfer mode: {mode_str}"))
         })?;
 
         // Parse options (RFC 2347)
@@ -352,6 +365,10 @@ impl RequestPacket {
     ///
     /// # Returns
     /// Serialized packet bytes with network byte order
+    ///
+    /// # Panics
+    /// Panics if writing to the in-memory buffer fails (should never happen in practice)
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
 
@@ -378,21 +395,25 @@ impl RequestPacket {
     }
 
     /// Get the opcode (RRQ or WRQ)
+    #[must_use]
     pub fn opcode(&self) -> TftpOpcode {
         self.opcode
     }
 
     /// Get the filename
+    #[must_use]
     pub fn filename(&self) -> &str {
         &self.filename
     }
 
     /// Get the transfer mode
+    #[must_use]
     pub fn mode(&self) -> TransferMode {
         self.mode
     }
 
     /// Get the options map
+    #[must_use]
     pub fn options(&self) -> &HashMap<String, String> {
         &self.options
     }
@@ -421,6 +442,7 @@ impl DataPacket {
     /// # Arguments
     /// * `block` - Block number
     /// * `data` - Block data
+    #[must_use]
     pub fn new(block: u16, data: Vec<u8>) -> Self {
         DataPacket { block, data }
     }
@@ -430,8 +452,9 @@ impl DataPacket {
     /// # Arguments
     /// * `data` - Raw packet bytes starting with opcode
     ///
-    /// # Returns
-    /// Parsed DataPacket or ProtocolError
+    /// # Errors
+    ///
+    /// Returns `ProtocolError` if the packet is malformed or has an invalid opcode.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < 4 {
             return Err(ProtocolError::MalformedPacket(
@@ -464,6 +487,10 @@ impl DataPacket {
     ///
     /// # Returns
     /// Serialized packet bytes with network byte order
+    ///
+    /// # Panics
+    /// Panics if writing to the in-memory buffer fails (should never happen in practice)
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(4 + self.data.len());
 
@@ -477,11 +504,13 @@ impl DataPacket {
     }
 
     /// Get the block number
+    #[must_use]
     pub fn block(&self) -> u16 {
         self.block
     }
 
     /// Get the data payload
+    #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.data
     }
@@ -507,6 +536,7 @@ impl AckPacket {
     ///
     /// # Arguments
     /// * `block` - Block number to acknowledge
+    #[must_use]
     pub fn new(block: u16) -> Self {
         AckPacket { block }
     }
@@ -516,8 +546,9 @@ impl AckPacket {
     /// # Arguments
     /// * `data` - Raw packet bytes starting with opcode
     ///
-    /// # Returns
-    /// Parsed AckPacket or ProtocolError
+    /// # Errors
+    ///
+    /// Returns `ProtocolError` if the packet is malformed or has an invalid opcode.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() != 4 {
             return Err(ProtocolError::MalformedPacket(format!(
@@ -546,6 +577,10 @@ impl AckPacket {
     ///
     /// # Returns
     /// Serialized packet bytes (always 4 bytes)
+    ///
+    /// # Panics
+    /// Panics if writing to the in-memory buffer fails (should never happen in practice)
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(4);
         buffer
@@ -556,6 +591,7 @@ impl AckPacket {
     }
 
     /// Get the block number
+    #[must_use]
     pub fn block(&self) -> u16 {
         self.block
     }
@@ -581,6 +617,7 @@ impl OackPacket {
     ///
     /// # Arguments
     /// * `options` - Map of option names to values
+    #[must_use]
     pub fn new(options: HashMap<String, String>) -> Self {
         OackPacket { options }
     }
@@ -590,8 +627,9 @@ impl OackPacket {
     /// # Arguments
     /// * `data` - Raw packet bytes starting with opcode
     ///
-    /// # Returns
-    /// Parsed OackPacket or ProtocolError
+    /// # Errors
+    ///
+    /// Returns `ProtocolError` if the packet is malformed or has an invalid opcode.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < 2 {
             return Err(ProtocolError::MalformedPacket(
@@ -643,6 +681,10 @@ impl OackPacket {
     ///
     /// # Returns
     /// Serialized packet bytes with network byte order
+    ///
+    /// # Panics
+    /// Panics if writing to the in-memory buffer fails (should never happen in practice)
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
 
@@ -661,6 +703,7 @@ impl OackPacket {
     }
 
     /// Get the options map
+    #[must_use]
     pub fn options(&self) -> &HashMap<String, String> {
         &self.options
     }
@@ -688,7 +731,8 @@ impl ErrorPacket {
     ///
     /// # Arguments
     /// * `error_code` - TFTP error code
-    /// * `message` - Error message (truncated to MAX_ERROR_MESSAGE if needed)
+    /// * `message` - Error message (truncated to `MAX_ERROR_MESSAGE` if needed)
+    #[must_use]
     pub fn new(error_code: TftpErrorCode, message: String) -> Self {
         let message = if message.len() > MAX_ERROR_MESSAGE {
             message[..MAX_ERROR_MESSAGE].to_string()
@@ -707,8 +751,9 @@ impl ErrorPacket {
     /// # Arguments
     /// * `data` - Raw packet bytes starting with opcode
     ///
-    /// # Returns
-    /// Parsed ErrorPacket or ProtocolError
+    /// # Errors
+    ///
+    /// Returns `ProtocolError` if the packet is malformed or has an invalid opcode or error code.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < 5 {
             return Err(ProtocolError::MalformedPacket(
@@ -730,14 +775,13 @@ impl ErrorPacket {
             .map_err(|e| ProtocolError::ParseError(e.to_string()))?;
 
         let error_code = TftpErrorCode::from_u16(error_code_val).ok_or_else(|| {
-            ProtocolError::InvalidOptions(format!("Invalid error code: {}", error_code_val))
+            ProtocolError::InvalidOptions(format!("Invalid error code: {error_code_val}"))
         })?;
 
         let message = extract_null_terminated_string(&data[4..])
             .ok_or_else(|| {
                 ProtocolError::MalformedPacket("Missing error message null terminator".to_string())
-            })?
-            .to_string();
+            })?;
 
         Ok(ErrorPacket {
             error_code,
@@ -749,6 +793,10 @@ impl ErrorPacket {
     ///
     /// # Returns
     /// Serialized packet bytes with network byte order
+    ///
+    /// # Panics
+    /// Panics if writing to the in-memory buffer fails (should never happen in practice)
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
 
@@ -765,11 +813,13 @@ impl ErrorPacket {
     }
 
     /// Get the error code
+    #[must_use]
     pub fn error_code(&self) -> TftpErrorCode {
         self.error_code
     }
 
     /// Get the error message
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -796,8 +846,9 @@ impl TftpPacket {
     /// # Arguments
     /// * `data` - Raw packet bytes
     ///
-    /// # Returns
-    /// Parsed TftpPacket or ProtocolError
+    /// # Errors
+    ///
+    /// Returns `ProtocolError` if the packet is malformed or has an invalid opcode.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < 2 {
             return Err(ProtocolError::MalformedPacket(
@@ -811,7 +862,7 @@ impl TftpPacket {
             .map_err(|e| ProtocolError::ParseError(e.to_string()))?;
 
         match TftpOpcode::from_u16(opcode) {
-            Some(TftpOpcode::RRQ) | Some(TftpOpcode::WRQ) => {
+            Some(TftpOpcode::RRQ | TftpOpcode::WRQ) => {
                 Ok(TftpPacket::Request(RequestPacket::parse(data)?))
             }
             Some(TftpOpcode::DATA) => Ok(TftpPacket::Data(DataPacket::parse(data)?)),
@@ -826,6 +877,7 @@ impl TftpPacket {
     ///
     /// # Returns
     /// Serialized packet bytes
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             TftpPacket::Request(pkt) => pkt.serialize(),
@@ -844,8 +896,9 @@ impl TftpPacket {
 /// # Arguments
 /// * `data` - Raw packet bytes
 ///
-/// # Returns
-/// Parsed RequestPacket or ProtocolError
+/// # Errors
+///
+/// Returns `ProtocolError` if the packet is malformed or has an invalid opcode.
 pub fn parse_request_packet(data: &[u8]) -> Result<RequestPacket, ProtocolError> {
     RequestPacket::parse(data)
 }
@@ -870,6 +923,7 @@ pub fn parse_request_packet(data: &[u8]) -> Result<RequestPacket, ProtocolError>
 /// let safe = sanitise_string(malicious);
 /// assert_eq!(safe, "filename.txt");
 /// ```
+#[must_use]
 pub fn sanitise_string(buf: &str) -> String {
     buf.chars()
         .filter(|c| c.is_ascii() && !c.is_ascii_control())

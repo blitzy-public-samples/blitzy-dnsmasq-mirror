@@ -51,7 +51,7 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create Netlink socket
-//! let socket = NetlinkSocket::new().await?;
+//! let socket = NetlinkSocket::new()?;
 //!
 //! // Enumerate IPv4 addresses
 //! let interfaces = socket.enumerate_interfaces(AddressFamily::Inet).await?;
@@ -81,6 +81,7 @@ use netlink_packet_core::{
 };
 use netlink_packet_route::address::{AddressAttribute, AddressMessage};
 use netlink_packet_route::link::{LinkAttribute, LinkFlag, LinkMessage};
+use netlink_packet_route::neighbour::NeighbourMessage;
 use netlink_packet_route::route::{RouteAttribute, RouteMessage, RouteScope, RouteType};
 use netlink_packet_route::{AddressFamily as NetlinkAddressFamily, RouteNetlinkMessage};
 use netlink_sys::{Socket, SocketAddr as NetlinkSocketAddr, protocols::NETLINK_ROUTE};
@@ -115,7 +116,9 @@ const DEFAULT_BUFFER_SIZE: usize = 8192;
 
 /// Address family constants for pattern matching
 /// These must be constants (not expressions) to use in match patterns
+#[allow(clippy::cast_possible_truncation)]
 const AF_INET_U8: u8 = libc::AF_INET as u8;
+#[allow(clippy::cast_possible_truncation)]
 const AF_INET6_U8: u8 = libc::AF_INET6 as u8;
 
 // ==============================================================================
@@ -189,10 +192,10 @@ pub type NetlinkResult<T> = Result<T, NetlinkError>;
 /// Address family selector for interface enumeration
 ///
 /// This enum specifies which type of information to enumerate:
-/// - `Inet`: IPv4 addresses (AF_INET)
-/// - `Inet6`: IPv6 addresses (AF_INET6)
-/// - `Local`: Interface MAC addresses (AF_LOCAL for RTM_GETLINK)
-/// - `Unspec`: Neighbor/ARP table (AF_UNSPEC for RTM_GETNEIGH)
+/// - `Inet`: IPv4 addresses (`AF_INET`)
+/// - `Inet6`: IPv6 addresses (`AF_INET6`)
+/// - `Local`: Interface MAC addresses (`AF_LOCAL` for `RTM_GETLINK`)
+/// - `Unspec`: Neighbor/ARP table (`AF_UNSPEC` for `RTM_GETNEIGH`)
 ///
 /// # C Implementation Context
 ///
@@ -209,13 +212,13 @@ pub type NetlinkResult<T> = Result<T, NetlinkError>;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressFamily {
-    /// IPv4 addresses (AF_INET)
+    /// IPv4 addresses (`AF_INET`)
     Inet,
-    /// IPv6 addresses (AF_INET6)
+    /// IPv6 addresses (`AF_INET6`)
     Inet6,
-    /// Interface MAC addresses (AF_LOCAL)
+    /// Interface MAC addresses (`AF_LOCAL`)
     Local,
-    /// Neighbor/ARP table (AF_UNSPEC)
+    /// Neighbor/ARP table (`AF_UNSPEC`)
     Unspec,
 }
 
@@ -230,13 +233,12 @@ impl AddressFamily {
         }
     }
 
-    /// Convert to netlink_packet_route::AddressFamily
+    /// Convert to `netlink_packet_route::AddressFamily`
     fn to_netlink_family(self) -> netlink_packet_route::AddressFamily {
         match self {
             AddressFamily::Inet => netlink_packet_route::AddressFamily::Inet,
             AddressFamily::Inet6 => netlink_packet_route::AddressFamily::Inet6,
-            AddressFamily::Local => netlink_packet_route::AddressFamily::Unspec,
-            AddressFamily::Unspec => netlink_packet_route::AddressFamily::Unspec,
+            AddressFamily::Local | AddressFamily::Unspec => netlink_packet_route::AddressFamily::Unspec,
         }
     }
 }
@@ -247,8 +249,8 @@ impl AddressFamily {
 
 /// Network change events from Netlink multicast notifications
 ///
-/// These events are emitted when the kernel sends RTM_NEWADDR, RTM_DELADDR,
-/// RTM_NEWROUTE, RTM_NEWLINK, or RTM_DELLINK messages to subscribed multicast groups.
+/// These events are emitted when the kernel sends `RTM_NEWADDR`, `RTM_DELADDR`,
+/// `RTM_NEWROUTE`, `RTM_NEWLINK`, or `RTM_DELLINK` messages to subscribed multicast groups.
 ///
 /// # C Implementation Context
 ///
@@ -294,9 +296,9 @@ pub enum NetlinkEvent {
 
 /// Routing table information
 ///
-/// Contains details about a routing table entry received from RTM_NEWROUTE messages.
-/// Used primarily for dial-on-demand (DoD) detection where new routes indicate
-/// that a PPP/dialup connection has been established.
+/// Contains details about a routing table entry received from `RTM_NEWROUTE` messages.
+/// Used primarily for dial-on-demand (`DoD`) detection where new routes indicate
+/// that a `PPP`/dialup connection has been established.
 #[derive(Debug, Clone)]
 pub struct RouteInfo {
     /// Route type (unicast, local, broadcast, etc.)
@@ -320,7 +322,7 @@ pub struct RouteInfo {
 ///
 /// This structure provides a high-level interface to Linux Netlink sockets,
 /// replacing the C implementation's manual socket management. It uses Tokio's
-/// AsyncFd for non-blocking I/O and netlink-packet-route for type-safe message
+/// `AsyncFd` for non-blocking I/O and `netlink-packet-route` for type-safe message
 /// parsing.
 ///
 /// # C Implementation Context
@@ -343,7 +345,7 @@ pub struct NetlinkSocket {
     /// Async file descriptor wrapper for Netlink socket
     socket: Arc<AsyncFd<Socket>>,
 
-    /// Process ID assigned by kernel bind()
+    /// Process ID assigned by kernel `bind()`
     /// Used to filter messages originated by this process vs kernel notifications
     pid: u32,
 
@@ -355,15 +357,15 @@ pub struct NetlinkSocket {
 impl NetlinkSocket {
     /// Create and initialize a new Netlink socket with multicast subscriptions
     ///
-    /// This function creates an AF_NETLINK socket with NETLINK_ROUTE protocol,
-    /// binds it with automatic PID assignment, and subscribes to multicast groups
-    /// for IPv4/IPv6 route and address notifications. If multicast subscription
-    /// fails with EPERM (insufficient permissions), it falls back to a socket
+    /// This function creates an `AF_NETLINK` socket with `NETLINK_ROUTE` protocol,
+    /// binds it with automatic `PID` assignment, and subscribes to multicast groups
+    /// for `IPv4`/`IPv6` route and address notifications. If multicast subscription
+    /// fails with `EPERM` (insufficient permissions), it falls back to a socket
     /// without multicast groups (polling-only mode).
     ///
     /// # C Implementation Context
     ///
-    /// Replaces netlink_init() from netlink.c:
+    /// Replaces `netlink_init()` from `netlink.c`:
     /// ```c
     /// char *netlink_init(void) {
     ///     struct sockaddr_nl addr;
@@ -382,7 +384,7 @@ impl NetlinkSocket {
     ///
     /// # Errors
     ///
-    /// - `SocketError`: Failed to create Netlink socket (requires CAP_NET_ADMIN)
+    /// - `SocketError`: Failed to create Netlink socket (requires `CAP_NET_ADMIN`)
     /// - `BindFailed`: Failed to bind socket even without multicast groups
     ///
     /// # Examples
@@ -390,13 +392,13 @@ impl NetlinkSocket {
     /// ```rust,no_run
     /// use dnsmasq::platform::linux::netlink::NetlinkSocket;
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let socket = NetlinkSocket::new().await?;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let socket = NetlinkSocket::new()?;
     /// // Socket is now ready for enumeration and monitoring
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn new() -> NetlinkResult<Self> {
+    pub fn new() -> NetlinkResult<Self> {
         // Create Netlink socket with NETLINK_ROUTE protocol
         let mut socket = Socket::new(NETLINK_ROUTE).map_err(NetlinkError::SocketError)?;
 
@@ -419,9 +421,9 @@ impl NetlinkSocket {
                 addr = NetlinkSocketAddr::new(0, 0);
                 socket
                     .bind(&addr)
-                    .map_err(|e| NetlinkError::BindFailed(format!("bind failed: {}", e)))?;
+                    .map_err(|e| NetlinkError::BindFailed(format!("bind failed: {e}")))?;
             } else {
-                return Err(NetlinkError::BindFailed(format!("bind failed: {}", e)));
+                return Err(NetlinkError::BindFailed(format!("bind failed: {e}")));
             }
         }
 
@@ -450,12 +452,13 @@ impl NetlinkSocket {
         })
     }
 
-    /// Set SO_NETLINK/NETLINK_NO_ENOBUFS socket option
+    /// Set `SO_NETLINK`/`NETLINK_NO_ENOBUFS` socket option
     ///
     /// This option tells the kernel to silently drop messages instead of
-    /// returning ENOBUFS when the receive buffer overflows. This prevents
+    /// returning `ENOBUFS` when the receive buffer overflows. This prevents
     /// the application from being overwhelmed by error handling during
     /// high-rate network changes.
+    #[allow(clippy::cast_possible_truncation)]
     fn set_no_enobufs(fd: RawFd) -> NetlinkResult<()> {
         let optval: i32 = 1;
         // SAFETY: This is safe because:
@@ -468,7 +471,7 @@ impl NetlinkSocket {
                 fd,
                 SOL_NETLINK,
                 NETLINK_NO_ENOBUFS,
-                &optval as *const _ as *const libc::c_void,
+                std::ptr::addr_of!(optval).cast::<libc::c_void>(),
                 std::mem::size_of::<i32>() as libc::socklen_t,
             )
         };
@@ -488,7 +491,7 @@ impl NetlinkSocket {
     /// Send a Netlink message to the kernel
     ///
     /// This function serializes and sends a Netlink message to the kernel,
-    /// handling async I/O through Tokio's AsyncFd. It waits for socket
+    /// handling async I/O through Tokio's `AsyncFd`. It waits for socket
     /// writability before sending to avoid blocking.
     ///
     /// # Arguments
@@ -497,7 +500,11 @@ impl NetlinkSocket {
     ///
     /// # Returns
     ///
-    /// Returns Ok(()) on success, or Err(NetlinkError) if send fails.
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(NetlinkError)` if send fails.
     pub async fn send(
         &self,
         mut message: NetlinkMessage<RouteNetlinkMessage>,
@@ -526,7 +533,7 @@ impl NetlinkSocket {
                     result.map_err(|e| NetlinkError::SendFailed(e.to_string()))?;
                     return Ok(());
                 }
-                Err(_would_block) => continue,
+                Err(_would_block) => {},
             }
         }
     }
@@ -539,8 +546,11 @@ impl NetlinkSocket {
     ///
     /// # Returns
     ///
-    /// Returns Ok(Vec<NetlinkMessage>) containing all messages in the buffer,
-    /// or Err(NetlinkError) if reception fails.
+    /// Returns `Ok(Vec<NetlinkMessage>)` containing all messages in the buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(NetlinkError)` if reception fails.
     pub async fn recv(&self) -> NetlinkResult<Vec<NetlinkMessage<RouteNetlinkMessage>>> {
         let mut buf = vec![0u8; DEFAULT_BUFFER_SIZE];
 
@@ -563,7 +573,7 @@ impl NetlinkSocket {
                     let messages = Self::parse_messages(&buf[..len])?;
                     return Ok(messages);
                 }
-                Err(_would_block) => continue,
+                Err(_would_block) => {},
             }
         }
     }
@@ -584,8 +594,7 @@ impl NetlinkSocket {
                 }
                 Err(e) => {
                     return Err(NetlinkError::ParseError(format!(
-                        "failed to parse message: {}",
-                        e
+                        "failed to parse message: {e}"
                     )));
                 }
             }
@@ -596,12 +605,12 @@ impl NetlinkSocket {
 
     /// Enumerate network interfaces, addresses, or routes
     ///
-    /// Sends a Netlink dump request (RTM_GETLINK, RTM_GETADDR, or RTM_GETNEIGH)
+    /// Sends a Netlink dump request (`RTM_GETLINK`, `RTM_GETADDR`, or `RTM_GETNEIGH`)
     /// to retrieve current network state and returns parsed interface records.
     ///
     /// # C Implementation Context
     ///
-    /// Replaces iface_enumerate() from netlink.c which uses callbacks:
+    /// Replaces `iface_enumerate()` from netlink.c which uses callbacks:
     /// ```c
     /// int iface_enumerate(int family, void *parm, int (*callback)()) {
     ///     // Send RTM_GETADDR/RTM_GETLINK/RTM_GETNEIGH request
@@ -632,7 +641,7 @@ impl NetlinkSocket {
     /// use dnsmasq::platform::linux::netlink::{NetlinkSocket, AddressFamily};
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let socket = NetlinkSocket::new().await?;
+    /// let socket = NetlinkSocket::new()?;
     /// let interfaces = socket.enumerate_interfaces(AddressFamily::Inet).await?;
     /// for iface in interfaces {
     ///     println!("{}: {:?}", iface.name, iface.addresses);
@@ -646,8 +655,8 @@ impl NetlinkSocket {
     ) -> NetlinkResult<Vec<InterfaceRecord>> {
         // Determine message type based on family
         let message_type = match family {
-            AddressFamily::Unspec => RouteNetlinkMessage::GetNeighbour(Default::default()),
-            AddressFamily::Local => RouteNetlinkMessage::GetLink(Default::default()),
+            AddressFamily::Unspec => RouteNetlinkMessage::GetNeighbour(NeighbourMessage::default()),
+            AddressFamily::Local => RouteNetlinkMessage::GetLink(LinkMessage::default()),
             AddressFamily::Inet | AddressFamily::Inet6 => {
                 let mut msg = AddressMessage::default();
                 msg.header.family = family.to_netlink_family();
@@ -715,7 +724,7 @@ impl NetlinkSocket {
         Ok(interfaces)
     }
 
-    /// Parse RTM_NEWADDR message into InterfaceRecord
+    /// Parse `RTM_NEWADDR` message into `InterfaceRecord`
     fn parse_address_message(
         msg: &AddressMessage,
         family: AddressFamily,
@@ -744,14 +753,14 @@ impl NetlinkSocket {
             }
         }
 
-        if !iface.addresses.is_empty() {
-            Some(iface)
-        } else {
+        if iface.addresses.is_empty() {
             None
+        } else {
+            Some(iface)
         }
     }
 
-    /// Parse RTM_NEWLINK message into InterfaceRecord
+    /// Parse `RTM_NEWLINK` message into `InterfaceRecord`
     fn parse_link_message(msg: &LinkMessage) -> Option<InterfaceRecord> {
         let mut iface = InterfaceRecord {
             name: String::new(),
@@ -789,14 +798,14 @@ impl NetlinkSocket {
             }
         }
 
-        if !iface.name.is_empty() {
-            Some(iface)
-        } else {
+        if iface.name.is_empty() {
             None
+        } else {
+            Some(iface)
         }
     }
 
-    /// Convert raw bytes to IpAddr based on family
+    /// Convert raw bytes to `IpAddr` based on family
     fn bytes_to_ipaddr(bytes: &[u8], family: AddressFamily) -> Option<IpAddr> {
         match family {
             AddressFamily::Inet => {
@@ -822,14 +831,14 @@ impl NetlinkSocket {
 
     /// Create a stream of multicast network events
     ///
-    /// This function returns a NetlinkMonitor that implements the Stream trait,
-    /// yielding NetlinkEvent items as the kernel sends multicast notifications.
-    /// This replaces the C implementation's netlink_multicast() and nl_async()
+    /// This function returns a `NetlinkMonitor` that implements the Stream trait,
+    /// yielding `NetlinkEvent` items as the kernel sends multicast notifications.
+    /// This replaces the C implementation's `netlink_multicast()` and `nl_async()`
     /// callback pattern with an async stream.
     ///
     /// # C Implementation Context
     ///
-    /// Replaces netlink_multicast() and nl_async() from netlink.c:
+    /// Replaces `netlink_multicast()` and `nl_async()` from netlink.c:
     /// ```c
     /// void netlink_multicast(void) {
     ///     nl_multicast_state(0);
@@ -845,8 +854,12 @@ impl NetlinkSocket {
     ///
     /// # Returns
     ///
-    /// Returns Ok(NetlinkMonitor) that can be used with tokio::select! or
-    /// futures::StreamExt::next(), or Err(NetlinkError) if monitor creation fails.
+    /// Returns `Ok(NetlinkMonitor)` that can be used with `tokio::select!` or
+    /// `futures::StreamExt::next()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(NetlinkError)` if monitor creation fails.
     ///
     /// # Examples
     ///
@@ -855,8 +868,8 @@ impl NetlinkSocket {
     /// use futures::StreamExt;
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let socket = NetlinkSocket::new().await?;
-    /// let mut monitor = socket.multicast_events().await?;
+    /// let socket = NetlinkSocket::new()?;
+    /// let mut monitor = socket.multicast_events()?;
     ///
     /// while let Some(event) = monitor.next().await {
     ///     match event {
@@ -867,7 +880,7 @@ impl NetlinkSocket {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn multicast_events(&self) -> NetlinkResult<NetlinkMonitor> {
+    pub fn multicast_events(&self) -> NetlinkResult<NetlinkMonitor> {
         Ok(NetlinkMonitor {
             socket: Arc::clone(&self.socket),
             pid: self.pid,
@@ -887,7 +900,7 @@ impl NetlinkSocket {
 ///
 /// # C Implementation Context
 ///
-/// Replaces nl_multicast_state() from netlink.c:
+/// Replaces `nl_multicast_state()` from netlink.c:
 /// ```c
 /// static void nl_multicast_state(unsigned state) {
 ///     do {
@@ -966,11 +979,11 @@ impl NetlinkMonitor {
     ///
     /// This function parses the raw message buffer and determines if it contains
     /// an event that should be reported. It implements the filtering logic from
-    /// nl_async() in the C implementation.
+    /// `nl_async()` in the C implementation.
     ///
     /// # C Implementation Context
     ///
-    /// Replaces nl_async() message classification:
+    /// Replaces `nl_async()` message classification:
     /// ```c
     /// if (h->nlmsg_type == RTM_NEWROUTE) {
     ///     struct rtmsg *rtm = NLMSG_DATA(h);
@@ -1074,7 +1087,7 @@ impl NetlinkMonitor {
 ///
 /// This is a convenience function that creates a temporary Netlink socket,
 /// enumerates interfaces, and returns the results. For repeated operations,
-/// consider creating a persistent NetlinkSocket instance.
+/// consider creating a persistent `NetlinkSocket` instance.
 ///
 /// # Arguments
 ///
@@ -1084,6 +1097,10 @@ impl NetlinkMonitor {
 ///
 /// Returns Ok(Vec<InterfaceRecord>) with all enumerated interfaces,
 /// or Err(NetlinkError) if enumeration fails.
+///
+/// # Errors
+///
+/// Returns `NetlinkError` if socket creation fails or interface enumeration fails.
 ///
 /// # Examples
 ///
@@ -1099,7 +1116,7 @@ impl NetlinkMonitor {
 /// # }
 /// ```
 pub async fn enumerate_interfaces(family: AddressFamily) -> NetlinkResult<Vec<InterfaceRecord>> {
-    let socket = NetlinkSocket::new().await?;
+    let socket = NetlinkSocket::new()?;
     socket.enumerate_interfaces(family).await
 }
 
@@ -1109,7 +1126,7 @@ pub async fn enumerate_interfaces(family: AddressFamily) -> NetlinkResult<Vec<In
 
 /// Linux platform implementation using Netlink sockets
 ///
-/// This struct provides the Linux-specific implementation of the NetworkPlatform trait,
+/// This struct provides the Linux-specific implementation of the `NetworkPlatform` trait,
 /// using Netlink RTNETLINK sockets for efficient network interface discovery and monitoring.
 pub struct LinuxPlatform {
     socket: Arc<tokio::sync::OnceCell<NetlinkSocket>>,
@@ -1125,6 +1142,7 @@ impl LinuxPlatform {
     /// Create a new Linux platform instance
     ///
     /// The underlying Netlink socket is lazily initialized on first use.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             socket: Arc::new(tokio::sync::OnceCell::new()),
@@ -1134,16 +1152,16 @@ impl LinuxPlatform {
     /// Get or initialize the netlink socket
     async fn get_socket(&self) -> NetlinkResult<&NetlinkSocket> {
         self.socket
-            .get_or_try_init(|| async { NetlinkSocket::new().await })
+            .get_or_try_init(|| async { NetlinkSocket::new() })
             .await
     }
 }
 
-/// Convert InterfaceRecord to platform::Interface
+/// Convert `InterfaceRecord` to `platform::Interface`
 ///
-/// This helper function converts between the network module's InterfaceRecord
-/// (which includes SocketAddr with ports) and the platform module's Interface
-/// (which uses IpAddr without ports).
+/// This helper function converts between the network module's `InterfaceRecord`
+/// (which includes `SocketAddr` with ports) and the platform module's `Interface`
+/// (which uses `IpAddr` without ports).
 fn interface_record_to_interface(record: InterfaceRecord) -> Interface {
     // Convert NetworkInterfaceFlags to PlatformInterfaceFlags
     // NetworkInterfaceFlags uses bitflags with .bits() method
@@ -1152,7 +1170,7 @@ fn interface_record_to_interface(record: InterfaceRecord) -> Interface {
     Interface {
         index: record.index,
         name: record.name,
-        addresses: record.addresses.iter().map(|sa| sa.ip()).collect(),
+        addresses: record.addresses.iter().map(std::net::SocketAddr::ip).collect(),
         flags: platform_flags,
     }
 }
@@ -1165,7 +1183,7 @@ impl NetworkPlatform for LinuxPlatform {
             tokio::runtime::Handle::current().block_on(async {
                 // Get or initialize socket
                 let socket = socket_cell
-                    .get_or_try_init(|| async { NetlinkSocket::new().await })
+                    .get_or_try_init(|| async { NetlinkSocket::new() })
                     .await
                     .map_err(|e| std::io::Error::other(e.to_string()))?;
 
@@ -1211,7 +1229,7 @@ mod tests {
     async fn test_socket_creation() {
         // Note: This test requires CAP_NET_ADMIN or root privileges
         // In CI environments without privileges, it will fail gracefully
-        match NetlinkSocket::new().await {
+        match NetlinkSocket::new() {
             Ok(socket) => {
                 assert!(socket.pid > 0);
                 println!("Netlink socket created with PID: {}", socket.pid);

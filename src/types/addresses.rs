@@ -116,6 +116,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv4(Ipv4Addr::new(10, 0, 0, 1));
     /// assert!(addr.is_ipv4());
     /// ```
+    #[must_use]
     pub fn from_ipv4(addr: Ipv4Addr) -> Self {
         AllAddr::Ipv4(addr)
     }
@@ -139,6 +140,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
     /// assert!(addr.is_ipv6());
     /// ```
+    #[must_use]
     pub fn from_ipv6(addr: Ipv6Addr) -> Self {
         AllAddr::Ipv6(addr)
     }
@@ -158,6 +160,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv4(Ipv4Addr::new(172, 16, 0, 1));
     /// assert_eq!(addr.as_ipv4(), Some(Ipv4Addr::new(172, 16, 0, 1)));
     /// ```
+    #[must_use]
     pub fn as_ipv4(&self) -> Option<Ipv4Addr> {
         match self {
             AllAddr::Ipv4(addr) => Some(*addr),
@@ -180,6 +183,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv6(Ipv6Addr::LOCALHOST);
     /// assert_eq!(addr.as_ipv6(), Some(Ipv6Addr::LOCALHOST));
     /// ```
+    #[must_use]
     pub fn as_ipv6(&self) -> Option<Ipv6Addr> {
         match self {
             AllAddr::Ipv6(addr) => Some(*addr),
@@ -202,6 +206,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv4(Ipv4Addr::new(8, 8, 8, 8));
     /// assert_eq!(addr.to_ip_addr(), Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
     /// ```
+    #[must_use]
     pub fn to_ip_addr(&self) -> Option<IpAddr> {
         match self {
             AllAddr::Ipv4(addr) => Some(IpAddr::V4(*addr)),
@@ -225,6 +230,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv4(Ipv4Addr::LOCALHOST);
     /// assert!(addr.is_ipv4());
     /// ```
+    #[must_use]
     pub fn is_ipv4(&self) -> bool {
         matches!(self, AllAddr::Ipv4(_))
     }
@@ -244,6 +250,7 @@ impl AllAddr {
     /// let addr = AllAddr::from_ipv6(Ipv6Addr::LOCALHOST);
     /// assert!(addr.is_ipv6());
     /// ```
+    #[must_use]
     pub fn is_ipv6(&self) -> bool {
         matches!(self, AllAddr::Ipv6(_))
     }
@@ -307,6 +314,7 @@ impl CnameData {
     /// assert_eq!(cname.target, "example.com");
     /// assert_eq!(cname.uid, 12345);
     /// ```
+    #[must_use]
     pub fn new(target: String, uid: u32) -> Self {
         CnameData { target, uid }
     }
@@ -380,6 +388,7 @@ impl DnsKeyData {
     /// );
     /// assert_eq!(key.algorithm, 8);
     /// ```
+    #[must_use]
     pub fn new(keydata: Vec<u8>, flags: u16, keytag: u16, algorithm: u8) -> Self {
         DnsKeyData {
             keydata,
@@ -456,6 +465,7 @@ impl DsData {
     /// );
     /// assert_eq!(ds.digest_type, 2);
     /// ```
+    #[must_use]
     pub fn new(keydata: Vec<u8>, keytag: u16, algorithm: u8, digest_type: u8) -> Self {
         DsData {
             keydata,
@@ -534,6 +544,7 @@ impl SrvData {
     /// assert_eq!(srv.port, 443);
     /// assert_eq!(srv.priority, 10);
     /// ```
+    #[must_use]
     pub fn new(target: String, port: u16, priority: u16, weight: u16) -> Self {
         SrvData {
             target,
@@ -547,7 +558,7 @@ impl SrvData {
 /// Checks if an IPv6 address is a Unique Local Address (ULA).
 ///
 /// Tests whether the provided IPv6 address falls within the Unique Local Address
-/// (ULA) range defined by RFC 4193. ULA addresses use the fd00::/8 prefix and are
+/// (ULA) range defined by RFC 4193. ULA addresses use the `fd00::/8` prefix and are
 /// analogous to IPv4 private addresses (RFC 1918).
 ///
 /// This function replaces the C macro `IN6_IS_ADDR_ULA(a)` from ip6addr.h with
@@ -559,7 +570,7 @@ impl SrvData {
 ///
 /// # Returns
 ///
-/// `true` if the address is within fd00::/8 ULA range, `false` otherwise
+/// `true` if the address is within `fd00::/8` ULA range, `false` otherwise
 ///
 /// # Examples
 ///
@@ -582,6 +593,7 @@ impl SrvData {
 ///     ((((__const uint32_t *) (a))[0] & htonl (0xff000000)) \
 ///      == htonl (0xfd000000))
 /// ```
+#[must_use]
 pub fn is_addr_ula(addr: &Ipv6Addr) -> bool {
     // Get the segments (16-bit values) of the IPv6 address
     let segments = addr.segments();
@@ -591,12 +603,12 @@ pub fn is_addr_ula(addr: &Ipv6Addr) -> bool {
     (segments[0] & 0xff00) == 0xfd00
 }
 
-/// Checks if an IPv6 address is exactly fd00:: (ULA prefix with all-zero host).
+/// Checks if an IPv6 address is exactly `fd00::` (ULA prefix with all-zero host).
 ///
 /// Tests whether the provided IPv6 address is exactly fd00:0000:0000:0000:0000:0000:0000:0000
-/// (abbreviated as fd00::), representing a Unique Local Address prefix with all host
+/// (abbreviated as `fd00::`), representing a Unique Local Address prefix with all host
 /// portion bits set to zero. This specific address format is used to denote ULA network
-/// prefixes in DHCPv6 configuration.
+/// prefixes in `DHCPv6` configuration.
 ///
 /// This function replaces the C macro `IN6_IS_ADDR_ULA_ZERO(a)` from ip6addr.h.
 ///
@@ -606,7 +618,7 @@ pub fn is_addr_ula(addr: &Ipv6Addr) -> bool {
 ///
 /// # Returns
 ///
-/// `true` if the address is exactly fd00::, `false` otherwise
+/// `true` if the address is exactly `fd00::`, `false` otherwise
 ///
 /// # Examples
 ///
@@ -631,6 +643,7 @@ pub fn is_addr_ula(addr: &Ipv6Addr) -> bool {
 ///      && ((__const uint32_t *) (a))[2] == 0 \
 ///      && ((__const uint32_t *) (a))[3] == 0)
 /// ```
+#[must_use]
 pub fn is_addr_ula_zero(addr: &Ipv6Addr) -> bool {
     let segments = addr.segments();
 
@@ -646,11 +659,11 @@ pub fn is_addr_ula_zero(addr: &Ipv6Addr) -> bool {
         && segments[7] == 0
 }
 
-/// Checks if an IPv6 address is exactly fe80:: (link-local prefix with all-zero host).
+/// Checks if an IPv6 address is exactly `fe80::` (link-local prefix with all-zero host).
 ///
 /// Tests whether the provided IPv6 address is exactly fe80:0000:0000:0000:0000:0000:0000:0000
-/// (abbreviated as fe80::), representing the link-local address prefix with all host portion
-/// bits set to zero. Link-local addresses (RFC 4291 Section 2.5.6) use the fe80::/10 prefix.
+/// (abbreviated as `fe80::`), representing the link-local address prefix with all host portion
+/// bits set to zero. Link-local addresses (RFC 4291 Section 2.5.6) use the `fe80::/10` prefix.
 ///
 /// This function replaces the C macro `IN6_IS_ADDR_LINK_LOCAL_ZERO(a)` from ip6addr.h.
 ///
@@ -660,7 +673,7 @@ pub fn is_addr_ula_zero(addr: &Ipv6Addr) -> bool {
 ///
 /// # Returns
 ///
-/// `true` if the address is exactly fe80::, `false` otherwise
+/// `true` if the address is exactly `fe80::`, `false` otherwise
 ///
 /// # Examples
 ///
@@ -685,6 +698,7 @@ pub fn is_addr_ula_zero(addr: &Ipv6Addr) -> bool {
 ///      && ((__const uint32_t *) (a))[2] == 0 \
 ///      && ((__const uint32_t *) (a))[3] == 0)
 /// ```
+#[must_use]
 pub fn is_addr_link_local_zero(addr: &Ipv6Addr) -> bool {
     let segments = addr.segments();
 

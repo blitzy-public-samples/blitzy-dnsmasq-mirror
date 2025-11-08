@@ -170,7 +170,7 @@ pub struct DaemonState {
 /// Corresponds to these fields from dnsmasq.h struct daemon:
 /// - `struct frec *frec_list` → `forward_records`
 /// - `struct server *servers` → `upstream_servers`
-/// - DNS cache fields (managed by DnsCache)
+/// - DNS cache fields (managed by `DnsCache`)
 /// - `char *packet`, `int packet_buff_sz` → managed by protocol parser
 ///
 /// # Fields
@@ -189,7 +189,7 @@ struct DnsState {
 
     /// Active forward records tracking in-flight queries
     /// Maps query ID to forward record for response matching
-    /// Limited to MAX_FORWARD_REQUESTS concurrent queries
+    /// Limited to `MAX_FORWARD_REQUESTS` concurrent queries
     forward_records: HashMap<u16, ForwardRecord>,
 
     /// Next query ID for outbound queries (incremented per query)
@@ -244,10 +244,10 @@ struct ForwardRecord {
 #[cfg(feature = "dhcp")]
 #[derive(Debug)]
 struct DhcpState {
-    /// DHCPv4 contexts (address ranges and options)
+    /// `DHCPv4` contexts (address ranges and options)
     contexts_v4: Vec<DhcpContext>,
 
-    /// DHCPv6 contexts (address ranges and options)
+    /// `DHCPv6` contexts (address ranges and options)
     #[cfg(feature = "dhcp-v6")]
     contexts_v6: Vec<DhcpContext>,
 
@@ -339,7 +339,7 @@ struct DhcpLease {
 /// Corresponds to these fields from dnsmasq.h struct daemon:
 /// - `struct irec *interfaces` → `interfaces`
 /// - `struct listener *listeners` → `listeners`
-/// - `struct serverfd *sfds` → managed by SocketListener
+/// - `struct serverfd *sfds` → managed by `SocketListener`
 ///
 /// # Fields
 ///
@@ -430,7 +430,8 @@ impl DaemonState {
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's daemon initialization in dnsmasq.c main() function
+    /// Replaces C's daemon initialization in `dnsmasq.c` `main()` function
+    #[must_use]
     pub fn new(config: Config) -> Self {
         let cache_size = config.dns.cache_size;
 
@@ -484,6 +485,7 @@ impl DaemonState {
     /// # C Source Reference
     ///
     /// Replaces access to `daemon->dhcp` and `daemon->dhcp6` linked lists
+    #[must_use]
     #[cfg(feature = "dhcp")]
     pub fn get_dhcp_contexts(&self) -> Vec<DhcpContext> {
         let mut contexts = self.dhcp.contexts_v4.clone();
@@ -523,6 +525,7 @@ impl DaemonState {
     /// # C Source Reference
     ///
     /// Replaces access to `daemon->dhcp_conf` linked list
+    #[must_use]
     #[cfg(feature = "dhcp")]
     pub fn get_static_hosts(&self) -> Vec<StaticHost> {
         self.dhcp.static_hosts.clone()
@@ -531,6 +534,7 @@ impl DaemonState {
     /// Get static DHCP host configurations (no-op when DHCP feature disabled)
     ///
     /// Returns empty vector when compiled without DHCP support.
+    #[must_use]
     #[cfg(not(feature = "dhcp"))]
     pub fn get_static_hosts(&self) -> Vec<StaticHost> {
         Vec::new()
@@ -556,6 +560,7 @@ impl DaemonState {
     /// # C Source Reference
     ///
     /// Replaces direct access to lease structures in lease.c
+    #[must_use]
     #[cfg(feature = "dhcp")]
     pub fn get_lease_database(&self) -> &DhcpLeaseDatabase {
         &self.dhcp.lease_database
@@ -564,6 +569,7 @@ impl DaemonState {
     /// Get empty lease database (no-op when DHCP feature disabled)
     ///
     /// Returns reference to empty database structure for API compatibility.
+    #[must_use]
     #[cfg(not(feature = "dhcp"))]
     pub fn get_lease_database(&self) -> &DhcpLeaseDatabase {
         // Return a static empty database
@@ -598,6 +604,7 @@ impl DaemonState {
     /// # C Source Reference
     ///
     /// Replaces direct access to global cache structures in cache.c
+    #[must_use]
     pub fn get_dns_cache(&self) -> Arc<DnsCache> {
         Arc::clone(&self.dns.cache)
     }
@@ -622,6 +629,7 @@ impl DaemonState {
     /// # C Source Reference
     ///
     /// Replaces access to daemon->option fields throughout C codebase
+    #[must_use]
     pub fn get_config(&self) -> &Config {
         &self.config
     }
@@ -640,10 +648,15 @@ impl DaemonState {
     ///
     /// `Ok(())` on successful reload, or error if configuration is invalid
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the new configuration is invalid or if subsystem
+    /// reinitialization fails during the reload process.
+    ///
     /// # Behavior
     ///
     /// Configuration reload triggers:
-    /// - DNS cache resize if cache_size changed
+    /// - DNS cache resize if `cache_size` changed
     /// - Upstream server list update
     /// - Network interface re-enumeration
     /// - DHCP context reconfiguration
@@ -662,7 +675,7 @@ impl DaemonState {
     ///
     /// # C Source Reference
     ///
-    /// Replaces SIGHUP handler logic in dnsmasq.c:main_loop()
+    /// Replaces SIGHUP handler logic in `dnsmasq.c:main_loop()`
     pub fn reload_config(&mut self, new_config: Config) -> Result<(), DnsmasqError> {
         // Check if DNS cache size changed
         let old_cache_size = self.config.dns.cache_size;
@@ -705,6 +718,11 @@ impl DaemonState {
     ///
     /// `Ok(())` on successful update, or error if interface configuration invalid
     ///
+    /// # Errors
+    ///
+    /// Returns an error if no interfaces are provided or if the interface
+    /// configuration is invalid for the daemon's operation.
+    ///
     /// # Behavior
     ///
     /// Interface updates trigger:
@@ -726,8 +744,8 @@ impl DaemonState {
     ///
     /// # C Source Reference
     ///
-    /// Replaces interface update logic in netlink.c:netlink_multicast()
-    /// and bpf.c:iface_check() for BSD platforms
+    /// Replaces interface update logic in `netlink.c:netlink_multicast()`
+    /// and `bpf.c:iface_check()` for BSD platforms
     pub fn update_interfaces(
         &mut self,
         new_interfaces: Vec<InterfaceRecord>,
@@ -768,6 +786,7 @@ impl DaemonState {
     /// let uptime = state.uptime_seconds();
     /// println!("Daemon has been running for {} seconds", uptime);
     /// ```
+    #[must_use]
     pub fn uptime_seconds(&self) -> u64 {
         self.start_time.elapsed().as_secs()
     }
@@ -789,6 +808,7 @@ impl DaemonState {
     ///     100.0 * metrics.dns_cache_hits as f64 /
     ///     metrics.dns_queries_received as f64);
     /// ```
+    #[must_use]
     pub fn get_metrics(&self) -> MetricsState {
         self.metrics.clone()
     }
@@ -811,6 +831,7 @@ impl DaemonState {
     ///     }
     /// }
     /// ```
+    #[must_use]
     pub fn get_interfaces(&self) -> &[InterfaceRecord] {
         &self.network.interfaces
     }
@@ -830,6 +851,7 @@ impl DaemonState {
     ///     println!("Listening on {} for {:?}", listener.addr, listener.protocol);
     /// }
     /// ```
+    #[must_use]
     pub fn get_listeners(&self) -> &[SocketListener] {
         &self.network.listeners
     }
@@ -849,12 +871,13 @@ impl DaemonState {
     ///     println!("Upstream: {} (domain: {:?})", server.addr, server.domain);
     /// }
     /// ```
+    #[must_use]
     pub fn get_upstream_servers(&self) -> &[Server] {
         &self.dns.upstream_servers
     }
 }
 
-/// Builder for constructing DaemonState with validation
+/// Builder for constructing `DaemonState` with validation
 ///
 /// Provides fluent interface for incremental daemon state construction
 /// with comprehensive validation at each step. Ensures all required
@@ -877,7 +900,7 @@ impl DaemonState {
 ///
 /// # C Source Reference
 ///
-/// Replaces scattered initialization logic in dnsmasq.c:main()
+/// Replaces scattered initialization logic in `dnsmasq.c:main()`
 #[derive(Debug, Default)]
 pub struct DaemonStateBuilder {
     config: Option<Config>,
@@ -901,6 +924,7 @@ impl DaemonStateBuilder {
     /// ```ignore
     /// let builder = DaemonStateBuilder::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -922,6 +946,7 @@ impl DaemonStateBuilder {
     /// ```ignore
     /// builder.config(config);
     /// ```
+    #[must_use]
     pub fn config(mut self, config: Config) -> Self {
         self.config = Some(config);
         self
@@ -944,6 +969,7 @@ impl DaemonStateBuilder {
     /// ```ignore
     /// builder.dns_cache(DnsCache::new(1000));
     /// ```
+    #[must_use]
     pub fn dns_cache(mut self, cache: DnsCache) -> Self {
         self.dns_cache = Some(cache);
         self
@@ -968,6 +994,7 @@ impl DaemonStateBuilder {
     ///     Server::from_address("8.8.8.8:53")?,
     /// ]);
     /// ```
+    #[must_use]
     pub fn forward_servers(mut self, servers: Vec<Server>) -> Self {
         self.forward_servers = Some(servers);
         self
@@ -990,6 +1017,7 @@ impl DaemonStateBuilder {
     /// ```ignore
     /// builder.interfaces(enumerate_interfaces()?);
     /// ```
+    #[must_use]
     pub fn interfaces(mut self, interfaces: Vec<InterfaceRecord>) -> Self {
         self.interfaces = Some(interfaces);
         self
@@ -1012,12 +1040,13 @@ impl DaemonStateBuilder {
     /// ```ignore
     /// builder.listeners(vec![udp_listener, tcp_listener]);
     /// ```
+    #[must_use]
     pub fn listeners(mut self, listeners: Vec<SocketListener>) -> Self {
         self.listeners = Some(listeners);
         self
     }
 
-    /// Build final DaemonState with validation
+    /// Build final `DaemonState` with validation
     ///
     /// Constructs the final `DaemonState` from builder configuration,
     /// validating that all required components are present.

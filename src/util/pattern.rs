@@ -241,21 +241,21 @@ fn match_glob_label(pattern: &str, value: &str) -> bool {
                     next_value_index = 0;
                 }
                 continue;
-            } else {
-                // Ordinary character
-                if value_index < value_bytes.len() {
-                    let mut value_char = value_bytes[value_index] as char;
+            }
+            
+            // Ordinary character
+            if value_index < value_bytes.len() {
+                let mut value_char = value_bytes[value_index] as char;
 
-                    // Convert to uppercase for case-insensitive matching
-                    if value_char.is_ascii_lowercase() {
-                        value_char = value_char.to_ascii_uppercase();
-                    }
+                // Convert to uppercase for case-insensitive matching
+                if value_char.is_ascii_lowercase() {
+                    value_char = value_char.to_ascii_uppercase();
+                }
 
-                    if value_char == pattern_char {
-                        pattern_index += 1;
-                        value_index += 1;
-                        continue;
-                    }
+                if value_char == pattern_char {
+                    pattern_index += 1;
+                    value_index += 1;
+                    continue;
                 }
             }
         }
@@ -287,6 +287,19 @@ fn match_glob_label(pattern: &str, value: &str) -> bool {
 ///
 /// * `Ok(())` if the name is valid
 /// * `Err(ValidationError)` with detailed error information if invalid
+///
+/// # Errors
+///
+/// Returns `ValidationError` in the following cases:
+/// - `EmptyLabel`: Name is empty or contains empty labels (e.g., "example..com")
+/// - `LabelTooLong`: A label exceeds 63 characters
+/// - `NameTooLong`: Total name length exceeds 253 characters
+/// - `InvalidLabelStart`: Label starts with a hyphen (e.g., "-test")
+/// - `InvalidLabelEnd`: Label ends with a hyphen (e.g., "test-")
+/// - `InvalidCharacter`: Label contains non-ASCII or invalid characters
+/// - `TooFewLabels`: Name has fewer than 2 labels (e.g., "hostname")
+/// - `NumericFinalLabel`: Final label is fully numeric (e.g., "example.123")
+/// - `LocalPseudoTld`: Name uses the reserved "local" pseudo-TLD
 ///
 /// # RFC 1123 Requirements
 ///
@@ -360,7 +373,7 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
                     chars[label_start..i.min(label_start + 10)].iter().collect();
                 debug!("Invalid DNS name: Label starts with hyphen");
                 return Err(ValidationError::LeadingOrTrailingHyphen {
-                    label: format!("-{}", label_str),
+                    label: format!("-{label_str}"),
                 });
             }
         }
@@ -452,6 +465,12 @@ pub fn validate_dns_name(name: &str) -> Result<(), ValidationError> {
 /// * `Ok(())` if the pattern is valid
 /// * `Err(ValidationError)` with detailed error information if invalid
 ///
+/// # Errors
+///
+/// Returns `ValidationError` for the same conditions as `validate_dns_name`, plus:
+/// - `TooManyWildcards`: More than 2 wildcards in a single label
+/// - `WildcardInFinalLabels`: Wildcard found in the final 2 labels
+///
 /// # Wildcard Constraints
 ///
 /// - Maximum 2 wildcards per label (e.g., "*-prod-*" is valid, "*-*-*" is not)
@@ -535,7 +554,7 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
                     chars[label_start..i.min(label_start + 10)].iter().collect();
                 debug!("Invalid DNS pattern: Label starts with hyphen");
                 return Err(ValidationError::LeadingOrTrailingHyphen {
-                    label: format!("-{}", label_str),
+                    label: format!("-{label_str}"),
                 });
             }
         }
@@ -551,7 +570,7 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
                 // Count wildcards
                 if ch == '*' {
                     if num_wildcards >= MAX_WILDCARDS_PER_LABEL {
-                        let label_str: String = chars[label_start..i + 1].iter().collect();
+                        let label_str: String = chars[label_start..=i].iter().collect();
                         debug!(
                             "Invalid DNS pattern: Wildcard used more than {} times per label",
                             MAX_WILDCARDS_PER_LABEL
@@ -689,18 +708,17 @@ pub fn validate_dns_pattern(pattern: &str) -> Result<(), ValidationError> {
 ///
 /// In debug builds, panics if inputs have not been validated. In release builds,
 /// behavior is undefined for invalid inputs.
+#[must_use]
 #[cfg(feature = "conntrack")]
 pub fn matches_pattern(name: &str, pattern: &str) -> bool {
     // In debug builds, validate inputs
     debug_assert!(
         validate_dns_name(name).is_ok(),
-        "matches_pattern called with invalid DNS name: {}",
-        name
+        "matches_pattern called with invalid DNS name: {name}"
     );
     debug_assert!(
         validate_dns_pattern(pattern).is_ok(),
-        "matches_pattern called with invalid DNS pattern: {}",
-        pattern
+        "matches_pattern called with invalid DNS pattern: {pattern}"
     );
 
     let name_labels: Vec<&str> = name.split('.').collect();
@@ -817,7 +835,7 @@ mod tests {
     #[test]
     fn test_validate_dns_name_label_too_long() {
         let long_label = "a".repeat(64);
-        let name = format!("{}.com", long_label);
+        let name = format!("{long_label}.com");
         let result = validate_dns_name(&name);
         assert!(matches!(
             result,
@@ -832,8 +850,9 @@ mod tests {
         // To exceed 253, we need enough labels: each "aa." is 3 chars
         // 85 labels of "aa." = 255 chars, minus the trailing dot = 254 chars
         let mut labels = Vec::new();
-        for i in 0..85 {
-            labels.push(format!("a{}", (b'a' + (i % 26) as u8) as char));
+        for i in 0u8..85 {
+            let ch = (b'a' + (i % 26)) as char;
+            labels.push(format!("a{ch}"));
         }
         let long_name = labels.join(".");
         // Verify the length is indeed > 253
@@ -1018,7 +1037,7 @@ mod tests {
         let label1 = "a".repeat(63);
         let label2 = "b".repeat(63);
         let label3 = "c".repeat(120);
-        let name = format!("{}.{}.com", label1, label2);
+        let name = format!("{label1}.{label2}.com");
         assert!(validate_dns_name(&name).is_ok());
     }
 
@@ -1026,7 +1045,7 @@ mod tests {
     fn test_validate_dns_pattern_wildcards_excluded_from_length() {
         // Pattern with wildcards should have wildcards excluded from length calculation
         let long_label = "a".repeat(60);
-        let pattern = format!("*{}*.example.com", long_label);
+        let pattern = format!("*{long_label}*.example.com");
         // After removing 2 wildcards, label is 60 chars (valid)
         assert!(validate_dns_pattern(&pattern).is_ok());
     }

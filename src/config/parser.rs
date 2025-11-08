@@ -61,38 +61,70 @@ use super::types::{ConfigError, DhcpRange};
 pub enum ParseError {
     /// Invalid syntax on a specific line
     #[error("Invalid syntax at line {line}: {content}")]
-    InvalidSyntax { line: usize, content: String },
+    InvalidSyntax {
+        /// Line number where the syntax error occurred
+        line: usize,
+        /// Content of the problematic line
+        content: String
+    },
 
     /// Unknown configuration option
     #[error("Unknown option '{option}' at line {line}")]
-    UnknownOption { line: usize, option: String },
+    UnknownOption {
+        /// Line number where the unknown option was found
+        line: usize,
+        /// Name of the unrecognized option
+        option: String
+    },
 
     /// Invalid value for a configuration option
     #[error(
         "Invalid value for option '{option}' at line {line}: expected {expected}, got '{value}'"
     )]
     InvalidValue {
+        /// Line number where the invalid value was found
         line: usize,
+        /// Name of the configuration option
         option: String,
+        /// Actual value provided
         value: String,
+        /// Expected value format or type
         expected: String,
     },
 
     /// Configuration file not found
     #[error("Configuration file not found: {path}")]
-    FileNotFound { path: PathBuf },
+    FileNotFound {
+        /// Path to the configuration file that could not be found
+        path: PathBuf
+    },
 
     /// Circular include detected in configuration files
     #[error("Circular include detected: {path} (include chain: {chain})")]
-    CircularInclude { path: PathBuf, chain: String },
+    CircularInclude {
+        /// Path that caused the circular include
+        path: PathBuf,
+        /// String representation of the include chain
+        chain: String
+    },
 
     /// Maximum recursion depth exceeded for includes
     #[error("Recursion depth exceeded at line {line}: maximum depth is {max_depth}")]
-    RecursionDepthExceeded { line: usize, max_depth: usize },
+    RecursionDepthExceeded {
+        /// Line number where the recursion depth was exceeded
+        line: usize,
+        /// Maximum allowed recursion depth
+        max_depth: usize
+    },
 
     /// I/O error while reading configuration file
     #[error("I/O error reading {path}: {error}")]
-    IoError { path: PathBuf, error: String },
+    IoError {
+        /// Path to the file that caused the I/O error
+        path: PathBuf,
+        /// Error message from the I/O operation
+        error: String
+    },
 
     /// Configuration validation error
     #[error("Validation error: {0}")]
@@ -107,7 +139,7 @@ pub enum ParseError {
 ///
 /// Accumulates configuration options as they are parsed from files and command-line
 /// arguments. Provides methods for each option category with validation.
-/// Once all options are processed, build() produces the final Config structure.
+/// Once all options are processed, `build()` produces the final `Config` structure.
 #[derive(Debug, Default)]
 pub struct ConfigBuilder {
     /// DNS server addresses (upstream forwarders)
@@ -199,6 +231,7 @@ pub struct ConfigBuilder {
 
 impl ConfigBuilder {
     /// Creates a new empty configuration builder
+    #[must_use]
     pub fn new() -> Self {
         ConfigBuilder::default()
     }
@@ -229,6 +262,10 @@ impl ConfigBuilder {
     }
 
     /// Validates the configuration and returns any errors
+    ///
+    /// # Errors
+    ///
+    /// Returns `ParseError::ValidationError` if any configuration values are invalid.
     pub fn validate(&self) -> Result<(), ParseError> {
         // Validate port number if specified
         if let Some(port) = self.port {
@@ -239,10 +276,9 @@ impl ConfigBuilder {
 
         // Validate cache size if specified
         if let Some(size) = self.cache_size {
-            if size > 100000 {
+            if size > 100_000 {
                 return Err(ParseError::ValidationError(format!(
-                    "Cache size {} exceeds maximum of 100000",
-                    size
+                    "Cache size {size} exceeds maximum of 100000"
                 )));
             }
         }
@@ -251,8 +287,7 @@ impl ConfigBuilder {
         if let Some(size) = self.edns_packet_max {
             if !(512..=65535).contains(&size) {
                 return Err(ParseError::ValidationError(format!(
-                    "EDNS packet size {} out of range 512-65535",
-                    size
+                    "EDNS packet size {size} out of range 512-65535"
                 )));
             }
         }
@@ -344,7 +379,7 @@ impl ParseContext {
 /// Type signature for option handler functions
 ///
 /// Each handler receives the option value string, current line number, and
-/// mutable reference to the configuration builder. Returns ParseError on failure.
+/// mutable reference to the configuration builder. Returns `ParseError` on failure.
 type OptionHandler = fn(&str, usize, &mut ConfigBuilder) -> Result<(), ParseError>;
 
 // =============================================================================
@@ -409,6 +444,10 @@ pub fn parse_config_file(path: &Path) -> Result<ConfigBuilder, ParseError> {
 /// * `Ok(ConfigBuilder)` - Successfully parsed configuration
 /// * `Err(ParseError)` - Parsing failed
 ///
+/// # Errors
+///
+/// Returns `ParseError` for syntax errors, unknown options, or invalid values.
+///
 /// # Example
 ///
 /// ```
@@ -439,7 +478,7 @@ pub fn parse_config_string(content: &str) -> Result<ConfigBuilder, ParseError> {
 
         // Process complete line (with or without continuation)
         let complete_line = if line_continuation.is_empty() {
-            line.to_string()
+            (*line).to_string()
         } else {
             line_continuation.push_str(line);
             let result = line_continuation.clone();
@@ -681,7 +720,7 @@ fn process_escapes(s: &str) -> String {
 
 /// Dispatches option parsing to appropriate handler function
 ///
-/// Uses a HashMap lookup table to route option names to their specific handler
+/// Uses a `HashMap` lookup table to route option names to their specific handler
 /// functions. Provides suggestions for unknown options based on edit distance.
 fn dispatch_option(
     key: &str,
@@ -705,8 +744,7 @@ fn dispatch_option(
 
         if let Some(suggested) = suggestion {
             error = ParseError::ValidationError(format!(
-                "Unknown option '{}' at line {}. Did you mean '{}'?",
-                key, line_number, suggested
+                "Unknown option '{key}' at line {line_number}. Did you mean '{suggested}'?"
             ));
         }
 
@@ -716,7 +754,7 @@ fn dispatch_option(
 
 /// Builds the complete option handler dispatch table
 ///
-/// Creates a HashMap mapping all supported option names (and aliases) to their
+/// Creates a `HashMap` mapping all supported option names (and aliases) to their
 /// handler functions. This includes all 200+ options from the C implementation.
 fn build_option_handlers() -> HashMap<String, OptionHandler> {
     let mut handlers: HashMap<String, OptionHandler> = HashMap::new();
@@ -897,11 +935,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
     for i in 1..=a_len {
         for j in 1..=b_len {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
-                0
-            } else {
-                1
-            };
+            let cost = usize::from(a_chars[i - 1] != b_chars[j - 1]);
             matrix[i][j] = std::cmp::min(
                 std::cmp::min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
                 matrix[i - 1][j - 1] + cost,
@@ -1163,6 +1197,7 @@ fn handle_interface(
 }
 
 /// Handles --bind-interfaces option: bind to interfaces only
+#[allow(clippy::unnecessary_wraps)]
 fn handle_bind_interfaces(
     _value: &str,
     _line: usize,
@@ -1173,6 +1208,7 @@ fn handle_bind_interfaces(
 }
 
 /// Handles --bind-dynamic option: bind to dynamic interfaces
+#[allow(clippy::unnecessary_wraps)]
 fn handle_bind_dynamic(
     _value: &str,
     _line: usize,
@@ -1192,14 +1228,14 @@ fn handle_bind_dynamic(
 /// Formats supported:
 /// - `192.168.1.50,192.168.1.150,12h` - Basic range with lease time
 /// - `set:tag,192.168.1.1,static` - Tagged static range
-/// - `::1,::100,constructor:eth0,12h` - DHCPv6 range
+/// - `::1,::100,constructor:eth0,12h` - `DHCPv6` range
 fn handle_dhcp_range(
     value: &str,
     line: usize,
     builder: &mut ConfigBuilder,
 ) -> Result<(), ParseError> {
     // Parse comma-separated values
-    let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
+    let parts: Vec<&str> = value.split(',').map(str::trim).collect();
 
     if parts.len() < 2 {
         return Err(ParseError::InvalidValue {
@@ -1360,6 +1396,7 @@ fn handle_no_dhcp_interface(
 
 #[cfg(feature = "dhcp")]
 /// Handles --log-dhcp option: enable DHCP logging
+#[allow(clippy::unnecessary_wraps)]
 fn handle_log_dhcp(
     _value: &str,
     _line: usize,
@@ -1375,6 +1412,7 @@ fn handle_log_dhcp(
 
 #[cfg(feature = "tftp")]
 /// Handles --enable-tftp option: enable TFTP server
+#[allow(clippy::unnecessary_wraps)]
 fn handle_enable_tftp(
     _value: &str,
     _line: usize,
@@ -1407,6 +1445,7 @@ fn handle_tftp_root(
 
 #[cfg(feature = "tftp")]
 /// Handles --tftp-secure option: enable TFTP secure mode
+#[allow(clippy::unnecessary_wraps)]
 fn handle_tftp_secure(
     _value: &str,
     _line: usize,
@@ -1443,6 +1482,7 @@ fn handle_tftp_max(
 
 #[cfg(feature = "dnssec")]
 /// Handles --dnssec option: enable DNSSEC validation
+#[allow(clippy::unnecessary_wraps)]
 fn handle_dnssec(
     _value: &str,
     _line: usize,
@@ -1477,6 +1517,7 @@ fn handle_trust_anchor(
 
 #[cfg(feature = "dnssec")]
 /// Handles --dnssec-check-unsigned option: check unsigned zones
+#[allow(clippy::unnecessary_wraps)]
 fn handle_dnssec_check_unsigned(
     _value: &str,
     _line: usize,
@@ -1528,6 +1569,7 @@ fn handle_log_facility(
 }
 
 /// Handles --log-queries option: enable query logging
+#[allow(clippy::unnecessary_wraps)]
 fn handle_log_queries(
     _value: &str,
     _line: usize,
@@ -1598,6 +1640,7 @@ fn handle_pid_file(
 }
 
 /// Handles --resolv-file option: resolv.conf file path
+#[allow(clippy::unnecessary_wraps)]
 fn handle_resolv_file(
     value: &str,
     line: usize,
@@ -1614,6 +1657,7 @@ fn handle_resolv_file(
 }
 
 /// Handles --no-resolv option: disable resolv.conf
+#[allow(clippy::unnecessary_wraps)]
 fn handle_no_resolv(
     _value: &str,
     _line: usize,
@@ -1624,6 +1668,7 @@ fn handle_no_resolv(
 }
 
 /// Handles --no-hosts option: disable /etc/hosts
+#[allow(clippy::unnecessary_wraps)]
 fn handle_no_hosts(
     _value: &str,
     _line: usize,
@@ -1700,7 +1745,7 @@ fn parse_duration(s: &str) -> Result<Duration, ParseError> {
 
     let value = value_str
         .parse::<u64>()
-        .map_err(|_| ParseError::ValidationError(format!("Invalid duration: {}", s)))?;
+        .map_err(|_| ParseError::ValidationError(format!("Invalid duration: {s}")))?;
 
     Ok(Duration::from_secs(value * multiplier))
 }

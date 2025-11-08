@@ -3,8 +3,8 @@
 
 //! Helper process for DHCP lease-change script execution
 //!
-//! This module translates C's privileged helper process architecture from helper.c to Rust's
-//! async task model. The original C implementation uses fork()+pipe() for privilege separation,
+//! This module translates C's privileged helper process architecture from `helper.c` to Rust's
+//! async task model. The original C implementation uses `fork()`+`pipe()` for privilege separation,
 //! where a helper process retains elevated privileges to execute external scripts while the main
 //! daemon drops to an unprivileged user. This Rust implementation replaces that with tokio tasks
 //! and channels while maintaining the same security model and script invocation semantics.
@@ -12,7 +12,7 @@
 //! # Architecture
 //!
 //! The helper system provides a way to execute external scripts or Lua functions in response to
-//! DHCP lease events (add/old/del), TFTP transfers, ARP detections, and DHCPv6 relay snooping.
+//! DHCP lease events (`add`/`old`/`del`), TFTP transfers, ARP detections, and `DHCPv6` relay events.
 //! Events are serialized and sent through a tokio channel to a long-running helper task that:
 //!
 //! 1. Deserializes the event
@@ -29,7 +29,7 @@
 //! - The helper task should be spawned before calling privilege-dropping functions
 //! - If scripts require elevated permissions, the entire process maintains those permissions
 //! - For security, it's recommended to configure scripts to run as unprivileged users via
-//!   systemd's DynamicUser or similar mechanisms
+//!   systemd's `DynamicUser` or similar mechanisms
 //!
 //! # Script Execution
 //!
@@ -44,7 +44,7 @@
 //! - `DNSMASQ_INTERFACE`: Network interface name
 //! - `DNSMASQ_LEASE_EXPIRES`: Lease expiry timestamp
 //! - `DNSMASQ_REQUESTED_OPTIONS`: DHCP options requested by client
-//! - And many more (see environment variable setup in process_event)
+//! - And many more (see environment variable setup in `process_event`)
 //!
 //! # Lua Integration
 //!
@@ -52,7 +52,7 @@
 //! - `lease(action, data_table)` - for DHCP lease events
 //! - `tftp(action, data_table)` - for TFTP transfers
 //! - `arp(action, data_table)` - for ARP detections
-//! - `snoop(action, data_table)` - for DHCPv6 relay snooping
+//! - `snoop(action, data_table)` - for `DHCPv6` relay snooping
 //!
 //! # Error Handling
 //!
@@ -97,7 +97,7 @@
 //!     old_hostname: None,
 //! };
 //!
-//! handle.send_event(event).await?;
+//! handle.send_event(event)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -126,8 +126,8 @@ const DEFAULT_SCRIPT_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// This enum represents all possible events that can trigger script or Lua function execution.
 /// Each variant contains the data necessary to populate environment variables (for scripts) or
-/// Lua table fields (for Lua functions). The structure matches the wire format from helper.c's
-/// struct script_data.
+/// Lua table fields (for Lua functions). The structure matches the wire format from `helper.c`'s
+/// `struct script_data`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ScriptEvent {
@@ -151,7 +151,7 @@ pub enum ScriptEvent {
         client_id: Option<String>,
         /// DHCP tags configured for this lease
         tags: Box<Vec<String>>,
-        /// Vendor class identifier (option 60 for DHCPv4, option 16 for DHCPv6)
+        /// Vendor class identifier (`option 60` for `DHCPv4`, `option 16` for `DHCPv6`)
         vendor_class: Option<String>,
         /// Hostname supplied by client in DHCP option 12
         supplied_hostname: Option<String>,
@@ -161,20 +161,20 @@ pub enum ScriptEvent {
         remote_id: Option<String>,
         /// Subscriber ID from DHCP relay agent
         subscriber_id: Option<String>,
-        /// Relay agent IP address (giaddr for DHCPv4, relay link-address for DHCPv6)
+        /// Relay agent IP address (`giaddr` for `DHCPv4`, relay `link-address` for `DHCPv6`)
         relay_address: Option<String>,
         /// User class options (option 77) sent by client
         user_classes: Box<Vec<String>>,
         /// Time remaining until lease expires (seconds)
         time_remaining: u32,
-        /// Old hostname if this is an ACTION_OLD_HOSTNAME event
+        /// Old hostname if this is an `ACTION_OLD_HOSTNAME` event
         old_hostname: Option<String>,
     },
 
     /// DHCP lease renewal with existing IP (action: "old")
     ///
     /// Triggered when a client renews an existing lease without changing IP address. Contains
-    /// subset of DhcpLease fields as not all options are re-transmitted during renewals.
+    /// subset of `DhcpLease` fields as not all options are re-transmitted during renewals.
     DhcpLeaseOld {
         /// MAC address
         mac: String,
@@ -245,14 +245,14 @@ pub enum ScriptEvent {
         interface: String,
     },
 
-    /// DHCPv6 relay snooping (action: "relay-snoop")
+    /// `DHCPv6` relay snooping (action: "relay-snoop")
     ///
-    /// Triggered when dnsmasq observes DHCPv6 messages relayed through it, useful for tracking
+    /// Triggered when `dnsmasq` observes `DHCPv6` messages relayed through it, useful for tracking
     /// IPv6 prefix delegations and client bindings in relay scenarios.
     RelaySnoop {
         /// Client IPv6 address
         client_address: String,
-        /// Delegated prefix in CIDR notation (e.g., "2001:db8::/64")
+        /// Delegated prefix in CIDR notation (e.g., `2001:db8::/64`)
         prefix: String,
         /// Network interface where relay message was received
         interface: String,
@@ -264,7 +264,8 @@ impl ScriptEvent {
     ///
     /// Returns the action string that will be passed as the first command-line argument to
     /// scripts and as the first parameter to Lua functions. Matches the action strings from
-    /// helper.c (lines 396-423).
+    /// `helper.c` (lines 396-423).
+    #[must_use]
     pub fn action(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { .. } => "add",
@@ -277,10 +278,11 @@ impl ScriptEvent {
         }
     }
 
-    /// Get the MAC address or client DUID for script invocation
+    /// Get the MAC address or client `DUID` for script invocation
     ///
     /// Returns the hardware address that will be passed as the second command-line argument.
-    /// For DHCP events, this is the MAC address; for DHCPv6, it's the DUID.
+    /// For DHCP events, this is the MAC address; for `DHCPv6`, it's the `DUID`.
+    #[must_use]
     pub fn mac_or_duid(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { mac, .. }
@@ -288,14 +290,14 @@ impl ScriptEvent {
             | ScriptEvent::DhcpLeaseDel { mac, .. }
             | ScriptEvent::ArpAdd { mac, .. }
             | ScriptEvent::ArpDel { mac, .. } => mac,
-            ScriptEvent::TftpTransfer { .. } => "",
-            ScriptEvent::RelaySnoop { .. } => "",
+            ScriptEvent::TftpTransfer { .. } | ScriptEvent::RelaySnoop { .. } => "",
         }
     }
 
     /// Get the IP address for script invocation
     ///
     /// Returns the IP address that will be passed as the third command-line argument.
+    #[must_use]
     pub fn ip_address(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { ip, .. }
@@ -312,6 +314,7 @@ impl ScriptEvent {
     ///
     /// Returns the hostname that will be passed as the fourth command-line argument.
     /// May be empty string if no hostname is available.
+    #[must_use]
     pub fn hostname(&self) -> &str {
         match self {
             ScriptEvent::DhcpLease { hostname, .. }
@@ -357,7 +360,7 @@ pub enum HelperError {
     /// Script exited with non-zero status
     ///
     /// The script executed but returned an error exit code. Includes the exit code for
-    /// debugging. Script stderr output is logged separately via tracing::error!.
+    /// debugging. Script stderr output is logged separately via `tracing::error!`.
     #[error("Script exited with code {code}")]
     ScriptNonZeroExit {
         /// Exit code returned by script
@@ -422,7 +425,7 @@ impl HelperHandle {
     /// # use dnsmasq::runtime::{HelperHandle, HelperError, ScriptEvent};
     /// # use std::path::PathBuf;
     /// # use std::time::Duration;
-    /// # async fn example(handle: HelperHandle) -> Result<(), HelperError> {
+    /// # fn example(handle: HelperHandle) -> Result<(), HelperError> {
     /// let event = ScriptEvent::DhcpLease {
     ///     mac: "00:11:22:33:44:55".to_string(),
     ///     ip: "192.168.1.100".to_string(),
@@ -442,11 +445,11 @@ impl HelperHandle {
     ///     old_hostname: None,
     /// };
     ///
-    /// handle.send_event(event).await?;
+    /// handle.send_event(event)?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_event(&self, event: ScriptEvent) -> Result<(), HelperError> {
+    pub fn send_event(&self, event: ScriptEvent) -> Result<(), HelperError> {
         self.sender
             .send(event)
             .map_err(|_| HelperError::ChannelClosed)
@@ -457,7 +460,7 @@ impl HelperHandle {
     /// Drops the sender channel, causing the helper task to complete any pending events and
     /// then exit. This method returns immediately; the helper task will terminate asynchronously.
     ///
-    /// After calling close(), any attempts to send events via cloned handles will fail with
+    /// After calling `close()`, any attempts to send events via cloned handles will fail with
     /// `HelperError::ChannelClosed`.
     pub fn close(self) {
         // Dropping self closes the channel
@@ -481,6 +484,7 @@ impl HelperHandle {
     /// }
     /// # }
     /// ```
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
     }
@@ -512,7 +516,7 @@ impl HelperHandle {
 ///
 /// The spawned task will panic if script execution fails catastrophically (e.g., OOM), but
 /// this is logged and doesn't affect the main application. Individual script failures are
-/// reported via tracing::error! and don't cause task termination.
+/// reported via `tracing::error!` and don't cause task termination.
 ///
 /// # Example
 ///
@@ -585,7 +589,7 @@ pub fn spawn_helper_process(
         if let Ok(init_fn) = lua.globals().get::<mlua::Function>("init") {
             init_fn
                 .call::<()>(())
-                .map_err(|e| HelperError::LuaError(format!("init() function failed: {}", e)))?;
+                .map_err(|e| HelperError::LuaError(format!("init() function failed: {e}")))?;
         }
 
         info!("Lua script loaded successfully");
@@ -755,29 +759,29 @@ async fn execute_script(
 
 /// Populate environment variables for script execution
 ///
-/// Translates event data into DNSMASQ_* environment variables matching the exact format from
-/// helper.c (lines 764-846). Sets variables to empty string or omits them based on whether
+/// Translates event data into `DNSMASQ_*` environment variables matching the exact format from
+/// `helper.c` (lines 764-846). Sets variables to empty string or omits them based on whether
 /// data is present, ensuring backward compatibility with existing scripts.
 ///
 /// Environment variables set:
-/// - DNSMASQ_LEASE_ACTION: Event action string
-/// - DNSMASQ_CLIENT_ID: DHCP client identifier (DHCPv4 only)
-/// - DNSMASQ_INTERFACE: Network interface name
-/// - DNSMASQ_LEASE_EXPIRES: Lease expiry timestamp
-/// - DNSMASQ_DOMAIN: Domain name portion of hostname
-/// - DNSMASQ_VENDOR_CLASS: Vendor class identifier
-/// - DNSMASQ_SUPPLIED_HOSTNAME: Hostname from DHCP option 12
-/// - DNSMASQ_CIRCUIT_ID: Relay agent circuit ID
-/// - DNSMASQ_SUBSCRIBER_ID: Relay agent subscriber ID
-/// - DNSMASQ_REMOTE_ID: Relay agent remote ID
-/// - DNSMASQ_RELAY_ADDRESS: Relay agent IP address
-/// - DNSMASQ_TAGS: Space-separated tag list
-/// - DNSMASQ_TIME_REMAINING: Seconds until lease expires
-/// - DNSMASQ_OLD_HOSTNAME: Previous hostname (for ACTION_OLD_HOSTNAME)
-/// - DNSMASQ_USER_CLASS0, DNSMASQ_USER_CLASS1, ...: User class options
+/// - `DNSMASQ_LEASE_ACTION`: Event action string
+/// - `DNSMASQ_CLIENT_ID`: DHCP client identifier (`DHCPv4` only)
+/// - `DNSMASQ_INTERFACE`: Network interface name
+/// - `DNSMASQ_LEASE_EXPIRES`: Lease expiry timestamp
+/// - `DNSMASQ_DOMAIN`: Domain name portion of hostname
+/// - `DNSMASQ_VENDOR_CLASS`: Vendor class identifier
+/// - `DNSMASQ_SUPPLIED_HOSTNAME`: Hostname from DHCP `option 12`
+/// - `DNSMASQ_CIRCUIT_ID`: Relay agent circuit ID
+/// - `DNSMASQ_SUBSCRIBER_ID`: Relay agent subscriber ID
+/// - `DNSMASQ_REMOTE_ID`: Relay agent remote ID
+/// - `DNSMASQ_RELAY_ADDRESS`: Relay agent IP address
+/// - `DNSMASQ_TAGS`: Space-separated tag list
+/// - `DNSMASQ_TIME_REMAINING`: Seconds until lease expires
+/// - `DNSMASQ_OLD_HOSTNAME`: Previous hostname (for `ACTION_OLD_HOSTNAME`)
+/// - `DNSMASQ_USER_CLASS0`, `DNSMASQ_USER_CLASS1`, ...: User class options
 ///
 /// For TFTP events:
-/// - DNSMASQ_FILE_SIZE: Size of transferred file
+/// - `DNSMASQ_FILE_SIZE`: Size of transferred file
 ///
 /// Note: Empty options are omitted rather than set to empty strings, matching C behavior.
 fn populate_environment_variables(env: &mut HashMap<String, String>, event: &ScriptEvent) {
@@ -863,7 +867,7 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
 
             // User classes
             for (i, user_class) in user_classes.iter().enumerate() {
-                env.insert(format!("DNSMASQ_USER_CLASS{}", i), user_class.clone());
+                env.insert(format!("DNSMASQ_USER_CLASS{i}"), user_class.clone());
             }
         }
 
@@ -883,7 +887,10 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
             }
         }
 
-        ScriptEvent::DhcpLeaseDel { interface, .. } => {
+        ScriptEvent::DhcpLeaseDel { interface, .. } 
+        | ScriptEvent::ArpAdd { interface, .. } 
+        | ScriptEvent::ArpDel { interface, .. } 
+        | ScriptEvent::RelaySnoop { interface, .. } => {
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
@@ -895,18 +902,6 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
             ..
         } => {
             env.insert("DNSMASQ_FILE_SIZE".to_string(), file_size.to_string());
-            if !interface.is_empty() {
-                env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
-            }
-        }
-
-        ScriptEvent::ArpAdd { interface, .. } | ScriptEvent::ArpDel { interface, .. } => {
-            if !interface.is_empty() {
-                env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
-            }
-        }
-
-        ScriptEvent::RelaySnoop { interface, .. } => {
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());
             }
@@ -938,12 +933,11 @@ fn execute_lua_function(lua: &Lua, event: &ScriptEvent) -> Result<(), HelperErro
     };
 
     // Get the Lua function (may not exist for optional functions like tftp, arp, snoop)
-    let lua_fn: mlua::Function = match lua.globals().get(function_name) {
-        Ok(f) => f,
-        Err(_) => {
-            debug!("Lua function '{}' not found, skipping", function_name);
-            return Ok(());
-        }
+    let lua_fn: mlua::Function = if let Ok(f) = lua.globals().get(function_name) {
+        f
+    } else {
+        debug!("Lua function '{}' not found, skipping", function_name);
+        return Ok(());
     };
 
     // Create data table
@@ -1042,7 +1036,7 @@ fn execute_lua_function(lua: &Lua, event: &ScriptEvent) -> Result<(), HelperErro
             // User classes
             for (i, user_class) in user_classes.iter().enumerate() {
                 data_table
-                    .set(format!("user_class{}", i), user_class.clone())
+                    .set(format!("user_class{i}"), user_class.clone())
                     .map_err(|e| HelperError::LuaError(e.to_string()))?;
             }
         }
@@ -1144,7 +1138,7 @@ mod tests {
             ip: "192.168.1.100".to_string(),
             hostname: "test.example.com".to_string(),
             interface: "eth0".to_string(),
-            expiry: 1234567890,
+            expiry: 1_234_567_890,
             client_id: Some("client-id-hex".to_string()),
             tags: Box::new(vec!["tag1".to_string(), "tag2".to_string()]),
             vendor_class: Some("vendor".to_string()),

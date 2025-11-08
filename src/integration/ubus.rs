@@ -11,9 +11,9 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
-//! # OpenWrt ubus Integration Module
+//! # `OpenWrt` `ubus` Integration Module
 //!
-//! This module provides lightweight IPC for embedded Linux systems via OpenWrt's ubus
+//! This module provides lightweight IPC for embedded Linux systems via `OpenWrt`'s `ubus`
 //! (micro bus) message bus. It exposes runtime control methods for metrics retrieval
 //! and connmark allowlist configuration, and broadcasts DHCP lease events to subscribers.
 //!
@@ -24,9 +24,9 @@
 //!
 //! ## Purpose
 //!
-//! ubus is OpenWrt's lightweight IPC system designed for resource-constrained routers.
+//! `ubus` is `OpenWrt`'s lightweight IPC system designed for resource-constrained routers.
 //! This module enables:
-//! - **Metrics Export**: DNS cache statistics and DHCP lease counts for LuCI web interface
+//! - **Metrics Export**: DNS cache statistics and DHCP lease counts for `LuCI` web interface
 //! - **Runtime Configuration**: Connmark allowlist updates for firewall integration
 //! - **Event Notifications**: DHCP lease events (add/old/del) for monitoring systems
 //! - **Firewall Integration**: Connmark-based DNS filtering with event broadcasts
@@ -75,10 +75,10 @@
 //! ## Memory Safety Improvements Over C
 //!
 //! - **No Manual Memory Management**: Rust ownership eliminates malloc/free bugs
-//! - **Type-Safe FFI**: Opaque pointer wrappers prevent invalid ubus_context access
-//! - **Resource Cleanup**: Drop trait ensures ubus_free() called automatically
+//! - **Type-Safe FFI**: Opaque pointer wrappers prevent invalid `ubus_context` access
+//! - **Resource Cleanup**: Drop trait ensures `ubus_free()` called automatically
 //! - **Bounds Checking**: Blob array iteration validated by Rust slice safety
-//! - **Thread Safety**: Arc<RwLock<>> enables safe concurrent access to daemon state
+//! - **Thread Safety**: `Arc<RwLock<>>` enables safe concurrent access to daemon state
 //!
 //! ## FFI Safety
 //!
@@ -86,7 +86,7 @@
 //! - Raw pointers wrapped in newtype structs with Drop implementations
 //! - CString/CStr conversions for string marshaling
 //! - Result types for error propagation from C status codes
-//! - Lifetime management for borrowed ubus_context references
+//! - Lifetime management for borrowed `ubus_context` references
 //!
 //! ## Feature Gates
 //!
@@ -96,9 +96,9 @@
 //!
 //! ## Platform Requirements
 //!
-//! - **Operating System**: Linux (OpenWrt, LEDE, or compatible)
-//! - **C Libraries**: libubus.so, libubox.so (OpenWrt SDK)
-//! - **Build Configuration**: Requires `PKG_CONFIG_PATH` pointing to OpenWrt libs
+//! - **Operating System**: Linux (`OpenWrt`, LEDE, or compatible)
+//! - **C Libraries**: libubus.so, libubox.so (`OpenWrt` SDK)
+//! - **Build Configuration**: Requires `PKG_CONFIG_PATH` pointing to `OpenWrt` libs
 //!
 //! ## Usage Example
 //!
@@ -125,26 +125,26 @@
 //!
 //! ## Thread Safety
 //!
-//! UbusContext uses interior mutability with Arc<RwLock<>> for safe concurrent access
-//! from Tokio async tasks. Method handlers acquire read locks on DaemonState to fetch
+//! `UbusContext` uses interior mutability with `Arc<RwLock<>>` for safe concurrent access
+//! from Tokio async tasks. Method handlers acquire read locks on `DaemonState` to fetch
 //! metrics or write locks to update allowlists.
 //!
 //! ## C Source Mapping
 //!
 //! | C Function | Rust Equivalent | Lines | Purpose |
 //! |------------|-----------------|-------|---------|
-//! | `ubus_init()` | `connect()` | 322-343 | Initialize ubus connection |
-//! | `ubus_destroy()` | `Drop::drop()` | 208-216 | Cleanup ubus resources |
+//! | `ubus_init()` | `connect()` | 322-343 | Initialize `ubus` connection |
+//! | `ubus_destroy()` | `Drop::drop()` | 208-216 | Cleanup `ubus` resources |
 //! | `ubus_disconnect_cb()` | `reconnect()` | 259-270 | Handle connection loss |
 //! | `ubus_handle_metrics()` | `get_metrics()` | 530-547 | Serve metrics query |
 //! | `ubus_handle_set_connmark_allowlist()` | `set_connmark_allowlist()` | 606-718 | Configure allowlist |
 //! | `ubus_event_bcast()` | `broadcast_lease_event()` | 780-798 | Broadcast DHCP events |
-//! | `set_ubus_listeners()` | Tokio AsyncFd integration | 384-402 | Register with event loop |
-//! | `check_ubus_listeners()` | `handle_event()` | 446-470 | Process ubus messages |
+//! | `set_ubus_listeners()` | Tokio `AsyncFd` integration | 384-402 | Register with event loop |
+//! | `check_ubus_listeners()` | `handle_event()` | 446-470 | Process `ubus` messages |
 //!
 //! ## RFC and Standards Compliance
 //!
-//! - **ubus Protocol**: OpenWrt ubus JSON-RPC over Unix domain sockets
+//! - **`ubus` Protocol**: `OpenWrt` `ubus` JSON-RPC over Unix domain sockets
 //! - **Blob Format**: libubox binary object format for efficient marshaling
 //! - **RFC 1123**: DNS name validation in connmark patterns
 
@@ -171,14 +171,14 @@ use crate::util::pattern::validate_dns_pattern;
 /// ubus integration error types
 ///
 /// Represents all error conditions that can occur during ubus operations,
-/// translating C error codes (UBUS_STATUS_*) to type-safe Rust enum variants.
+/// translating C error codes (`UBUS_STATUS_*`) to type-safe Rust enum variants.
 ///
 /// ## C Mapping
 ///
 /// - `ConnectionFailed` → `ubus_connect()` returned NULL
 /// - `MethodFailed` → Handler returned non-zero status code
 /// - `InvalidArgument` → `UBUS_STATUS_INVALID_ARGUMENT`
-/// - `SerializationError` → blob_buf operations failed
+/// - `SerializationError` → `blob_buf` operations failed
 #[derive(Debug, Error)]
 pub enum UbusError {
     /// Failed to establish connection to ubusd
@@ -198,10 +198,10 @@ pub enum UbusError {
     SerializationError(String),
 }
 
-/// Metrics data structure for ubus export
+/// Metrics data structure for `ubus` export
 ///
-/// Represents operational statistics exported via the `metrics` ubus method.
-/// Fields correspond to values read from DaemonState::MetricsState.
+/// Represents operational statistics exported via the `metrics` `ubus` method.
+/// Fields correspond to values read from `DaemonState::MetricsState`.
 ///
 /// ## C Mapping
 ///
@@ -218,9 +218,33 @@ pub struct UbusMetrics {
     /// Total DNS cache misses (queries forwarded)
     pub cache_misses: u64,
 
-    /// Total active DHCP leases (DHCPv4 + DHCPv6)
+    /// Total active DHCP leases (`DHCPv4` + `DHCPv6`)
     #[cfg(feature = "dhcp")]
     pub lease_count: u64,
+}
+
+/// DHCP lease information for `ubus` event broadcasting
+///
+/// Represents lease data transmitted via `ubus` events (dhcp.add, dhcp.old, dhcp.del).
+/// Used for `OpenWrt` `LuCI` web interface and external monitoring systems.
+///
+/// ## C Mapping
+///
+/// Corresponds to parameters passed to `ubus_event_bcast()` in ubus.c:780-842
+#[derive(Debug, Clone)]
+#[cfg(feature = "dhcp")]
+pub struct UbusLease {
+    /// Client MAC address in colon-separated format (e.g., "aa:bb:cc:dd:ee:ff")
+    pub mac_address: String,
+
+    /// Lease IP address (IPv4 or IPv6)
+    pub ip_address: std::net::IpAddr,
+
+    /// Client hostname (None if not provided by client)
+    pub hostname: Option<String>,
+
+    /// Lease duration in seconds (0 for infinite)
+    pub expires: u64,
 }
 
 // FFI bindings to libubus (OpenWrt C library)
@@ -313,7 +337,7 @@ extern "C" {
     fn blob_id(attr: *const blob_attr) -> c_int;
 }
 
-/// OpenWrt ubus context wrapper
+/// `OpenWrt` `ubus` context wrapper
 ///
 /// Wraps the C `ubus_context` pointer with safe Rust ownership semantics.
 /// Automatically calls `ubus_free()` on drop to prevent resource leaks.
@@ -331,7 +355,7 @@ extern "C" {
 ///
 /// ## Thread Safety
 ///
-/// The underlying ubus_context is NOT thread-safe. Access must be serialized
+/// The underlying `ubus_context` is NOT thread-safe. Access must be serialized
 /// via tokio's single-threaded event loop or explicit synchronization.
 pub struct UbusContext {
     /// Raw ubus context pointer (C FFI)
@@ -351,19 +375,22 @@ pub struct UbusContext {
 }
 
 impl UbusContext {
-    /// Connect to ubus daemon and register dnsmasq object
+    /// Connect to `ubus` daemon and register dnsmasq object
     ///
-    /// Establishes connection to the OpenWrt ubus daemon and registers the dnsmasq
+    /// Establishes connection to the `OpenWrt` `ubus` daemon and registers the dnsmasq
     /// object with its exported methods. Corresponds to C's `ubus_init()`.
     ///
     /// ## Arguments
     ///
-    /// * `object_name` - Name for ubus object registration (typically "dnsmasq")
+    /// * `object_name` - Name for `ubus` object registration (typically "dnsmasq")
     ///
     /// ## Returns
     ///
-    /// * `Ok(UbusContext)` - Connected ubus context ready for method calls
-    /// * `Err(UbusError::ConnectionFailed)` - Failed to connect to ubusd
+    /// * `Ok(UbusContext)` - Connected `ubus` context ready for method calls
+    ///
+    /// # Errors
+    ///
+    /// Returns `UbusError::ConnectionFailed` if unable to connect to `ubusd` daemon.
     ///
     /// ## C Mapping
     ///
@@ -401,7 +428,7 @@ impl UbusContext {
         }
     }
 
-    /// Broadcast DHCP lease event to ubus subscribers
+    /// Broadcast DHCP lease event to `ubus` subscribers
     ///
     /// Sends asynchronous notification to all subscribed clients when DHCP leases
     /// change. Event types: "dhcp.add" (new), "dhcp.old" (renewed), "dhcp.del" (expired).
@@ -414,10 +441,13 @@ impl UbusContext {
     /// * `hostname` - Client hostname (optional)
     /// * `interface` - Network interface name (optional)
     ///
-    /// ## Returns
+    /// # Errors
     ///
-    /// * `Ok(())` - Event broadcast successfully or no subscribers
-    /// * `Err(UbusError::SerializationError)` - Failed to construct blob message
+    /// Returns `UbusError::SerializationError` if blob message construction fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if field names or values contain null bytes (invalid for C strings).
     ///
     /// ## C Mapping
     ///
@@ -451,7 +481,7 @@ impl UbusContext {
         unsafe {
             // Initialize blob buffer
             let mut buf: blob_buf = std::mem::zeroed();
-            let ret = blob_buf_init(&mut buf, BLOBMSG_TYPE_TABLE);
+            let ret = blob_buf_init(ptr::addr_of_mut!(buf), BLOBMSG_TYPE_TABLE);
             if ret != 0 {
                 return Err(UbusError::SerializationError(
                     "blob_buf_init failed".to_string(),
@@ -462,9 +492,9 @@ impl UbusContext {
             if let Some(mac_addr) = mac {
                 let c_name = CString::new("mac").unwrap();
                 let c_value = CString::new(mac_addr).unwrap();
-                let ret = blobmsg_add_string(&mut buf, c_name.as_ptr(), c_value.as_ptr());
+                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
-                    blob_buf_free(&mut buf);
+                    blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
                         "blobmsg_add_string(mac) failed".to_string(),
                     ));
@@ -474,9 +504,9 @@ impl UbusContext {
             if let Some(ip_addr) = ip {
                 let c_name = CString::new("ip").unwrap();
                 let c_value = CString::new(ip_addr).unwrap();
-                let ret = blobmsg_add_string(&mut buf, c_name.as_ptr(), c_value.as_ptr());
+                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
-                    blob_buf_free(&mut buf);
+                    blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
                         "blobmsg_add_string(ip) failed".to_string(),
                     ));
@@ -486,9 +516,9 @@ impl UbusContext {
             if let Some(name) = hostname {
                 let c_name = CString::new("name").unwrap();
                 let c_value = CString::new(name).unwrap();
-                let ret = blobmsg_add_string(&mut buf, c_name.as_ptr(), c_value.as_ptr());
+                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
-                    blob_buf_free(&mut buf);
+                    blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
                         "blobmsg_add_string(name) failed".to_string(),
                     ));
@@ -498,9 +528,9 @@ impl UbusContext {
             if let Some(iface) = interface {
                 let c_name = CString::new("interface").unwrap();
                 let c_value = CString::new(iface).unwrap();
-                let ret = blobmsg_add_string(&mut buf, c_name.as_ptr(), c_value.as_ptr());
+                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
-                    blob_buf_free(&mut buf);
+                    blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
                         "blobmsg_add_string(interface) failed".to_string(),
                     ));
@@ -517,13 +547,12 @@ impl UbusContext {
                 -1,
             );
 
-            blob_buf_free(&mut buf);
+            blob_buf_free(ptr::addr_of_mut!(buf));
 
             if ret != 0 {
                 error!("ubus_notify failed for event '{}': {}", event_type, ret);
                 return Err(UbusError::MethodFailed(format!(
-                    "ubus_notify failed with code {}",
-                    ret
+                    "ubus_notify failed with code {ret}"
                 )));
             }
 
@@ -532,10 +561,10 @@ impl UbusContext {
         }
     }
 
-    /// Query operational metrics for ubus export
+    /// Query operational metrics for `ubus` export
     ///
     /// Retrieves DNS cache statistics and DHCP lease counts from daemon state,
-    /// formatting them for ubus metrics method response. Corresponds to C's
+    /// formatting them for `ubus` metrics method response. Corresponds to C's
     /// `ubus_handle_metrics()` handler logic.
     ///
     /// ## Arguments
@@ -557,21 +586,21 @@ impl UbusContext {
     /// let metrics = ctx.get_metrics(&state_lock);
     /// println!("Cache size: {}", metrics.cache_size);
     /// ```
+    #[must_use]
     pub fn get_metrics(&self, state: &DaemonState) -> UbusMetrics {
-        // Access metrics from DaemonState
-        // Note: DaemonState has MetricsState with individual fields, not MetricsCollector
-        // We construct UbusMetrics from available fields
+        // Access metrics from DaemonState using the public getter
+        let metrics = state.get_metrics();
         
-        let cache_size = 0u64; // TODO: Get from DNS cache
-        let cache_inserted = 0u64; // TODO: Get from metrics
-        let cache_misses = state.metrics.dns_cache_misses;
-
+        // Get DNS cache statistics for cache size and insertions
+        let dns_cache = state.get_dns_cache();
+        let cache_stats = dns_cache.get_statistics();
+        
         UbusMetrics {
-            cache_size,
-            cache_inserted,
-            cache_misses,
+            cache_size: cache_stats.current_size as u64,
+            cache_inserted: cache_stats.inserts,
+            cache_misses: metrics.dns_cache_misses,
             #[cfg(feature = "dhcp")]
-            lease_count: state.metrics.dhcp_leases_active,
+            lease_count: metrics.dhcp_leases_active,
         }
     }
 
@@ -581,36 +610,35 @@ impl UbusContext {
     /// which domain patterns are permitted for connections marked with specific conntrack
     /// mark/mask combinations. Integrates with Linux netfilter for firewall-level DNS policies.
     ///
-    /// ## Arguments
+    /// # Arguments
     ///
     /// * `mark` - Connection tracking mark value (must be non-zero)
     /// * `mask` - Netmask for mark matching (default: 0xFFFFFFFF)
     /// * `patterns` - Array of domain patterns (wildcards supported)
     ///
-    /// ## Returns
+    /// # Errors
     ///
-    /// * `Ok(())` - Allowlist configured successfully
-    /// * `Err(UbusError::InvalidArgument)` - Invalid mark/mask or pattern
+    /// Returns `UbusError::InvalidArgument` if:
+    /// * `mark` is zero
+    /// * Any domain pattern is invalid (malformed DNS name)
     ///
-    /// ## C Mapping
+    /// # C Mapping
     ///
     /// Replaces `ubus_handle_set_connmark_allowlist()` from ubus.c:606-718
     ///
-    /// ## Example
+    /// # Example
     ///
     /// ```rust,ignore
-    /// ctx.set_connmark_allowlist(
-    ///     100,
-    ///     0xFF,
-    ///     vec!["*.example.com".to_string(), "safe.org".to_string()],
-    /// )?;
+    /// let patterns = vec!["*.example.com".to_string(), "safe.org".to_string()];
+    /// ctx.set_connmark_allowlist(100, 0xFF, &patterns)?;
     /// ```
     #[cfg(feature = "conntrack")]
+    #[allow(clippy::similar_names)] // mark and mask are standard networking terms
     pub fn set_connmark_allowlist(
         &self,
         mark: u32,
         mask: u32,
-        patterns: Vec<String>,
+        patterns: &[String],
     ) -> Result<(), UbusError> {
         // Validate mark
         if mark == 0 {
@@ -627,10 +655,10 @@ impl UbusContext {
         }
 
         // Validate patterns
-        for pattern in &patterns {
+        for pattern in patterns {
             if pattern != "*" {
                 validate_dns_pattern(pattern).map_err(|e| {
-                    UbusError::InvalidArgument(format!("invalid DNS pattern '{}': {}", pattern, e))
+                    UbusError::InvalidArgument(format!("invalid DNS pattern '{pattern}': {e}"))
                 })?;
             }
         }
@@ -650,16 +678,15 @@ impl UbusContext {
     /// Handles incoming ubus method calls by dispatching to registered handlers.
     /// Must be called when the ubus socket becomes readable in the event loop.
     ///
-    /// ## Returns
+    /// # Errors
     ///
-    /// * `Ok(())` - Events processed successfully
-    /// * `Err(UbusError::MethodFailed)` - Handler invocation failed
+    /// Returns `UbusError::MethodFailed` if handler invocation fails.
     ///
-    /// ## C Mapping
+    /// # C Mapping
     ///
     /// Replaces `check_ubus_listeners()` from ubus.c:446-470
     ///
-    /// ## Example
+    /// # Example
     ///
     /// ```rust,ignore
     /// // In Tokio event loop
@@ -683,16 +710,15 @@ impl UbusContext {
     /// Tries to re-establish connection to ubusd after disconnect or crash.
     /// Corresponds to C's `ubus_disconnect_cb()` reconnection logic.
     ///
-    /// ## Returns
+    /// # Errors
     ///
-    /// * `Ok(())` - Reconnection successful
-    /// * `Err(UbusError::ConnectionFailed)` - Reconnection failed
+    /// Returns `UbusError::ConnectionFailed` if reconnection to ubusd fails.
     ///
-    /// ## C Mapping
+    /// # C Mapping
     ///
     /// Replaces `ubus_disconnect_cb()` from ubus.c:259-270
     ///
-    /// ## Example
+    /// # Example
     ///
     /// ```rust,ignore
     /// if let Err(e) = ctx.handle_event() {
@@ -721,10 +747,10 @@ impl UbusContext {
 impl Drop for UbusContext {
     /// Cleanup ubus resources on drop
     ///
-    /// Automatically called when UbusContext goes out of scope. Frees the ubus_context
+    /// Automatically called when `UbusContext` goes out of scope. Frees the `ubus_context`
     /// and closes the Unix domain socket connection to ubusd.
     ///
-    /// ## C Mapping
+    /// # C Mapping
     ///
     /// Replaces `ubus_destroy()` from ubus.c:208-216
     fn drop(&mut self) {
@@ -737,25 +763,25 @@ impl Drop for UbusContext {
     }
 }
 
-// Ensure UbusContext is not Send/Sync since ubus_context is not thread-safe
-impl !Send for UbusContext {}
-impl !Sync for UbusContext {}
+// Note: UbusContext is not Send/Sync since ubus_context is not thread-safe.
+// In Rust 1.91.0, we rely on the compiler's auto-trait analysis to determine
+// that UbusContext is not Send/Sync due to the raw pointer field.
+// Negative trait bounds (!Send, !Sync) are not yet stable.
 
 /// Establish connection to ubus daemon
 ///
 /// Convenience function for initializing ubus connection with error handling.
 /// Wraps `UbusContext::connect()` for simpler API.
 ///
-/// ## Arguments
+/// # Arguments
 ///
 /// * `object_name` - Name for ubus object registration
 ///
-/// ## Returns
+/// # Errors
 ///
-/// * `Ok(UbusContext)` - Connected ubus context
-/// * `Err(UbusError::ConnectionFailed)` - Connection failed
+/// Returns `UbusError::ConnectionFailed` if connection to ubusd fails.
 ///
-/// ## Example
+/// # Example
 ///
 /// ```rust,ignore
 /// let ctx = connect("dnsmasq").await?;
@@ -804,12 +830,12 @@ mod tests {
         
         // Test invalid mask
         let mark = 100u32;
-        let mask = 50u32;
-        assert!((mark & !mask) != 0);
+        let netmask = 50u32;
+        assert!((mark & !netmask) != 0);
         
         // Test valid combination
         let mark = 100u32;
-        let mask = 0xFF;
-        assert!((mark & !mask) == 0);
+        let netmask = 0xFF;
+        assert!((mark & !netmask) == 0);
     }
 }

@@ -92,7 +92,7 @@ use crate::dns::edns::{OptRecord, find_opt_record};
 use crate::dns::forward::{Server, handle_query};
 use crate::dns::protocol::DnsMessage;
 use crate::runtime::signal::SignalEvent;
-use crate::types::errors::{DnsmasqError, NetworkError};
+use crate::types::errors::{DnsError, DnsmasqError, NetworkError};
 
 /// Result type for DNS server operations
 type ServerResult<T> = Result<T, DnsmasqError>;
@@ -100,7 +100,7 @@ type ServerResult<T> = Result<T, DnsmasqError>;
 /// Socket configuration for DNS server
 ///
 /// Controls socket binding behavior and buffer sizing for DNS query processing.
-/// Corresponds to C's socket setup in network.c create_bound_listeners().
+/// Corresponds to C's socket setup in `network.c` `create_bound_listeners()`.
 #[derive(Debug, Clone)]
 pub struct SocketConfig {
     /// List of IP addresses to bind to (empty = bind to all interfaces)
@@ -109,14 +109,14 @@ pub struct SocketConfig {
     /// DNS port number (default: 53)
     pub port: u16,
 
-    /// Enable SO_REUSEPORT for load balancing across multiple processes
+    /// Enable `SO_REUSEPORT` for load balancing across multiple processes
     /// (Linux 3.9+, BSD)
     pub reuse_port: bool,
 
-    /// SO_RCVBUF socket receive buffer size in bytes
+    /// `SO_RCVBUF` socket receive buffer size in bytes
     pub receive_buffer: usize,
 
-    /// SO_SNDBUF socket send buffer size in bytes
+    /// `SO_SNDBUF` socket send buffer size in bytes
     pub send_buffer: usize,
 }
 
@@ -126,8 +126,8 @@ impl Default for SocketConfig {
             bind_addresses: vec![],
             port: 53,
             reuse_port: false,
-            receive_buffer: 262144, // 256 KB for high-traffic DNS servers
-            send_buffer: 262144,
+            receive_buffer: 262_144, // 256 KB for high-traffic DNS servers
+            send_buffer: 262_144,
         }
     }
 }
@@ -172,42 +172,49 @@ impl Default for ServerConfig {
 
 impl ServerConfig {
     /// Set bind addresses for DNS server
+    #[must_use]
     pub fn with_bind_addresses(mut self, addresses: Vec<IpAddr>) -> Self {
         self.socket_config.bind_addresses = addresses;
         self
     }
 
     /// Set DNS port number (default: 53)
+    #[must_use]
     pub fn with_port(mut self, port: u16) -> Self {
         self.socket_config.port = port;
         self
     }
 
     /// Set DNS cache size
+    #[must_use]
     pub fn with_cache_size(mut self, size: usize) -> Self {
         self.cache_size = size;
         self
     }
 
     /// Set maximum TCP connections
+    #[must_use]
     pub fn with_max_tcp_connections(mut self, max: usize) -> Self {
         self.max_tcp_connections = max;
         self
     }
 
-    /// Enable SO_REUSEPORT for load balancing
+    /// Enable `SO_REUSEPORT` for load balancing
+    #[must_use]
     pub fn with_reuse_port(mut self, enable: bool) -> Self {
         self.socket_config.reuse_port = enable;
         self
     }
 
     /// Set TCP idle timeout
+    #[must_use]
     pub fn with_tcp_timeout(mut self, timeout: Duration) -> Self {
         self.tcp_timeout = timeout;
         self
     }
 
     /// Enable query logging
+    #[must_use]
     pub fn with_query_logging(mut self, enable: bool) -> Self {
         self.enable_query_logging = enable;
         self
@@ -241,11 +248,13 @@ pub struct ServerStatistics {
 
 impl ServerStatistics {
     /// Create new statistics instance with zero counters
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Get snapshot of current statistics (non-atomic read)
+    #[must_use]
     pub fn snapshot(&self) -> StatisticsSnapshot {
         StatisticsSnapshot {
             queries_received: self.queries_received.load(Ordering::Relaxed),
@@ -271,11 +280,17 @@ impl ServerStatistics {
 /// Immutable snapshot of server statistics
 #[derive(Debug, Clone, Copy)]
 pub struct StatisticsSnapshot {
+    /// Total queries received
     pub queries_received: u64,
+    /// Queries forwarded to upstream
     pub queries_forwarded: u64,
+    /// Cache hits
     pub cache_hits: u64,
+    /// Cache misses
     pub cache_misses: u64,
+    /// `SERVFAIL` responses sent
     pub servfail_responses: u64,
+    /// `NXDOMAIN` responses sent
     pub nxdomain_responses: u64,
 }
 
@@ -321,13 +336,17 @@ impl DnsServer {
     /// * `config` - Server configuration
     /// * `global_config` - Global dnsmasq configuration
     ///
+    /// # Errors
+    ///
+    /// Returns error if configuration validation fails
+    ///
     /// # Returns
     ///
-    /// New DnsServer instance ready for binding
+    /// New `DnsServer` instance ready for binding
     ///
     /// # C Source Reference
     ///
-    /// Replaces initialization in dnsmasq.c main() function (lines 800-900)
+    /// Replaces initialization in `dnsmasq.c` `main()` function (lines 800-900)
     pub fn new(config: ServerConfig, global_config: Arc<Config>) -> ServerResult<Self> {
         // Initialize DNS cache with configured size
         let cache = DnsCache::new(config.cache_size);
@@ -371,13 +390,21 @@ impl DnsServer {
     /// Creates UDP and TCP sockets with configured socket options. Must be called
     /// before privilege drop if binding to port <1024.
     ///
+    /// # Errors
+    ///
+    /// Returns error if socket binding fails or socket options cannot be set
+    ///
+    /// # Panics
+    ///
+    /// Panics if socket conversion to tokio types fails
+    ///
     /// # Returns
     ///
-    /// Ok(()) on success, error on socket binding failure
+    /// `Ok(())` on success, error on socket binding failure
     ///
     /// # C Source Reference
     ///
-    /// Replaces network.c create_bound_listeners() (lines 200-400)
+    /// Replaces `network.c` `create_bound_listeners()` (lines 200-400)
     #[instrument(skip(self), level = "info")]
     pub fn bind(&mut self) -> ServerResult<()> {
         let socket_config = &self.config.socket_config;
@@ -413,11 +440,11 @@ impl DnsServer {
             bind_addresses
                 .first()
                 .copied()
-                .unwrap_or_else(|| "0.0.0.0".parse().unwrap()),
+                .unwrap_or_else(|| "0.0.0.0".parse().expect("Valid IP address")),
             socket_config.port,
         );
 
-        match self.create_tcp_listener(tcp_bind_addr) {
+        match Self::create_tcp_listener(tcp_bind_addr) {
             Ok(listener) => {
                 info!("DNS server bound to TCP {}", tcp_bind_addr);
                 self.tcp_listener = Some(Arc::new(listener));
@@ -433,11 +460,11 @@ impl DnsServer {
 
     /// Create UDP socket with configured socket options
     ///
-    /// Sets SO_REUSEADDR, SO_REUSEPORT (if enabled), and buffer sizes.
+    /// Sets `SO_REUSEADDR`, `SO_REUSEPORT` (if enabled), and buffer sizes.
     ///
     /// # C Source Reference
     ///
-    /// Replaces network.c socket creation (lines 250-300)
+    /// Replaces `network.c` socket creation (lines 250-300)
     fn create_udp_socket(&self, addr: SocketAddr) -> ServerResult<UdpSocket> {
         let socket_config = &self.config.socket_config;
 
@@ -492,8 +519,8 @@ impl DnsServer {
 
     /// Create TCP listener with configured socket options
     ///
-    /// Sets SO_REUSEADDR for quick restart.
-    fn create_tcp_listener(&self, addr: SocketAddr) -> ServerResult<TcpListener> {
+    /// Sets `SO_REUSEADDR` for quick restart.
+    fn create_tcp_listener(addr: SocketAddr) -> ServerResult<TcpListener> {
         let domain = if addr.is_ipv4() {
             Domain::IPV4
         } else {
@@ -526,16 +553,20 @@ impl DnsServer {
 
     /// Main event loop - process DNS queries until shutdown
     ///
-    /// Multiplexes UDP sockets, TCP listener, and shutdown signals using tokio::select!.
+    /// Multiplexes UDP sockets, TCP listener, and shutdown signals using `tokio::select!`.
     /// Spawns concurrent tasks for query processing to avoid blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns error on fatal I/O failure or signal handling error
     ///
     /// # Returns
     ///
-    /// Ok(()) on graceful shutdown, error on fatal failure
+    /// `Ok(())` on graceful shutdown, error on fatal failure
     ///
     /// # C Source Reference
     ///
-    /// Replaces dnsmasq.c main event loop (lines 1200-1450)
+    /// Replaces `dnsmasq.c` main event loop (lines 1200-1450)
     #[instrument(skip(self), level = "info")]
     pub async fn run(&mut self) -> ServerResult<()> {
         info!("DNS server starting event loop");
@@ -582,7 +613,7 @@ impl DnsServer {
                 }
 
                 // Handle TCP connections
-                result = Self::accept_tcp_connection(&tcp_listener), if tcp_listener.is_some() => {
+                result = Self::accept_tcp_connection(tcp_listener.as_ref()), if tcp_listener.is_some() => {
                     match result {
                         Ok((stream, peer_addr)) => {
                             // Acquire semaphore permit for connection limiting
@@ -617,12 +648,12 @@ impl DnsServer {
                     break;
                 }
 
-                _ = sigint.recv() => {
+                Some(()) = sigint.recv() => {
                     info!("Received SIGINT, initiating graceful shutdown");
                     break;
                 }
 
-                _ = shutdown_notify.notified() => {
+                () = shutdown_notify.notified() => {
                     info!("Shutdown requested via API, initiating graceful shutdown");
                     break;
                 }
@@ -649,7 +680,7 @@ impl DnsServer {
                     return Ok((buf.to_vec(), source, socket.clone()));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue; // Try next socket
+                    // Try next socket
                 }
                 Err(e) => {
                     return Err(DnsmasqError::Network(NetworkError::Receive(e.to_string())));
@@ -693,7 +724,7 @@ impl DnsServer {
 
     /// Accept TCP connection from listener
     async fn accept_tcp_connection(
-        listener: &Option<Arc<TcpListener>>,
+        listener: Option<&Arc<TcpListener>>,
     ) -> ServerResult<(TcpStream, SocketAddr)> {
         if let Some(listener) = listener {
             listener
@@ -729,7 +760,7 @@ impl DnsServer {
     ///
     /// # C Source Reference
     ///
-    /// Replaces dnsmasq.c check_dns_listeners() and forward.c receive_query()
+    /// Replaces `dnsmasq.c` `check_dns_listeners()` and `forward.c` `receive_query()`
     #[instrument(skip(self, data, socket), level = "debug")]
     async fn handle_udp_query(
         &self,
@@ -745,14 +776,11 @@ impl DnsServer {
             .fetch_add(1, Ordering::Relaxed);
 
         // Parse DNS message
-        let query = match DnsMessage::parse(&data) {
-            Ok(msg) => msg,
-            Err(e) => {
-                error!("Failed to parse DNS query from {}: {}", source, e);
-                // Send FORMERR response
-                self.send_error_response(&socket, source, &data, 1).await?; // FORMERR = 1
-                return Ok(());
-            }
+        let Ok(query) = DnsMessage::parse(&data) else {
+            error!("Failed to parse DNS query from {}", source);
+            // Send FORMERR response
+            self.send_error_response(&socket, source, &data, 1).await?; // FORMERR = 1
+            return Ok(());
         };
 
         // Log query if enabled
@@ -789,7 +817,7 @@ impl DnsServer {
                 response_data.len(),
                 max_udp_size
             );
-            self.truncate_response(response, max_udp_size)?
+            Self::truncate_response(response, max_udp_size)?
         } else {
             response_data
         };
@@ -867,12 +895,9 @@ impl DnsServer {
                 .fetch_add(1, Ordering::Relaxed);
 
             // Parse and process query
-            let query = match DnsMessage::parse(&query_data) {
-                Ok(msg) => msg,
-                Err(e) => {
-                    error!("Failed to parse TCP DNS query from {}: {}", peer_addr, e);
-                    continue; // Try next query
-                }
+            let Ok(query) = DnsMessage::parse(&query_data) else {
+                error!("Failed to parse TCP DNS query from {}", peer_addr);
+                continue; // Try next query
             };
 
             let response = self.process_query(query, peer_addr).await?;
@@ -925,6 +950,7 @@ impl DnsServer {
         use tokio::io::AsyncWriteExt;
 
         // Send 2-byte length prefix
+        #[allow(clippy::cast_possible_truncation)]
         let length = (data.len() as u16).to_be_bytes();
         stream
             .write_all(&length)
@@ -944,9 +970,13 @@ impl DnsServer {
     ///
     /// Core query processing logic coordinating cache and forwarding.
     ///
+    /// # Errors
+    ///
+    /// Returns error if query is invalid or forwarding fails
+    ///
     /// # C Source Reference
     ///
-    /// Replaces forward.c receive_query() processing logic
+    /// Replaces `forward.c` `receive_query()` processing logic
     #[instrument(skip(self, query), level = "debug")]
     pub async fn process_query(
         &self,
@@ -1010,7 +1040,7 @@ impl DnsServer {
                         record_class: question.qclass,
                     };
                     // Use minimum TTL from all answer records
-                    let min_ttl = response.answers.iter().map(|r| r.ttl()).min().unwrap_or(0);
+                    let min_ttl = response.answers.iter().map(super::protocol::ResourceRecord::ttl).min().unwrap_or(0);
                     cache.insert(
                         cache_key,
                         response.answers.clone(),
@@ -1061,7 +1091,6 @@ impl DnsServer {
     ///
     /// Sets TC bit and removes answers/authority/additional records
     fn truncate_response(
-        &self,
         mut response: DnsMessage,
         max_size: usize,
     ) -> ServerResult<Vec<u8>> {
@@ -1115,11 +1144,11 @@ impl DnsServer {
 
             response.serialize().unwrap_or_else(|_| {
                 // Fallback: minimal error response
-                self.create_minimal_error(rcode)
+                Self::create_minimal_error(rcode)
             })
         } else {
             // Can't parse query - send minimal error
-            self.create_minimal_error(rcode)
+            Self::create_minimal_error(rcode)
         };
 
         socket
@@ -1131,7 +1160,7 @@ impl DnsServer {
     }
 
     /// Create minimal error response when query can't be parsed
-    fn create_minimal_error(&self, rcode: u8) -> Vec<u8> {
+    fn create_minimal_error(rcode: u8) -> Vec<u8> {
         // Minimal DNS header with error code
         let mut response = vec![0u8; 12];
         response[2] = 0x80; // QR=1 (response)
@@ -1143,7 +1172,11 @@ impl DnsServer {
     ///
     /// # C Source Reference
     ///
-    /// Replaces cleanup in dnsmasq.c async_event() SIGTERM handler
+    /// Replaces cleanup in dnsmasq.c `async_event()` SIGTERM handler
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if socket closure fails or operations timeout
     pub async fn shutdown(&mut self) -> ServerResult<()> {
         info!("DNS server shutting down gracefully");
 
@@ -1174,6 +1207,7 @@ impl DnsServer {
     /// Get server statistics
     ///
     /// Returns reference to statistics for monitoring and debugging
+    #[must_use]
     pub fn statistics(&self) -> &ServerStatistics {
         &self.statistics
     }
@@ -1212,13 +1246,10 @@ impl ServerContext {
             .fetch_add(1, Ordering::Relaxed);
 
         // Parse DNS message
-        let query = match DnsMessage::parse(&data) {
-            Ok(msg) => msg,
-            Err(e) => {
-                error!("Failed to parse DNS query from {}: {}", source, e);
-                // Send FORMERR response
-                return self.send_error_response(&socket, source, &data, 1).await;
-            }
+        let Ok(query) = DnsMessage::parse(&data) else {
+            error!("Failed to parse DNS query from {}", source);
+            // Send FORMERR response
+            return self.send_error_response(&socket, source, &data, 1).await;
         };
 
         // Log query if enabled
@@ -1255,7 +1286,7 @@ impl ServerContext {
 
         let final_response = if response_data.len() > max_size {
             warn!("Response truncated for {}", source);
-            self.truncate_response(response, max_size)?
+            Self::truncate_response(response, max_size)?
         } else {
             response_data
         };
@@ -1286,21 +1317,17 @@ impl ServerContext {
 
         loop {
             // Read length prefix
-            let length =
-                match tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await {
-                    Ok(Ok(len)) => len,
-                    Ok(Err(_)) | Err(_) => return Ok(()),
-                };
+            let Ok(Ok(length)) = tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await else {
+                return Ok(());
+            };
 
             // Read query data
-            let query_data = match tokio::time::timeout(
+            let Ok(Ok(query_data)) = tokio::time::timeout(
                 timeout,
                 self.read_tcp_data(&mut stream, length),
             )
-            .await
-            {
-                Ok(Ok(data)) => data,
-                Ok(Err(_)) | Err(_) => return Ok(()),
+            .await else {
+                return Ok(());
             };
 
             self.statistics
@@ -1308,12 +1335,9 @@ impl ServerContext {
                 .fetch_add(1, Ordering::Relaxed);
 
             // Parse and process
-            let query = match DnsMessage::parse(&query_data) {
-                Ok(msg) => msg,
-                Err(e) => {
-                    error!("Failed to parse TCP query from {}: {}", peer_addr, e);
-                    continue;
-                }
+            let Ok(query) = DnsMessage::parse(&query_data) else {
+                error!("Failed to parse TCP query from {}", peer_addr);
+                continue;
             };
 
             let response = self.process_query(query, peer_addr).await?;
@@ -1384,7 +1408,7 @@ impl ServerContext {
                         record_type: question.qtype,
                         record_class: question.qclass,
                     };
-                    let min_ttl = response.answers.iter().map(|r| r.ttl()).min().unwrap_or(0);
+                    let min_ttl = response.answers.iter().map(super::protocol::ResourceRecord::ttl).min().unwrap_or(0);
                     cache.insert(
                         cache_key,
                         response.answers.clone(),
@@ -1442,7 +1466,6 @@ impl ServerContext {
     }
 
     fn truncate_response(
-        &self,
         mut response: DnsMessage,
         max_size: usize,
     ) -> ServerResult<Vec<u8>> {
@@ -1490,7 +1513,11 @@ impl ServerContext {
 
     async fn send_tcp_response(&self, stream: &mut TcpStream, data: &[u8]) -> ServerResult<()> {
         use tokio::io::AsyncWriteExt;
-        let length = (data.len() as u16).to_be_bytes();
+        let length = u16::try_from(data.len())
+            .map_err(|_| DnsError::ProtocolError {
+                message: "DNS response too large for TCP".to_string()
+            })?
+            .to_be_bytes();
         stream
             .write_all(&length)
             .await

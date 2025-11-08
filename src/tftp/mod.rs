@@ -45,7 +45,7 @@
 //!     };
 //!     
 //!     let mut server = TftpServer::new(config);
-//!     server.bind().await?;
+//!     server.bind()?;
 //!     server.run().await?;
 //!     Ok(())
 //! }
@@ -179,7 +179,7 @@ pub enum TftpError {
 /// Convenient Result type alias for TFTP operations
 ///
 /// Simplifies function signatures throughout the TFTP subsystem by providing
-/// a default error type of TftpError.
+/// a default error type of `TftpError`.
 ///
 /// # Example
 ///

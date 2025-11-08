@@ -53,13 +53,13 @@ use crate::dns::forward::Server;
 use crate::dns::protocol::RecordType;
 use crate::types::errors::DnsmasqError;
 
-/// Server flag indicating a detected forwarding loop (from C's SERV_LOOP)
+/// Server flag indicating a detected forwarding loop (from C's `SERV_LOOP`)
 ///
 /// This flag is set on upstream servers that return our own probe queries,
 /// indicating they are forwarding DNS requests back to dnsmasq and creating
 /// an infinite loop. Servers with this flag are excluded from query forwarding.
 ///
-/// Value: 0x0020 (next available bit after SERV_HAS_DOMAIN = 0x0010)
+/// Value: 0x0020 (next available bit after `SERV_HAS_DOMAIN` = 0x0010)
 pub const SERV_LOOP: u16 = 0x0020;
 
 /// RFC 2606 reserved domain suffix for loop detection probes
@@ -111,7 +111,7 @@ pub enum LoopDetectError {
 /// ## Design
 ///
 /// Unlike the C implementation which uses a global uid field in struct server,
-/// this Rust implementation tracks UIDs in a HashMap keyed by server address.
+/// this Rust implementation tracks UIDs in a `HashMap` keyed by server address.
 /// This provides better separation of concerns and allows the Server struct
 /// to remain simpler.
 ///
@@ -162,6 +162,7 @@ impl LoopDetector {
     /// use std::time::Duration;
     /// let detector = LoopDetector::new(true, Duration::from_secs(30));
     /// ```
+    #[must_use]
     pub fn new(enabled: bool, probe_interval: Duration) -> Self {
         Self {
             enabled,
@@ -174,7 +175,7 @@ impl LoopDetector {
     /// Get or create a UID for the given server address
     ///
     /// Returns existing UID if server already has one, otherwise allocates
-    /// a new UID and stores it in the tracking HashMap.
+    /// a new UID and stores it in the tracking `HashMap`.
     ///
     /// # Arguments
     ///
@@ -208,6 +209,7 @@ impl LoopDetector {
     /// # Returns
     ///
     /// Some(uid) if server has been assigned a UID, None otherwise
+    #[must_use]
     pub fn get_server_uid(&self, addr: &SocketAddr) -> Option<u32> {
         self.server_uids.get(addr).copied()
     }
@@ -215,7 +217,7 @@ impl LoopDetector {
     /// Send loop detection probes to all default upstream servers
     ///
     /// Iterates through all servers without domain restrictions and sends
-    /// a unique TXT query to each. Clears SERV_LOOP flag before sending to
+    /// a unique TXT query to each. Clears `SERV_LOOP` flag before sending to
     /// allow recovery if upstream configuration has been fixed.
     ///
     /// Corresponds to C's `loop_send_probes()` (loop.c lines 123-150)
@@ -229,9 +231,13 @@ impl LoopDetector {
     ///
     /// Ok(()) on success, Err if socket operations fail
     ///
+    /// # Errors
+    ///
+    /// Returns error if socket send operations fail
+    ///
     /// # Async
     ///
-    /// Uses tokio::net::UdpSocket::send_to for non-blocking transmission
+    /// Uses `tokio::net::UdpSocket::send_to` for non-blocking transmission
     ///
     /// # Examples
     ///
@@ -294,7 +300,7 @@ impl LoopDetector {
     /// Check if an incoming DNS query is a loop detection probe
     ///
     /// Examines the query name and type to determine if it matches a probe
-    /// previously sent by send_probes(). Valid probes have the format
+    /// previously sent by `send_probes()`. Valid probes have the format
     /// "XXXXXXXX.test" where XXXXXXXX is 8 hexadecimal digits.
     ///
     /// Corresponds to C's `detect_loop()` (loop.c lines 305-336)
@@ -315,6 +321,7 @@ impl LoopDetector {
     ///     println!("Detected loop with UID: {}", uid);
     /// }
     /// ```
+    #[must_use]
     pub fn is_probe_query(&self, query_name: &str, query_type: u16) -> Option<u32> {
         if !self.enabled {
             return None;
@@ -406,7 +413,8 @@ fn make_probe_query(uid: u32) -> Result<Vec<u8>, LoopDetectError> {
     // Format: <length-byte><label-bytes>...<length-byte><label-bytes><0x00>
 
     // First label: 8-character hex UID
-    let uid_hex = format!("{:08x}", uid);
+    let uid_hex = format!("{uid:08x}");
+    #[allow(clippy::cast_possible_truncation)]
     cursor
         .write_u8(UID_HEX_LENGTH as u8)
         .map_err(|_| LoopDetectError::PacketBuildError)?;
@@ -415,6 +423,7 @@ fn make_probe_query(uid: u32) -> Result<Vec<u8>, LoopDetectError> {
         .map_err(|_| LoopDetectError::PacketBuildError)?;
 
     // Second label: "test"
+    #[allow(clippy::cast_possible_truncation)]
     cursor
         .write_u8(PROBE_DOMAIN_SUFFIX.len() as u8)
         .map_err(|_| LoopDetectError::PacketBuildError)?;
@@ -438,6 +447,7 @@ fn make_probe_query(uid: u32) -> Result<Vec<u8>, LoopDetectError> {
         .map_err(|_| LoopDetectError::PacketBuildError)?;
 
     // Get final packet length
+    #[allow(clippy::cast_possible_truncation)]
     let packet_len = cursor.position() as usize;
     // Cursor goes out of scope here, releasing the borrow
 
@@ -483,7 +493,7 @@ fn parse_probe_name(query_name: &str) -> Option<u32> {
     }
 
     // Check if it ends with ".test"
-    if !query_name.ends_with(&format!(".{}", PROBE_DOMAIN_SUFFIX)) {
+    if !query_name.ends_with(&format!(".{PROBE_DOMAIN_SUFFIX}")) {
         return None;
     }
 
@@ -518,7 +528,7 @@ fn parse_probe_name(query_name: &str) -> Option<u32> {
 
 /// Convenience function: send loop detection probes
 ///
-/// Wrapper around LoopDetector::send_probes() for simpler API usage.
+/// Wrapper around `LoopDetector::send_probes()` for simpler API usage.
 /// Exported for use by the forwarding subsystem.
 ///
 /// # Arguments
@@ -530,6 +540,10 @@ fn parse_probe_name(query_name: &str) -> Option<u32> {
 /// # Returns
 ///
 /// Result indicating success or socket error
+///
+/// # Errors
+///
+/// Returns `LoopDetectError::SocketError` if UDP socket operations fail
 pub async fn send_probes(
     detector: &mut LoopDetector,
     servers: &mut [Server],
@@ -540,7 +554,7 @@ pub async fn send_probes(
 
 /// Convenience function: check if query is a probe
 ///
-/// Wrapper around LoopDetector::is_probe_query() for simpler API usage.
+/// Wrapper around `LoopDetector::is_probe_query()` for simpler API usage.
 /// Exported for use by the DNS query processing pipeline.
 ///
 /// # Arguments
@@ -552,6 +566,7 @@ pub async fn send_probes(
 /// # Returns
 ///
 /// Some(uid) if query is a probe, None otherwise
+#[must_use]
 pub fn is_probe_query(detector: &LoopDetector, query_name: &str, query_type: u16) -> Option<u32> {
     detector.is_probe_query(query_name, query_type)
 }
@@ -584,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_make_probe_query() {
-        let uid = 0x12345678;
+        let uid = 0x1234_5678;
         let packet = make_probe_query(uid).unwrap();
 
         // Verify packet is not empty and has reasonable size
@@ -601,12 +616,12 @@ mod tests {
 
     #[test]
     fn test_parse_probe_name_valid() {
-        assert_eq!(parse_probe_name("12345678.test"), Some(0x12345678));
-        assert_eq!(parse_probe_name("abcdef01.test"), Some(0xabcdef01));
-        assert_eq!(parse_probe_name("00000000.test"), Some(0x00000000));
-        assert_eq!(parse_probe_name("ffffffff.test"), Some(0xffffffff));
+        assert_eq!(parse_probe_name("12345678.test"), Some(0x1234_5678));
+        assert_eq!(parse_probe_name("abcdef01.test"), Some(0xabcd_ef01));
+        assert_eq!(parse_probe_name("00000000.test"), Some(0x0000_0000));
+        assert_eq!(parse_probe_name("ffffffff.test"), Some(0xffff_ffff));
         // Case insensitive hex
-        assert_eq!(parse_probe_name("ABCDEF01.test"), Some(0xABCDEF01));
+        assert_eq!(parse_probe_name("ABCDEF01.test"), Some(0xABCD_EF01));
     }
 
     #[test]
@@ -649,7 +664,7 @@ mod tests {
     fn test_is_probe_query_valid() {
         let detector = LoopDetector::new(true, Duration::from_secs(30));
         let result = detector.is_probe_query("abcd1234.test", PROBE_QUERY_TYPE);
-        assert_eq!(result, Some(0xabcd1234));
+        assert_eq!(result, Some(0xabcd_1234));
     }
 
     #[test]

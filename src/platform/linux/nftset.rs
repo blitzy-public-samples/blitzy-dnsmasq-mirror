@@ -140,7 +140,7 @@ pub struct NftablesManager {
 }
 
 impl NftablesManager {
-    /// Create a new NftablesManager with initialized nftables context
+    /// Create a new `NftablesManager` with initialized nftables context
     ///
     /// This initializes the libnftables context required for all nftables
     /// set operations. Error output from libnftables is buffered to prevent
@@ -172,8 +172,7 @@ impl NftablesManager {
                 Ok(NftablesManager { nft_path })
             }
             Ok(_) | Err(_) => Err(NftsetError::InitFailed(format!(
-                "nft binary not found or not executable at {}",
-                nft_path
+                "nft binary not found or not executable at {nft_path}"
             ))),
         }
     }
@@ -278,10 +277,7 @@ impl NftablesManager {
         // Construct the nftables command
         let operation = if remove { "delete" } else { "add" };
         let addr_str = addr.to_string();
-        let command = format!(
-            "{} element {} {{ {} }}",
-            operation, parsed_setname, addr_str
-        );
+        let command = format!("{operation} element {parsed_setname} {{ {addr_str} }}");
 
         info!(
             "executing nftables command: {} address {} to/from set {}",
@@ -306,8 +302,7 @@ impl NftablesManager {
             let first_line = error_msg.lines().next().unwrap_or(&error_msg);
 
             Err(NftsetError::CommandFailed(format!(
-                "set {}: {}",
-                parsed_setname, first_line
+                "set {parsed_setname}: {first_line}"
             )))
         }
     }
@@ -335,7 +330,7 @@ enum AddressFamilyFilter {
 ///
 /// # Returns
 ///
-/// A tuple of (parsed_setname, optional_filter)
+/// A tuple of (`parsed_setname`, `optional_filter`)
 ///
 /// # Errors
 ///
@@ -370,8 +365,7 @@ fn parse_setname_and_filter(
     // We expect at least 2 # characters: table#family#set
     if parsed_name.matches('#').count() < 2 {
         return Err(NftsetError::InvalidSetName(format!(
-            "invalid format '{}': expected 'table#family#set'",
-            parsed_name
+            "invalid format '{parsed_name}': expected 'table#family#set'"
         )));
     }
 
@@ -380,9 +374,9 @@ fn parse_setname_and_filter(
 
 /// Add or remove an IP address to/from a nftables set
 ///
-/// This is a convenience function that creates a temporary NftablesManager,
+/// This is a convenience function that creates a temporary `NftablesManager`,
 /// performs the operation, and returns. For multiple operations, it's more
-/// efficient to create a NftablesManager once and reuse it.
+/// efficient to create a `NftablesManager` once and reuse it.
 ///
 /// # Arguments
 ///

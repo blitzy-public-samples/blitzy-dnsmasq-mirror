@@ -6,18 +6,18 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated June, 2007.
 
-//! # DHCPv6 State Machine
+//! # `DHCPv6` State Machine
 //!
-//! Type-safe state transitions for DHCPv6 protocol lifecycle implementing RFC 3315.
+//! Type-safe state transitions for `DHCPv6` protocol lifecycle implementing RFC 3315.
 //!
 //! ## Overview
 //!
-//! This module implements DHCPv6 state machines using Rust's type system to enforce
+//! This module implements `DHCPv6` state machines using Rust's type system to enforce
 //! valid state transitions at compile-time, preventing protocol violations. It replaces
 //! C's switch-case message type handling in `rfc3315.c` with type-state pattern where
 //! invalid states are unrepresentable.
 //!
-//! ## DHCPv6 Message Exchanges
+//! ## `DHCPv6` Message Exchanges
 //!
 //! ### Stateful Address Allocation (4-message exchange)
 //! ```text
@@ -50,8 +50,8 @@
 //!
 //! ## References
 //!
-//! - RFC 3315: Dynamic Host Configuration Protocol for IPv6 (DHCPv6)
-//! - RFC 8415: DHCPv6 bis (updated specification)
+//! - `RFC 3315`: Dynamic Host Configuration Protocol for IPv6 (`DHCPv6`)
+//! - `RFC 8415`: `DHCPv6` bis (updated specification)
 //! - Source: `src/rfc3315.c` (C implementation reference)
 
 use std::fmt;
@@ -61,9 +61,9 @@ use super::protocol::Dhcpv6MessageType;
 use crate::dhcp::v6::options::Dhcp6Option;
 use crate::types::errors::{DhcpError, DnsmasqError};
 
-/// DHCPv6 protocol states
+/// `DHCPv6` protocol states
 ///
-/// Represents the lifecycle states of a DHCPv6 transaction from the server's
+/// Represents the lifecycle states of a `DHCPv6` transaction from the server's
 /// perspective. This enum replaces implicit state tracking in C implementation
 /// where state was inferred from message types and transaction IDs.
 ///
@@ -150,13 +150,13 @@ impl fmt::Display for Dhcpv6State {
             Self::Decline => "DECLINE",
             Self::InformationRequest => "INFORMATION-REQUEST",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 
 /// State transition validator and processor
 ///
-/// Encapsulates DHCPv6 state transition logic with compile-time and runtime
+/// Encapsulates `DHCPv6` state transition logic with compile-time and runtime
 /// validation. This struct replaces C's switch-case dispatch with explicit
 /// state transition methods that return `Result` types encoding valid
 /// transitions in function signatures.
@@ -182,7 +182,7 @@ impl fmt::Display for Dhcpv6State {
 /// ```
 #[derive(Debug)]
 pub struct Dhcpv6StateMachine {
-    /// Current state in the DHCPv6 exchange
+    /// Current state in the `DHCPv6` exchange
     current_state: Dhcpv6State,
     /// Whether rapid commit is active (2-message exchange)
     rapid_commit: bool,
@@ -195,7 +195,7 @@ impl Dhcpv6StateMachine {
     ///
     /// # Arguments
     ///
-    /// * `transaction_id` - DHCPv6 transaction ID for message correlation
+    /// * `transaction_id` - `DHCPv6` transaction ID for message correlation
     ///
     /// # Returns
     ///
@@ -222,9 +222,9 @@ impl Dhcpv6StateMachine {
     ///
     /// # Arguments
     ///
-    /// * `msg_type` - Received DHCPv6 message type
+    /// * `msg_type` - Received `DHCPv6` message type
     /// * `transaction_id` - Transaction ID from message header
-    /// * `options` - Parsed DHCPv6 options from message
+    /// * `options` - Parsed `DHCPv6` options from message
     ///
     /// # Returns
     ///
@@ -267,10 +267,7 @@ impl Dhcpv6StateMachine {
             Dhcpv6MessageType::InformationRequest => Dhcpv6State::InformationRequest,
             _ => {
                 return Err(DnsmasqError::Dhcp(DhcpError::StateMachineError {
-                    message: format!(
-                        "Message type {} cannot initiate DHCPv6 transaction",
-                        msg_type
-                    ),
+                    message: format!("Message type {msg_type} cannot initiate DHCPv6 transaction"),
                 }));
             }
         };
@@ -321,34 +318,16 @@ impl Dhcpv6StateMachine {
     /// )?; // Error
     /// ```
     pub fn validate(from: Dhcpv6State, to: Dhcpv6State) -> Result<(), DnsmasqError> {
-        use Dhcpv6State::*;
+        use Dhcpv6State::{Solicit, Advertise, Request, Reply, Renew, Rebind, Confirm, Release, Decline, InformationRequest};
 
         let valid = match (from, to) {
-            // Standard 4-message exchange
-            (Solicit, Advertise) => true,
-            (Advertise, Request) | (Solicit, Request) => true,
-            (Request, Reply) => true,
-
-            // Lease lifecycle transitions
-            (Reply, Renew) | (Reply, Rebind) => true,
-            (Renew, Reply) | (Rebind, Reply) => true,
-
-            // Confirmation and release
-            (Solicit, Confirm) | (Reply, Confirm) => true,
-            (Confirm, Reply) => true,
-            (Reply, Release) | (Renew, Release) | (Rebind, Release) => true,
-            (Release, Reply) => true,
-
-            // Decline
-            (Reply, Decline) | (Request, Decline) => true,
-            (Decline, Reply) => true,
-
-            // Information request (stateless)
-            (Solicit, InformationRequest) => true,
-            (InformationRequest, Reply) => true,
-
-            // Rapid commit bypass (SOLICIT → REPLY)
-            (Solicit, Reply) => true,
+            // Valid transitions organized by source state
+            (Solicit, Advertise | Request | InformationRequest | Reply | Confirm) |
+            (Advertise, Request) |
+            (Request, Reply | Decline) |
+            (Reply, Renew | Rebind | Confirm | Release | Decline) |
+            (Renew | Rebind, Reply | Release) |
+            (Confirm | Release | Decline | InformationRequest, Reply) => true,
 
             // Self-transitions for retransmissions
             (s1, s2) if s1 == s2 => true,
@@ -364,7 +343,7 @@ impl Dhcpv6StateMachine {
                 "Invalid DHCPv6 state transition attempted"
             );
             return Err(DnsmasqError::Dhcp(DhcpError::StateMachineError {
-                message: format!("Invalid state transition: {} → {}", from, to),
+                message: format!("Invalid state transition: {from} → {to}"),
             }));
         }
 
@@ -456,6 +435,7 @@ impl Dhcpv6StateMachine {
     ///     transition.transition_to(Dhcpv6State::Advertise)?;
     /// }
     /// ```
+    #[must_use]
     pub fn requires_rapid_commit(&self) -> bool {
         self.rapid_commit
     }
@@ -464,7 +444,8 @@ impl Dhcpv6StateMachine {
     ///
     /// # Returns
     ///
-    /// Current state in the DHCPv6 transaction
+    /// Current state in the `DHCPv6` transaction
+    #[must_use]
     pub fn current_state(&self) -> Dhcpv6State {
         self.current_state
     }
@@ -474,6 +455,7 @@ impl Dhcpv6StateMachine {
     /// # Returns
     ///
     /// 24-bit transaction ID used for message correlation
+    #[must_use]
     pub fn transaction_id(&self) -> u32 {
         self.transaction_id
     }
@@ -482,7 +464,7 @@ impl Dhcpv6StateMachine {
     ///
     /// # Returns
     ///
-    /// Expected DHCPv6 message type that server should send in response
+    /// Expected `DHCPv6` message type that server should send in response
     ///
     /// # Examples
     ///
@@ -493,17 +475,16 @@ impl Dhcpv6StateMachine {
     ///     Dhcpv6MessageType::Advertise
     /// );
     /// ```
+    #[must_use]
     pub fn response_message_type(&self) -> Dhcpv6MessageType {
-        use Dhcpv6State::*;
+        use Dhcpv6State::{Solicit, Advertise, Request, Renew, Rebind, Confirm, Release, Decline, InformationRequest, Reply};
 
         match self.current_state {
             Solicit if self.rapid_commit => Dhcpv6MessageType::Reply,
             Solicit => Dhcpv6MessageType::Advertise,
-            Advertise => Dhcpv6MessageType::Reply,
-            Request | Renew | Rebind | Confirm | Release | Decline | InformationRequest => {
+            Advertise | Request | Renew | Rebind | Confirm | Release | Decline | InformationRequest | Reply => {
                 Dhcpv6MessageType::Reply
             }
-            Reply => Dhcpv6MessageType::Reply, // Retransmission
         }
     }
 
@@ -521,6 +502,7 @@ impl Dhcpv6StateMachine {
     ///     let addr = allocate_address(&client_duid, &iaid)?;
     /// }
     /// ```
+    #[must_use]
     pub fn requires_address_allocation(&self) -> bool {
         matches!(
             self.current_state,
@@ -537,6 +519,7 @@ impl Dhcpv6StateMachine {
     /// # Returns
     ///
     /// `true` if no further messages expected in this transaction
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.current_state,
@@ -578,9 +561,9 @@ mod tests {
 
     #[test]
     fn test_state_transition_new() {
-        let transition = Dhcpv6StateMachine::new(0x123456);
+        let transition = Dhcpv6StateMachine::new(0x0012_3456);
         assert_eq!(transition.current_state(), Dhcpv6State::Solicit);
-        assert_eq!(transition.transaction_id(), 0x123456);
+        assert_eq!(transition.transaction_id(), 0x0012_3456);
         assert!(!transition.requires_rapid_commit());
     }
 
@@ -749,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_full_4_message_exchange() {
-        let mut transition = Dhcpv6StateMachine::new(0x123456);
+        let mut transition = Dhcpv6StateMachine::new(0x0012_3456);
 
         // SOLICIT
         assert_eq!(transition.current_state(), Dhcpv6State::Solicit);

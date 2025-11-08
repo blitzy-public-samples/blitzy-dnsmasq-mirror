@@ -176,7 +176,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 #[cfg(unix)]
 use syslog_tracing::Syslog;
 
-/// Default syslog facility: LOG_DAEMON (3)
+/// Default syslog facility: `LOG_DAEMON` (3)
 ///
 /// Corresponds to the syslog facility for system daemons. This matches the C implementation's
 /// default when no facility is explicitly configured. The facility code is multiplied by 8
@@ -215,9 +215,8 @@ pub enum FileRotation {
 impl From<FileRotation> for Rotation {
     fn from(rotation: FileRotation) -> Self {
         match rotation {
-            FileRotation::Daily => Rotation::DAILY,
             FileRotation::Hourly => Rotation::HOURLY,
-            FileRotation::SizeBased(_) => Rotation::DAILY, // Fallback to daily for now
+            FileRotation::Daily | FileRotation::SizeBased(_) => Rotation::DAILY, // Fallback to daily for now
         }
     }
 }
@@ -235,7 +234,7 @@ impl From<FileRotation> for Rotation {
 /// - `enable_stderr`: Output logs to stderr (typically for debugging with `--debug`)
 /// - `enable_json`: Enable structured JSON logging for SIEM integration
 /// - `max_level`: Minimum log level to process (DEBUG, INFO, WARN, ERROR)
-/// - `syslog_facility`: Syslog facility code (3=LOG_DAEMON, 16=LOG_LOCAL0, etc.)
+/// - `syslog_facility`: Syslog facility code (3=`LOG_DAEMON`, 16=`LOG_LOCAL0`, etc.)
 /// - `file_rotation`: File rotation policy (daily, hourly, size-based)
 ///
 /// # Examples
@@ -294,7 +293,7 @@ pub struct LogConfig {
     /// Maximum log level to emit (DEBUG, INFO, WARN, ERROR, TRACE)
     pub max_level: Level,
 
-    /// Syslog facility code (3=LOG_DAEMON, 16=LOG_LOCAL0, etc.)
+    /// Syslog facility code (3=`LOG_DAEMON`, 16=`LOG_LOCAL0`, etc.)
     pub syslog_facility: Option<u8>,
 
     /// File rotation policy (daily, hourly, size-based)
@@ -304,7 +303,7 @@ pub struct LogConfig {
 impl Default for LogConfig {
     /// Create default logging configuration matching C defaults
     ///
-    /// - Syslog enabled with LOG_DAEMON facility
+    /// - Syslog enabled with `LOG_DAEMON` facility
     /// - No file logging
     /// - Stderr disabled
     /// - JSON disabled
@@ -366,7 +365,7 @@ pub enum LogError {
 /// # Architecture
 ///
 /// The function builds a layered tracing subscriber:
-/// 1. **EnvFilter**: Filters logs by level and module path
+/// 1. **`EnvFilter`**: Filters logs by level and module path
 /// 2. **Syslog Layer** (optional): RFC 3164/5424 syslog output via `/dev/log`
 /// 3. **File Layer** (optional): Rotating file appender with configurable policy
 /// 4. **Fmt Layer** (optional): Formatted stderr output for debugging
@@ -466,8 +465,7 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
     let subscriber = if let Some(ref log_path) = config.enable_file {
         let rotation = config
             .file_rotation
-            .map(Rotation::from)
-            .unwrap_or(Rotation::NEVER);
+            .map_or(Rotation::NEVER, Rotation::from);
 
         // Extract directory and filename
         let directory = log_path.parent().ok_or_else(|| {
@@ -525,7 +523,7 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
     // Initialize the global subscriber
     subscriber
         .try_init()
-        .map_err(|e| LogError::InvalidConfig(format!("Failed to set global subscriber: {}", e)))?;
+        .map_err(|e| LogError::InvalidConfig(format!("Failed to set global subscriber: {e}")))?;
 
     Ok(())
 }
@@ -601,8 +599,7 @@ fn validate_config(config: &LogConfig) -> Result<(), LogError> {
     if let Some(facility) = config.syslog_facility {
         if facility > 23 {
             return Err(LogError::InvalidConfig(format!(
-                "Invalid syslog facility code: {} (must be 0-23)",
-                facility
+                "Invalid syslog facility code: {facility} (must be 0-23)"
             )));
         }
     }
@@ -619,26 +616,26 @@ fn validate_config(config: &LogConfig) -> Result<(), LogError> {
     Ok(())
 }
 
-/// Convert numeric facility code to tracing_syslog Facility enum
+/// Convert numeric facility code to `tracing_syslog` `Facility` enum
 ///
-/// Maps syslog facility codes (0-23) to the tracing_syslog crate's Facility enum.
+/// Maps syslog facility codes (0-23) to the `tracing_syslog` crate's `Facility` enum.
 /// This matches the C implementation's facility codes from `<sys/syslog.h>`.
 ///
 /// # Standard Facility Codes
 ///
-/// - 0: Kernel messages (LOG_KERN)
-/// - 1: User-level messages (LOG_USER)
-/// - 2: Mail system (LOG_MAIL)
-/// - 3: System daemons (LOG_DAEMON) - **default for dnsmasq**
-/// - 4: Security/authorization messages (LOG_AUTH)
-/// - 5: Internal syslog messages (LOG_SYSLOG)
-/// - 6: Line printer subsystem (LOG_LPR)
-/// - 7: Network news subsystem (LOG_NEWS)
-/// - 8: UUCP subsystem (LOG_UUCP)
-/// - 9: Clock daemon (LOG_CRON)
-/// - 10: Security/authorization messages (LOG_AUTHPRIV)
-/// - 11: FTP daemon (LOG_FTP)
-/// - 16-23: Local use 0-7 (LOG_LOCAL0 - LOG_LOCAL7)
+/// - 0: Kernel messages (`LOG_KERN`)
+/// - 1: User-level messages (`LOG_USER`)
+/// - 2: Mail system (`LOG_MAIL`)
+/// - 3: System daemons (`LOG_DAEMON`) - **default for dnsmasq**
+/// - 4: Security/authorization messages (`LOG_AUTH`)
+/// - 5: Internal syslog messages (`LOG_SYSLOG`)
+/// - 6: Line printer subsystem (`LOG_LPR`)
+/// - 7: Network news subsystem (`LOG_NEWS`)
+/// - 8: UUCP subsystem (`LOG_UUCP`)
+/// - 9: Clock daemon (`LOG_CRON`)
+/// - 10: Security/authorization messages (`LOG_AUTHPRIV`)
+/// - 11: FTP daemon (`LOG_FTP`)
+/// - 16-23: Local use 0-7 (`LOG_LOCAL0` - `LOG_LOCAL7`)
 ///
 /// # Parameters
 ///
@@ -646,20 +643,15 @@ fn validate_config(config: &LogConfig) -> Result<(), LogError> {
 ///
 /// # Returns
 ///
-/// Corresponding syslog facility, defaulting to LOG_DAEMON if code is invalid
+/// Corresponding syslog facility, defaulting to `LOG_DAEMON` if code is invalid
 #[cfg(unix)]
 fn facility_code_to_syslog_facility(code: u8) -> syslog_tracing::Facility {
     use syslog_tracing::Facility;
 
     match code {
-        // Note: Kernel (0) and Syslog (5) facilities are not exposed by syslog-tracing
-        // Map them to Daemon as a reasonable fallback
-        0 => Facility::Daemon, // Kernel -> Daemon (not available)
         1 => Facility::User,
         2 => Facility::Mail,
-        3 => Facility::Daemon,
         4 => Facility::Auth,
-        5 => Facility::Daemon, // Syslog -> Daemon (internal facility, not available)
         6 => Facility::Lpr,
         7 => Facility::News,
         8 => Facility::Uucp,
@@ -674,7 +666,9 @@ fn facility_code_to_syslog_facility(code: u8) -> syslog_tracing::Facility {
         21 => Facility::Local5,
         22 => Facility::Local6,
         23 => Facility::Local7,
-        _ => Facility::Daemon, // Default fallback
+        // Default: Maps Kernel (0), Daemon (3), Syslog (5), and any unmapped values to Daemon
+        // Note: Kernel and Syslog facilities not exposed by syslog-tracing
+        _ => Facility::Daemon,
     }
 }
 

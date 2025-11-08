@@ -83,15 +83,15 @@ const MAX_BLOCK_SIZE: u16 = 65464;
 const MIN_BLOCK_SIZE: u16 = 8;
 
 /// Maximum backoff iterations before aborting transfer
-/// C reference: transfer->backoff > 7 check in check_tftp_listeners()
+/// C reference: `transfer->backoff > 7` check in `check_tftp_listeners()`
 const MAX_BACKOFF: u8 = 7;
 
 /// Initial timeout duration in seconds
-/// C reference: timeout calculation in check_tftp_listeners()
+/// C reference: timeout calculation in `check_tftp_listeners()`
 const INITIAL_TIMEOUT_SECS: u64 = 1;
 
 /// TFTP transfer options negotiated with client
-/// C reference: transfer->opt_blocksize, opt_transize fields
+/// C reference: `transfer->opt_blocksize`, `opt_transize` fields
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TransferOptions {
     /// Whether blocksize option was requested by client
@@ -104,6 +104,7 @@ pub struct TransferOptions {
 
 impl TransferOptions {
     /// Create new transfer options with all flags disabled
+    #[must_use]
     pub fn new() -> Self {
         TransferOptions {
             blocksize_requested: false,
@@ -113,18 +114,21 @@ impl TransferOptions {
     }
 
     /// Create options with blocksize negotiation enabled
+    #[must_use]
     pub fn with_blocksize(mut self) -> Self {
         self.blocksize_requested = true;
         self
     }
 
     /// Create options with tsize negotiation enabled
+    #[must_use]
     pub fn with_tsize(mut self) -> Self {
         self.tsize_requested = true;
         self
     }
 
     /// Create options with timeout negotiation enabled
+    #[must_use]
     pub fn with_timeout(mut self) -> Self {
         self.timeout_requested = true;
         self
@@ -132,7 +136,7 @@ impl TransferOptions {
 }
 
 /// File metadata for stale file detection
-/// C reference: struct tftp_file fields dev, inode
+/// C reference: `struct tftp_file` fields `dev`, `inode`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileMetadata {
     /// Device ID containing the file
@@ -145,6 +149,7 @@ pub struct FileMetadata {
 
 impl FileMetadata {
     /// Create new file metadata
+    #[must_use]
     pub fn new(device: u64, inode: u64, size: u64) -> Self {
         FileMetadata {
             device,
@@ -155,6 +160,7 @@ impl FileMetadata {
 
     /// Check if this metadata represents a stale file reference
     /// by comparing with current filesystem metadata
+    #[must_use]
     pub fn is_stale(&self, other: &FileMetadata) -> bool {
         self.device != other.device || self.inode != other.inode
     }
@@ -198,7 +204,7 @@ pub enum TransferError {
 }
 
 /// Actions to take after handling a packet
-/// C reference: Implicit state machine in handle_tftp() and check_tftp_listeners()
+/// C reference: Implicit state machine in `handle_tftp()` and `check_tftp_listeners()`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferAction {
     /// Continue transfer, no immediate action
@@ -214,7 +220,7 @@ pub enum TransferAction {
 }
 
 /// Shared TFTP file handle with reference counting
-/// C reference: struct tftp_file (src/tftp.c lines 758-764)
+/// C reference: `struct tftp_file` (`src/tftp.c` lines 758-764)
 ///
 /// Multiple concurrent transfers can share the same file descriptor when serving
 /// the same file to multiple clients. Reference counting ensures the file is closed
@@ -239,21 +245,21 @@ pub enum TransferAction {
 #[derive(Debug)]
 pub struct TftpFile {
     /// Async file handle protected by mutex for safe concurrent reads
-    /// C reference: fd field (int file descriptor)
+    /// C reference: `fd` field (`int` file descriptor)
     file: Arc<Mutex<File>>,
     /// File size in bytes for transfer size reporting
-    /// C reference: size field (off_t)
+    /// C reference: `size` field (`off_t`)
     size: u64,
     /// File path for logging and error messages
-    /// C reference: filename field (char[])
+    /// C reference: `filename` field (`char[]`)
     filename: PathBuf,
     /// File metadata for stale detection
-    /// C reference: dev, inode fields (dev_t, ino_t)
+    /// C reference: `dev`, `inode` fields (`dev_t`, `ino_t`)
     metadata: FileMetadata,
 }
 
 impl TftpFile {
-    /// Create a new TftpFile from an opened file handle
+    /// Create a new `TftpFile` from an opened file handle
     ///
     /// # Arguments
     /// * `file` - Opened async file handle
@@ -271,17 +277,23 @@ impl TftpFile {
 
     /// Open a file for TFTP serving with permission validation
     ///
-    /// C reference: check_tftp_fileperm() in src/tftp.c (lines 721-801)
+    /// C reference: `check_tftp_fileperm()` in `src/tftp.c` (lines 721-801)
     ///
     /// # Arguments
     /// * `path` - Path to the file to open
-    /// * `secure_mode` - If true, enforce ownership check (OPT_TFTP_SECURE)
+    /// * `secure_mode` - If true, enforce ownership check (`OPT_TFTP_SECURE`)
     ///
     /// # Returns
-    /// Opened TftpFile or TransferError
+    /// Opened `TftpFile` or `TransferError`
+    ///
+    /// # Errors
+    /// Returns `TransferError` if:
+    /// - File not found
+    /// - Permission denied (path traversal, not world-readable as root, ownership mismatch in secure mode)
+    /// - I/O error reading file metadata
     ///
     /// # Security
-    /// - Blocks path traversal (/../) in prefix mode
+    /// - Blocks path traversal (`/../`) in prefix mode
     /// - Enforces world-readable when running as root
     /// - Enforces ownership match in secure mode
     pub async fn open(path: &PathBuf, secure_mode: bool) -> Result<Self, TransferError> {
@@ -360,16 +372,19 @@ impl TftpFile {
     }
 
     /// Get file size in bytes
+    #[must_use]
     pub fn size(&self) -> u64 {
         self.size
     }
 
     /// Get file path
+    #[must_use]
     pub fn filename(&self) -> &PathBuf {
         &self.filename
     }
 
     /// Get file metadata
+    #[must_use]
     pub fn metadata(&self) -> &FileMetadata {
         &self.metadata
     }
@@ -378,6 +393,9 @@ impl TftpFile {
     ///
     /// This checks if the file is still accessible and hasn't been replaced
     /// (different inode). Used for long-running transfers.
+    ///
+    /// # Errors
+    /// Returns `TransferError` if the file is no longer accessible or has been replaced (stale inode)
     pub async fn validate_access(&self) -> Result<(), TransferError> {
         // Try to read metadata to ensure file is still accessible
         let current_meta = tokio::fs::metadata(&self.filename)
@@ -432,7 +450,7 @@ impl TftpFile {
 }
 
 /// TFTP transfer state for a single client session
-/// C reference: struct tftp_transfer (src/tftp.c lines 766-780)
+/// C reference: `struct tftp_transfer` (`src/tftp.c` lines 766-780)
 ///
 /// Tracks all state for an active file transfer including:
 /// - Network connection (socket, peer address)
@@ -451,69 +469,69 @@ impl TftpFile {
 #[derive(Debug)]
 pub struct Transfer {
     /// UDP socket for this transfer
-    /// C reference: sockfd field (int)
+    /// C reference: `sockfd` field (`int`)
     pub socket: Arc<UdpSocket>,
 
     /// Client address (IP and port)
-    /// C reference: peer field (union mysockaddr)
+    /// C reference: `peer` field (`union mysockaddr`)
     pub peer: SocketAddr,
 
     /// Server source address for multi-homed systems
-    /// C reference: source field (union all_addr)
+    /// C reference: `source` field (`union all_addr`)
     source: IpAddr,
 
     /// Network interface index for multi-homed binding
-    /// C reference: if_index field (int)
+    /// C reference: `if_index` field (`int`)
     if_index: u32,
 
     /// Current block number (0 = OACK, 1-65535 = DATA blocks)
-    /// C reference: block field (unsigned int)
+    /// C reference: `block` field (`unsigned int`)
     pub block: u16,
 
     /// Negotiated block size in bytes (512-65464)
-    /// C reference: blocksize field (unsigned int)
+    /// C reference: `blocksize` field (`unsigned int`)
     pub blocksize: u16,
 
     /// Absolute timeout instant for next retransmission
-    /// C reference: timeout field (time_t)
+    /// C reference: `timeout` field (`time_t`)
     pub timeout: Instant,
 
     /// Exponential backoff counter (0-7, abort at > 7)
-    /// C reference: backoff field (int)
+    /// C reference: `backoff` field (`int`)
     pub backoff: u8,
 
     /// Current file offset in bytes for next read
-    /// C reference: offset field (off_t)
+    /// C reference: `offset` field (`off_t`)
     offset: u64,
 
     /// Number of CR characters inserted in current block (netascii mode)
-    /// C reference: expansion field (unsigned int)
+    /// C reference: `expansion` field (`unsigned int`)
     expansion: usize,
 
     /// Transfer mode (octet, netascii, mail)
-    /// C reference: netascii field (char)
+    /// C reference: `netascii` field (`char`)
     mode: TransferMode,
 
     /// Whether previous block ended with LF (prevents double-expansion)
-    /// C reference: carrylf field (char)
+    /// C reference: `carrylf` field (`char`)
     carrylf: bool,
 
     /// Transfer options negotiated with client
-    /// C reference: opt_blocksize, opt_transize fields
+    /// C reference: `opt_blocksize`, `opt_transize` fields
     options: TransferOptions,
 
     /// Shared file reference
-    /// C reference: file field (struct tftp_file *)
+    /// C reference: `file` field (`struct tftp_file *`)
     file: Arc<TftpFile>,
 }
 
 impl Transfer {
     /// Create a new TFTP transfer
     ///
-    /// C reference: Allocation in tftp_request() (src/tftp.c lines 196-650)
+    /// C reference: Allocation in `tftp_request()` (src/tftp.c lines 196-650)
     ///
     /// # Arguments
-    /// * `socket` - UDP socket for this transfer
+    /// * `socket` - `UDP` socket for this transfer
     /// * `peer` - Client address
     /// * `source` - Server source address
     /// * `if_index` - Network interface index
@@ -521,6 +539,10 @@ impl Transfer {
     /// * `blocksize` - Negotiated block size (default 512)
     /// * `mode` - Transfer mode (octet, netascii)
     /// * `options` - Transfer options
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the block size is outside the valid range.
     ///
     /// # Returns
     /// New Transfer instance ready for first block
@@ -544,11 +566,7 @@ impl Transfer {
             peer,
             source,
             if_index,
-            block: if options.blocksize_requested || options.tsize_requested {
-                0
-            } else {
-                1
-            },
+            block: u16::from(!(options.blocksize_requested || options.tsize_requested)),
             blocksize,
             timeout: Instant::now() + Duration::from_secs(INITIAL_TIMEOUT_SECS),
             backoff: 0,
@@ -561,15 +579,19 @@ impl Transfer {
         })
     }
 
-    /// Handle received packet (ACK or ERROR)
+    /// Handle received packet (`ACK` or `ERROR`)
     ///
-    /// C reference: handle_tftp() in src/tftp.c (lines 1014-1053)
+    /// C reference: `handle_tftp()` in src/tftp.c (lines 1014-1053)
     ///
     /// # Arguments
     /// * `packet` - Received packet data
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the packet is malformed or if an error packet is received.
+    ///
     /// # Returns
-    /// Action to take (Continue, SendBlock, Abort)
+    /// Action to take (`Continue`, `SendBlock`, `Abort`)
     pub fn handle_packet(&mut self, packet: &[u8]) -> Result<TransferAction, TransferError> {
         if packet.len() < 4 {
             // Packet too short, ignore
@@ -595,7 +617,7 @@ impl Transfer {
 
                     if self.block != 0 {
                         // Advance offset for next block
-                        self.offset += self.blocksize as u64 - self.expansion as u64;
+                        self.offset += u64::from(self.blocksize) - self.expansion as u64;
                     }
 
                     // Advance to next block
@@ -620,24 +642,28 @@ impl Transfer {
 
     /// Get next data block to send
     ///
-    /// C reference: get_block() in src/tftp.c (lines 1442-1523)
+    /// C reference: `get_block()` in src/tftp.c (lines 1442-1523)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading from the file fails.
     ///
     /// # Returns
-    /// Packet data to send (OACK for block 0, DATA for other blocks)
+    /// Packet data to send (`OACK` for block 0, `DATA` for other blocks)
     pub async fn get_block(&mut self) -> Result<Vec<u8>, TransferError> {
         if self.block == 0 {
             // Send OACK
-            self.construct_oack()
+            Ok(self.construct_oack())
         } else {
             // Send DATA block
             self.construct_data_block().await
         }
     }
 
-    /// Construct OACK packet for block 0
+    /// Construct `OACK` packet for block 0
     ///
-    /// C reference: get_block() OACK construction (lines 1446-1469)
-    fn construct_oack(&self) -> Result<Vec<u8>, TransferError> {
+    /// C reference: `get_block()` `OACK` construction (lines 1446-1469)
+    fn construct_oack(&self) -> Vec<u8> {
         let mut packet = Vec::new();
 
         // Opcode: OACK (6)
@@ -655,12 +681,12 @@ impl Transfer {
             packet.push(0);
         }
 
-        Ok(packet)
+        packet
     }
 
-    /// Construct DATA packet with file content
+    /// Construct `DATA` packet with file content
     ///
-    /// C reference: get_block() DATA construction (lines 1471-1523)
+    /// C reference: `get_block()` `DATA` construction (lines 1471-1523)
     async fn construct_data_block(&mut self) -> Result<Vec<u8>, TransferError> {
         // Calculate read size (may be 0 for final block of file that's exact multiple of blocksize)
         // C reference: src/tftp.c lines 1478-1484
@@ -670,7 +696,9 @@ impl Transfer {
         } else {
             self.file.size() - self.offset
         };
-        let read_size = std::cmp::min(remaining, self.blocksize as u64) as usize;
+        let read_size = std::cmp::min(remaining, u64::from(self.blocksize))
+            .try_into()
+            .unwrap_or(usize::MAX);
 
         // Read data from file (may be 0 bytes for final block)
         let mut data = if read_size > 0 {
@@ -684,7 +712,7 @@ impl Transfer {
 
         // Apply netascii translation if needed
         if self.mode == TransferMode::Netascii {
-            data = self.apply_netascii_translation(data)?;
+            data = self.apply_netascii_translation(&data);
         }
 
         // Construct DATA packet
@@ -705,12 +733,12 @@ impl Transfer {
         Ok(packet)
     }
 
-    /// Apply netascii CR-LF translation to data block
+    /// Apply netascii `CR-LF` translation to data block
     ///
-    /// C reference: Netascii translation loop in get_block() (lines 1496-1519)
+    /// C reference: Netascii translation loop in `get_block()` (lines 1496-1519)
     ///
-    /// Translates LF to CR-LF, tracking expansion and carry state across blocks
-    fn apply_netascii_translation(&mut self, mut data: Vec<u8>) -> Result<Vec<u8>, TransferError> {
+    /// Translates `LF` to `CR-LF`, tracking expansion and carry state across blocks
+    fn apply_netascii_translation(&mut self, data: &[u8]) -> Vec<u8> {
         let original_size = data.len();
         let mut result = Vec::with_capacity(data.len() + data.len() / 10); // Estimate expansion
         let mut new_carrylf = false;
@@ -739,26 +767,28 @@ impl Transfer {
         }
 
         self.carrylf = new_carrylf;
-        Ok(result)
+        result
     }
 
     /// Check if transfer is complete
     ///
     /// Transfer is complete when we've sent a block smaller than blocksize
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         self.offset >= self.file.size() && self.block > 0
     }
 
     /// Check if transfer has timed out
     ///
-    /// C reference: Timeout check in check_tftp_listeners() (lines 898-950)
+    /// C reference: Timeout check in `check_tftp_listeners()` (lines 898-950)
+    #[must_use]
     pub fn is_timed_out(&self) -> bool {
         Instant::now() >= self.timeout && self.backoff > MAX_BACKOFF
     }
 
     /// Reset timeout to current time plus exponential backoff
     ///
-    /// C reference: Timeout update in check_tftp_listeners() (line 904)
+    /// C reference: Timeout update in `check_tftp_listeners()` (line 904)
     pub fn reset_timeout(&mut self) {
         let backoff_duration =
             Duration::from_secs(INITIAL_TIMEOUT_SECS * (1 << (self.backoff / 2)));
@@ -767,7 +797,7 @@ impl Transfer {
 
     /// Increment backoff counter for retransmission
     ///
-    /// C reference: transfer->backoff++ in check_tftp_listeners() (line 914)
+    /// C reference: transfer->backoff++ in `check_tftp_listeners()` (line 914)
     pub fn increment_backoff(&mut self) {
         self.backoff += 1;
         self.reset_timeout();

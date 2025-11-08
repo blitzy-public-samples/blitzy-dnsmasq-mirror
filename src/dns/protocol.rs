@@ -41,8 +41,11 @@ use crate::dns::compression::{CompressionError, extract_name};
 
 /// DNS protocol constants from dns-protocol.h
 pub const DNS_HEADER_SIZE: usize = 12;
+/// Maximum DNS packet size over UDP (RFC 1035)
 pub const MAX_PACKET_SIZE_UDP: usize = 512;
+/// Maximum length of a DNS label (RFC 1035)
 pub const MAX_LABEL_LENGTH: usize = 63;
+/// Bitmask to identify DNS name compression pointers (top 2 bits set)
 pub const COMPRESSION_POINTER_MASK: u8 = 0xC0;
 
 /// DNS header flags - Query/Response bit
@@ -69,24 +72,36 @@ const RCODE_MASK: u16 = 0x000F;
 /// DNS Protocol Error Types
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum ProtocolError {
+    /// Malformed DNS packet
     #[error("Malformed DNS packet: {0}")]
     MalformedPacket(String),
 
+    /// Invalid compression pointer at specified offset
     #[error("Invalid compression pointer at offset {0}")]
     InvalidCompressionPointer(usize),
 
+    /// Unsupported DNS record type
     #[error("Unsupported record type: {0}")]
     UnsupportedRecordType(u16),
 
+    /// Packet is too short for expected content
     #[error("Packet too short: expected at least {expected} bytes, got {actual}")]
-    PacketTooShort { expected: usize, actual: usize },
+    PacketTooShort {
+        /// Expected minimum packet size
+        expected: usize,
+        /// Actual packet size received
+        actual: usize
+    },
 
+    /// Invalid DNS response code
     #[error("Invalid response code: {0}")]
     InvalidRcode(u8),
 
+    /// Domain name exceeds maximum length
     #[error("Domain name too long: {0} bytes")]
     NameTooLong(usize),
 
+    /// I/O error occurred
     #[error("IO error: {0}")]
     IoError(String),
 }
@@ -116,7 +131,7 @@ impl From<CompressionError> for ProtocolError {
             }
             CompressionError::NameTooLong { length } => ProtocolError::NameTooLong(length),
             CompressionError::InvalidLabelType { label_type } => {
-                ProtocolError::MalformedPacket(format!("Unsupported label type: {:#x}", label_type))
+                ProtocolError::MalformedPacket(format!("Unsupported label type: {label_type:#x}"))
             }
         }
     }
@@ -126,26 +141,45 @@ impl From<CompressionError> for ProtocolError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum RecordType {
-    A = 1,       // IPv4 address
-    NS = 2,      // Name server
-    CNAME = 5,   // Canonical name
-    SOA = 6,     // Start of authority
-    PTR = 12,    // Pointer record
-    MX = 15,     // Mail exchange
-    TXT = 16,    // Text record
-    AAAA = 28,   // IPv6 address
-    SRV = 33,    // Service locator
-    OPT = 41,    // EDNS0 option (pseudo-record)
-    DS = 43,     // DNSSEC Delegation Signer
-    RRSIG = 46,  // DNSSEC Signature
-    NSEC = 47,   // DNSSEC Next Secure
-    DNSKEY = 48, // DNSSEC Public Key
-    NSEC3 = 50,  // DNSSEC Next Secure v3
-    ANY = 255,   // QTYPE for queries matching any record type
+    /// IPv4 address
+    A = 1,
+    /// Name server
+    NS = 2,
+    /// Canonical name
+    CNAME = 5,
+    /// Start of authority
+    SOA = 6,
+    /// Pointer record
+    PTR = 12,
+    /// Mail exchange
+    MX = 15,
+    /// Text record
+    TXT = 16,
+    /// IPv6 address
+    AAAA = 28,
+    /// Service locator
+    SRV = 33,
+    /// EDNS0 option (pseudo-record)
+    OPT = 41,
+    /// DNSSEC Delegation Signer
+    DS = 43,
+    /// DNSSEC Signature
+    RRSIG = 46,
+    /// DNSSEC Next Secure
+    NSEC = 47,
+    /// DNSSEC Public Key
+    DNSKEY = 48,
+    /// DNSSEC Next Secure v3
+    NSEC3 = 50,
+    /// QTYPE for queries matching any record type
+    ANY = 255,
 }
 
 impl RecordType {
-    /// Convert from wire format u16 to RecordType
+    /// Convert from wire format `u16` to `RecordType`
+    ///
+    /// # Errors
+    /// Returns `ProtocolError::UnsupportedRecordType` if the value doesn't correspond to a known record type.
     pub fn from_u16(value: u16) -> Result<Self, ProtocolError> {
         match value {
             1 => Ok(RecordType::A),
@@ -169,6 +203,7 @@ impl RecordType {
     }
 
     /// Convert to wire format u16
+    #[must_use]
     pub fn to_u16(self) -> u16 {
         self as u16
     }
@@ -178,15 +213,23 @@ impl RecordType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum RecordClass {
-    IN = 1,    // Internet
-    CS = 2,    // CSNET (obsolete)
-    CH = 3,    // CHAOS
-    HS = 4,    // Hesiod
-    ANY = 255, // QCLASS for queries matching any class
+    /// Internet
+    IN = 1,
+    /// CSNET (obsolete)
+    CS = 2,
+    /// CHAOS
+    CH = 3,
+    /// Hesiod
+    HS = 4,
+    /// QCLASS for queries matching any class
+    ANY = 255,
 }
 
 impl RecordClass {
-    /// Convert from wire format u16 to RecordClass
+    /// Convert from wire format `u16` to `RecordClass`
+    ///
+    /// # Errors
+    /// Returns `ProtocolError::MalformedPacket` if the value doesn't correspond to a known class.
     pub fn from_u16(value: u16) -> Result<Self, ProtocolError> {
         match value {
             1 => Ok(RecordClass::IN),
@@ -195,13 +238,13 @@ impl RecordClass {
             4 => Ok(RecordClass::HS),
             255 => Ok(RecordClass::ANY),
             _ => Err(ProtocolError::MalformedPacket(format!(
-                "Unknown class: {}",
-                value
+                "Unknown class: {value}"
             ))),
         }
     }
 
-    /// Convert to wire format u16
+    /// Convert to wire format `u16`
+    #[must_use]
     pub fn to_u16(self) -> u16 {
         self as u16
     }
@@ -210,20 +253,31 @@ impl RecordClass {
 /// DNS Header Flags structure (RFC 1035 Section 4.1.1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DnsFlags {
-    pub qr: bool,   // Query/Response flag
-    pub opcode: u8, // Operation code
-    pub aa: bool,   // Authoritative Answer
-    pub tc: bool,   // Truncation
-    pub rd: bool,   // Recursion Desired
-    pub ra: bool,   // Recursion Available
-    pub z: bool,    // Reserved (must be zero)
-    pub ad: bool,   // Authenticated Data (DNSSEC)
-    pub cd: bool,   // Checking Disabled (DNSSEC)
-    pub rcode: u8,  // Response code
+    /// Query/Response flag
+    pub qr: bool,
+    /// Operation code
+    pub opcode: u8,
+    /// Authoritative Answer
+    pub aa: bool,
+    /// Truncation
+    pub tc: bool,
+    /// Recursion Desired
+    pub rd: bool,
+    /// Recursion Available
+    pub ra: bool,
+    /// Reserved (must be zero)
+    pub z: bool,
+    /// Authenticated Data (DNSSEC)
+    pub ad: bool,
+    /// Checking Disabled (DNSSEC)
+    pub cd: bool,
+    /// Response code
+    pub rcode: u8,
 }
 
 impl DnsFlags {
-    /// Create new DnsFlags with default values
+    /// Create new `DnsFlags` with default values
+    #[must_use]
     pub fn new() -> Self {
         Self {
             qr: false,
@@ -240,6 +294,7 @@ impl DnsFlags {
     }
 
     /// Parse flags from wire format (2 bytes)
+    #[must_use]
     pub fn from_u16(flags: u16) -> Self {
         Self {
             qr: (flags & QR_MASK) != 0,
@@ -256,12 +311,13 @@ impl DnsFlags {
     }
 
     /// Convert to wire format (2 bytes)
+    #[must_use]
     pub fn to_u16(&self) -> u16 {
         let mut flags = 0u16;
         if self.qr {
             flags |= QR_MASK;
         }
-        flags |= ((self.opcode as u16) << 11) & OPCODE_MASK;
+        flags |= (u16::from(self.opcode) << 11) & OPCODE_MASK;
         if self.aa {
             flags |= AA_MASK;
         }
@@ -283,7 +339,7 @@ impl DnsFlags {
         if self.cd {
             flags |= CD_MASK;
         }
-        flags |= (self.rcode as u16) & RCODE_MASK;
+        flags |= u16::from(self.rcode) & RCODE_MASK;
         flags
     }
 }
@@ -298,16 +354,23 @@ impl Default for DnsFlags {
 /// Fixed 12-byte structure at the start of every DNS message
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsHeader {
-    pub id: u16,         // Transaction ID
-    pub flags: DnsFlags, // Flags and codes
-    pub qdcount: u16,    // Number of questions
-    pub ancount: u16,    // Number of answers
-    pub nscount: u16,    // Number of authority records
-    pub arcount: u16,    // Number of additional records
+    /// Transaction ID
+    pub id: u16,
+    /// Flags and codes
+    pub flags: DnsFlags,
+    /// Number of questions
+    pub qdcount: u16,
+    /// Number of answers
+    pub ancount: u16,
+    /// Number of authority records
+    pub nscount: u16,
+    /// Number of additional records
+    pub arcount: u16,
 }
 
 impl DnsHeader {
     /// Create new DNS header with default values
+    #[must_use]
     pub fn new() -> Self {
         Self {
             id: 0,
@@ -320,6 +383,9 @@ impl DnsHeader {
     }
 
     /// Parse DNS header from wire format (12 bytes)
+    ///
+    /// # Errors
+    /// Returns `ProtocolError::PacketTooShort` if the data is less than 12 bytes.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < DNS_HEADER_SIZE {
             return Err(ProtocolError::PacketTooShort {
@@ -341,6 +407,9 @@ impl DnsHeader {
     }
 
     /// Serialize DNS header to wire format (12 bytes)
+    ///
+    /// # Errors
+    /// This function currently never fails but returns `Result` for consistency with the protocol API.
     pub fn serialize(&self, buf: &mut BytesMut) -> Result<(), ProtocolError> {
         buf.reserve(DNS_HEADER_SIZE);
         buf.put_u16(self.id);
@@ -362,13 +431,17 @@ impl Default for DnsHeader {
 /// DNS Question section entry (RFC 1035 Section 4.1.2)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsQuestion {
-    pub qname: String,       // Domain name being queried
-    pub qtype: RecordType,   // Record type requested
-    pub qclass: RecordClass, // Record class (usually IN)
+    /// Domain name being queried
+    pub qname: String,
+    /// Record type requested
+    pub qtype: RecordType,
+    /// Record class (usually IN)
+    pub qclass: RecordClass,
 }
 
 impl DnsQuestion {
     /// Create new DNS question
+    #[must_use]
     pub fn new(qname: String, qtype: RecordType, qclass: RecordClass) -> Self {
         Self {
             qname,
@@ -384,83 +457,129 @@ impl DnsQuestion {
 pub enum ResourceRecord {
     /// A record - IPv4 address (RFC 1035)
     A {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// IPv4 address
         address: Ipv4Addr,
     },
 
     /// AAAA record - IPv6 address (RFC 3596)
     AAAA {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// IPv6 address
         address: Ipv6Addr,
     },
 
     /// CNAME record - Canonical name alias (RFC 1035)
     CNAME {
+        /// Domain name (alias)
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Canonical name (target)
         cname: String,
     },
 
     /// MX record - Mail exchange (RFC 1035)
     MX {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Mail server preference (lower is preferred)
         preference: u16,
+        /// Mail server domain name
         exchange: String,
     },
 
     /// NS record - Name server (RFC 1035)
     NS {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Name server domain name
         nsdname: String,
     },
 
     /// PTR record - Pointer for reverse lookup (RFC 1035)
     PTR {
+        /// Domain name (reverse DNS address)
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Pointer domain name (target)
         ptrdname: String,
     },
 
     /// SOA record - Start of authority (RFC 1035)
     SOA {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
-        mname: String, // Primary name server
-        rname: String, // Responsible party email
-        serial: u32,   // Zone serial number
-        refresh: u32,  // Refresh interval
-        retry: u32,    // Retry interval
-        expire: u32,   // Expiration time
-        minimum: u32,  // Minimum TTL
+        /// Primary name server
+        mname: String,
+        /// Responsible party email
+        rname: String,
+        /// Zone serial number
+        serial: u32,
+        /// Refresh interval
+        refresh: u32,
+        /// Retry interval
+        retry: u32,
+        /// Expiration time
+        expire: u32,
+        /// Minimum TTL
+        minimum: u32,
     },
 
     /// SRV record - Service locator (RFC 2782)
     SRV {
+        /// Service name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Priority of target host (lower is preferred)
         priority: u16,
+        /// Relative weight for same priority
         weight: u16,
+        /// Port number of the service
         port: u16,
+        /// Target host domain name
         target: String,
     },
 
     /// TXT record - Text strings (RFC 1035)
     TXT {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Text data strings
         data: Vec<String>,
     },
 
@@ -468,76 +587,122 @@ pub enum ResourceRecord {
     /// Note: OPT records don't have a traditional class field; the class field
     /// is reused for UDP payload size
     OPT {
+        /// Maximum UDP payload size the sender can handle
         udp_payload_size: u16,
+        /// Extended response code (upper 8 bits of extended RCODE)
         extended_rcode: u8,
+        /// EDNS version number
         version: u8,
+        /// DNSSEC OK flag indicating DNSSEC support
         dnssec_ok: bool,
+        /// Variable-length EDNS option data
         data: Vec<u8>,
     },
 
     /// RRSIG record - DNSSEC signature (RFC 4034)
     RRSIG {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Type of `RRset` covered by this signature
         type_covered: u16,
+        /// Cryptographic algorithm used
         algorithm: u8,
+        /// Number of labels in the original RRSIG owner name
         labels: u8,
+        /// Original TTL of the covered `RRset`
         original_ttl: u32,
+        /// Signature expiration time (seconds since epoch)
         signature_expiration: u32,
+        /// Signature inception time (seconds since epoch)
         signature_inception: u32,
+        /// Key tag for the DNSKEY RR that validates this signature
         key_tag: u16,
+        /// Domain name of the signer
         signer_name: String,
+        /// Cryptographic signature data
         signature: Vec<u8>,
     },
 
     /// DNSKEY record - DNSSEC public key (RFC 4034)
     DNSKEY {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Key flags (bit 7 = Zone Key, bit 15 = Secure Entry Point)
         flags: u16,
+        /// Protocol field (must be 3 for DNSSEC)
         protocol: u8,
+        /// Cryptographic algorithm identifier
         algorithm: u8,
+        /// Public key data
         public_key: Vec<u8>,
     },
 
     /// DS record - Delegation Signer (RFC 4034)
     DS {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Key tag of the referenced DNSKEY
         key_tag: u16,
+        /// Cryptographic algorithm of the referenced DNSKEY
         algorithm: u8,
+        /// Digest algorithm used
         digest_type: u8,
+        /// Digest of the referenced DNSKEY
         digest: Vec<u8>,
     },
 
     /// NSEC record - Next Secure (RFC 4034)
     NSEC {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Next domain name in canonical order
         next_domain: String,
+        /// Bitmap of RR types present at this name
         type_bitmaps: Vec<u8>,
     },
 
     /// NSEC3 record - Next Secure v3 (RFC 5155)
     NSEC3 {
+        /// Domain name
         name: String,
+        /// Record class (typically IN for Internet)
         class: RecordClass,
+        /// Time to live in seconds
         ttl: u32,
+        /// Cryptographic hash algorithm used
         hash_algorithm: u8,
+        /// Flags (bit 0 = Opt-Out)
         flags: u8,
+        /// Number of additional hash iterations
         iterations: u16,
+        /// Salt value for hash calculation
         salt: Vec<u8>,
+        /// Hash of the next owner name
         next_hashed_owner: Vec<u8>,
+        /// Bitmap of RR types present at this name
         type_bitmaps: Vec<u8>,
     },
 }
 
 impl ResourceRecord {
     /// Get the record type for this resource record
+    #[must_use]
     pub fn record_type(&self) -> RecordType {
         match self {
             ResourceRecord::A { .. } => RecordType::A,
@@ -559,6 +724,8 @@ impl ResourceRecord {
     }
 
     /// Get the name field from any resource record
+    #[must_use]
+    #[allow(clippy::match_same_arms)]
     pub fn name(&self) -> &str {
         match self {
             ResourceRecord::A { name, .. } => name,
@@ -580,6 +747,8 @@ impl ResourceRecord {
     }
 
     /// Get the TTL from any resource record (except OPT)
+    #[must_use]
+    #[allow(clippy::match_same_arms)]
     pub fn ttl(&self) -> u32 {
         match self {
             ResourceRecord::A { ttl, .. } => *ttl,
@@ -604,15 +773,21 @@ impl ResourceRecord {
 /// DNS Message structure containing all sections
 #[derive(Debug, Clone, PartialEq)]
 pub struct DnsMessage {
+    /// DNS header with transaction ID and flags
     pub header: DnsHeader,
+    /// Question section (queries)
     pub questions: Vec<DnsQuestion>,
+    /// Answer section (response records)
     pub answers: Vec<ResourceRecord>,
+    /// Authority section (nameserver records)
     pub authority: Vec<ResourceRecord>,
+    /// Additional section (extra information)
     pub additional: Vec<ResourceRecord>,
 }
 
 impl DnsMessage {
     /// Create new empty DNS message
+    #[must_use]
     pub fn new() -> Self {
         Self {
             header: DnsHeader::new(),
@@ -624,6 +799,9 @@ impl DnsMessage {
     }
 
     /// Parse complete DNS message from wire format
+    ///
+    /// # Errors
+    /// Returns `ProtocolError` if the data is malformed, too short, or contains invalid DNS records.
     pub fn parse(data: &[u8]) -> Result<Self, ProtocolError> {
         if data.len() < DNS_HEADER_SIZE {
             return Err(ProtocolError::PacketTooShort {
@@ -673,6 +851,10 @@ impl DnsMessage {
     }
 
     /// Serialize DNS message to wire format
+    ///
+    /// # Errors
+    /// Returns `ProtocolError` if any record cannot be serialized to wire format.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn serialize(&self) -> Result<Vec<u8>, ProtocolError> {
         let mut buf = BytesMut::with_capacity(512);
 
@@ -741,6 +923,9 @@ fn parse_question_at(packet: &[u8], offset: &mut usize) -> Result<DnsQuestion, P
 }
 
 /// Parse DNS question section (exported function matching schema)
+///
+/// # Errors
+/// Returns `nom::Err` if the question section cannot be parsed from the input data.
 pub fn parse_question(data: &[u8]) -> IResult<&[u8], DnsQuestion> {
     let input = data;
     let mut offset = 0;
@@ -1146,6 +1331,9 @@ fn parse_rdata(
 }
 
 /// Parse resource records from packet (exported function matching schema)
+///
+/// # Errors
+/// Returns `nom::Err` if any resource record cannot be parsed from the input data.
 pub fn parse_resource_records(data: &[u8], count: u16) -> IResult<&[u8], Vec<ResourceRecord>> {
     let mut offset = 0;
     let mut records = Vec::with_capacity(count as usize);
@@ -1178,6 +1366,7 @@ fn serialize_question(question: &DnsQuestion, buf: &mut BytesMut) -> Result<(), 
 }
 
 /// Serialize domain name to wire format (simplified without compression)
+#[allow(clippy::cast_possible_truncation)]
 fn serialize_name(name: &str, buf: &mut BytesMut) -> Result<(), ProtocolError> {
     if name == "." {
         buf.put_u8(0);
@@ -1197,6 +1386,7 @@ fn serialize_name(name: &str, buf: &mut BytesMut) -> Result<(), ProtocolError> {
 }
 
 /// Serialize a resource record to wire format
+#[allow(clippy::cast_possible_truncation)]
 fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolError> {
     match rr {
         ResourceRecord::A {
@@ -1389,8 +1579,8 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
 
             // TTL field encodes extended RCODE, version, and flags
             let mut ttl_field = 0u32;
-            ttl_field |= (*extended_rcode as u32) << 24;
-            ttl_field |= (*version as u32) << 16;
+            ttl_field |= u32::from(*extended_rcode) << 24;
+            ttl_field |= u32::from(*version) << 16;
             if *dnssec_ok {
                 ttl_field |= 0x8000;
             }
@@ -1530,6 +1720,8 @@ fn serialize_rr(rr: &ResourceRecord, buf: &mut BytesMut) -> Result<(), ProtocolE
 }
 
 /// Serialize resource record (exported function matching schema)
+#[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn serialize_resource_record(
     rr: &ResourceRecord,
     compression: &mut std::collections::HashMap<String, u16>,
@@ -1547,12 +1739,13 @@ pub fn serialize_resource_record(
 }
 
 /// Create DNS response from query with given answer records
+#[must_use]
 pub fn create_response(query: &DnsMessage, response_records: Vec<ResourceRecord>) -> DnsMessage {
     let mut response = DnsMessage::new();
 
     // Copy transaction ID and questions
     response.header.id = query.header.id;
-    response.questions = query.questions.clone();
+    response.questions.clone_from(&query.questions);
 
     // Set response flags
     response.header.flags.qr = true; // This is a response
@@ -1568,6 +1761,7 @@ pub fn create_response(query: &DnsMessage, response_records: Vec<ResourceRecord>
 }
 
 /// Build complete DNS response packet in wire format
+#[must_use]
 pub fn build_response_packet(message: &DnsMessage) -> Vec<u8> {
     match message.serialize() {
         Ok(packet) => {

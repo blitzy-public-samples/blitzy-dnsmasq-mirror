@@ -148,7 +148,7 @@ pub mod validation;
 
 /// Cryptographic signature verification function
 ///
-/// Verifies DNSSEC signatures using various algorithms (RSA, ECDSA, EdDSA).
+/// Verifies DNSSEC signatures using various algorithms (RSA, ECDSA, `EdDSA`).
 /// This is the primary entry point for signature verification operations.
 ///
 /// # Source
@@ -169,7 +169,7 @@ pub use crypto::hash_init;
 /// DNSSEC algorithm enumeration
 ///
 /// Supported cryptographic algorithms for signature verification.
-/// Includes RSA/SHA-256, RSA/SHA-512, ECDSA variants, and EdDSA variants.
+/// Includes RSA/SHA-256, RSA/SHA-512, ECDSA variants, and `EdDSA` variants.
 pub use crypto::Algorithm;
 
 /// Hash function enumeration
@@ -191,7 +191,7 @@ pub use crypto::CryptoError;
 
 /// Main DNSSEC validation entry point
 ///
-/// Validates all RRsets in a DNS response, checking RRSIG signatures and
+/// Validates all `RRsets` in a DNS response, checking RRSIG signatures and
 /// building the chain of trust from configured trust anchors.
 ///
 /// # Source
@@ -199,7 +199,7 @@ pub use crypto::CryptoError;
 /// C implementation: `dnssec_validate_reply()` in src/dnssec.c lines 1860-2118
 pub use validation::validate_reply;
 
-/// Validates DNSKEY RRset against parent DS records
+/// Validates DNSKEY `RRset` against parent DS records
 ///
 /// Establishes trust for a zone's public keys by verifying that at least one
 /// DNSKEY matches the DS record from the parent zone.
@@ -253,7 +253,7 @@ pub use validation::setup_timestamp;
 
 /// Result type for DNSSEC operations
 ///
-/// Convenience alias for Result<T, DnssecError> used throughout the DNSSEC
+/// Convenience alias for Result<T, `DnssecError`> used throughout the DNSSEC
 /// subsystem for consistent error handling.
 pub type DnssecResult<T> = Result<T, DnssecError>;
 

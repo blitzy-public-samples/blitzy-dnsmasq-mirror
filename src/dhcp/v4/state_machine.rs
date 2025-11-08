@@ -6,15 +6,15 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated June, 2007.
 
-//! # DHCPv4 State Machine
+//! # `DHCPv4` State Machine
 //!
-//! Provides type-safe state transitions for DHCPv4 protocol (RFC 2131).
+//! Provides type-safe state transitions for `DHCPv4` protocol (RFC 2131).
 //!
 //! Replaces state management in C implementation (`src/dhcp.c`).
 
 use super::protocol::{Dhcpv4MessageType, MessageType};
 
-/// DHCPv4 client states (RFC 2131 Section 4.4)
+/// `DHCPv4` client states (RFC 2131 Section 4.4)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dhcpv4State {
     /// Initial state - no configuration
@@ -39,7 +39,7 @@ pub enum Dhcpv4State {
     Released,
 }
 
-/// DHCPv4 state machine
+/// `DHCPv4` state machine
 pub struct Dhcpv4StateMachine {
     /// Current state
     state: Dhcpv4State,
@@ -47,6 +47,7 @@ pub struct Dhcpv4StateMachine {
 
 impl Dhcpv4StateMachine {
     /// Create new state machine in INIT state
+    #[must_use]
     pub fn new() -> Self {
         Self {
             state: Dhcpv4State::Init,
@@ -54,6 +55,7 @@ impl Dhcpv4StateMachine {
     }
 
     /// Get current state
+    #[must_use]
     pub fn state(&self) -> Dhcpv4State {
         self.state
     }
@@ -62,84 +64,66 @@ impl Dhcpv4StateMachine {
     ///
     /// # Arguments
     ///
-    /// * `msg_type` - Type of received DHCPv4 message
+    /// * `msg_type` - Type of received `DHCPv4` message
     ///
     /// # Returns
     ///
     /// Expected response message type, or None if no response needed
     pub fn process_message(&mut self, msg_type: Dhcpv4MessageType) -> Option<Dhcpv4MessageType> {
-        use Dhcpv4State::*;
-        use MessageType::*;
-
         match (self.state, msg_type) {
             // From INIT: Client sends DISCOVER
-            (Init, Discover) => {
-                self.state = Selecting;
-                Some(Offer)
+            (Dhcpv4State::Init, MessageType::Discover) => {
+                self.state = Dhcpv4State::Selecting;
+                Some(MessageType::Offer)
             }
 
             // From SELECTING: Server responds to DISCOVER with OFFER
-            (Selecting, Offer) => {
+            (Dhcpv4State::Selecting, MessageType::Offer) => {
                 // Client typically sends REQUEST in response
-                Some(Request)
+                Some(MessageType::Request)
             }
 
             // From SELECTING: Client sends REQUEST (selected server)
-            (Selecting, Request) => {
-                self.state = Requesting;
-                Some(Ack)
+            (Dhcpv4State::Selecting, MessageType::Request) => {
+                self.state = Dhcpv4State::Requesting;
+                Some(MessageType::Ack)
             }
 
             // From REQUESTING: Server responds with ACK
-            (Requesting, Ack) => {
-                self.state = Bound;
+            // From RENEWING: ACK received
+            // From REBINDING: Any server can ACK
+            (Dhcpv4State::Requesting | Dhcpv4State::Renewing | Dhcpv4State::Rebinding, MessageType::Ack) => {
+                self.state = Dhcpv4State::Bound;
                 None
             }
 
             // From REQUESTING: Server responds with NAK
-            (Requesting, Nak) => {
-                self.state = Init;
+            // From REBINDING: NAK -> restart
+            (Dhcpv4State::Requesting | Dhcpv4State::Rebinding, MessageType::Nak) => {
+                self.state = Dhcpv4State::Init;
                 None
             }
 
             // From BOUND: Lease expires or client renews
-            (Bound, Request) => {
-                self.state = Renewing;
-                Some(Ack)
-            }
-
-            // From RENEWING: ACK received
-            (Renewing, Ack) => {
-                self.state = Bound;
-                None
+            (Dhcpv4State::Bound, MessageType::Request) => {
+                self.state = Dhcpv4State::Renewing;
+                Some(MessageType::Ack)
             }
 
             // From RENEWING: NAK or timeout -> rebinding
-            (Renewing, Nak) => {
-                self.state = Rebinding;
-                None
-            }
-
-            // From REBINDING: Any server can ACK
-            (Rebinding, Ack) => {
-                self.state = Bound;
-                None
-            }
-
-            // From REBINDING: NAK -> restart
-            (Rebinding, Nak) => {
-                self.state = Init;
+            (Dhcpv4State::Renewing, MessageType::Nak) => {
+                self.state = Dhcpv4State::Rebinding;
                 None
             }
 
             // RELEASE from any state with lease
-            (Bound | Renewing | Rebinding, Release) => {
-                self.state = Released;
+            (Dhcpv4State::Bound | Dhcpv4State::Renewing | Dhcpv4State::Rebinding, MessageType::Release) => {
+                self.state = Dhcpv4State::Released;
                 None
             }
 
             // INFORM message (client has IP, wants configuration)
-            (_, Inform) => Some(Ack),
+            (_, MessageType::Inform) => Some(MessageType::Ack),
 
             // Invalid transitions
             _ => None,
@@ -152,6 +136,7 @@ impl Dhcpv4StateMachine {
     }
 
     /// Check if in bound state (has valid lease)
+    #[must_use]
     pub fn is_bound(&self) -> bool {
         self.state == Dhcpv4State::Bound
     }

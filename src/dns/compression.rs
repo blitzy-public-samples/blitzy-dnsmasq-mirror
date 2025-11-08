@@ -120,8 +120,8 @@ const LABEL_TYPE_RESERVED: u8 = 0x80;
 
 /// DNSSEC name escape character for special byte encoding
 ///
-/// In DNSSEC mode, characters 0x00 (null), 0x2E (dot), and NAME_ESCAPE itself
-/// are encoded as NAME_ESCAPE followed by (original_byte + 1).
+/// In DNSSEC mode, characters `0x00` (null), `0x2E` (dot), and `NAME_ESCAPE` itself
+/// are encoded as `NAME_ESCAPE` followed by (`original_byte` + 1).
 /// Corresponds to C's `NAME_ESCAPE` in dns-protocol.h line 1429.
 #[cfg(feature = "dnssec")]
 const NAME_ESCAPE: u8 = 0x01;
@@ -145,8 +145,11 @@ pub enum CompressionError {
         "Packet too short: attempted to read {attempted} bytes at offset {offset}, but packet is only {packet_len} bytes"
     )]
     PacketTooShort {
+        /// Current read offset in packet
         offset: usize,
+        /// Number of bytes attempted to read
         attempted: usize,
+        /// Total length of packet
         packet_len: usize,
     },
 
@@ -157,7 +160,12 @@ pub enum CompressionError {
     #[error(
         "Invalid compression pointer offset {offset}: must be within packet bounds (0-{packet_len}) and point backwards"
     )]
-    InvalidOffset { offset: usize, packet_len: usize },
+    InvalidOffset {
+        /// Compression pointer offset value
+        offset: usize,
+        /// Total length of packet
+        packet_len: usize,
+    },
 
     /// Too many compression pointer hops (potential infinite loop)
     ///
@@ -174,14 +182,20 @@ pub enum CompressionError {
     #[error(
         "Invalid label type {label_type:#04x}: only normal labels (0x00) and compression pointers (0xC0) are supported"
     )]
-    InvalidLabelType { label_type: u8 },
+    InvalidLabelType {
+        /// Invalid label type byte value
+        label_type: u8,
+    },
 
     /// Domain name exceeds maximum length
     ///
     /// DNS names in presentation format (with dots) are limited to 1025 bytes including
     /// null terminator. Corresponds to C's `MAXDNAME` check in rfc1035.c line 200.
     #[error("Domain name too long: {length} bytes exceeds maximum of {MAX_DOMAIN_NAME}")]
-    NameTooLong { length: usize },
+    NameTooLong {
+        /// Length of the domain name in bytes
+        length: usize,
+    },
 }
 
 // =============================================================================
@@ -197,7 +211,7 @@ pub type CompressionResult<T> = Result<T, CompressionError>;
 /// individual labels and whether compression pointers were used during extraction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompressedName {
-    /// Individual labels of the domain name (e.g., ["example", "com"])
+    /// Individual labels of the domain name (e.g., `["example", "com"]`)
     ///
     /// Labels are stored without the separating dots. The full domain name can be
     /// reconstructed by joining with dots. Empty labels vector represents the root domain.
@@ -236,6 +250,7 @@ impl CompressedName {
     /// assert!(name.matches_ignore_case("example.com"));
     /// assert!(name.matches_ignore_case("EXAMPLE.COM"));
     /// ```
+    #[must_use]
     pub fn matches_ignore_case(&self, other: &str) -> bool {
         self.to_string().eq_ignore_ascii_case(other)
     }
@@ -277,7 +292,7 @@ impl CompressedName {
 ///
 /// # Safety Features
 ///
-/// - All buffer accesses are bounds-checked via Rust slices (no CHECK_LEN macro needed)
+/// - All buffer accesses are bounds-checked via Rust slices (no `CHECK_LEN` macro needed)
 /// - Compression pointer offsets validated before dereferencing
 /// - Hop counter prevents infinite loops from cyclic pointers
 /// - Name length checked against `MAX_DOMAIN_NAME` (1025 bytes)
@@ -290,7 +305,7 @@ impl CompressedName {
 /// - Uses `usize` offset instead of `unsigned char**` pointer manipulation
 /// - Returns `Result<CompressedName, CompressionError>` instead of int + name buffer
 /// - Builds `String` directly instead of writing to pre-allocated char buffer
-/// - Automatic bounds checking via slices instead of CHECK_LEN macro
+/// - Automatic bounds checking via slices instead of `CHECK_LEN` macro
 ///
 /// # Examples
 ///
@@ -316,6 +331,15 @@ impl CompressedName {
 /// assert_eq!(offset, 25); // After name (12 + 13 bytes), positioned at QTYPE/QCLASS
 /// # Ok::<(), CompressionError>(())
 /// ```
+///
+/// # Errors
+///
+/// - `CompressionError::PacketTooShort` - Not enough bytes in packet for complete name
+/// - `CompressionError::InvalidOffset` - Compression pointer targets invalid location
+/// - `CompressionError::TooManyHops` - Exceeds maximum compression pointer hops (prevents cycles)
+/// - `CompressionError::NameTooLong` - Domain name exceeds RFC 1035 maximum (255 bytes)
+/// - `CompressionError::InvalidLabelType` - Invalid label type byte encountered
+/// - `CompressionError::InvalidCharacter` - Label contains invalid DNS character
 pub fn extract_name(
     packet: &[u8],
     offset: &mut usize,
@@ -448,7 +472,7 @@ pub fn extract_name(
 
 /// Decode label bytes to String, handling DNSSEC escaping if enabled
 ///
-/// In DNSSEC mode, special characters (0x00, '.', NAME_ESCAPE) are stored escaped.
+/// In DNSSEC mode, special characters (0x00, '.', `NAME_ESCAPE`) are stored escaped.
 /// This function decodes them back to their original values.
 ///
 /// # Arguments
@@ -559,6 +583,11 @@ fn decode_label(label_bytes: &[u8]) -> CompressionResult<String> {
 /// assert_eq!(offset, 12 + 13); // After name, before extrabytes
 /// # Ok::<(), CompressionError>(())
 /// ```
+///
+/// # Errors
+///
+/// - `CompressionError::PacketTooShort` - Not enough bytes in packet to skip complete name
+/// - `CompressionError::InvalidLabelType` - Invalid or unsupported label type encountered
 pub fn skip_name(packet: &[u8], offset: &mut usize, extrabytes: usize) -> CompressionResult<()> {
     let mut current_offset = *offset;
 
@@ -694,11 +723,16 @@ pub fn skip_name(packet: &[u8], offset: &mut usize, extrabytes: usize) -> Compre
 /// * `Ok(())` - Name successfully written to packet
 /// * `Err(CompressionError)` - Compression failure (name too long, invalid format)
 ///
+/// # Errors
+///
+/// - `CompressionError::InvalidOffset` - Compression pointer offset exceeds 14-bit limit (0x3FFF)
+/// - `CompressionError::NameTooLong` - Individual label exceeds 63 bytes
+///
 /// # Compression Algorithm
 ///
 /// For each label suffix (e.g., "example.com", "com"):
 /// 1. Check if suffix exists in compression map
-/// 2. If yes: Write 2-byte pointer (0xC0 | offset_high, offset_low)
+/// 2. If yes: Write 2-byte pointer (0xC0 | `offset_high`, `offset_low`)
 /// 3. If no: Write label (length byte + data), add to map, continue
 ///
 /// # C Source Reference
@@ -708,7 +742,7 @@ pub fn skip_name(packet: &[u8], offset: &mut usize, extrabytes: usize) -> Compre
 /// - Compression map maintained manually via pointer comparisons
 ///
 /// Key differences from C:
-/// - Uses HashMap for efficient suffix lookup instead of linear scan
+/// - Uses `HashMap` for efficient suffix lookup instead of linear scan
 /// - Explicit compression map parameter instead of implicit packet scanning
 /// - Returns Result instead of boolean or pointer
 ///
@@ -727,10 +761,10 @@ pub fn skip_name(packet: &[u8], offset: &mut usize, extrabytes: usize) -> Compre
 /// compress_name("www.example.com", &mut packet, &mut compression_map)?;
 /// # Ok::<(), CompressionError>(())
 /// ```
-pub fn compress_name(
+pub fn compress_name<S: std::hash::BuildHasher>(
     name: &str,
     packet: &mut Vec<u8>,
-    compression_map: &mut HashMap<String, usize>,
+    compression_map: &mut HashMap<String, usize, S>,
 ) -> CompressionResult<()> {
     // Handle root domain special case
     if name == "." || name.is_empty() {
@@ -758,7 +792,9 @@ pub fn compress_name(
                 });
             }
 
+            #[allow(clippy::cast_possible_truncation)]
             let pointer_high = 0xC0 | ((offset >> 8) as u8);
+            #[allow(clippy::cast_possible_truncation)]
             let pointer_low = (offset & 0xFF) as u8;
             packet.push(pointer_high);
             packet.push(pointer_low);
@@ -782,6 +818,7 @@ pub fn compress_name(
         compression_map.insert(suffix.clone(), suffix_offset);
 
         // Write label: length byte + label data
+        #[allow(clippy::cast_possible_truncation)]
         packet.push(label_bytes.len() as u8);
         packet.extend_from_slice(label_bytes);
 
@@ -974,7 +1011,7 @@ mod tests {
         assert_eq!(packet, vec![0x00]); // Just terminating zero
     }
 
-    /// Test CompressedName to_string conversion
+    /// Test `CompressedName` `to_string` conversion
     #[test]
     fn test_compressed_name_to_string() {
         let name = CompressedName {
@@ -990,7 +1027,7 @@ mod tests {
         assert_eq!(root.to_string(), ".");
     }
 
-    /// Test CompressedName case-insensitive matching
+    /// Test `CompressedName` case-insensitive matching
     #[test]
     fn test_compressed_name_case_insensitive() {
         let name = CompressedName {

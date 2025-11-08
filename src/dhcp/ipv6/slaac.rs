@@ -13,9 +13,9 @@
 //!
 //! ## Purpose
 //!
-//! SLAAC functionality for DHCPv6:
+//! SLAAC functionality for `DHCPv6`:
 //! - Generate SLAAC IPv6 addresses from RA prefixes and hardware addresses
-//! - Perform Duplicate Address Detection (DAD) via ICMPv6 ping
+//! - Perform Duplicate Address Detection (DAD) via `ICMPv6` ping
 //! - Convert MAC addresses to Modified EUI-64 interface identifiers
 //! - Automatically register confirmed addresses in DNS cache
 //! - Track SLAAC address state with ping timing and exponential backoff
@@ -25,7 +25,7 @@
 //! | C Function | Rust Equivalent | Purpose |
 //! |------------|-----------------|---------|
 //! | `slaac_add_addrs()` | `SlaacManager::generate_addresses()` | Generate SLAAC addresses |
-//! | `periodic_slaac()` | `SlaacManager::periodic_dad()` | Perform DAD via ICMPv6 ping |
+//! | `periodic_slaac()` | `SlaacManager::periodic_dad()` | Perform DAD via `ICMPv6` ping |
 //! | `slaac_ping_reply()` | `SlaacManager::handle_ping_reply()` | Process Echo Reply |
 //! | MAC to EUI-64 | `mac_to_eui64()` | Convert MAC-48 to EUI-64 IID |
 //!
@@ -45,7 +45,7 @@
 //!
 //! - RFC 4862: IPv6 Stateless Address Autoconfiguration (Section 5.5.3)
 //! - RFC 4291: IPv6 Addressing Architecture (Appendix A on Modified EUI-64)
-//! - RFC 4443: ICMPv6 (Echo Request/Reply for DAD)
+//! - RFC 4443: `ICMPv6` (Echo Request/Reply for DAD)
 //! - RFC 2464: Transmission of IPv6 over Ethernet (MAC to EUI-64)
 
 use std::net::Ipv6Addr;
@@ -100,6 +100,7 @@ impl SlaacAddress {
     /// # Returns
     ///
     /// New SLAAC address in tentative state
+    #[must_use]
     pub fn new(address: Ipv6Addr, hwaddr: Vec<u8>) -> Self {
         Self {
             address,
@@ -116,6 +117,7 @@ impl SlaacAddress {
     /// # Returns
     ///
     /// True if ping should be sent
+    #[must_use]
     pub fn is_ping_due(&self) -> bool {
         match self.last_ping {
             None => true,
@@ -152,7 +154,7 @@ pub struct SlaacManager {
     /// Tracked SLAAC addresses
     addresses: Vec<SlaacAddress>,
 
-    /// ICMPv6 Echo Request identifier
+    /// `ICMPv6` Echo Request identifier
     ping_id: u16,
 }
 
@@ -162,6 +164,7 @@ impl SlaacManager {
     /// # Returns
     ///
     /// New SLAAC manager
+    #[must_use]
     pub fn new() -> Self {
         // Generate pseudo-random ping ID from system time
         // This is sufficient for DAD purposes (doesn't need cryptographic randomness)
@@ -260,7 +263,7 @@ impl SlaacManager {
         awaiting_dad
     }
 
-    /// Handle ICMPv6 Echo Reply for DAD
+    /// Handle `ICMPv6` Echo Reply for DAD
     ///
     /// Corresponds to C's `slaac_ping_reply()` (slaac.c)
     ///
@@ -308,6 +311,7 @@ impl SlaacManager {
     /// # Returns
     ///
     /// Vector of confirmed SLAAC addresses
+    #[must_use]
     pub fn confirmed_addresses(&self) -> Vec<&SlaacAddress> {
         self.addresses
             .iter()
@@ -316,6 +320,7 @@ impl SlaacManager {
     }
 
     /// Get all addresses
+    #[must_use]
     pub fn all_addresses(&self) -> &[SlaacAddress] {
         &self.addresses
     }
@@ -349,6 +354,7 @@ impl Default for SlaacManager {
 /// let eui64 = mac_to_eui64(&mac).unwrap();
 /// assert_eq!(eui64, vec![0x02, 0x11, 0x22, 0xFF, 0xFE, 0x33, 0x44, 0x55]);
 /// ```
+#[must_use]
 pub fn mac_to_eui64(mac: &[u8]) -> Option<Vec<u8>> {
     if mac.len() != 6 {
         return None;
@@ -400,6 +406,10 @@ fn get_slaac_manager() -> &'static Arc<Mutex<SlaacManager>> {
 /// # Returns
 /// * `true` if address was successfully added
 /// * `false` if address generation or addition failed
+///
+/// # Panics
+/// Panics if the global SLAAC manager mutex is poisoned
+#[must_use]
 pub fn slaac_add_addrs(_iface: &str, prefix: Ipv6Addr, prefix_len: u8, mac_addr: &[u8]) -> bool {
     let mut manager = get_slaac_manager().lock().unwrap();
 
@@ -416,18 +426,22 @@ pub fn slaac_add_addrs(_iface: &str, prefix: Ipv6Addr, prefix_len: u8, mac_addr:
         .is_some()
 }
 
-/// Handle received ICMPv6 Echo Reply for Duplicate Address Detection
+/// Handle received `ICMPv6` Echo Reply for Duplicate Address Detection
 ///
-/// Processes ICMPv6 Echo Reply messages to detect duplicate addresses during
+/// Processes `ICMPv6` Echo Reply messages to detect duplicate addresses during
 /// SLAAC address validation. Matches the signature from slaac.c.
 ///
 /// # Arguments
 /// * `addr` - IPv6 address that received echo reply
-/// * `ping_id` - ICMPv6 echo identifier to match our probes
+/// * `ping_id` - `ICMPv6` echo identifier to match our probes
 ///
 /// # Returns
 /// * `true` if this was our probe (indicates duplicate address)
 /// * `false` if probe ID doesn't match (not our probe)
+///
+/// # Panics
+/// Panics if the SLAAC manager mutex is poisoned (internal synchronization error).
+#[must_use]
 pub fn slaac_ping_reply(addr: Ipv6Addr, ping_id: u16) -> bool {
     let mut manager = get_slaac_manager().lock().unwrap();
 
@@ -452,6 +466,9 @@ pub fn slaac_ping_reply(addr: Ipv6Addr, ping_id: u16) -> bool {
 /// - Timing out unconfirmed addresses
 /// - Cleaning up expired addresses
 /// - Refreshing address lifetimes
+///
+/// # Panics
+/// Panics if the SLAAC manager mutex is poisoned (internal synchronization error).
 pub fn periodic_slaac() {
     let mut manager = get_slaac_manager().lock().unwrap();
 

@@ -74,7 +74,7 @@ pub type LeaseTime = u64;
 
 /// Special value indicating an infinite (never-expiring) lease.
 ///
-/// This value (u64::MAX) is used in DHCP to indicate static leases or permanent
+/// This value (`u64::MAX`) is used in DHCP to indicate static leases or permanent
 /// address assignments. Corresponds to C's `0xffffffff` (when stored in u32).
 pub const INFINITE_LEASE: u64 = u64::MAX;
 
@@ -88,7 +88,7 @@ pub const SECS_PER_HOUR: u64 = 3600;
 pub const SECS_PER_DAY: u64 = 86400;
 
 /// Seconds per week (604800).
-pub const SECS_PER_WEEK: u64 = 604800;
+pub const SECS_PER_WEEK: u64 = 604_800;
 
 /// Process start time (monotonic clock reference point).
 ///
@@ -101,7 +101,7 @@ pub const SECS_PER_WEEK: u64 = 604800;
 /// hardware clocks.
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
-/// Process start time for broken-rtc systems (SystemTime fallback).
+/// Process start time for broken-rtc systems (`SystemTime` fallback).
 ///
 /// Only used when the `broken-rtc` feature is enabled. Stores the `SystemTime`
 /// when the process started as a fallback for systems without reliable
@@ -171,7 +171,7 @@ pub fn init_time_source() {
 ///
 /// ## Platform Behavior
 ///
-/// - **Default**: Uses `std::time::Instant` (CLOCK_MONOTONIC on Unix)
+/// - **Default**: Uses `std::time::Instant` (`CLOCK_MONOTONIC` on Unix)
 /// - **With `broken-rtc` feature**: Falls back to `SystemTime` for embedded
 ///   systems without reliable hardware clocks
 ///
@@ -285,9 +285,10 @@ pub fn monotonic_time() -> u64 {
 /// assert_eq!(format_duration(INFINITE_LEASE), "infinite");
 /// assert_eq!(format_duration(u32::MAX as u64), "infinite");
 /// ```
+#[must_use]
 pub fn format_duration(seconds: u64) -> String {
     // Handle special infinite lease value (matches C's 0xffffffff check)
-    if seconds == INFINITE_LEASE || seconds == u32::MAX as u64 {
+    if seconds == INFINITE_LEASE || seconds == u64::from(u32::MAX) {
         return "infinite".to_string();
     }
 
@@ -302,27 +303,27 @@ pub fn format_duration(seconds: u64) -> String {
     // Days
     let days = remaining / SECS_PER_DAY;
     if days > 0 {
-        parts.push(format!("{}d", days));
+        parts.push(format!("{days}d"));
         remaining %= SECS_PER_DAY;
     }
 
     // Hours
     let hours = remaining / SECS_PER_HOUR;
     if hours > 0 {
-        parts.push(format!("{}h", hours));
+        parts.push(format!("{hours}h"));
         remaining %= SECS_PER_HOUR;
     }
 
     // Minutes
     let minutes = remaining / SECS_PER_MINUTE;
     if minutes > 0 {
-        parts.push(format!("{}m", minutes));
+        parts.push(format!("{minutes}m"));
         remaining %= SECS_PER_MINUTE;
     }
 
     // Seconds
     if remaining > 0 {
-        parts.push(format!("{}s", remaining));
+        parts.push(format!("{remaining}s"));
     }
 
     parts.join(" ")
@@ -363,6 +364,7 @@ pub fn format_duration(seconds: u64) -> String {
 /// thread::sleep(Duration::from_secs(3));
 /// assert!(is_expired(start, timeout));
 /// ```
+#[must_use]
 pub fn is_expired(timestamp: Timestamp, timeout_secs: u64) -> bool {
     let now = monotonic_time();
     now >= timestamp.saturating_add(timeout_secs)
@@ -399,6 +401,7 @@ pub fn is_expired(timestamp: Timestamp, timeout_secs: u64) -> bool {
 ///     None => println!("Lease has expired"),
 /// }
 /// ```
+#[must_use]
 pub fn time_remaining(timestamp: Timestamp, timeout_secs: u64) -> Option<u64> {
     let now = monotonic_time();
     let expiry = timestamp.saturating_add(timeout_secs);
@@ -432,6 +435,7 @@ pub fn time_remaining(timestamp: Timestamp, timeout_secs: u64) -> Option<u64> {
 /// let dur = seconds_to_duration(3600);
 /// assert_eq!(dur, Duration::from_secs(3600));
 /// ```
+#[must_use]
 pub fn seconds_to_duration(secs: u64) -> Duration {
     Duration::from_secs(secs)
 }
@@ -462,6 +466,7 @@ pub fn seconds_to_duration(secs: u64) -> Duration {
 /// let dur_with_nanos = Duration::new(3600, 500_000_000);
 /// assert_eq!(duration_to_seconds(dur_with_nanos), 3600);
 /// ```
+#[must_use]
 pub fn duration_to_seconds(dur: Duration) -> u64 {
     dur.as_secs()
 }
@@ -494,6 +499,7 @@ pub fn duration_to_seconds(dur: Duration) -> u64 {
 ///
 /// assert_eq!(expires_at, start + lease_duration);
 /// ```
+#[must_use]
 pub fn calculate_lease_expiry(start: Timestamp, lease_secs: LeaseTime) -> Timestamp {
     start.saturating_add(lease_secs)
 }
@@ -529,6 +535,7 @@ pub fn calculate_lease_expiry(start: Timestamp, lease_secs: LeaseTime) -> Timest
 ///     None => println!("Lease has expired"),
 /// }
 /// ```
+#[must_use]
 pub fn lease_time_remaining(expiry: Timestamp) -> Option<u64> {
     let now = monotonic_time();
 
@@ -607,7 +614,7 @@ mod tests {
 
     #[test]
     fn test_format_duration_infinite_u32_max() {
-        assert_eq!(format_duration(u32::MAX as u64), "infinite");
+        assert_eq!(format_duration(u64::from(u32::MAX)), "infinite");
     }
 
     #[test]
@@ -703,7 +710,7 @@ mod tests {
         assert_eq!(SECS_PER_MINUTE, 60);
         assert_eq!(SECS_PER_HOUR, 3600);
         assert_eq!(SECS_PER_DAY, 86400);
-        assert_eq!(SECS_PER_WEEK, 604800);
+        assert_eq!(SECS_PER_WEEK, 604_800);
         assert_eq!(INFINITE_LEASE, u64::MAX);
     }
 }

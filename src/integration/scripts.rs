@@ -10,11 +10,11 @@
 //!
 //! This module implements privilege-separated script execution for DHCP lease changes,
 //! TFTP transfers, and ARP events. It replaces the C implementation in `src/helper.c`
-//! with async Rust using tokio::process.
+//! with async Rust using `tokio::process`.
 //!
 //! # Architecture
 //!
-//! The C version uses fork() to create a privileged helper process that receives events
+//! The C version uses `fork()` to create a privileged helper process that receives events
 //! via a Unix socket and executes scripts with root privileges. The Rust version maintains
 //! similar privilege separation but uses async task spawning:
 //!
@@ -105,6 +105,7 @@ pub enum LeaseAction {
 
 impl LeaseAction {
     /// Convert to environment variable string
+    #[must_use]
     pub fn as_env_str(&self) -> &'static str {
         match self {
             LeaseAction::Add => "add",
@@ -117,58 +118,86 @@ impl LeaseAction {
 /// Script event types
 ///
 /// Represents all event types that can trigger script execution,
-/// mirroring the C version's struct script_data wire format.
+/// mirroring the C version's `struct script_data` wire format.
 #[derive(Debug, Clone)]
 pub enum ScriptEvent {
-    /// DHCPv4 lease event
+    /// `DHCPv4` lease event
     DhcpLease {
+        /// Lease action (add/del/old)
         action: LeaseAction,
+        /// Client MAC address
         mac_address: String,
+        /// Assigned IP address
         ip_address: IpAddr,
+        /// Client hostname
         hostname: Option<String>,
+        /// DHCP client identifier
         client_id: Option<Vec<u8>>,
+        /// Lease expiry time (Unix timestamp)
         expiry_time: Option<u64>,
+        /// Vendor class identifier
         vendor_class: Option<String>,
+        /// User class identifier
         user_class: Option<String>,
+        /// DHCP relay circuit ID
         circuit_id: Option<String>,
+        /// DHCP relay remote ID
         remote_id: Option<String>,
+        /// DHCP tags applied to this lease
         tags: Vec<String>,
     },
 
-    /// DHCPv6 lease event
+    /// `DHCPv6` lease event
     Dhcp6Lease {
+        /// Lease action (add/del/old)
         action: LeaseAction,
+        /// DHCP Unique Identifier
         duid: Vec<u8>,
+        /// Identity Association Identifier
         iaid: u32,
+        /// Assigned IPv6 address
         ip_address: IpAddr,
+        /// Client hostname
         hostname: Option<String>,
+        /// Lease expiry time (Unix timestamp)
         expiry_time: Option<u64>,
+        /// DHCP tags applied to this lease
         tags: Vec<String>,
     },
 
     /// TFTP file transfer event
     TftpTransfer {
+        /// Path to transferred file
         file_path: PathBuf,
+        /// Size of file in bytes
         file_size: u64,
+        /// Client IP address
         client_address: IpAddr,
     },
 
     /// TFTP transfer error
     TftpError {
+        /// Path to file that failed
         file_path: PathBuf,
+        /// Client IP address
         client_address: IpAddr,
+        /// Error message describing failure
         error_message: String,
     },
 
     /// ARP table entry detection
     ArpAdd {
+        /// Hardware MAC address
         mac_address: String,
+        /// Associated IP address
         ip_address: IpAddr,
     },
 
     /// ARP table entry removal
     ArpDel {
+        /// Hardware MAC address
         mac_address: String,
+        /// Associated IP address
         ip_address: IpAddr,
     },
 }
@@ -177,7 +206,8 @@ impl ScriptEvent {
     /// Build environment variables for script execution
     ///
     /// Creates DNSMASQ_* environment variables that the script can read,
-    /// matching the C version's my_setenv() function behavior.
+    /// matching the C version's `my_setenv()` function behavior.
+    #[must_use]
     pub fn build_env_vars(&self) -> HashMap<String, String> {
         let mut env = HashMap::new();
 
@@ -322,17 +352,18 @@ impl ScriptEvent {
     }
 
     /// Get event description for logging
+    #[must_use]
     pub fn description(&self) -> String {
         match self {
             ScriptEvent::DhcpLease {
                 action, ip_address, ..
             } => {
-                format!("DHCP {:?} for {}", action, ip_address)
+                format!("DHCP {action:?} for {ip_address}")
             }
             ScriptEvent::Dhcp6Lease {
                 action, ip_address, ..
             } => {
-                format!("DHCPv6 {:?} for {}", action, ip_address)
+                format!("DHCPv6 {action:?} for {ip_address}")
             }
             ScriptEvent::TftpTransfer { file_path, .. } => {
                 format!("TFTP transfer: {}", file_path.display())
@@ -341,10 +372,10 @@ impl ScriptEvent {
                 format!("TFTP error: {}", file_path.display())
             }
             ScriptEvent::ArpAdd { ip_address, .. } => {
-                format!("ARP add: {}", ip_address)
+                format!("ARP add: {ip_address}")
             }
             ScriptEvent::ArpDel { ip_address, .. } => {
-                format!("ARP del: {}", ip_address)
+                format!("ARP del: {ip_address}")
             }
         }
     }
@@ -368,7 +399,7 @@ pub struct ScriptResult {
 
 /// Asynchronous script executor
 ///
-/// Manages a queue of script events and executes them asynchronously using tokio::process.
+/// Manages a queue of script events and executes them asynchronously using `tokio::process`.
 /// Replaces the C version's helper process model with async Rust tasks.
 pub struct ScriptExecutor {
     /// Path to the script executable (immutable after construction for security)
@@ -451,6 +482,10 @@ impl ScriptExecutor {
     /// Queue a script event for execution
     ///
     /// Events are queued and executed asynchronously in FIFO order.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ScriptError::QueueError` if the event channel is closed or full.
     pub async fn queue_event(&self, event: ScriptEvent) -> Result<(), ScriptError> {
         debug!("Queuing script event: {}", event.description());
 
@@ -467,6 +502,10 @@ impl ScriptExecutor {
     /// Queue a DHCP lease event
     ///
     /// Convenience method for queuing DHCP lease changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ScriptError::QueueError` if the event channel is closed or full.
     pub async fn queue_lease_event(
         &self,
         action: LeaseAction,
@@ -579,7 +618,7 @@ impl ScriptExecutor {
             }
         };
 
-        let duration_ms = start_time.elapsed().as_millis() as u64;
+        let duration_ms = start_time.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
 
         // Capture stdout
         let mut stdout_buf = Vec::new();
@@ -629,10 +668,13 @@ impl ScriptExecutor {
 // In production, this would use the hex crate or implement hex encoding
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
+        use std::fmt::Write;
         bytes
             .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>()
+            .fold(String::new(), |mut acc, b| {
+                let _ = write!(acc, "{b:02x}");
+                acc
+            })
     }
 }
 

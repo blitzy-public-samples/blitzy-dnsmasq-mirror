@@ -6,16 +6,16 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated June, 2007.
 
-//! # DHCPv4 Server
+//! # `DHCPv4` Server
 //!
-//! Main DHCPv4 server implementation, replacing `src/dhcp.c`.
+//! Main `DHCPv4` server implementation, replacing `src/dhcp.c`.
 
 use super::protocol::{Dhcpv4Message, Dhcpv4MessageType};
 use super::state_machine::Dhcpv4StateMachine;
 use crate::dhcp::lease::{Lease, LeaseV4};
 use std::net::Ipv4Addr;
 
-/// DHCPv4 server configuration
+/// `DHCPv4` server configuration
 #[derive(Debug, Clone)]
 pub struct Dhcpv4ServerConfig {
     /// Server IP address (DHCP server identifier)
@@ -43,7 +43,7 @@ pub struct Dhcpv4ServerConfig {
     pub max_lease_time: u32,
 }
 
-/// DHCPv4 server
+/// `DHCPv4` server
 pub struct Dhcpv4Server {
     /// Server configuration
     config: Dhcpv4ServerConfig,
@@ -56,11 +56,12 @@ pub struct Dhcpv4Server {
 }
 
 impl Dhcpv4Server {
-    /// Create new DHCPv4 server
+    /// Create new `DHCPv4` server
     ///
     /// # Arguments
     ///
     /// * `config` - Server configuration
+    #[must_use]
     pub fn new(config: Dhcpv4ServerConfig) -> Self {
         Self {
             config,
@@ -69,11 +70,11 @@ impl Dhcpv4Server {
         }
     }
 
-    /// Handle incoming DHCPv4 message
+    /// Handle incoming `DHCPv4` message
     ///
     /// # Arguments
     ///
-    /// * `message` - Received DHCPv4 message
+    /// * `message` - Received `DHCPv4` message
     ///
     /// # Returns
     ///
@@ -85,13 +86,14 @@ impl Dhcpv4Server {
         match msg_type {
             Dhcpv4MessageType::Discover => self.handle_discover(message),
             Dhcpv4MessageType::Request => self.handle_request(message),
-            Dhcpv4MessageType::Release => self.handle_release(message),
+            Dhcpv4MessageType::Release => self.handle_release(&message),
             Dhcpv4MessageType::Inform => self.handle_inform(message),
             _ => None,
         }
     }
 
     /// Handle DISCOVER message
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     fn handle_discover(&mut self, _message: Dhcpv4Message) -> Option<Dhcpv4Message> {
         // TODO: Implement full DISCOVER logic
         // For now, return a basic OFFER
@@ -101,6 +103,7 @@ impl Dhcpv4Server {
     }
 
     /// Handle REQUEST message
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     fn handle_request(&mut self, _message: Dhcpv4Message) -> Option<Dhcpv4Message> {
         // TODO: Implement full REQUEST logic
         let mut response = Dhcpv4Message::new();
@@ -109,7 +112,7 @@ impl Dhcpv4Server {
     }
 
     /// Handle RELEASE message
-    fn handle_release(&mut self, message: Dhcpv4Message) -> Option<Dhcpv4Message> {
+    fn handle_release(&mut self, message: &Dhcpv4Message) -> Option<Dhcpv4Message> {
         // Find and remove lease
         let client_addr = message.get_ciaddr();
         self.leases.retain(|lease| {
@@ -124,6 +127,7 @@ impl Dhcpv4Server {
     }
 
     /// Handle INFORM message
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     fn handle_inform(&mut self, _message: Dhcpv4Message) -> Option<Dhcpv4Message> {
         // TODO: Implement INFORM response
         let mut response = Dhcpv4Message::new();
@@ -132,6 +136,7 @@ impl Dhcpv4Server {
     }
 
     /// Extract message type from options
+    #[allow(clippy::unused_self)]
     fn extract_message_type(&self, message: &Dhcpv4Message) -> Option<Dhcpv4MessageType> {
         // TODO: Parse options to extract message type
         // For now, return None
@@ -140,6 +145,7 @@ impl Dhcpv4Server {
     }
 
     /// Allocate IP address from pool
+    #[allow(clippy::unnecessary_wraps)]
     fn allocate_address(&mut self, hwaddr: &[u8]) -> Option<Ipv4Addr> {
         // TODO: Implement address allocation logic
         // For now, return a placeholder

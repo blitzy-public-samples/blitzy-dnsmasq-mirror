@@ -60,7 +60,7 @@ use tracing::{debug, error, info, warn};
 ///
 /// # Members Exposed
 ///
-/// Per schema: addr, prefix_len
+/// Per schema: `addr`, `prefix_len`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpNetwork {
     /// Network address (IPv4 or IPv6)
@@ -71,6 +71,11 @@ pub struct IpNetwork {
 
 impl IpNetwork {
     /// Create a new IP network from address and prefix length
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError::InternalError` if prefix length exceeds maximum
+    /// for the address family (32 for IPv4, 128 for IPv6).
     pub fn new(addr: IpAddr, prefix_len: u8) -> Result<Self, AuthError> {
         // Validate prefix length based on address family
         let max_prefix = match addr {
@@ -80,7 +85,7 @@ impl IpNetwork {
 
         if prefix_len > max_prefix {
             return Err(AuthError::InternalError {
-                message: format!("Invalid prefix length {} for address {}", prefix_len, addr),
+                message: format!("Invalid prefix length {prefix_len} for address {addr}"),
             });
         }
 
@@ -90,7 +95,8 @@ impl IpNetwork {
     /// Check if an IP address belongs to this network
     ///
     /// Performs prefix matching to determine subnet membership.
-    /// Replaces C's is_same_net() and is_same_net6() from util.c.
+    /// Replaces C's `is_same_net()` and `is_same_net6()` from `util.c`.
+    #[must_use]
     pub fn contains(&self, addr: &IpAddr) -> bool {
         match (self.addr, addr) {
             (IpAddr::V4(net), IpAddr::V4(test)) => {
@@ -141,16 +147,16 @@ impl IpNetwork {
 ///
 /// # C Equivalent
 ///
-/// Replaces SOA-related fields in `struct daemon` from dnsmasq.h:
-/// - authserver (MNAME)
-/// - hostmaster (RNAME)
-/// - soa_sn (serial)
-/// - soa_refresh, soa_retry, soa_expiry (timers)
-/// - auth_ttl (minimum/negative caching TTL)
+/// Replaces SOA-related fields in `struct daemon` from `dnsmasq.h`:
+/// - `authserver` (MNAME)
+/// - `hostmaster` (RNAME)
+/// - `soa_sn` (serial)
+/// - `soa_refresh`, `soa_retry`, `soa_expiry` (timers)
+/// - `auth_ttl` (minimum/negative caching TTL)
 ///
 /// # Members Exposed
 ///
-/// Per schema: primary_ns, admin_email, serial, refresh, retry, expire, minimum
+/// Per schema: `primary_ns`, `admin_email`, `serial`, `refresh`, `retry`, `expire`, `minimum`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SoaRecord {
     /// Primary nameserver (MNAME) - authoritative server for zone
@@ -171,15 +177,16 @@ pub struct SoaRecord {
 
 impl SoaRecord {
     /// Create a new SOA record with default values
+    #[must_use]
     pub fn new(primary_ns: String, admin_email: String) -> Self {
         SoaRecord {
             primary_ns,
             admin_email,
             serial: 1,
-            refresh: 7200,   // 2 hours
-            retry: 1800,     // 30 minutes
-            expire: 1209600, // 2 weeks
-            minimum: 3600,   // 1 hour
+            refresh: 7200,     // 2 hours
+            retry: 1800,       // 30 minutes
+            expire: 1_209_600, // 2 weeks
+            minimum: 3600,     // 1 hour
         }
     }
 }
@@ -196,7 +203,7 @@ impl SoaRecord {
 ///
 /// # Members Exposed
 ///
-/// Per schema: domain, subnets, excluded, soa, nameservers, interface_names
+/// Per schema: `domain`, `subnets`, `excluded`, `soa`, `nameservers`, `interface_names`
 #[derive(Debug, Clone)]
 pub struct AuthZone {
     /// Zone domain name (e.g., "local", "lan")
@@ -215,6 +222,8 @@ pub struct AuthZone {
 
 impl AuthZone {
     /// Create a new authoritative zone with default values
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(domain: String, soa: SoaRecord) -> Self {
         AuthZone {
             domain: domain.to_lowercase(),
@@ -249,6 +258,7 @@ impl AuthZone {
     /// Check if a domain name is within this authoritative zone
     ///
     /// Returns true if the query name matches the zone's domain or is a subdomain.
+    #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         is_in_zone(self, name).is_some()
     }
@@ -257,6 +267,11 @@ impl AuthZone {
     ///
     /// Returns resource records that match the question, or an error if the
     /// question cannot be answered authoritatively.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DnsError` if the question cannot be answered authoritatively.
+    /// In the current simplified implementation, this always returns `Ok(Vec::new())`.
     pub fn lookup(&self, question: &DnsQuestion) -> Result<Vec<ResourceRecord>, DnsError> {
         // For now, return empty result as this is a simplified implementation
         // The full authoritative query processing is done through answer_authoritative_query
@@ -273,7 +288,7 @@ impl AuthZone {
 /// Searches address list for an entry whose network prefix matches the
 /// provided address. Used for subnet matching and exclusion checking.
 ///
-/// Translates: find_addrlist() from auth.c lines 75-178
+/// Translates: `find_addrlist()` from `auth.c` lines 75-178
 fn find_matching_address(list: &[IpNetwork], addr: IpAddr) -> Option<&IpNetwork> {
     list.iter().find(|network| network.contains(&addr))
 }
@@ -283,7 +298,7 @@ fn find_matching_address(list: &[IpNetwork], addr: IpAddr) -> Option<&IpNetwork>
 /// Finds the subnet entry that matches the client address for reverse zone
 /// queries. Used for PTR record processing with subnet-specific zones.
 ///
-/// Translates: find_subnet() from auth.c lines 180-228
+/// Translates: `find_subnet()` from `auth.c` lines 180-228
 fn find_matching_subnet(zone: &AuthZone, addr: IpAddr) -> Option<&IpNetwork> {
     find_matching_address(&zone.subnets, addr)
 }
@@ -293,7 +308,7 @@ fn find_matching_subnet(zone: &AuthZone, addr: IpAddr) -> Option<&IpNetwork> {
 /// Returns true if the address should be excluded from authoritative answers.
 /// Used to blacklist specific addresses from split-horizon DNS responses.
 ///
-/// Translates: find_exclude() from auth.c lines 230-281
+/// Translates: `find_exclude()` from `auth.c` lines 230-281
 fn is_excluded(zone: &AuthZone, addr: IpAddr) -> bool {
     for excluded_addr in &zone.excluded {
         if excluded_addr == &addr {
@@ -309,7 +324,7 @@ fn is_excluded(zone: &AuthZone, addr: IpAddr) -> bool {
 /// an authoritative response. Implements split-horizon DNS by returning
 /// different answers based on client network location.
 ///
-/// Translates: filter_zone() from auth.c lines 283-345
+/// Translates: `filter_zone()` from `auth.c` lines 283-345
 ///
 /// # Arguments
 ///
@@ -357,7 +372,7 @@ pub fn should_answer_for_subnet(zone: &AuthZone, client_addr: IpAddr) -> bool {
 /// both exact matches and subdomain matches. Wildcard zones (*.example.com)
 /// are supported. Returns the zone-relative name (cut point) if matched.
 ///
-/// Translates: in_zone() from auth.c lines 347-430
+/// Translates: `in_zone()` from `auth.c` lines 347-430
 ///
 /// # Arguments
 ///
@@ -376,6 +391,7 @@ pub fn should_answer_for_subnet(zone: &AuthZone, client_addr: IpAddr) -> bool {
 /// is_in_zone(&zone, "example.com") => Some("")
 /// is_in_zone(&zone, "other.org") => None
 /// ```
+#[must_use]
 pub fn is_in_zone(zone: &AuthZone, name: &str) -> Option<String> {
     let name_lower = name.trim_end_matches('.').to_lowercase();
     let zone_lower = zone.domain.trim_end_matches('.').to_lowercase();
@@ -386,7 +402,7 @@ pub fn is_in_zone(zone: &AuthZone, name: &str) -> Option<String> {
     }
 
     // Subdomain match - query for name within zone
-    if name_lower.ends_with(&format!(".{}", zone_lower)) {
+    if name_lower.ends_with(&format!(".{zone_lower}")) {
         // Extract subdomain part (everything before zone domain)
         let cut_point = name_lower.len() - zone_lower.len() - 1;
         let subdomain = &name_lower[..cut_point];
@@ -399,7 +415,7 @@ pub fn is_in_zone(zone: &AuthZone, name: &str) -> Option<String> {
             // Calculate subdomain relative to wildcard base
             if domain_equal(&name_lower, wildcard_base) {
                 return Some(String::new());
-            } else if name_lower.ends_with(&format!(".{}", wildcard_base)) {
+            } else if name_lower.ends_with(&format!(".{wildcard_base}")) {
                 let cut_point = name_lower.len() - wildcard_base.len() - 1;
                 let subdomain = &name_lower[..cut_point];
                 return Some(subdomain.to_string());
@@ -423,7 +439,7 @@ const CNAME_CHAIN_LIMIT: usize = 10;
 /// and generates authoritative answer including SOA, NS, A, AAAA, PTR, MX,
 /// SRV, TXT, CNAME records from zone configuration and DHCP cache integration.
 ///
-/// Translates: answer_auth() from auth.c lines 450-1200
+/// Translates: `answer_auth()` from `auth.c` lines 450-1200
 ///
 /// # Arguments
 ///
@@ -445,6 +461,11 @@ const CNAME_CHAIN_LIMIT: usize = 10;
 /// - `AuthError::NoAuthorityForSubnet` - Client subnet not authorized
 /// - `AuthError::MalformedQuery` - Invalid query format
 /// - `AuthError::PacketTruncated` - Response exceeds UDP packet size
+///
+/// # Panics
+///
+/// Panics if `zone_relative_name` is `None` after `matched_zone` is verified to be `Some`.
+/// This should never occur due to the structure of `is_in_zone()` logic.
 pub async fn answer_authoritative_query(
     header: &mut DnsHeader,
     query: &DnsMessage,
@@ -487,7 +508,7 @@ pub async fn answer_authoritative_query(
     // Return REFUSED if not in any zone
     let zone = matched_zone.ok_or_else(|| AuthError::NotInZone {
         zone: "<none>".to_string(),
-        query: query_name.to_string(),
+        query: query_name.clone(),
     })?;
     let _relative_name = zone_relative_name.unwrap();
 
@@ -533,21 +554,20 @@ pub async fn answer_authoritative_query(
                 &cache,
                 local_query,
                 &mut response,
-            )
-            .await?;
+            )?;
         }
         RecordType::PTR => {
             // Reverse lookup - PTR records
             found_records =
-                process_ptr_query(query_name, zone, &cache, local_query, &mut response).await?;
+                process_ptr_query(query_name, zone, &cache, local_query, &mut response)?;
         }
         RecordType::SOA => {
             // SOA record query
-            found_records = process_soa_query(zone, &mut response)?;
+            found_records = process_soa_query(zone, &mut response);
         }
         RecordType::NS => {
             // NS record query
-            found_records = process_ns_query(zone, &mut response)?;
+            found_records = process_ns_query(zone, &mut response);
         }
         RecordType::MX | RecordType::SRV | RecordType::TXT => {
             // MX, SRV, TXT records from configuration
@@ -573,10 +593,10 @@ pub async fn answer_authoritative_query(
     }
 
     // Update header counts
-    response.header.qdcount = response.questions.len() as u16;
-    response.header.ancount = response.answers.len() as u16;
-    response.header.nscount = response.authority.len() as u16;
-    response.header.arcount = response.additional.len() as u16;
+    response.header.qdcount = response.questions.len().try_into().unwrap_or(u16::MAX);
+    response.header.ancount = response.answers.len().try_into().unwrap_or(u16::MAX);
+    response.header.nscount = response.authority.len().try_into().unwrap_or(u16::MAX);
+    response.header.arcount = response.additional.len().try_into().unwrap_or(u16::MAX);
 
     info!(
         "Authoritative response: answers={}, authority={}, additional={}",
@@ -590,7 +610,7 @@ pub async fn answer_authoritative_query(
 ///
 /// Generates A or AAAA records from cache, DHCP leases, and static interface
 /// name configuration. Integrates with DNS cache for dynamic hostname resolution.
-async fn process_forward_query(
+fn process_forward_query(
     query_name: &str,
     query_type: RecordType,
     zone: &AuthZone,
@@ -602,7 +622,7 @@ async fn process_forward_query(
 
     // Search cache for matching hostnames
     let cache_guard = cache.read().map_err(|e| AuthError::InternalError {
-        message: format!("Failed to acquire cache read lock: {}", e),
+        message: format!("Failed to acquire cache read lock: {e}"),
     })?;
 
     let entries = cache_guard.find_by_name(query_name);
@@ -684,7 +704,7 @@ async fn process_forward_query(
 ///
 /// Generates PTR records from cache reverse mappings and static configuration.
 /// Extracts IP address from .in-addr.arpa or .ip6.arpa query name.
-async fn process_ptr_query(
+fn process_ptr_query(
     query_name: &str,
     zone: &AuthZone,
     cache: &Arc<RwLock<DnsCache>>,
@@ -700,7 +720,7 @@ async fn process_ptr_query(
 
     // Search cache for reverse mapping
     let cache_guard = cache.read().map_err(|e| AuthError::InternalError {
-        message: format!("Failed to acquire cache read lock: {}", e),
+        message: format!("Failed to acquire cache read lock: {e}"),
     })?;
 
     if let Some(hostname) = cache_guard.find_by_addr(ip_addr) {
@@ -750,7 +770,7 @@ async fn process_ptr_query(
 /// Process SOA query
 ///
 /// Adds SOA record to answer section for explicit SOA queries.
-fn process_soa_query(zone: &AuthZone, response: &mut DnsMessage) -> Result<bool, AuthError> {
+fn process_soa_query(zone: &AuthZone, response: &mut DnsMessage) -> bool {
     let soa_record = ResourceRecord::SOA {
         name: zone.domain.clone(),
         class: RecordClass::IN,
@@ -766,13 +786,13 @@ fn process_soa_query(zone: &AuthZone, response: &mut DnsMessage) -> Result<bool,
 
     response.answers.push(soa_record);
     debug!("Added SOA record for zone {}", zone.domain);
-    Ok(true)
+    true
 }
 
 /// Process NS query
 ///
 /// Adds NS records to answer section for explicit NS queries.
-fn process_ns_query(zone: &AuthZone, response: &mut DnsMessage) -> Result<bool, AuthError> {
+fn process_ns_query(zone: &AuthZone, response: &mut DnsMessage) -> bool {
     let mut found = false;
 
     for nameserver in &zone.nameservers {
@@ -788,7 +808,7 @@ fn process_ns_query(zone: &AuthZone, response: &mut DnsMessage) -> Result<bool, 
         debug!("Added NS record: {} -> {}", zone.domain, nameserver);
     }
 
-    Ok(found)
+    found
 }
 
 /// Add SOA record to authority section
@@ -881,11 +901,11 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
         let mut bytes = [0u8; 16];
         for (i, nibble) in parts.iter().rev().enumerate() {
             let value = u8::from_str_radix(nibble, 16).map_err(|_| AuthError::MalformedQuery {
-                message: format!("Failed to parse hex nibble: {}", nibble),
+                message: format!("Failed to parse hex nibble: {nibble}"),
             })?;
             if value > 15 {
                 return Err(AuthError::MalformedQuery {
-                    message: format!("Invalid nibble value: {}", value),
+                    message: format!("Invalid nibble value: {value}"),
                 });
             }
 
@@ -901,8 +921,7 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
     } else {
         Err(AuthError::MalformedQuery {
             message: format!(
-                "PTR query name {} does not end with .in-addr.arpa or .ip6.arpa",
-                name
+                "PTR query name {name} does not end with .in-addr.arpa or .ip6.arpa"
             ),
         })
     }
@@ -1076,7 +1095,7 @@ mod tests {
         assert_eq!(soa.serial, 1);
         assert_eq!(soa.refresh, 7200);
         assert_eq!(soa.retry, 1800);
-        assert_eq!(soa.expire, 1209600);
+        assert_eq!(soa.expire, 1_209_600);
         assert_eq!(soa.minimum, 3600);
     }
 }

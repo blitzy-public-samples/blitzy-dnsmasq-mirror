@@ -100,19 +100,28 @@
 //! # #[cfg(feature = "dbus")]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! use dnsmasq::integration::dbus::{DbusInterface, LeaseInfo};
+//! use dnsmasq::types::daemon_state::DaemonState;
+//! use dnsmasq::config::types::Config;
 //! use std::net::IpAddr;
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
-//! // Connect to D-Bus
-//! let dbus = DbusInterface::connect().await?;
+//! // Create daemon state and D-Bus interface
+//! let state = Arc::new(RwLock::new(DaemonState::new(Config::default())));
+//! let dbus = DbusInterface::new(state);
 //!
-//! // Emit lease added signal
+//! // Create lease info
 //! let lease = LeaseInfo {
-//!     mac_address: "00:11:22:33:44:55".to_string(),
-//!     ip_address: "192.168.1.100".parse::<IpAddr>()?,
-//!     hostname: Some("test-host".to_string()),
-//!     expiry_time: Some(3600),
+//!     address: "192.168.1.100".parse::<IpAddr>()?,
+//!     mac: "00:11:22:33:44:55".to_string(),
+//!     hostname: "test-host".to_string(),
+//!     expiry: 3600,
+//!     client_id: vec![],
+//!     iaid: 0,
+//!     is_temporary: false,
 //! };
-//! dbus.emit_lease_added(&lease).await?;
+//! // Add DHCP lease via D-Bus
+//! dbus.add_dhcp_lease_impl(lease).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -120,22 +129,21 @@
 //! ## ubus Integration
 //!
 //! ```rust,no_run
-//! # #[cfg(feature = "ubus")]
+//! # #[cfg(all(feature = "ubus", feature = "dhcp"))]
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use dnsmasq::integration::ubus::{UbusContext, UbusLease};
-//! use std::net::IpAddr;
+//! use dnsmasq::integration::ubus::UbusContext;
 //!
 //! // Connect to ubus (OpenWrt only)
-//! let ubus = UbusContext::connect()?;
+//! let mut ubus = UbusContext::connect("dnsmasq")?;
 //!
-//! // Broadcast lease event
-//! let lease = UbusLease {
-//!     mac_address: "00:11:22:33:44:55".to_string(),
-//!     ip_address: "192.168.1.100".parse::<IpAddr>()?,
-//!     hostname: Some("test-host".to_string()),
-//!     expires: 3600,
-//! };
-//! ubus.broadcast_lease_event("lease_added", &lease)?;
+//! // Broadcast lease event with individual fields
+//! ubus.broadcast_lease_event(
+//!     "dhcp.add",
+//!     Some("00:11:22:33:44:55"),
+//!     Some("192.168.1.100"),
+//!     Some("test-host"),
+//!     Some("eth0"),
+//! )?;
 //! # Ok(())
 //! # }
 //! ```
@@ -193,7 +201,10 @@ pub mod scripts;
 pub use dbus::{DbusInterface, LeaseInfo as DbusLeaseInfo, ServerSpec};
 
 #[cfg(feature = "ubus")]
-pub use ubus::{UbusContext, UbusLease, UbusMetrics};
+pub use ubus::{UbusContext, UbusMetrics};
+
+#[cfg(all(feature = "ubus", feature = "dhcp"))]
+pub use ubus::UbusLease;
 
 #[cfg(feature = "scripts")]
 pub use scripts::{LeaseAction, ScriptError, ScriptEvent, ScriptExecutor, ScriptResult};
@@ -216,6 +227,7 @@ pub struct IntegrationStatus {
 
 impl IntegrationStatus {
     /// Create new integration status by detecting available subsystems
+    #[must_use]
     pub fn detect() -> Self {
         Self {
             dbus_available: cfg!(feature = "dbus"),
@@ -225,6 +237,7 @@ impl IntegrationStatus {
     }
 
     /// Check if any integrations are available
+    #[must_use]
     pub fn has_any(&self) -> bool {
         self.dbus_available || self.ubus_available || self.scripts_available
     }

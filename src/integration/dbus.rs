@@ -11,11 +11,11 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
-//! D-Bus IPC interface for NetworkManager and systemd integration
+//! `D-Bus` IPC interface for `NetworkManager` and systemd integration
 //!
-//! This module implements the D-Bus Inter-Process Communication interface for dnsmasq,
+//! This module implements the `D-Bus` Inter-Process Communication interface for dnsmasq,
 //! providing runtime control and monitoring capabilities without requiring daemon restart.
-//! It exposes methods under the `uk.org.thekelleys.dnsmasq` interface on the system D-Bus bus.
+//! It exposes methods under the `uk.org.thekelleys.dnsmasq` interface on the system `D-Bus` bus.
 //!
 //! # Overview
 //!
@@ -26,18 +26,18 @@
 //!
 //! # Key Features
 //!
-//! - **Dynamic Server Configuration**: SetServers/SetServersEx methods for runtime DNS server changes
-//! - **Cache Management**: ClearCache method for immediate cache flush and config reload
-//! - **DHCP Lease Control**: AddDhcpLease/DeleteDhcpLease for manual lease management
-//! - **Metrics Export**: GetMetrics method for Prometheus-compatible statistics
-//! - **Event Signals**: DhcpLeaseAdded/Deleted/Updated signals for lease change notifications
-//! - **Configuration Toggles**: Boolean option setters (FilterWin2K, BogusPriv, DomainNeeded)
+//! - **Dynamic Server Configuration**: `SetServers`/`SetServersEx` methods for runtime DNS server changes
+//! - **Cache Management**: `ClearCache` method for immediate cache flush and config reload
+//! - **DHCP Lease Control**: `AddDhcpLease`/`DeleteDhcpLease` for manual lease management
+//! - **Metrics Export**: `GetMetrics` method for Prometheus-compatible statistics
+//! - **Event Signals**: `DhcpLeaseAdded`/`Deleted`/`Updated` signals for lease change notifications
+//! - **Configuration Toggles**: Boolean option setters (`FilterWin2K`, `BogusPriv`, `DomainNeeded`)
 //!
-//! # D-Bus Interface Specification
+//! # `D-Bus` Interface Specification
 //!
-//! - **Service Name**: uk.org.thekelleys.dnsmasq
-//! - **Object Path**: /uk/org/thekelleys/dnsmasq
-//! - **Interface**: uk.org.thekelleys.dnsmasq
+//! - **Service Name**: `uk.org.thekelleys.dnsmasq`
+//! - **Object Path**: `/uk/org/thekelleys/dnsmasq`
+//! - **Interface**: `uk.org.thekelleys.dnsmasq`
 //!
 //! # Methods
 //!
@@ -45,12 +45,12 @@
 //! - `ClearCache()` - Flushes DNS cache and reloads configuration
 //! - `SetServers(servers: Vec<ServerSpec>)` - Configure upstream DNS servers
 //! - `SetServersEx(servers: Vec<ServerSpecEx>)` - Extended server config with interface binding
-//! - `GetLoopServers() -> Vec<String>` - Returns servers detected in forwarding loops (HAVE_LOOP)
+//! - `GetLoopServers() -> Vec<String>` - Returns servers detected in forwarding loops (`HAVE_LOOP`)
 //! - `SetFilterWin2KOption(enable: bool)` - Enable Windows 2000 option filtering
 //! - `SetBogusPriv(enable: bool)` - Enable private IP address filtering
 //! - `SetDomainNeeded(enable: bool)` - Require domain in DNS queries
-//! - `AddDhcpLease(lease: LeaseInfo)` - Manually add DHCP lease (HAVE_DHCP)
-//! - `DeleteDhcpLease(ip_addr: String) -> bool` - Delete DHCP lease (HAVE_DHCP)
+//! - `AddDhcpLease(lease: LeaseInfo)` - Manually add DHCP lease (`HAVE_DHCP`)
+//! - `DeleteDhcpLease(ip_addr: String) -> bool` - Delete DHCP lease (`HAVE_DHCP`)
 //! - `GetMetrics() -> HashMap<String, u64>` - Export runtime metrics
 //!
 //! # Signals
@@ -62,9 +62,9 @@
 //!
 //! # Thread Safety
 //!
-//! All D-Bus method handlers accept Arc<RwLock<DaemonState>> for safe concurrent access.
-//! Read locks are used for queries (GetVersion, GetMetrics), write locks for mutations
-//! (ClearCache, SetServers, AddDhcpLease).
+//! All `D-Bus` method handlers accept `Arc<RwLock<DaemonState>>` for safe concurrent access.
+//! Read locks are used for queries (`GetVersion`, `GetMetrics`), write locks for mutations
+//! (`ClearCache`, `SetServers`, `AddDhcpLease`).
 //!
 //! # Memory Safety
 //!
@@ -149,10 +149,10 @@ pub enum DbusError {
     SerializationError(String),
 }
 
-/// Server specification for SetServers method
+/// Server specification for `SetServers` method
 ///
 /// Represents a single upstream DNS server with optional domain-specific routing.
-/// IPv4 addresses are transmitted as UINT32, IPv6 as BYTE[16] arrays per D-Bus spec.
+/// IPv4 addresses are transmitted as `UINT32`, IPv6 as `BYTE[16]` arrays per `D-Bus` spec.
 ///
 /// # C Source Reference
 ///
@@ -167,7 +167,7 @@ pub struct ServerSpec {
     pub domains: Vec<String>,
 }
 
-/// Extended server specification for SetServersEx method
+/// Extended server specification for `SetServersEx` method
 ///
 /// Adds interface binding capability for servers that should only be used
 /// when queries arrive on a specific network interface.
@@ -181,7 +181,7 @@ pub struct ServerSpecEx {
     pub address: IpAddr,
 
     /// Optional network interface name for server binding
-    /// Format: @interface_name (e.g., @eth0)
+    /// Format: `@interface_name` (e.g., `@eth0`)
     /// Empty string if not specified
     pub interface: String,
 
@@ -189,10 +189,10 @@ pub struct ServerSpecEx {
     pub domains: Vec<String>,
 }
 
-/// DHCP lease information for AddDhcpLease method
+/// DHCP lease information for `AddDhcpLease` method
 ///
 /// Contains all fields needed to manually add a DHCP lease to the database.
-/// Supports both DHCPv4 and DHCPv6 leases through unified IP address type.
+/// Supports both `DHCPv4` and `DHCPv6` leases through unified IP address type.
 ///
 /// # C Source Reference
 ///
@@ -215,18 +215,18 @@ pub struct LeaseInfo {
     /// Client identifier (DHCP option 61) as byte array (empty if not present)
     pub client_id: Vec<u8>,
 
-    /// Identity Association ID for DHCPv6 (0 for DHCPv4)
+    /// Identity Association ID for `DHCPv6` (0 for `DHCPv4`)
     pub iaid: u32,
 
     /// Whether this is a temporary IPv6 address
     pub is_temporary: bool,
 }
 
-/// Main D-Bus interface implementation
+/// Main `D-Bus` interface implementation
 ///
-/// This struct is decorated with #[interface] to generate D-Bus introspection XML
+/// This struct is decorated with `#[interface]` to generate `D-Bus` introspection XML
 /// and method dispatch logic automatically. All methods are async and accept
-/// shared daemon state through Arc<RwLock<DaemonState>>.
+/// shared daemon state through `Arc<RwLock<DaemonState>>`.
 ///
 /// # C Source Reference
 ///
@@ -246,24 +246,28 @@ impl DbusInterface {
     ///
     /// # C Source Reference
     ///
-    /// Returns VERSION constant like C's GetVersion method
+    /// Returns `VERSION` constant like C's `GetVersion` method
     #[instrument(skip(self))]
     pub async fn get_version_impl(&self) -> String {
-        info!("D-Bus GetVersion called");
+        info!("`D-Bus` `GetVersion` called");
         VERSION.to_string()
     }
 
     /// Clear DNS cache and reload configuration
     ///
     /// Flushes all cached DNS records and triggers configuration reload,
-    /// matching C's ClearCache implementation behavior.
+    /// matching C's `ClearCache` implementation behavior.
     ///
     /// # C Source Reference
     ///
-    /// Calls clear_cache_and_reload() like C implementation
+    /// Calls `clear_cache_and_reload()` like C implementation
+    ///
+    /// # Errors
+    ///
+    /// Returns error if cache clearing fails
     #[instrument(skip(self))]
     pub async fn clear_cache_impl(&self) -> Result<(), DbusError> {
-        info!("D-Bus ClearCache called");
+        info!("`D-Bus` `ClearCache` called");
         
         let mut state = self.state.write().await;
         
@@ -278,7 +282,7 @@ impl DbusInterface {
     /// Configure upstream DNS servers dynamically
     ///
     /// Accepts array of server specifications with optional domain restrictions.
-    /// Removes all SERV_FROM_DBUS servers not in the new configuration.
+    /// Removes all `SERV_FROM_DBUS` servers not in the new configuration.
     ///
     /// # C Source Reference
     ///
@@ -288,12 +292,12 @@ impl DbusInterface {
     ///
     /// * `servers` - Vector of server specifications with addresses and domain filters
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Ok(()) on success, error if server parsing fails
+    /// Returns error if server parsing fails
     #[instrument(skip(self, servers))]
     pub async fn set_servers_impl(&self, servers: Vec<ServerSpec>) -> Result<(), DbusError> {
-        info!("D-Bus SetServers called with {} servers", servers.len());
+        info!("`D-Bus` `SetServers` called with {} servers", servers.len());
         
         let mut state = self.state.write().await;
         
@@ -310,7 +314,7 @@ impl DbusInterface {
             // Convert address to SocketAddr (default to port 53)
             let addr = format!("{}:53", server_spec.address)
                 .parse()
-                .map_err(|e| DbusError::InvalidArgs(format!("Invalid address: {}", e)))?;
+                .map_err(|e| DbusError::InvalidArgs(format!("Invalid address: {e}")))?;
             
             let mut server = Server::new(addr).mark_as_from_dbus();
             
@@ -339,12 +343,12 @@ impl DbusInterface {
     ///
     /// * `servers` - Vector of extended server specifications
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Ok(()) on success, error if parsing fails
+    /// Returns error if parsing fails
     #[instrument(skip(self, servers))]
     pub async fn set_servers_ex_impl(&self, servers: Vec<ServerSpecEx>) -> Result<(), DbusError> {
-        info!("D-Bus SetServersEx called with {} servers", servers.len());
+        info!("`D-Bus` `SetServersEx` called with {} servers", servers.len());
         
         let mut state = self.state.write().await;
         
@@ -356,7 +360,7 @@ impl DbusInterface {
             
             let addr = format!("{}:53", server_spec.address)
                 .parse()
-                .map_err(|e| DbusError::InvalidArgs(format!("Invalid address: {}", e)))?;
+                .map_err(|e| DbusError::InvalidArgs(format!("Invalid address: {e}")))?;
             
             let mut server = Server::new(addr).mark_as_from_dbus();
             
@@ -406,6 +410,10 @@ impl DbusInterface {
     /// # C Source Reference
     ///
     /// Translated from `dbus_set_bool()` (dbus.c lines 736-809)
+    ///
+    /// # Errors
+    ///
+    /// Returns error if configuration update fails
     #[instrument(skip(self))]
     pub async fn set_filter_win2k_option_impl(&self, enable: bool) -> Result<(), DbusError> {
         info!("D-Bus SetFilterWin2KOption called: enable={}", enable);
@@ -422,6 +430,10 @@ impl DbusInterface {
     /// # C Source Reference
     ///
     /// Translated from `dbus_set_bool()` (dbus.c lines 736-809)
+    ///
+    /// # Errors
+    ///
+    /// Returns error if configuration update fails
     #[instrument(skip(self))]
     pub async fn set_bogus_priv_impl(&self, enable: bool) -> Result<(), DbusError> {
         info!("D-Bus SetBogusPriv called: enable={}", enable);
@@ -438,6 +450,10 @@ impl DbusInterface {
     /// # C Source Reference
     ///
     /// Translated from `dbus_set_bool()` (dbus.c lines 736-809)
+    ///
+    /// # Errors
+    ///
+    /// Returns error if configuration update fails
     #[instrument(skip(self))]
     pub async fn set_domain_needed_impl(&self, enable: bool) -> Result<(), DbusError> {
         info!("D-Bus SetDomainNeeded called: enable={}", enable);
@@ -451,7 +467,7 @@ impl DbusInterface {
 
     /// Manually add DHCP lease to database
     ///
-    /// Allows external controllers like NetworkManager to add leases without
+    /// Allows external controllers like `NetworkManager` to add leases without
     /// going through normal DHCP protocol exchange.
     ///
     /// # C Source Reference
@@ -462,9 +478,9 @@ impl DbusInterface {
     ///
     /// * `lease_info` - Complete lease information structure
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Ok(()) on success, error if lease is invalid or database operation fails
+    /// Returns error if lease is invalid or database operation fails
     #[cfg(feature = "dhcp")]
     #[instrument(skip(self, lease_info))]
     pub async fn add_dhcp_lease_impl(&self, lease_info: LeaseInfo) -> Result<(), DbusError> {
@@ -498,20 +514,20 @@ impl DbusInterface {
     ///
     /// * `ip_addr` - IP address string (IPv4 or IPv6)
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// true if lease was found and deleted, false if not found
+    /// Returns error if IP address is invalid
     #[cfg(feature = "dhcp")]
     #[instrument(skip(self, ip_addr))]
     pub async fn delete_dhcp_lease_impl(&self, ip_addr: String) -> Result<bool, DbusError> {
-        info!("D-Bus DeleteDhcpLease called: ip={}", ip_addr);
+        info!("`D-Bus` `DeleteDhcpLease` called: ip={ip_addr}");
         
         let mut state = self.state.write().await;
         
         // Parse IP address
         let addr: IpAddr = ip_addr
             .parse()
-            .map_err(|e| DbusError::InvalidArgs(format!("Invalid IP address: {}", e)))?;
+            .map_err(|e| DbusError::InvalidArgs(format!("Invalid IP address: {e}")))?;
         
         // In real implementation: state.dhcp_leases.remove_lease(addr)
         info!("DHCP lease lookup for deletion: {}", addr);
@@ -521,7 +537,7 @@ impl DbusInterface {
 
     /// Export runtime metrics for monitoring
     ///
-    /// Returns key-value map of operational statistics including DNS cache metrics,
+    /// Returns key-value map of operational statistics including `DNS` cache metrics,
     /// DHCP lease counts, and upstream server query statistics.
     ///
     /// # C Source Reference
@@ -530,7 +546,7 @@ impl DbusInterface {
     ///
     /// # Returns
     ///
-    /// HashMap with metric names as keys and counter values
+    /// `HashMap` with metric names as keys and counter values
     #[instrument(skip(self))]
     pub async fn get_metrics_impl(&self) -> HashMap<String, u64> {
         info!("D-Bus GetMetrics called");
@@ -667,17 +683,17 @@ impl DbusInterface {
     async fn up(ctxt: &SignalContext<'_>) -> zbus::Result<()>;
 }
 
-/// Emit DhcpLeaseAdded signal
+/// Emit `DhcpLeaseAdded` signal
 ///
-/// Convenience function to emit the DhcpLeaseAdded signal on the dnsmasq D-Bus interface.
+/// Convenience function to emit the `DhcpLeaseAdded` signal on the dnsmasq `D-Bus` interface.
 ///
 /// # C Source Reference
 ///
-/// Translated from `emit_dbus_signal()` (dbus.c lines 1531-1584) with ACTION_ADD
+/// Translated from `emit_dbus_signal()` (dbus.c lines 1531-1584) with `ACTION_ADD`
 ///
 /// # Arguments
 ///
-/// * `connection` - D-Bus connection handle
+/// * `connection` - `D-Bus` connection handle
 /// * `ip` - IP address of the lease
 /// * `mac` - MAC address of the client
 /// * `hostname` - Hostname of the client
@@ -692,7 +708,7 @@ pub async fn emit_lease_added(
     mac: &str,
     hostname: &str,
 ) -> zbus::Result<()> {
-    info!("Emitting DhcpLeaseAdded: ip={}, mac={}, hostname={}", ip, mac, hostname);
+    info!("Emitting `DhcpLeaseAdded`: ip={ip}, mac={mac}, hostname={hostname}");
     
     // Get interface reference to obtain signal context
     let iface_ref = connection
@@ -702,20 +718,20 @@ pub async fn emit_lease_added(
     
     // Get signal context and emit signal as associated function
     let signal_ctxt = iface_ref.signal_context();
-    DbusInterface::dhcp_lease_added(&signal_ctxt, ip, mac, hostname).await
+    DbusInterface::dhcp_lease_added(signal_ctxt, ip, mac, hostname).await
 }
 
-/// Emit DhcpLeaseDeleted signal
+/// Emit `DhcpLeaseDeleted` signal
 ///
-/// Convenience function to emit the DhcpLeaseDeleted signal on the dnsmasq D-Bus interface.
+/// Convenience function to emit the `DhcpLeaseDeleted` signal on the dnsmasq `D-Bus` interface.
 ///
 /// # C Source Reference
 ///
-/// Translated from `emit_dbus_signal()` (dbus.c lines 1531-1584) with ACTION_DEL
+/// Translated from `emit_dbus_signal()` (dbus.c lines 1531-1584) with `ACTION_DEL`
 ///
 /// # Arguments
 ///
-/// * `connection` - D-Bus connection handle
+/// * `connection` - `D-Bus` connection handle
 /// * `ip` - IP address of the lease
 /// * `mac` - MAC address of the client
 /// * `hostname` - Hostname of the client
@@ -730,7 +746,7 @@ pub async fn emit_lease_deleted(
     mac: &str,
     hostname: &str,
 ) -> zbus::Result<()> {
-    info!("Emitting DhcpLeaseDeleted: ip={}, mac={}, hostname={}", ip, mac, hostname);
+    info!("Emitting `DhcpLeaseDeleted`: ip={ip}, mac={mac}, hostname={hostname}");
     
     // Get interface reference to obtain signal context
     let iface_ref = connection
@@ -740,20 +756,20 @@ pub async fn emit_lease_deleted(
     
     // Get signal context and emit signal as associated function
     let signal_ctxt = iface_ref.signal_context();
-    DbusInterface::dhcp_lease_deleted(&signal_ctxt, ip, mac, hostname).await
+    DbusInterface::dhcp_lease_deleted(signal_ctxt, ip, mac, hostname).await
 }
 
-/// Emit DhcpLeaseUpdated signal
+/// Emit `DhcpLeaseUpdated` signal
 ///
-/// Convenience function to emit the DhcpLeaseUpdated signal on the dnsmasq D-Bus interface.
+/// Convenience function to emit the `DhcpLeaseUpdated` signal on the dnsmasq `D-Bus` interface.
 ///
 /// # C Source Reference
 ///
-/// Translated from `emit_dbus_signal()` (dbus.c lines 1531-1584) with ACTION_OLD
+/// Translated from `emit_dbus_signal()` (dbus.c lines 1531-1584) with `ACTION_OLD`
 ///
 /// # Arguments
 ///
-/// * `connection` - D-Bus connection handle
+/// * `connection` - `D-Bus` connection handle
 /// * `ip` - IP address of the lease
 /// * `mac` - MAC address of the client
 /// * `hostname` - Hostname of the client
@@ -768,7 +784,7 @@ pub async fn emit_lease_updated(
     mac: &str,
     hostname: &str,
 ) -> zbus::Result<()> {
-    info!("Emitting DhcpLeaseUpdated: ip={}, mac={}, hostname={}", ip, mac, hostname);
+    info!("Emitting `DhcpLeaseUpdated`: ip={ip}, mac={mac}, hostname={hostname}");
     
     // Get interface reference to obtain signal context
     let iface_ref = connection
@@ -778,7 +794,7 @@ pub async fn emit_lease_updated(
     
     // Get signal context and emit signal as associated function
     let signal_ctxt = iface_ref.signal_context();
-    DbusInterface::dhcp_lease_updated(&signal_ctxt, ip, mac, hostname).await
+    DbusInterface::dhcp_lease_updated(signal_ctxt, ip, mac, hostname).await
 }
 
 /// Connect to D-Bus system bus and export dnsmasq interface
@@ -800,9 +816,9 @@ pub async fn emit_lease_updated(
 ///
 /// # Errors
 ///
-/// - ConnectionFailed if system bus connection fails
-/// - ConnectionFailed if service name registration fails
-/// - ConnectionFailed if interface export fails
+/// - `ConnectionFailed` if system bus connection fails
+/// - `ConnectionFailed` if service name registration fails
+/// - `ConnectionFailed` if interface export fails
 #[instrument(skip(interface))]
 pub async fn connect(interface: DbusInterface) -> Result<Connection, DbusError> {
     info!("Initializing D-Bus connection");
@@ -810,7 +826,7 @@ pub async fn connect(interface: DbusInterface) -> Result<Connection, DbusError> 
     // Connect to system bus
     let connection = Connection::system()
         .await
-        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to connect to system bus: {}", e)))?;
+        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to connect to system bus: {e}")))?;
     
     info!("Connected to system D-Bus");
     
@@ -823,7 +839,7 @@ pub async fn connect(interface: DbusInterface) -> Result<Connection, DbusError> 
         .at(DBUS_OBJECT_PATH, interface)
         .await
         .map_err(|e| {
-            DbusError::ConnectionFailed(format!("Failed to export interface: {}", e))
+            DbusError::ConnectionFailed(format!("Failed to export interface: {e}"))
         })?;
     
     info!("Interface exported at {}", DBUS_OBJECT_PATH);
@@ -833,7 +849,7 @@ pub async fn connect(interface: DbusInterface) -> Result<Connection, DbusError> 
         .request_name(DBUS_SERVICE_NAME)
         .await
         .map_err(|e| {
-            DbusError::ConnectionFailed(format!("Failed to request name '{}': {}", DBUS_SERVICE_NAME, e))
+            DbusError::ConnectionFailed(format!("Failed to request name '{DBUS_SERVICE_NAME}': {e}"))
         })?;
     
     info!("Service name '{}' registered", DBUS_SERVICE_NAME);
@@ -844,13 +860,13 @@ pub async fn connect(interface: DbusInterface) -> Result<Connection, DbusError> 
         .object_server()
         .interface::<_, DbusInterface>(DBUS_OBJECT_PATH)
         .await
-        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to get interface reference: {}", e)))?;
+        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to get interface reference: {e}")))?;
     
     // Get signal context and emit Up signal as an associated function
     let signal_ctxt = iface_ref.signal_context();
-    DbusInterface::up(&signal_ctxt)
+    DbusInterface::up(signal_ctxt)
         .await
-        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to emit Up signal: {}", e)))?;
+        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to emit Up signal: {e}")))?;
     
     info!("D-Bus interface initialized successfully");
     
@@ -877,30 +893,28 @@ mod tests {
     fn test_server_spec_ex_with_interface() {
         let spec = ServerSpecEx {
             address: "1.1.1.1".parse().unwrap(),
-            interface: Some("eth0".to_string()),
+            interface: "eth0".to_string(),
             domains: vec![],
         };
         
-        assert_eq!(spec.interface, Some("eth0".to_string()));
+        assert_eq!(spec.interface, "eth0");
     }
 
     #[cfg(feature = "dhcp")]
     #[test]
     fn test_lease_info_creation() {
-        use std::time::SystemTime;
-        
         let lease = LeaseInfo {
             address: "192.168.1.100".parse().unwrap(),
             mac: "00:11:22:33:44:55".to_string(),
-            hostname: Some("test-host".to_string()),
-            expiry: SystemTime::now(),
-            client_id: None,
+            hostname: "test-host".to_string(),
+            expiry: 1_234_567_890,
+            client_id: vec![],
             iaid: 0,
             is_temporary: false,
         };
         
         assert_eq!(lease.mac, "00:11:22:33:44:55");
-        assert_eq!(lease.hostname, Some("test-host".to_string()));
+        assert_eq!(lease.hostname, "test-host");
     }
 
     #[test]

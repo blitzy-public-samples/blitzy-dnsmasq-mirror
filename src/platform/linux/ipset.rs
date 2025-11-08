@@ -113,7 +113,7 @@ pub enum IpsetError {
     #[error("Socket error: {0}")]
     SocketError(#[from] std::io::Error),
 
-    /// Set name exceeds IPSET_MAXNAMELEN limit
+    /// Set name exceeds `IPSET_MAXNAMELEN` limit
     #[error("Ipset name too long (max {IPSET_MAXNAMELEN} characters)")]
     NameTooLong,
 
@@ -169,6 +169,7 @@ struct NfGenMsg {
 /// Main header for all Netlink protocol messages. Contains message length, type,
 /// flags, and sequence/port identifiers.
 #[repr(C)]
+#[allow(clippy::struct_field_names)]
 struct NetlinkMsgHdr {
     nlmsg_len: u32,   // Message length including header
     nlmsg_type: u16,  // Message type (command)
@@ -223,14 +224,18 @@ impl IpsetSocket {
 
         // Bind to Netlink with kernel
         let mut addr: libc::sockaddr_nl = unsafe { mem::zeroed() };
-        addr.nl_family = libc::AF_NETLINK as u16;
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            addr.nl_family = libc::AF_NETLINK as u16;
+        }
         addr.nl_pid = 0;
         addr.nl_groups = 0;
 
         unsafe {
+            #[allow(clippy::cast_possible_truncation)]
             if libc::bind(
                 fd,
-                &addr as *const _ as *const libc::sockaddr,
+                std::ptr::from_ref(&addr).cast::<libc::sockaddr>(),
                 mem::size_of::<libc::sockaddr_nl>() as u32,
             ) < 0
             {
@@ -286,7 +291,7 @@ impl IpsetManager {
     /// # Errors
     ///
     /// Returns `IpsetError::InitFailed` if socket creation or binding fails.
-    /// This typically indicates missing CAP_NET_ADMIN capability or that the
+    /// This typically indicates missing `CAP_NET_ADMIN` capability or that the
     /// ipset kernel module is not loaded.
     ///
     /// # Examples
@@ -324,7 +329,7 @@ impl IpsetManager {
         let mut utsname: libc::utsname = unsafe { mem::zeroed() };
 
         unsafe {
-            if libc::uname(&mut utsname) == 0 {
+            if libc::uname(&raw mut utsname) == 0 {
                 let release = std::ffi::CStr::from_ptr(utsname.release.as_ptr()).to_string_lossy();
 
                 if let Some((major, minor, patch)) = Self::parse_kernel_version(&release) {
@@ -357,6 +362,7 @@ impl IpsetManager {
     ///
     /// Returns `IpsetProtocol::Modern` for Netlink protocol or
     /// `IpsetProtocol::Legacy` for raw socket protocol.
+    #[must_use]
     pub fn protocol(&self) -> IpsetProtocol {
         self.protocol
     }
@@ -373,7 +379,7 @@ impl IpsetManager {
     ///
     /// # Errors
     ///
-    /// - `IpsetError::NameTooLong`: Set name exceeds IPSET_MAXNAMELEN
+    /// - `IpsetError::NameTooLong`: Set name exceeds `IPSET_MAXNAMELEN`
     /// - `IpsetError::UnsupportedAddressFamily`: IPv6 with legacy protocol
     /// - `IpsetError::SendFailed`: Failed to send command to kernel
     ///
@@ -448,6 +454,7 @@ impl IpsetManager {
         }
 
         // Determine address family and size
+        #[allow(clippy::cast_possible_truncation)]
         let (af, addr_bytes) = match addr {
             IpAddr::V4(ipv4) => (libc::AF_INET as u8, ipv4.octets().to_vec()),
             IpAddr::V6(ipv6) => (libc::AF_INET6 as u8, ipv6.octets().to_vec()),
@@ -458,10 +465,11 @@ impl IpsetManager {
         let mut offset = 0;
 
         // Netlink message header
+        #[allow(clippy::cast_possible_truncation)]
         let nlh = NetlinkMsgHdr {
             nlmsg_len: nl_align(mem::size_of::<NetlinkMsgHdr>()) as u32,
-            nlmsg_type: ((NFNL_SUBSYS_IPSET as u16) << 8)
-                | (if remove { IPSET_CMD_DEL } else { IPSET_CMD_ADD } as u16),
+            nlmsg_type: (u16::from(NFNL_SUBSYS_IPSET) << 8)
+                | u16::from(if remove { IPSET_CMD_DEL } else { IPSET_CMD_ADD }),
             nlmsg_flags: NLM_F_REQUEST,
             nlmsg_seq: 0,
             nlmsg_pid: 0,
@@ -497,6 +505,7 @@ impl IpsetManager {
         offset += nl_align(mem::size_of::<NetlinkAttr>());
 
         // Add IP address attribute
+        #[allow(clippy::cast_possible_truncation)]
         let addr_type = if af == libc::AF_INET as u8 {
             IPSET_ATTR_IPADDR_IPV4
         } else {
@@ -506,6 +515,7 @@ impl IpsetManager {
         Self::add_attr(&mut buffer, &mut offset, addr_type, &addr_bytes);
 
         // Set nested IP attribute length
+        #[allow(clippy::cast_possible_truncation)]
         let ip_len = (offset - ip_start) as u16;
         let ip_attr = NetlinkAttr {
             nla_len: ip_len,
@@ -514,6 +524,7 @@ impl IpsetManager {
         Self::write_struct_at(&mut buffer, ip_start, &ip_attr);
 
         // Set nested DATA attribute length
+        #[allow(clippy::cast_possible_truncation)]
         let data_len = (offset - data_start) as u16;
         let data_attr = NetlinkAttr {
             nla_len: data_len,
@@ -522,6 +533,7 @@ impl IpsetManager {
         Self::write_struct_at(&mut buffer, data_start, &data_attr);
 
         // Update total message length
+        #[allow(clippy::cast_possible_truncation)]
         let total_len = offset as u32;
         NetworkEndian::write_u32(&mut buffer[0..4], total_len);
 
@@ -539,12 +551,31 @@ impl IpsetManager {
     }
 
     /// Legacy raw socket protocol implementation (IPv4 only)
+    #[allow(clippy::unused_async)]
     async fn legacy_modify_set(
         &self,
         setname: &str,
         addr: IpAddr,
         remove: bool,
     ) -> Result<(), IpsetError> {
+        // Query ipset index by name
+        #[repr(C)]
+        struct IpSetReqAdtGet {
+            op: u32,
+            version: u32,
+            set_name: [u8; IPSET_MAXNAMELEN],
+            typename: [u8; IPSET_MAXNAMELEN],
+        }
+
+        // Add or remove address
+        #[repr(C)]
+        struct IpSetReqAdt {
+            op: u32,
+            index: u16,
+            _padding: u16,
+            ip: u32,
+        }
+
         // Validate setname length
         if setname.len() >= IPSET_MAXNAMELEN {
             return Err(IpsetError::NameTooLong);
@@ -560,15 +591,6 @@ impl IpsetManager {
             }
         };
 
-        // Query ipset index by name
-        #[repr(C)]
-        struct IpSetReqAdtGet {
-            op: u32,
-            version: u32,
-            set_name: [u8; IPSET_MAXNAMELEN],
-            typename: [u8; IPSET_MAXNAMELEN],
-        }
-
         let mut req_get: IpSetReqAdtGet = unsafe { mem::zeroed() };
         req_get.op = LEGACY_IPSET_OP_QUERY;
         req_get.version = LEGACY_IPSET_VERSION;
@@ -576,6 +598,7 @@ impl IpsetManager {
         let name_bytes = setname.as_bytes();
         req_get.set_name[..name_bytes.len()].copy_from_slice(name_bytes);
 
+        #[allow(clippy::cast_possible_truncation)]
         let mut req_len = mem::size_of::<IpSetReqAdtGet>() as libc::socklen_t;
 
         unsafe {
@@ -583,8 +606,8 @@ impl IpsetManager {
                 self.socket.as_raw_fd(),
                 libc::SOL_IP,
                 LEGACY_IPSET_SOCKOPT,
-                &mut req_get as *mut _ as *mut libc::c_void,
-                &mut req_len,
+                (&raw mut req_get).cast::<libc::c_void>(),
+                &raw mut req_len,
             ) < 0
             {
                 return Err(IpsetError::SendFailed(
@@ -595,15 +618,6 @@ impl IpsetManager {
 
         // Extract set index from first two bytes of set_name field
         let set_index = u16::from_ne_bytes([req_get.set_name[0], req_get.set_name[1]]);
-
-        // Add or remove address
-        #[repr(C)]
-        struct IpSetReqAdt {
-            op: u32,
-            index: u16,
-            _padding: u16,
-            ip: u32,
-        }
 
         let req_adt = IpSetReqAdt {
             op: if remove {
@@ -617,11 +631,12 @@ impl IpsetManager {
         };
 
         unsafe {
+            #[allow(clippy::cast_possible_truncation)]
             if libc::setsockopt(
                 self.socket.as_raw_fd(),
                 libc::SOL_IP,
                 LEGACY_IPSET_SOCKOPT,
-                &req_adt as *const _ as *const libc::c_void,
+                (&raw const req_adt).cast::<libc::c_void>(),
                 mem::size_of::<IpSetReqAdt>() as libc::socklen_t,
             ) < 0
             {
@@ -642,20 +657,25 @@ impl IpsetManager {
     }
 
     /// Send Netlink message to kernel with retry on EINTR
+    #[allow(clippy::unused_async)]
     async fn send_netlink_message(&self, buffer: &[u8]) -> Result<(), IpsetError> {
         let mut addr: libc::sockaddr_nl = unsafe { mem::zeroed() };
-        addr.nl_family = libc::AF_NETLINK as u16;
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            addr.nl_family = libc::AF_NETLINK as u16;
+        }
         addr.nl_pid = 0;
         addr.nl_groups = 0;
 
         loop {
             unsafe {
+                #[allow(clippy::cast_possible_truncation)]
                 let result = libc::sendto(
                     self.socket.as_raw_fd(),
-                    buffer.as_ptr() as *const libc::c_void,
+                    buffer.as_ptr().cast::<libc::c_void>(),
                     buffer.len(),
                     0,
-                    &addr as *const _ as *const libc::sockaddr,
+                    (&raw const addr).cast::<libc::sockaddr>(),
                     mem::size_of::<libc::sockaddr_nl>() as u32,
                 );
 
@@ -679,7 +699,7 @@ impl IpsetManager {
         let aligned_offset = nl_align(*offset);
 
         unsafe {
-            let src = data as *const T as *const u8;
+            let src = std::ptr::from_ref::<T>(data).cast::<u8>();
             let dst = buffer[aligned_offset..].as_mut_ptr();
             std::ptr::copy_nonoverlapping(src, dst, size);
         }
@@ -692,7 +712,7 @@ impl IpsetManager {
         let size = mem::size_of::<T>();
 
         unsafe {
-            let src = data as *const T as *const u8;
+            let src = std::ptr::from_ref::<T>(data).cast::<u8>();
             let dst = buffer[offset..].as_mut_ptr();
             std::ptr::copy_nonoverlapping(src, dst, size);
         }
@@ -703,6 +723,7 @@ impl IpsetManager {
         let attr_start = *offset;
         let payload_len = nl_align(mem::size_of::<NetlinkAttr>()) + data.len();
 
+        #[allow(clippy::cast_possible_truncation)]
         let attr = NetlinkAttr {
             nla_len: payload_len as u16,
             nla_type: attr_type,

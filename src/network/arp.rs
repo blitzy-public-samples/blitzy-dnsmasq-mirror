@@ -31,7 +31,7 @@
 //! # Platform Support
 //!
 //! - **Linux**: Parses `/proc/net/arp` using async file I/O
-//! - **BSD** (FreeBSD, OpenBSD, NetBSD): Uses routing socket RTM_GET messages
+//! - **BSD** (FreeBSD, OpenBSD, NetBSD): Uses routing socket `RTM_GET` messages
 //! - **Other platforms**: Returns empty cache (graceful degradation)
 //!
 //! # Architecture
@@ -48,11 +48,11 @@
 //! Translated from: `src/arp.c` (593 lines)
 //!
 //! Key differences:
-//! - Replaced linked lists (arps, old, freelist) with HashMap
+//! - Replaced linked lists (arps, old, freelist) with `HashMap`
 //! - Async I/O instead of blocking reads
 //! - Type-safe enums instead of #define constants
-//! - Owned types (IpAddr) instead of C unions
-//! - Thread-safe with RwLock instead of single-threaded assumptions
+//! - Owned types (`IpAddr`) instead of C unions
+//! - Thread-safe with `RwLock` instead of single-threaded assumptions
 //!
 //! # Example Usage
 //!
@@ -109,12 +109,12 @@ const REFRESH_INTERVAL_SECS: u64 = 90;
 
 /// Status of an ARP cache entry during refresh cycle.
 ///
-/// This enum replaces the C version's #define constants (ARP_MARK, ARP_FOUND, ARP_NEW, ARP_EMPTY)
+/// This enum replaces the C version's #define constants (`ARP_MARK`, `ARP_FOUND`, `ARP_NEW`, `ARP_EMPTY`)
 /// with a type-safe Rust enum, preventing invalid state combinations.
 ///
 /// # C Reference
 ///
-/// Translated from: `arp.c` lines 91-125 (ARP_MARK, ARP_FOUND, ARP_NEW, ARP_EMPTY)
+/// Translated from: `arp.c` lines 91-125 (`ARP_MARK`, `ARP_FOUND`, `ARP_NEW`, `ARP_EMPTY`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArpStatus {
     /// Temporary marker status during cache refresh sweep.
@@ -132,7 +132,7 @@ pub enum ArpStatus {
     /// Newly discovered ARP entry.
     ///
     /// Entry was just added to cache during current refresh cycle. Used to trigger script
-    /// notifications (ACTION_ARP event) for new IP→MAC mappings.
+    /// notifications (`ACTION_ARP` event) for new IP→MAC mappings.
     New,
 
     /// Negative cache entry (no MAC address).
@@ -145,21 +145,21 @@ pub enum ArpStatus {
 /// Address family for ARP entries.
 ///
 /// Type-safe enum representing whether an ARP entry is for IPv4 or IPv6,
-/// replacing C's AF_INET/AF_INET6 integer constants.
+/// replacing C's `AF_INET`/`AF_INET6` integer constants.
 ///
 /// # C Reference
 ///
-/// Replaces C's `int family` field using AF_INET/AF_INET6 constants.
+/// Replaces C's `int family` field using `AF_INET`/`AF_INET6` constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressFamily {
-    /// IPv4 address family (AF_INET in C)
+    /// IPv4 address family (`AF_INET` in C)
     V4,
-    /// IPv6 address family (AF_INET6 in C)
+    /// IPv6 address family (`AF_INET6` in C)
     V6,
 }
 
 impl AddressFamily {
-    /// Create AddressFamily from IpAddr
+    /// Create `AddressFamily` from `IpAddr`
     fn from_ip(ip: &IpAddr) -> Self {
         match ip {
             IpAddr::V4(_) => AddressFamily::V4,
@@ -171,7 +171,7 @@ impl AddressFamily {
 /// MAC address newtype wrapper.
 ///
 /// Provides a type-safe wrapper around a 6-byte Ethernet MAC address with Display and
-/// FromStr implementations for human-readable formatting (AA:BB:CC:DD:EE:FF).
+/// `FromStr` implementations for human-readable formatting (AA:BB:CC:DD:EE:FF).
 ///
 /// # C Reference
 ///
@@ -184,6 +184,7 @@ impl MacAddr {
     ///
     /// Returns the underlying 6-byte array as a slice for use in packet construction
     /// or comparison operations.
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -198,6 +199,7 @@ impl MacAddr {
     ///
     /// * `Some(MacAddr)` if bytes has exactly 6 elements
     /// * `None` if bytes length is not 6
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() == 6 {
             let mut arr = [0u8; 6];
@@ -234,16 +236,16 @@ impl FromStr for MacAddr {
         let mut bytes = [0u8; 6];
         for (i, part) in parts.iter().enumerate() {
             bytes[i] = u8::from_str_radix(part, 16)
-                .map_err(|_| ArpError::ParseError(format!("Invalid hex byte: {}", part)))?;
+                .map_err(|_| ArpError::ParseError(format!("Invalid hex byte: {part}")))?;
         }
 
         Ok(MacAddr(bytes))
     }
 }
 
-/// ARP cache entry recording IP→MAC address mapping.
+/// ARP cache entry recording `IP`→`MAC` address mapping.
 ///
-/// Each ArpRecord represents one entry from the system ARP cache, storing the IP address,
+/// Each `ArpRecord` represents one entry from the system ARP cache, storing the IP address,
 /// corresponding hardware (MAC) address, and current status.
 ///
 /// # C Reference
@@ -255,7 +257,7 @@ impl FromStr for MacAddr {
 /// - Uses `IpAddr` enum instead of C's `union all_addr` for type safety
 /// - Uses `AddressFamily` enum instead of C's int family field
 /// - Uses owned types instead of pointers
-/// - No linked list pointer (uses HashMap instead)
+/// - No linked list pointer (uses `HashMap` instead)
 #[derive(Debug, Clone)]
 pub struct ArpRecord {
     /// Hardware address length in bytes (typically 6 for Ethernet, 0 for negative entries).
@@ -264,10 +266,10 @@ pub struct ArpRecord {
     /// Entry status: Mark, Found, New, or Empty.
     pub status: ArpStatus,
 
-    /// Address family: V4 or V6.
+    /// Address family: V4 or V6 (`AddressFamily`).
     pub family: AddressFamily,
 
-    /// Hardware (MAC) address, up to DHCP_CHADDR_MAX (16) bytes.
+    /// Hardware (MAC) address, up to `DHCP_CHADDR_MAX` (16) bytes.
     ///
     /// Only the first `hwlen` bytes are valid. For negative entries (Empty status), this
     /// field is unused.
@@ -304,7 +306,7 @@ pub enum ArpError {
 /// ARP cache manager with automatic refresh.
 ///
 /// Maintains an in-memory cache of ARP entries with periodic refresh from kernel ARP table.
-/// Uses HashMap for O(1) lookup performance (vs C's O(n) linked list search).
+/// Uses `HashMap` for O(1) lookup performance (vs C's O(n) linked list search).
 ///
 /// # Thread Safety
 ///
@@ -334,7 +336,7 @@ impl ArpCache {
     ///
     /// # Returns
     ///
-    /// New ArpCache instance ready for use.
+    /// New `ArpCache` instance ready for use.
     ///
     /// # Example
     ///
@@ -345,6 +347,7 @@ impl ArpCache {
     ///
     /// let cache = Arc::new(RwLock::new(ArpCache::new()));
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         ArpCache {
             arps: HashMap::new(),
@@ -379,7 +382,10 @@ impl ArpCache {
     ///
     /// * `Ok(Some(MacAddr))` if address found with MAC
     /// * `Ok(None)` if address not in ARP table or negative entry and lazy=false
-    /// * `Err(ArpError)` on I/O or parse errors
+    ///
+    /// # Errors
+    ///
+    /// Returns `ArpError` on I/O or parse errors during cache refresh.
     ///
     /// # C Reference
     ///
@@ -389,7 +395,7 @@ impl ArpCache {
     ///
     /// - Async instead of blocking I/O
     /// - Result type instead of return code
-    /// - HashMap lookup O(1) instead of linked list O(n)
+    /// - `HashMap` lookup O(1) instead of linked list O(n)
     /// - No goto-based retry logic
     pub async fn find_mac(&mut self, ip: IpAddr, lazy: bool) -> Result<Option<MacAddr>, ArpError> {
         // Refresh cache if needed
@@ -428,13 +434,16 @@ impl ArpCache {
     /// # Platform Behavior
     ///
     /// - **Linux**: Parses `/proc/net/arp` asynchronously
-    /// - **BSD**: Uses routing socket RTM_GET (synchronous, dispatched to blocking pool)
+    /// - **BSD**: Uses routing socket `RTM_GET` (synchronous, dispatched to blocking pool)
     /// - **Other**: No-op, cache remains empty
     ///
     /// # Returns
     ///
     /// * `Ok(())` on success
-    /// * `Err(ArpError)` on I/O or parse failures
+    ///
+    /// # Errors
+    ///
+    /// Returns `ArpError` on I/O or parse failures during kernel ARP table access.
     ///
     /// # C Reference
     ///
@@ -501,9 +510,8 @@ impl ArpCache {
             }
 
             // Parse IP address
-            let ip = match parts[0].parse::<IpAddr>() {
-                Ok(ip) => ip,
-                Err(_) => continue, // Invalid IP, skip
+            let Ok(ip) = parts[0].parse::<IpAddr>() else {
+                continue; // Invalid IP, skip
             };
 
             // Parse MAC address (format: aa:bb:cc:dd:ee:ff)
@@ -512,9 +520,8 @@ impl ArpCache {
                 continue; // Incomplete entry
             }
 
-            let mac = match MacAddr::from_str(mac_str) {
-                Ok(mac) => mac,
-                Err(_) => continue, // Invalid MAC, skip
+            let Ok(mac) = MacAddr::from_str(mac_str) else {
+                continue; // Invalid MAC, skip
             };
 
             // Update or create entry
@@ -610,7 +617,10 @@ impl Default for ArpCache {
 ///
 /// * `Ok(Some(MacAddr))` if address found with MAC
 /// * `Ok(None)` if address not in ARP table
-/// * `Err(ArpError)` on I/O or parse errors
+///
+/// # Errors
+///
+/// Returns `ArpError` on I/O or parse errors during cache refresh.
 ///
 /// # Example
 ///

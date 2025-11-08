@@ -9,7 +9,7 @@
 
 //! # DHCP Common Utilities Module
 //!
-//! This module provides shared functionality used by both DHCPv4 and DHCPv6 servers,
+//! This module provides shared functionality used by both `DHCPv4` and `DHCPv6` servers,
 //! translating approximately 1,920 lines from the C implementation in `src/dhcp-common.c`.
 //!
 //! ## Core Responsibilities
@@ -21,7 +21,7 @@
 //! - **Option Filtering**: Filter DHCP options based on client and context tags
 //! - **Packet Reception**: Shared packet reception logic with async I/O
 //! - **Configuration Updates**: Update static DHCP host configurations from /etc/hosts
-//! - **Device Binding**: SO_BINDTODEVICE support for per-interface operation on Linux
+//! - **Device Binding**: `SO_BINDTODEVICE` support for per-interface operation on Linux
 //!
 //! ## C Source Mapping
 //!
@@ -121,6 +121,7 @@ impl DhcpNetId {
     }
 
     /// Returns the tag name
+    #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
@@ -128,8 +129,8 @@ impl DhcpNetId {
 
 /// Client identifier for DHCP client identification
 ///
-/// This type encapsulates the client identifier (CLID for DHCPv4 option 61,
-/// DUID for DHCPv6) used to uniquely identify DHCP clients. The client ID
+/// This type encapsulates the client identifier (`CLID` for `DHCPv4` option 61,
+/// `DUID` for `DHCPv6`) used to uniquely identify DHCP clients. The client ID
 /// takes precedence over hardware address for client matching.
 ///
 /// # C Equivalent
@@ -174,13 +175,14 @@ impl ClientId {
     /// let id = ClientId::new(vec![0x01, 0x02, 0x03, 0x04]);
     /// assert_eq!(id.len(), 4);
     /// ```
+    #[must_use]
     pub fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
     /// Creates a client ID from a hardware address
     ///
-    /// For DHCPv4, this prepends the hardware type (0x01 for Ethernet)
+    /// For `DHCPv4`, this prepends the hardware type (0x01 for Ethernet)
     /// to the MAC address as specified in RFC 2132.
     ///
     /// # Arguments
@@ -190,7 +192,7 @@ impl ClientId {
     ///
     /// # Returns
     ///
-    /// New `ClientId` with format [type, hw_addr...]
+    /// New `ClientId` with format `[type, hw_addr...]`
     ///
     /// # Examples
     ///
@@ -201,6 +203,7 @@ impl ClientId {
     /// let id = ClientId::from_hardware_address(1, &mac);
     /// assert_eq!(id.len(), 7); // 1 type byte + 6 MAC bytes
     /// ```
+    #[must_use]
     pub fn from_hardware_address(hardware_type: u8, hw_address: &[u8]) -> Self {
         let mut data = Vec::with_capacity(1 + hw_address.len());
         data.push(hardware_type);
@@ -210,7 +213,7 @@ impl ClientId {
 
     /// Creates a client ID from DHCP option data
     ///
-    /// Extracts client identifier from DHCPv4 option 61 or DHCPv6 DUID option.
+    /// Extracts client identifier from `DHCPv4` option 61 or `DHCPv6` `DUID` option.
     /// The option data is used as-is without modification.
     ///
     /// # Arguments
@@ -230,6 +233,7 @@ impl ClientId {
     /// let id = ClientId::from_option(&option_data);
     /// assert_eq!(id.as_bytes(), &option_data);
     /// ```
+    #[must_use]
     pub fn from_option(option_data: &[u8]) -> Self {
         Self {
             data: option_data.to_vec(),
@@ -241,6 +245,7 @@ impl ClientId {
     /// # Returns
     ///
     /// Byte slice containing the client identifier
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
     }
@@ -250,6 +255,7 @@ impl ClientId {
     /// # Returns
     ///
     /// Number of bytes in the client identifier
+    #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()
     }
@@ -259,6 +265,7 @@ impl ClientId {
     /// # Returns
     ///
     /// `true` if the client ID contains no bytes
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -315,6 +322,7 @@ impl ClientId {
 ///     println!("Found configuration for client");
 /// }
 /// ```
+#[must_use]
 pub fn find_config<'a>(
     daemon: &'a DaemonState,
     client_id: Option<&ClientId>,
@@ -377,10 +385,11 @@ pub fn find_config<'a>(
 ///
 /// # C Source Reference
 ///
-/// From dhcp-common.c:729-809 (is_config_in_context):
+/// From dhcp-common.c:729-809 (`is_config_in_context`):
 /// ```c
 /// int is_config_in_context(struct dhcp_context *context, struct dhcp_config *config)
 /// ```
+#[must_use]
 pub fn is_config_in_context(
     daemon: &DaemonState,
     config: &crate::config::types::DhcpStaticHost,
@@ -441,8 +450,8 @@ fn collect_context_netids(daemon: &DaemonState) -> HashSet<DhcpNetId> {
 
 /// Internal helper to check if config is valid in context
 ///
-/// Similar to is_config_in_context but works with already-collected netids.
-/// Note: DhcpConfig doesn't have netid_tags field, so this is a simplified version
+/// Similar to `is_config_in_context` but works with already-collected `netids`.
+/// Note: `DhcpConfig` doesn't have `netid_tags` field, so this is a simplified version
 fn is_config_in_context_internal(
     _config: &DhcpConfig,
     _context_netids: &HashSet<DhcpNetId>,
@@ -455,7 +464,7 @@ fn is_config_in_context_internal(
 /// Collect network ID tags from a specific context
 ///
 /// Helper to extract tags from a single DHCP context.
-/// Note: DhcpContext fields are private, so this returns an empty set for now
+/// Note: `DhcpContext` fields are private, so this returns an empty set for now
 fn collect_context_tags(_context: &crate::types::daemon_state::DhcpContext) -> HashSet<DhcpNetId> {
     // TODO: When DhcpContext provides public accessors for interface and tags,
     // implement proper tag collection here
@@ -504,6 +513,8 @@ fn collect_context_tags(_context: &crate::types::daemon_state::DhcpContext) -> H
 ///
 /// assert!(match_netid(&required, &available));
 /// ```
+#[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn match_netid(required: &HashSet<DhcpNetId>, available: &HashSet<DhcpNetId>) -> bool {
     // If no tags are required, match succeeds
     if required.is_empty() {
@@ -564,6 +575,8 @@ pub fn match_netid(required: &HashSet<DhcpNetId>, available: &HashSet<DhcpNetId>
 ///
 /// assert!(option_filter(&client_tags, &context_tags, &option_tags));
 /// ```
+#[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn option_filter(
     client_tags: &HashSet<DhcpNetId>,
     context_tags: &HashSet<DhcpNetId>,
@@ -631,6 +644,7 @@ pub fn option_filter(
 /// // Length mismatch
 /// assert!(!match_bytes(&[0x01, 0x02], &[0x01, 0x02, 0x03]));
 /// ```
+#[must_use]
 pub fn match_bytes(pattern: &[u8], data: &[u8]) -> bool {
     // Length must match exactly
     if pattern.len() != data.len() {
@@ -660,7 +674,7 @@ pub fn match_bytes(pattern: &[u8], data: &[u8]) -> bool {
 ///
 /// # Arguments
 ///
-/// * `socket` - UDP socket to receive from (per schema: members_accessed includes recv_from())
+/// * `socket` - UDP socket to receive from (per schema: `members_accessed` includes `recv_from()`)
 ///
 /// # Returns
 ///
@@ -691,8 +705,8 @@ pub fn match_bytes(pattern: &[u8], data: &[u8]) -> bool {
 /// recvmsg(fd, &msg, MSG_PEEK);
 /// ```
 ///
-/// The Rust version uses safe Vec<u8> with automatic resizing and Tokio's
-/// async recv_from() which handles all buffer management safely.
+/// The Rust version uses safe `Vec<u8>` with automatic resizing and Tokio's
+/// async `recv_from()` which handles all buffer management safely.
 ///
 /// # Examples
 ///
@@ -749,7 +763,7 @@ pub async fn recv_dhcp_packet(socket: &UdpSocket) -> Result<(Vec<u8>, SocketAddr
 /// # Arguments
 ///
 /// * `daemon` - Daemon state with DHCP configuration
-/// * `cache` - DNS cache containing /etc/hosts entries (per schema: members_accessed includes find_by_name())
+/// * `cache` - DNS cache containing /etc/hosts entries (per schema: `members_accessed` includes `find_by_name()`)
 ///
 /// # Returns
 ///
@@ -821,18 +835,18 @@ pub fn dhcp_update_configs(daemon: &mut DaemonState, _cache: &DnsCache) -> usize
 /// # Errors
 ///
 /// Returns error if:
-/// - Option 61 (DHCPv4 client identifier) is malformed
+/// - Option 61 (`DHCPv4` client identifier) is malformed
 /// - Client ID length is zero
 /// - Option data is invalid
 ///
-/// # DHCPv4
+/// # `DHCPv4`
 ///
 /// Extracts from option 61 (Client Identifier) per RFC 2132.
 /// Format: [type (1 byte), identifier (variable length)]
 ///
-/// # DHCPv6
+/// # `DHCPv6`
 ///
-/// Extracts DUID (DHCP Unique Identifier) from option 1 per RFC 3315.
+/// Extracts `DUID` (DHCP Unique Identifier) from option 1 per RFC 3315.
 ///
 /// # Examples
 ///
@@ -847,6 +861,7 @@ pub fn dhcp_update_configs(daemon: &mut DaemonState, _cache: &DnsCache) -> usize
 /// let client_id = extract_client_id(&packet, &options)?;
 /// println!("Client ID: {:?}", client_id);
 /// ```
+#[allow(clippy::implicit_hasher)]
 pub fn extract_client_id(
     _packet: &[u8],
     options: &std::collections::HashMap<u8, Vec<u8>>,

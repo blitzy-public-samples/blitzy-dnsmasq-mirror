@@ -126,10 +126,10 @@ pub enum CacheError {
 /// # C Source Reference
 ///
 /// Corresponds to cache record flags in C's `struct crec` (dnsmasq.h:465-477):
-/// - F_HOSTS flag → HostsFile
-/// - F_DHCP flag → Dhcp  
-/// - F_CONFIG flag → Authoritative
-/// - No flag → Upstream
+/// - `F_HOSTS` flag → `HostsFile`
+/// - `F_DHCP` flag → `Dhcp`  
+/// - `F_CONFIG` flag → `Authoritative`
+/// - No flag → `Upstream`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CacheSource {
     /// From upstream DNS server response
@@ -158,7 +158,7 @@ pub enum CacheSource {
 /// # C Source Reference
 ///
 /// Replaces C's cache lookup logic that hashes name + type + class together
-/// (cache.c:cache_hash function)
+/// (`cache.c:cache_hash` function)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CacheKey {
     /// Domain name (canonicalized to lowercase)
@@ -193,6 +193,8 @@ impl CacheKey {
     /// );
     /// assert_eq!(key.name, "example.com");
     /// ```
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(name: String, record_type: RecordType, record_class: RecordClass) -> Self {
         Self {
             name: name.to_lowercase(),
@@ -243,8 +245,9 @@ pub struct CacheEntry {
 impl CacheEntry {
     /// Check if this cache entry has expired
     ///
-    /// Permanent entries (expires_at == None) never expire.
+    /// Permanent entries (`expires_at` == `None`) never expire.
     /// Returns true if current time has passed the expiry time.
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         match self.expires_at {
             Some(expires) => Instant::now() >= expires,
@@ -254,8 +257,9 @@ impl CacheEntry {
 
     /// Get remaining TTL in seconds
     ///
-    /// Returns 0 for expired entries. Returns a large value (u32::MAX) for
+    /// Returns 0 for expired entries. Returns a large value (`u32::MAX`) for
     /// permanent entries that never expire.
+    #[must_use]
     pub fn remaining_ttl(&self) -> u32 {
         match self.expires_at {
             Some(expires) => {
@@ -263,7 +267,7 @@ impl CacheEntry {
                 if now >= expires {
                     0
                 } else {
-                    expires.duration_since(now).as_secs() as u32
+                    expires.duration_since(now).as_secs().try_into().unwrap_or(u32::MAX)
                 }
             }
             None => u32::MAX, // Permanent entry
@@ -301,6 +305,8 @@ pub struct CacheStatistics {
 
 impl CacheStatistics {
     /// Calculate cache hit rate as percentage (0.0 to 100.0)
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
@@ -313,14 +319,14 @@ impl CacheStatistics {
 
 /// DNS cache with LRU eviction and TTL management
 ///
-/// Provides O(1) average-case lookup performance using LruCache, which combines
+/// Provides O(1) average-case lookup performance using `LruCache`, which combines
 /// a hash table with an intrusive doubly-linked list for efficient LRU tracking.
 ///
 /// ## Concurrency
 ///
 /// Not thread-safe on its own. Wrap in `Arc<RwLock<DnsCache>>` for concurrent access:
-/// - Multiple readers can lookup simultaneously (RwLock read lock)
-/// - Single writer for inserts/evictions (RwLock write lock)
+/// - Multiple readers can lookup simultaneously (`RwLock` read lock)
+/// - Single writer for inserts/evictions (`RwLock` write lock)
 ///
 /// ## Memory Management
 ///
@@ -330,9 +336,9 @@ impl CacheStatistics {
 ///
 /// # C Source Reference
 ///
-/// Replaces C's cache implementation (cache.c) with:
-/// - Hash table + LRU linked list → Rust's LruCache
-/// - Manual memory management → RAII with Vec and Box
+/// Replaces C's cache implementation (`cache.c`) with:
+/// - Hash table + LRU linked list → Rust's `LruCache`
+/// - Manual memory management → RAII with `Vec` and `Box`
 /// - Pointer chasing → Safe references and cloning
 #[derive(Debug)]
 pub struct DnsCache {
@@ -361,9 +367,15 @@ impl DnsCache {
     /// let cache = DnsCache::new(1000);
     /// ```
     ///
+    /// # Panics
+    ///
+    /// Never panics. The internal `NonZeroUsize::new()` is guaranteed to succeed because
+    /// `effective_size` is always at least 1.
+    ///
     /// # C Source Reference
     ///
-    /// Replaces C's `cache_init()` function (cache.c:256-320)
+    /// Replaces C's `cache_init()` function (`cache.c:256-320`)
+    #[must_use]
     pub fn new(max_size: usize) -> Self {
         // Handle max_size of 0 (caching disabled) by using minimum cache size of 1
         // C implementation checks: if (daemon->cachesize > 0) before allocating
@@ -414,7 +426,8 @@ impl DnsCache {
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's `cache_insert()` function (cache.c:540-680)
+    /// Replaces C's `cache_insert()` function (`cache.c:540-680`)
+    #[allow(clippy::needless_pass_by_value)]
     pub fn insert(
         &mut self,
         key: CacheKey,
@@ -425,7 +438,7 @@ impl DnsCache {
         let expires_at = if ttl == 0 {
             None // Permanent entry
         } else {
-            Some(Instant::now() + Duration::from_secs(ttl as u64))
+            Some(Instant::now() + Duration::from_secs(u64::from(ttl)))
         };
 
         let entry = CacheEntry {
@@ -517,7 +530,7 @@ impl DnsCache {
     ///
     /// # Returns
     ///
-    /// Vector of matching CacheEntry references
+    /// Vector of matching `CacheEntry` references
     ///
     /// # Examples
     ///
@@ -530,7 +543,8 @@ impl DnsCache {
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's cache enumeration pattern used in dump.c
+    /// Replaces C's cache enumeration pattern used in `dump.c`
+    #[must_use]
     pub fn find_by_name(&self, name: &str) -> Vec<CacheEntry> {
         let name_lower = name.to_lowercase();
         self.entries
@@ -566,7 +580,8 @@ impl DnsCache {
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's reverse lookup logic in cache.c (search through all records)
+    /// Replaces C's reverse lookup logic in `cache.c` (search through all records)
+    #[must_use]
     pub fn find_by_addr(&self, addr: IpAddr) -> Option<String> {
         self.addr_index.get(&addr).cloned()
     }
@@ -593,16 +608,17 @@ impl DnsCache {
     ///
     /// # RFC Reference
     ///
-    /// RFC 2308 - Negative Caching of DNS Queries
+    /// `RFC 2308` - Negative Caching of DNS Queries
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's negative caching logic in cache.c:cache_insert with F_NEG flag
+    /// Replaces C's negative caching logic in `cache.c:cache_insert` with `F_NEG` flag
+    #[allow(clippy::needless_pass_by_value)]
     pub fn insert_negative(&mut self, key: CacheKey, ttl: u32) {
         let expires_at = if ttl == 0 {
             None
         } else {
-            Some(Instant::now() + Duration::from_secs(ttl as u64))
+            Some(Instant::now() + Duration::from_secs(u64::from(ttl)))
         };
 
         let entry = CacheEntry {
@@ -625,7 +641,7 @@ impl DnsCache {
 
     /// Resolve CNAME chain to final A or AAAA records
     ///
-    /// Follows CNAME records up to MAX_CNAME_HOPS (10) times, detecting loops
+    /// Follows CNAME records up to `MAX_CNAME_HOPS` (10) times, detecting loops
     /// and returning the final non-CNAME records. Returns error if a loop is
     /// detected or hop limit is exceeded.
     ///
@@ -640,7 +656,7 @@ impl DnsCache {
     /// # Errors
     ///
     /// - `CacheError::CnameLoop` - CNAME chain loops back to a previous name
-    /// - `CacheError::ExcessiveHops` - Chain exceeds MAX_CNAME_HOPS
+    /// - `CacheError::ExcessiveHops` - Chain exceeds `MAX_CNAME_HOPS`
     ///
     /// # Examples
     ///
@@ -728,13 +744,13 @@ impl DnsCache {
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's `cache_scan_free()` function (cache.c:920-1050)
+    /// Replaces C's `cache_scan_free()` function (`cache.c:920-1050`)
     pub fn expire_old_entries(&mut self) -> usize {
         let now = Instant::now();
         let mut expired_keys = Vec::new();
 
         // Collect expired keys
-        for (key, entry) in self.entries.iter() {
+        for (key, entry) in &self.entries {
             if let Some(expires_at) = entry.expires_at {
                 if now >= expires_at {
                     expired_keys.push(key.clone());
@@ -758,7 +774,7 @@ impl DnsCache {
     /// Insert DHCP host mapping into cache
     ///
     /// Adds a hostname-to-IP mapping from a DHCP lease. The TTL is derived from
-    /// the lease duration. These entries are marked with CacheSource::Dhcp and
+    /// the lease duration. These entries are marked with `CacheSource::Dhcp` and
     /// are removed when the lease expires or is released.
     ///
     /// # Arguments
@@ -782,7 +798,9 @@ impl DnsCache {
     ///
     /// # C Source Reference
     ///
-    /// Replaces C's DHCP cache integration in cache.c (F_DHCP flag handling)
+    /// Replaces C's DHCP cache integration in `cache.c` (`F_DHCP` flag handling)
+    #[allow(clippy::needless_pass_by_value)]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn insert_dhcp_host(&mut self, hostname: String, addr: IpAddr, lease_time: Duration) {
         let ttl = lease_time.as_secs() as u32;
 
@@ -864,6 +882,7 @@ impl DnsCache {
     /// println!("Cache hit rate: {:.2}%", stats.hit_rate());
     /// println!("Current size: {}/{}", stats.current_size, stats.max_size);
     /// ```
+    #[must_use]
     pub fn get_statistics(&self) -> CacheStatistics {
         self.stats
     }
@@ -871,13 +890,13 @@ impl DnsCache {
 
 /// Standalone function for inserting DHCP host (for convenience)
 ///
-/// This is a convenience wrapper that can be called without a DnsCache reference.
+/// This is a convenience wrapper that can be called without a `DnsCache` reference.
 /// In practice, you would typically call `cache.insert_dhcp_host()` directly.
 ///
 /// # Note
 ///
 /// This function exists to match the export schema requirement but is not typically
-/// used in production code. Direct method calls on DnsCache are preferred.
+/// used in production code. Direct method calls on `DnsCache` are preferred.
 pub fn insert_dhcp_host(
     cache: &mut DnsCache,
     hostname: String,
@@ -889,13 +908,13 @@ pub fn insert_dhcp_host(
 
 /// Standalone function for removing DHCP host (for convenience)
 ///
-/// This is a convenience wrapper that can be called without a DnsCache reference.
+/// This is a convenience wrapper that can be called without a `DnsCache` reference.
 /// In practice, you would typically call `cache.remove_dhcp_host()` directly.
 ///
 /// # Note
 ///
 /// This function exists to match the export schema requirement but is not typically
-/// used in production code. Direct method calls on DnsCache are preferred.
+/// used in production code. Direct method calls on `DnsCache` are preferred.
 pub fn remove_dhcp_host(cache: &mut DnsCache, hostname: &str) {
     cache.remove_dhcp_host(hostname);
 }
@@ -1077,13 +1096,13 @@ mod tests {
         let mut cache = DnsCache::new(3); // Small cache for testing eviction
 
         // Insert 4 entries (one more than capacity)
-        for i in 1..=4 {
-            let key = CacheKey::new(format!("host{}.com", i), RecordType::A, RecordClass::IN);
+        for i in 1_u8..=4 {
+            let key = CacheKey::new(format!("host{i}.com"), RecordType::A, RecordClass::IN);
             let records = vec![ResourceRecord::A {
-                name: format!("host{}.com", i),
+                name: format!("host{i}.com"),
                 class: RecordClass::IN,
                 ttl: 3600,
-                address: Ipv4Addr::new(192, 0, 2, i as u8),
+                address: Ipv4Addr::new(192, 0, 2, i),
             }];
             cache.insert(key, records, 3600, CacheSource::Upstream);
         }

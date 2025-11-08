@@ -151,12 +151,12 @@ pub enum ConfigError {
 /// # C Equivalent
 ///
 /// Replaces C's conditional listening logic with explicit protocol designation.
-/// In C, protocol determined by compilation flags (HAVE_DHCP, HAVE_TFTP).
+/// In C, protocol determined by compilation flags (`HAVE_DHCP`, `HAVE_TFTP`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     /// DNS protocol on port 53 (UDP/TCP)
     Dns,
-    /// DHCP protocol on ports 67/68 (DHCPv4) or 547/546 (DHCPv6)
+    /// DHCP protocol on ports 67/68 (`DHCPv4`) or 547/546 (`DHCPv6`)
     Dhcp,
     /// TFTP protocol on port 69 (UDP only)
     Tftp,
@@ -172,7 +172,7 @@ pub enum Protocol {
 ///
 /// # C Equivalent
 ///
-/// Replaces LOG_DAEMON, LOG_LOCAL0-7, LOG_USER macros from <syslog.h>.
+/// Replaces `LOG_DAEMON`, `LOG_LOCAL0`-7, `LOG_USER` macros from `<syslog.h>`.
 /// See dnsmasq.h lines 980-1003 for facility flag definitions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyslogFacility {
@@ -210,24 +210,26 @@ pub enum SyslogFacility {
 ///
 /// # C Equivalent
 ///
-/// Replaces `unsigned char hwaddr[DHCP_CHADDR_MAX]` in struct dhcp_lease (dnsmasq.h line 2584).
-/// DHCP_CHADDR_MAX is 16 bytes but MAC addresses are 6 bytes.
+/// Replaces `unsigned char hwaddr[DHCP_CHADDR_MAX]` in struct `dhcp_lease` (dnsmasq.h line 2584).
+/// `DHCP_CHADDR_MAX` is 16 bytes but MAC addresses are 6 bytes.
 ///
 /// # Validation
 ///
 /// - Exactly 6 bytes
-/// - FromStr expects colon-separated hex notation
-/// - Display outputs standard notation with lowercase hex
+/// - `FromStr` expects colon-separated hex notation
+/// - `Display` outputs standard notation with lowercase hex
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MacAddress(pub [u8; 6]);
 
 impl MacAddress {
-    /// Creates a new MAC address from 6 bytes
+    /// Creates a new `MacAddress` from 6 bytes
+    #[must_use]
     pub fn new(bytes: [u8; 6]) -> Self {
         MacAddress(bytes)
     }
 
-    /// Returns the MAC address as a byte slice
+    /// Returns the `MacAddress` as a byte slice
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -258,7 +260,7 @@ impl FromStr for MacAddress {
         let mut bytes = [0u8; 6];
         for (i, part) in parts.iter().enumerate() {
             bytes[i] = u8::from_str_radix(part, 16).map_err(|_| {
-                ConfigError::InvalidMacAddress(format!("Invalid hex byte: {}", part))
+                ConfigError::InvalidMacAddress(format!("Invalid hex byte: {part}"))
             })?;
         }
 
@@ -285,9 +287,9 @@ impl FromStr for MacAddress {
 /// Each variant knows how to encode itself into the wire format per RFC 2132.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DhcpOptionValue {
-    /// IP address (4 or 16 bytes depending on DHCPv4/v6)
+    /// IP address (4 or 16 bytes depending on `DHCPv4`/v6)
     Ip(IpAddr),
-    /// Text string (ASCII or UTF-8, null-terminated in DHCPv4)
+    /// Text string (ASCII or UTF-8, null-terminated in `DHCPv4`)
     String(String),
     /// Binary data (arbitrary byte sequence)
     Binary(Vec<u8>),
@@ -334,6 +336,7 @@ pub struct UpstreamServer {
 
 impl UpstreamServer {
     /// Creates a new upstream server with default port 53
+    #[must_use]
     pub fn new(address: SocketAddr) -> Self {
         UpstreamServer {
             address,
@@ -352,7 +355,7 @@ impl UpstreamServer {
 /// # C Equivalent
 ///
 /// Replaces domain-specific entries in `struct server` linked list with
-/// SERV_HAS_DOMAIN flag (dnsmasq.h line 1839).
+/// `SERV_HAS_DOMAIN` flag (dnsmasq.h line 1839).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForwardRule {
     /// Domain suffix to match (e.g., "example.com")
@@ -370,7 +373,7 @@ pub struct ForwardRule {
 ///
 /// # C Equivalent
 ///
-/// Replaces entries in `struct server` with SERV_LITERAL_ADDRESS flag
+/// Replaces entries in `struct server` with `SERV_LITERAL_ADDRESS` flag
 /// (dnsmasq.h line 1734).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalDomain {
@@ -437,8 +440,8 @@ impl Default for CacheConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: cache_size, upstream_servers, forward_rules, local_domains,
-/// bogus_domains, edns_packet_size, min_ttl, max_ttl, negative_ttl
+/// Per schema: `cache_size`, `upstream_servers`, `forward_rules`, `local_domains`,
+/// `bogus_domains`, `edns_packet_size`, `min_ttl`, `max_ttl`, `negative_ttl`
 #[derive(Debug, Clone, PartialEq)]
 pub struct DnsConfig {
     /// Cache size in number of records
@@ -494,7 +497,7 @@ impl Default for DnsConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: start, end, netmask, lease_time, tag
+/// Per schema: start, end, netmask, `lease_time`, tag
 #[derive(Debug, Clone, PartialEq)]
 pub struct DhcpRange {
     /// Start of address range (inclusive)
@@ -510,7 +513,8 @@ pub struct DhcpRange {
 }
 
 impl DhcpRange {
-    /// Creates a new DHCPv4 range with default 1-hour lease time
+    /// Creates a new `DHCPv4` range with default 1-hour lease time
+    #[must_use]
     pub fn new_v4(start: Ipv4Addr, end: Ipv4Addr) -> Self {
         DhcpRange {
             start: IpAddr::V4(start),
@@ -521,7 +525,8 @@ impl DhcpRange {
         }
     }
 
-    /// Creates a new DHCPv6 range with default 1-hour lease time
+    /// Creates a new `DHCPv6` range with default 1-hour lease time
+    #[must_use]
     pub fn new_v6(start: Ipv6Addr, end: Ipv6Addr) -> Self {
         DhcpRange {
             start: IpAddr::V6(start),
@@ -533,22 +538,28 @@ impl DhcpRange {
     }
 
     /// Validates that start address is less than or equal to end address
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError::ValidationError` if:
+    /// - Start address is greater than end address
+    /// - Start and end addresses are different address families
+    ///
+    /// Returns `ConfigError::InvalidLeaseTime` if lease time is less than 60 seconds or greater than 1 year
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Basic validation: start must be same address family as end
         match (self.start, self.end) {
             (IpAddr::V4(s), IpAddr::V4(e)) => {
                 if s > e {
                     return Err(ConfigError::ValidationError(format!(
-                        "DHCP range start {} is greater than end {}",
-                        s, e
+                        "DHCP range start {s} is greater than end {e}"
                     )));
                 }
             }
             (IpAddr::V6(s), IpAddr::V6(e)) => {
                 if s > e {
                     return Err(ConfigError::ValidationError(format!(
-                        "DHCP range start {} is greater than end {}",
-                        s, e
+                        "DHCP range start {s} is greater than end {e}"
                     )));
                 }
             }
@@ -562,10 +573,10 @@ impl DhcpRange {
         // Validate lease time is reasonable (at least 60 seconds, at most 1 year)
         let secs = self.lease_time.as_secs();
         if secs < 60 {
-            return Err(ConfigError::InvalidLeaseTime(secs as u32));
+            return Err(ConfigError::InvalidLeaseTime(u32::try_from(secs).unwrap_or(u32::MAX)));
         }
         if secs > 365 * 24 * 3600 {
-            return Err(ConfigError::InvalidLeaseTime(secs as u32));
+            return Err(ConfigError::InvalidLeaseTime(u32::try_from(secs).unwrap_or(u32::MAX)));
         }
 
         Ok(())
@@ -583,7 +594,7 @@ impl DhcpRange {
 ///
 /// # Members Exposed
 ///
-/// Per schema: mac, ip, hostname, client_id
+/// Per schema: mac, ip, hostname, `client_id`
 #[derive(Debug, Clone, PartialEq)]
 pub struct DhcpStaticHost {
     /// Client MAC address for identification
@@ -592,7 +603,7 @@ pub struct DhcpStaticHost {
     pub ip: IpAddr,
     /// Hostname to register in DNS (optional)
     pub hostname: Option<String>,
-    /// Client ID (CLID for DHCPv6, option 61 for DHCPv4)
+    /// Client ID (CLID for `DHCPv6`, option 61 for `DHCPv4`)
     pub client_id: Option<Vec<u8>>,
 }
 
@@ -622,6 +633,7 @@ pub struct DhcpOption {
 
 impl DhcpOption {
     /// Creates a new DHCP option with given code and value
+    #[must_use]
     pub fn new(code: u8, value: DhcpOptionValue) -> Self {
         DhcpOption {
             code,
@@ -644,7 +656,7 @@ impl DhcpOption {
 ///
 /// # Members Exposed
 ///
-/// Per schema: ranges, static_hosts, options, lease_file, lease_time, authoritative
+/// Per schema: ranges, `static_hosts`, options, `lease_file`, `lease_time`, authoritative
 #[cfg(feature = "dhcp")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DhcpConfig {
@@ -679,7 +691,7 @@ impl Default for DhcpConfig {
 /// DHCP context with complete range and network parameters
 ///
 /// Extended context information including network parameters like netmask,
-/// broadcast, router, and interface binding. Maps closely to C's struct dhcp_context.
+/// broadcast, router, and interface binding. Maps closely to C's `struct dhcp_context`.
 ///
 /// # C Equivalent
 ///
@@ -688,8 +700,8 @@ impl Default for DhcpConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: flags, start, end, netmask, broadcast, router, lease_time,
-/// interface, next, ra_time, ra_short_period_start, prefix, prefix_len
+/// Per schema: flags, start, end, netmask, broadcast, router, `lease_time`,
+/// interface, next, `ra_time`, `ra_short_period_start`, prefix, `prefix_len`
 #[cfg(feature = "dhcp")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DhcpContext {
@@ -740,7 +752,7 @@ pub struct DhcpContext {
 ///
 /// # Members Exposed
 ///
-/// Per schema: root, secure, max_connections, port_range
+/// Per schema: root, secure, `max_connections`, `port_range`
 #[cfg(feature = "tftp")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TftpConfig {
@@ -781,7 +793,7 @@ impl Default for TftpConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: domain, key_tag, algorithm, digest_type, digest
+/// Per schema: domain, `key_tag`, algorithm, `digest_type`, digest
 #[cfg(feature = "dnssec")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrustAnchor {
@@ -808,7 +820,7 @@ pub struct TrustAnchor {
 ///
 /// # Members Exposed
 ///
-/// Per schema: enabled, check_unsigned, trust_anchors
+/// Per schema: enabled, `check_unsigned`, `trust_anchors`
 #[cfg(feature = "dnssec")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DnssecConfig {
@@ -904,7 +916,7 @@ pub struct ListenAddress {
 ///
 /// # Members Exposed
 ///
-/// Per schema: interfaces, listen_addresses, bind_interfaces, bind_dynamic, port, query_port
+/// Per schema: interfaces, `listen_addresses`, `bind_interfaces`, `bind_dynamic`, port, `query_port`
 #[derive(Debug, Clone, PartialEq)]
 pub struct NetworkConfig {
     /// Network interfaces to listen on
@@ -948,7 +960,7 @@ impl Default for NetworkConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: facility, async_log, log_queries, log_dhcp, log_file
+/// Per schema: facility, `async_log`, `log_queries`, `log_dhcp`, `log_file`
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoggingConfig {
     /// Syslog facility for daemon messages
@@ -989,7 +1001,7 @@ impl Default for LoggingConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: user, group, script_user, drop_after_bind
+/// Per schema: `user`, `group`, `script_user`, `drop_after_bind`
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecurityConfig {
     /// User to run as after initialization
@@ -1093,6 +1105,7 @@ impl Config {
     ///
     /// - `Some(port)` if DNS is enabled (port != 0)
     /// - `None` if DNS is disabled (port == 0)
+    #[must_use]
     pub fn dns_port(&self) -> Option<u16> {
         if self.network.port == 0 {
             None
@@ -1106,6 +1119,7 @@ impl Config {
     /// DHCP is enabled if the dhcp configuration is present.
     /// Requires the "dhcp" feature to be compiled.
     #[cfg(feature = "dhcp")]
+    #[must_use]
     pub fn dhcp_enabled(&self) -> bool {
         self.dhcp.is_some()
     }
@@ -1116,11 +1130,12 @@ impl Config {
         false
     }
 
-    /// Returns true if DHCPv6 is enabled
+    /// Returns true if `DHCPv6` is enabled
     ///
-    /// DHCPv6 is enabled if the dhcp configuration is present and
+    /// `DHCPv6` is enabled if the dhcp configuration is present and
     /// the dhcp-v6 feature is compiled in.
     #[cfg(feature = "dhcp-v6")]
+    #[must_use]
     pub fn dhcp6_enabled(&self) -> bool {
         #[cfg(feature = "dhcp")]
         {
@@ -1138,17 +1153,19 @@ impl Config {
         false
     }
 
-    /// Returns true if TFTP is enabled
+    /// Returns true if `TFTP` is enabled
     ///
-    /// TFTP is enabled if the tftp configuration is present.
+    /// `TFTP` is enabled if the tftp configuration is present.
     /// Requires the "tftp" feature to be compiled.
     #[cfg(feature = "tftp")]
+    #[must_use]
     pub fn tftp_enabled(&self) -> bool {
         self.tftp.is_some()
     }
 
-    /// Returns false if TFTP feature is not compiled
+    /// Returns false if `TFTP` feature is not compiled
     #[cfg(not(feature = "tftp"))]
+    #[must_use]
     pub fn tftp_enabled(&self) -> bool {
         false
     }
@@ -1198,7 +1215,7 @@ impl Default for FileConfig {
 ///
 /// # Members Exposed
 ///
-/// Per schema: new(), dns(), dhcp(), network(), logging(), security(), validate(), build()
+/// Per schema: `new()`, `dns()`, `dhcp()`, `network()`, `logging()`, `security()`, `validate()`, `build()`
 #[derive(Debug, Default)]
 pub struct ConfigBuilder {
     dns: Option<DnsConfig>,
@@ -1218,6 +1235,7 @@ pub struct ConfigBuilder {
 
 impl ConfigBuilder {
     /// Creates a new configuration builder with default values
+    #[must_use]
     pub fn new() -> Self {
         ConfigBuilder::default()
     }
@@ -1255,8 +1273,8 @@ impl ConfigBuilder {
 
     /// Internal validation helper
     ///
-    /// Performs validation checks and returns Result<(), ConfigError>
-    fn _validate(&self) -> Result<(), ConfigError> {
+    /// Performs validation checks and returns `Result<(), ConfigError>`
+    fn validate_internal(&self) -> Result<(), ConfigError> {
         // Validate DNS configuration
         if let Some(ref dns) = self.dns {
             if dns.cache_size > 100_000 {
@@ -1301,17 +1319,33 @@ impl ConfigBuilder {
     /// - Valid network interface names
     ///
     /// Returns a mutable reference to self for method chaining.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if any validation check fails:
+    /// - `InvalidCacheSize` if DNS cache size exceeds 100,000 entries
+    /// - `ValidationError` if DHCP ranges are invalid or overlap
+    /// - `InvalidPort` if port numbers are invalid
+    /// - Other validation errors as defined in `ConfigError`
     pub fn validate(&mut self) -> Result<&mut Self, ConfigError> {
-        self._validate()?;
+        self.validate_internal()?;
         Ok(self)
     }
 
     /// Builds the final configuration after validation
     ///
     /// Consumes the builder and returns a validated `Config` instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if validation fails:
+    /// - `InvalidCacheSize` if DNS cache size exceeds 100,000 entries
+    /// - `ValidationError` if DHCP ranges are invalid or overlap
+    /// - `InvalidPort` if port numbers are invalid
+    /// - Other validation errors as defined in `ConfigError`
     pub fn build(self) -> Result<Config, ConfigError> {
         // Perform final validation
-        self._validate()?;
+        self.validate_internal()?;
 
         Ok(Config {
             dns: self.dns.unwrap_or_default(),
