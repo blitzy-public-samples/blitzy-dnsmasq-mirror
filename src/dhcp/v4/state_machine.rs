@@ -6,14 +6,14 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated 29 June, 2007.
 
-//! # DHCPv4 State Machine
+//! # `DHCPv4` State Machine
 //!
-//! This module implements a type-safe DHCPv4 state machine enforcing RFC 2131
+//! This module implements a type-safe `DHCPv4` state machine enforcing RFC 2131
 //! state transitions with compile-time prevention of invalid message sequences.
 //!
 //! ## Purpose
 //!
-//! Provides explicit state management for DHCPv4 protocol exchanges, replacing
+//! Provides explicit state management for `DHCPv4` protocol exchanges, replacing
 //! C's implicit state tracking through lease flags and packet inspection with
 //! Rust's type system. Each state transition is validated, ensuring clients can
 //! only send valid messages in each state and servers generate appropriate responses.
@@ -126,7 +126,7 @@ const DEFAULT_T1_FRACTION: f64 = 0.5;
 /// Default T2 (rebinding time) as fraction of lease time (87.5%)
 const DEFAULT_T2_FRACTION: f64 = 0.875;
 
-/// DHCPv4 client states per RFC 2131 Section 3.1
+/// `DHCPv4` client states per RFC 2131 Section 3.1
 ///
 /// Represents the complete set of states a DHCP client can be in during its
 /// interaction with a DHCP server. Each state determines which message types
@@ -229,8 +229,11 @@ pub enum StateTransitionError {
     /// Example: Receiving OFFER when already in BOUND state
     #[error("Invalid state transition from {from:?} to {to:?} via message type {message:?}")]
     InvalidStateTransition {
+        /// Source state
         from: DhcpState,
+        /// Target state
         to: DhcpState,
+        /// Message type that triggered the invalid transition
         message: MessageType,
     },
 
@@ -239,7 +242,9 @@ pub enum StateTransitionError {
     /// Example: RELEASE message when in INIT state
     #[error("Invalid message type {message_type:?} for state {state:?}")]
     InvalidMessageType {
+        /// Current DHCP state
         state: DhcpState,
+        /// Message type received
         message_type: MessageType,
     },
 
@@ -247,7 +252,12 @@ pub enum StateTransitionError {
     ///
     /// This can indicate packet corruption or a spoofing attempt
     #[error("Transaction ID mismatch: expected {expected:#x}, got {actual:#x}")]
-    MismatchedTransactionId { expected: u32, actual: u32 },
+    MismatchedTransactionId {
+        /// Expected transaction ID
+        expected: u32,
+        /// Actual transaction ID received
+        actual: u32
+    },
 
     /// Client identifier mismatch in lease lookup
     ///
@@ -265,14 +275,19 @@ pub enum StateTransitionError {
     ///
     /// Address is either allocated to another client or outside valid range
     #[error("Requested address {address} is not available")]
-    AddressUnavailable { address: Ipv4Addr },
+    AddressUnavailable {
+        /// Requested IP address
+        address: Ipv4Addr
+    },
 
     /// Server identifier does not match this server
     ///
     /// Client selected a different server - we should ignore this REQUEST
     #[error("Server identifier {provided} does not match our address {expected}")]
     ServerIdMismatch {
+        /// Server identifier provided by client
         provided: Ipv4Addr,
+        /// This server's expected identifier
         expected: Ipv4Addr,
     },
 }
@@ -294,6 +309,7 @@ impl DhcpTransaction {
     /// let transaction = DhcpTransaction::new(0x12345678);
     /// assert_eq!(transaction.get_state(), DhcpState::Init);
     /// ```
+    #[must_use]
     pub fn new(xid: u32) -> Self {
         Self {
             xid,
@@ -361,7 +377,7 @@ impl DhcpTransaction {
     /// on current state:
     ///
     /// - **SELECTING**: Client accepting our OFFER (must include server identifier)
-    /// - **INIT_REBOOT**: Client verifying previous lease
+    /// - **`INIT_REBOOT`**: Client verifying previous lease
     /// - **RENEWING**: Client renewing lease (unicast to server)
     /// - **REBINDING**: Client rebinding lease (broadcast)
     /// - **BOUND**: Client explicitly renewing before T1
@@ -518,6 +534,7 @@ impl DhcpTransaction {
     /// # Returns
     ///
     /// Current `DhcpState`
+    #[must_use]
     pub fn get_state(&self) -> DhcpState {
         self.state
     }
@@ -527,6 +544,7 @@ impl DhcpTransaction {
     /// # Returns
     ///
     /// Transaction ID (xid) from DHCP packet header
+    #[must_use]
     pub fn get_xid(&self) -> u32 {
         self.xid
     }
@@ -540,6 +558,7 @@ impl DhcpTransaction {
     /// # Returns
     ///
     /// Optional client identifier bytes
+    #[must_use]
     pub fn get_client_id(&self) -> Option<&[u8]> {
         self.client_id.as_deref()
     }
@@ -549,6 +568,7 @@ impl DhcpTransaction {
     /// # Returns
     ///
     /// IP address from Option 50 if client specified one
+    #[must_use]
     pub fn get_requested_ip(&self) -> Option<Ipv4Addr> {
         self.requested_ip
     }
@@ -558,6 +578,7 @@ impl DhcpTransaction {
     /// # Returns
     ///
     /// IP address offered by server in OFFER message
+    #[must_use]
     pub fn get_offered_ip(&self) -> Option<Ipv4Addr> {
         self.offered_ip
     }
@@ -567,6 +588,7 @@ impl DhcpTransaction {
     /// # Returns
     ///
     /// Reference to lease object if one exists
+    #[must_use]
     pub fn get_lease(&self) -> Option<&LeaseV4> {
         self.lease.as_ref()
     }
@@ -596,8 +618,10 @@ impl DhcpTransaction {
     /// let t1 = DhcpTransaction::calculate_t1(86400, Some(3600));
     /// assert_eq!(t1, 3600);
     /// ```
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
     pub fn calculate_t1(lease_time: u64, override_t1: Option<u64>) -> u64 {
-        override_t1.unwrap_or_else(|| (lease_time as f64 * DEFAULT_T1_FRACTION) as u64)
+        override_t1.unwrap_or((lease_time as f64 * DEFAULT_T1_FRACTION) as u64)
     }
 
     /// Calculate T2 (rebinding time)
@@ -625,8 +649,10 @@ impl DhcpTransaction {
     /// let t2 = DhcpTransaction::calculate_t2(86400, Some(72000));
     /// assert_eq!(t2, 72000);
     /// ```
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
     pub fn calculate_t2(lease_time: u64, override_t2: Option<u64>) -> u64 {
-        override_t2.unwrap_or_else(|| (lease_time as f64 * DEFAULT_T2_FRACTION) as u64)
+        override_t2.unwrap_or((lease_time as f64 * DEFAULT_T2_FRACTION) as u64)
     }
 
     /// Validate server identifier matches expected value
@@ -674,16 +700,30 @@ impl DhcpTransaction {
     ///
     /// Returns `MismatchedTransactionId` if xid doesn't match
     pub fn validate_xid(&self, packet_xid: u32) -> Result<(), StateTransitionError> {
-        if self.xid != packet_xid {
+        if self.xid == packet_xid {
+            Ok(())
+        } else {
             Err(StateTransitionError::MismatchedTransactionId {
                 expected: self.xid,
                 actual: packet_xid,
             })
-        } else {
-            Ok(())
         }
     }
 }
+
+/// Type alias for `DHCPv4` state - external API compatibility
+///
+/// External modules can import either `DhcpState` or `Dhcpv4State`.
+/// This alias provides naming consistency with other `DHCPv4` types
+/// like `Dhcpv4Message` and `Dhcpv4MessageType`.
+pub type Dhcpv4State = DhcpState;
+
+/// Type alias for `DHCPv4` state machine - external API compatibility
+///
+/// External modules can import either `DhcpTransaction` or `Dhcpv4StateMachine`.
+/// This alias provides naming consistency with other `DHCPv4` types and
+/// better semantic meaning for the server's use of transaction objects.
+pub type Dhcpv4StateMachine = DhcpTransaction;
 
 #[cfg(test)]
 mod tests {
