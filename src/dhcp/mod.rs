@@ -169,11 +169,11 @@ pub use common::find_config;
 
 // DHCPv4 server re-exports (conditional on dhcp-v4 feature)
 #[cfg(feature = "dhcp-v4")]
-pub use v4::server::Dhcpv4Server;
+pub use v4::server::DhcpV4Server;
 
 // DHCPv6 server re-exports (conditional on dhcp-v6 feature)
 #[cfg(feature = "dhcp-v6")]
-pub use v6::server::Dhcpv6Server;
+pub use v6::server::DhcpV6Server;
 
 // IPv6 Router Advertisement re-exports (conditional on ipv6 feature)
 #[cfg(feature = "ipv6")]
@@ -204,16 +204,16 @@ mod tests {
     #[test]
     fn test_dhcpv4_feature_enabled() {
         // Verify DHCPv4 types are available when feature is enabled
-        let type_name = std::any::type_name::<Dhcpv4Server>();
-        assert!(type_name.contains("Dhcpv4Server"));
+        let type_name = std::any::type_name::<DhcpV4Server>();
+        assert!(type_name.contains("DhcpV4Server"));
     }
 
     #[cfg(feature = "dhcp-v6")]
     #[test]
     fn test_dhcpv6_feature_enabled() {
         // Verify DHCPv6 types are available when feature is enabled
-        let type_name = std::any::type_name::<Dhcpv6Server>();
-        assert!(type_name.contains("Dhcpv6Server"));
+        let type_name = std::any::type_name::<DhcpV6Server>();
+        assert!(type_name.contains("DhcpV6Server"));
     }
 
     #[cfg(feature = "ipv6")]

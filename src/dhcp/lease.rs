@@ -422,6 +422,7 @@ impl Lease {
 /// Replaces C's global `leases` linked list and related management functions:
 /// - `static struct dhcp_lease *leases` → `HashMap` storage
 /// - `leases_left` counter → tracked separately
+#[derive(Debug)]
 pub struct LeaseDatabase {
     /// `DHCPv4` leases indexed by IPv4 address
     v4_by_ip: Arc<RwLock<HashMap<Ipv4Addr, LeaseV4>>>,
