@@ -6,15 +6,15 @@
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated June, 2007.
 
-//! # DHCPv6 Protocol Implementation (RFC 3315)
+//! # `DHCPv6` Protocol Implementation (RFC 3315)
 //!
-//! Comprehensive DHCPv6 server and relay agent implementation translating from C's `src/rfc3315.c`
-//! (approximately 3559 lines). Provides stateful address allocation (IA_NA), temporary addresses
-//! (IA_TA), prefix delegation (IA_PD), and stateless configuration (INFORMATION-REQUEST).
+//! Comprehensive `DHCPv6` server and relay agent implementation translating from C's `src/rfc3315.c`
+//! (approximately 3559 lines). Provides stateful address allocation (`IA_NA`), temporary addresses
+//! (`IA_TA`), prefix delegation (`IA_PD`), and stateless configuration (`INFORMATION-REQUEST`).
 //!
 //! ## Purpose
 //!
-//! This module implements the complete DHCPv6 protocol per RFC 3315, including:
+//! This module implements the complete `DHCPv6` protocol per RFC 3315, including:
 //! - Message parsing with transaction ID extraction and TLV option decoding
 //! - SOLICIT/ADVERTISE/REQUEST/REPLY four-message exchange for stateful allocation
 //! - Rapid Commit support for two-message SOLICIT→REPLY fast path
@@ -23,7 +23,7 @@
 //! - Relay agent support with RELAY-FORW/RELAY-REPL recursive relay chain processing
 //! - DUID-based client identification replacing MAC address matching
 //! - T1/T2 timer calculation per RFC 3315 (T1=0.5*preferred, T2=0.8*preferred)
-//! - Status code generation (Success, NoAddrsAvail, NoBinding, NotOnLink, UseMulticast)
+//! - Status code generation (Success, `NoAddrsAvail`, `NoBinding`, `NotOnLink`, `UseMulticast`)
 //!
 //! ## Key Differences from C Implementation
 //!
@@ -31,7 +31,7 @@
 //! - **Type Safety**: Strongly-typed message enums prevent invalid state transitions
 //! - **Error Handling**: Result types replace C's errno and NULL pointer returns
 //! - **TLV Parsing**: Safe byteorder operations replace GETSHORT/PUTSHORT pointer macros
-//! - **Async I/O**: Tokio async/await replaces blocking poll() event loop
+//! - **Async I/O**: `Tokio` async/await replaces blocking `poll()` event loop
 //! - **Bounds Checking**: Automatic slice validation prevents buffer overflows
 //!
 //! ## C Source Mapping
@@ -41,24 +41,24 @@
 //! | `dhcp6_reply()` | `dhcp6_reply()` | 269-302 | Main entry point, message dispatcher |
 //! | `dhcp6_maybe_relay()` | `dhcp6_maybe_relay()` | 365-534 | Relay agent message processing |
 //! | `dhcp6_no_relay()` | `dhcp6_no_relay()` | 537-1104 | Direct client message handling |
-//! | `check_ia()` | `check_ia()` | 1107-1210 | IA_NA/IA_TA/IA_PD validation |
+//! | `check_ia()` | `check_ia()` | 1107-1210 | `IA_NA`/`IA_TA`/`IA_PD` validation |
 //! | `build_ia()` | `build_ia()` | 1213-1437 | IA response construction with T1/T2 |
 //! | `add_address()` | Internal helper | 1575-1666 | Address allocation from context pools |
 //! | `update_leases()` | Internal helper | 1669-1756 | Lease database synchronization |
 //!
 //! ## Protocol Compliance
 //!
-//! - RFC 3315: DHCPv6 base protocol (message types, options, DUID types, IA structures)
-//! - RFC 3633: IPv6 Prefix Delegation (IA_PD, IAPREFIX options)
+//! - RFC 3315: `DHCPv6` base protocol (message types, options, DUID types, IA structures)
+//! - RFC 3633: IPv6 Prefix Delegation (`IA_PD`, `IAPREFIX` options)
 //! - RFC 4361: DUID definition and format (DUID-LLT, DUID-EN, DUID-LL)
 //! - RFC 6939: Client Link-Layer Address Option in relay messages
-//! - RFC 8415: DHCPv6 bis (updated specification incorporating errata)
+//! - RFC 8415: `DHCPv6` bis (updated specification incorporating errata)
 //!
 //! ## Threading and Concurrency
 //!
 //! C implementation uses single-process event-driven architecture with global daemon state.
-//! Rust implementation uses Tokio async runtime with Arc<RwLock<DaemonState>> for safe
-//! concurrent access, enabling multiple DHCPv6 requests to be processed concurrently.
+//! Rust implementation uses `Tokio` async runtime with `Arc<RwLock<DaemonState>>` for safe
+//! concurrent access, enabling multiple `DHCPv6` requests to be processed concurrently.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -90,10 +90,10 @@ use crate::util::time::monotonic_time;
 // Constants
 // ============================================================================
 
-/// DHCPv6 server port (RFC 3315 Section 5.2)
+/// `DHCPv6` server port (RFC 3315 Section 5.2)
 pub const DHCPV6_SERVER_PORT: u16 = 547;
 
-/// DHCPv6 client port (RFC 3315 Section 5.2)
+/// `DHCPv6` client port (RFC 3315 Section 5.2)
 pub const DHCPV6_CLIENT_PORT: u16 = 546;
 
 /// Maximum relay hop count to prevent infinite relay loops
@@ -102,20 +102,20 @@ pub const MAX_RELAY_HOPS: u8 = 32;
 /// Maximum number of vendor tags to accumulate during relay processing
 const MAX_VENDOR_TAGS: usize = 16;
 
-/// DHCPv6 message header size (1-byte type + 3-byte transaction ID)
+/// `DHCPv6` message header size (1-byte type + 3-byte transaction ID)
 const DHCPV6_HEADER_SIZE: usize = 4;
 
-/// DHCP Hardware Address Maximum Length (from dnsmasq.h DHCP_CHADDR_MAX)
+/// DHCP Hardware Address Maximum Length (from `dnsmasq.h` `DHCP_CHADDR_MAX`)
 const DHCP_CHADDR_MAX: usize = 16;
 
 // ============================================================================
-// DHCPv6 Message Types (RFC 3315 Section 5.3)
+// `DHCPv6` Message Types (RFC 3315 Section 5.3)
 // ============================================================================
 
-/// DHCPv6 message types per RFC 3315
+/// `DHCPv6` message types per RFC 3315
 ///
-/// Represents the message type byte in the DHCPv6 message header.
-/// Replaces C's integer constants (DHCP6SOLICIT, DHCP6ADVERTISE, etc.)
+/// Represents the message type byte in the `DHCPv6` message header.
+/// Replaces C's integer constants (`DHCP6SOLICIT`, `DHCP6ADVERTISE`, etc.)
 /// with strongly-typed enum for compile-time validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -155,7 +155,8 @@ impl Dhcpv6MessageType {
     /// * `value` - Raw message type byte from packet header
     ///
     /// # Returns
-    /// Parsed message type or None if value is invalid
+    /// Parsed message type or `None` if value is invalid
+    #[must_use] 
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(Self::Solicit),
@@ -175,7 +176,8 @@ impl Dhcpv6MessageType {
         }
     }
 
-    /// Convert message type to u8 for serialization
+    /// Convert message type to `u8` for serialization
+    #[must_use] 
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -183,7 +185,8 @@ impl Dhcpv6MessageType {
     /// Check if this message type requires a response from the server
     ///
     /// # Returns
-    /// true if the message type expects a response (e.g., SOLICIT expects ADVERTISE)
+    /// `true` if the message type expects a response (e.g., `SOLICIT` expects `ADVERTISE`)
+    #[must_use] 
     pub fn requires_response(self) -> bool {
         matches!(
             self,
@@ -200,7 +203,8 @@ impl Dhcpv6MessageType {
     /// Check if this is a relay message type
     ///
     /// # Returns
-    /// true if the message type is RELAY-FORW or RELAY-REPL
+    /// `true` if the message type is `RELAY-FORW` or `RELAY-REPL`
+    #[must_use] 
     pub fn is_relay_message(self) -> bool {
         matches!(self, Self::RelayForw | Self::RelayRepl)
     }
@@ -223,21 +227,21 @@ impl fmt::Display for Dhcpv6MessageType {
             Self::RelayForw => "RELAY-FORW",
             Self::RelayRepl => "RELAY-REPL",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 
 // ============================================================================
-// DHCPv6 Message Structure
+// `DHCPv6` Message Structure
 // ============================================================================
 
-/// DHCPv6 message with parsed header and options
+/// `DHCPv6` message with parsed header and options
 ///
-/// Represents a complete DHCPv6 packet after parsing. Replaces C's raw buffer manipulation
+/// Represents a complete `DHCPv6` packet after parsing. Replaces C's raw buffer manipulation
 /// with type-safe structure. Supports both client messages (4-byte header) and relay
 /// messages (34-byte header with link/peer addresses).
 ///
-/// # DHCPv6 Message Format (RFC 3315 Section 6)
+/// # `DHCPv6` Message Format (RFC 3315 Section 6)
 ///
 /// Client message format:
 /// ```text
@@ -296,13 +300,14 @@ pub struct Dhcp6Message {
 }
 
 impl Dhcp6Message {
-    /// Create a new DHCPv6 message with the specified type
+    /// Create a new `DHCPv6` message with the specified type
     ///
     /// # Arguments
     /// * `msg_type` - Message type code (1-13)
     ///
     /// # Returns
     /// New message with empty options and zero transaction ID
+    #[must_use] 
     pub fn new(msg_type: u8) -> Self {
         let message_type = Dhcpv6MessageType::from_u8(msg_type)
             .unwrap_or(Dhcpv6MessageType::Reply);
@@ -317,9 +322,9 @@ impl Dhcp6Message {
         }
     }
 
-    /// Parse DHCPv6 message from raw bytes
+    /// Parse `DHCPv6` message from raw bytes
     ///
-    /// Corresponds to C's implicit parsing in dhcp6_reply() and dhcp6_maybe_relay().
+    /// Corresponds to C's implicit parsing in `dhcp6_reply()` and `dhcp6_maybe_relay()`.
     ///
     /// # Arguments
     /// * `data` - Raw packet bytes starting with message type
@@ -328,17 +333,17 @@ impl Dhcp6Message {
     /// Parsed message or error if packet is malformed
     ///
     /// # Errors
-    /// Returns ParseError if packet is too short or has invalid format
+    /// Returns `ParseError` if packet is too short or has invalid format
     pub fn parse(data: &[u8]) -> Result<Self, DnsmasqError> {
         if data.is_empty() {
             return Err(DnsmasqError::Dhcp(DhcpError::ParseError {
-                message: "Empty DHCPv6 packet".to_string(),
+                message: "Empty `DHCPv6` packet".to_string(),
             }));
         }
 
         let msg_type = Dhcpv6MessageType::from_u8(data[0])
             .ok_or_else(|| DnsmasqError::Dhcp(DhcpError::ParseError {
-                message: format!("Invalid DHCPv6 message type: {}", data[0]),
+                message: format!("Invalid `DHCPv6` message type: {}", data[0]),
             }))?;
 
         // Relay messages have different format
@@ -382,7 +387,7 @@ impl Dhcp6Message {
             }
 
             // Transaction ID is 3 bytes (24 bits) in network byte order
-            let transaction_id = ((data[1] as u32) << 16) | ((data[2] as u32) << 8) | (data[3] as u32);
+            let transaction_id = (u32::from(data[1]) << 16) | (u32::from(data[2]) << 8) | u32::from(data[3]);
 
             Ok(Self {
                 msg_type,
@@ -395,10 +400,15 @@ impl Dhcp6Message {
         }
     }
 
-    /// Serialize DHCPv6 message to bytes
+    /// Serialize `DHCPv6` message to bytes
     ///
     /// # Returns
     /// Serialized message bytes in network byte order
+    ///
+    /// # Panics
+    ///
+    /// Panics if the message is a relay message but `link_address` or `peer_address` are `None`.
+    #[must_use] 
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
@@ -411,9 +421,12 @@ impl Dhcp6Message {
             buf.extend_from_slice(&self.peer_address.unwrap().octets());
         } else {
             // Client message format - transaction ID is 24 bits
-            buf.push((self.transaction_id >> 16) as u8);
-            buf.push((self.transaction_id >> 8) as u8);
-            buf.push(self.transaction_id as u8);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                buf.push((self.transaction_id >> 16) as u8);
+                buf.push((self.transaction_id >> 8) as u8);
+                buf.push(self.transaction_id as u8);
+            }
         }
 
         buf.extend_from_slice(&self.options);
@@ -421,16 +434,19 @@ impl Dhcp6Message {
     }
 
     /// Get message type
+    #[must_use] 
     pub fn get_message_type(&self) -> Dhcpv6MessageType {
         self.msg_type
     }
 
     /// Get transaction ID (client messages only)
+    #[must_use] 
     pub fn get_transaction_id(&self) -> u32 {
         self.transaction_id
     }
 
     /// Get options as byte slice
+    #[must_use] 
     pub fn get_options(&self) -> &[u8] {
         &self.options
     }
@@ -441,11 +457,16 @@ impl Dhcp6Message {
     }
 
     /// Create message from raw bytes (alias for parse)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DnsmasqError::Parse` if the data is invalid or malformed.
     pub fn from_bytes(data: &[u8]) -> Result<Self, DnsmasqError> {
         Self::parse(data)
     }
 
     /// Convert message to bytes (alias for serialize)
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         self.serialize()
     }
@@ -455,7 +476,7 @@ impl fmt::Display for Dhcp6Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "DHCPv6 {} (xid: 0x{:06x})",
+            "`DHCPv6` {} (xid: 0x{:06x})",
             self.msg_type, self.transaction_id
         )
     }
@@ -465,10 +486,10 @@ impl fmt::Display for Dhcp6Message {
 // Request State Structure
 // ============================================================================
 
-/// Ephemeral per-request DHCPv6 transaction state
+/// Ephemeral per-request `DHCPv6` transaction state
 ///
 /// Replaces C's `struct state` from rfc3315.c lines 92-100. Tracks all information needed
-/// to process a single DHCPv6 request/reply cycle. Stack-allocated for each incoming message
+/// to process a single `DHCPv6` request/reply cycle. Stack-allocated for each incoming message
 /// and destroyed after reply transmission. Consolidates client identification (DUID), network
 /// context selection, option parsing, and accumulated tags for conditional configuration.
 ///
@@ -493,7 +514,7 @@ pub struct RequestState<'a> {
     /// Link address from relay or detected from interface
     pub link_address: Ipv6Addr,
     
-    /// Client MAC address (from link-layer or OPTION6_CLIENT_MAC)
+    /// Client MAC address (from link-layer or `OPTION6_CLIENT_MAC`)
     pub mac: [u8; DHCP_CHADDR_MAX],
     
     /// Actual length of MAC address (typically 6 for Ethernet)
@@ -502,29 +523,30 @@ pub struct RequestState<'a> {
     /// Accumulated configuration tags for option filtering
     pub tags: Vec<String>,
     
-    /// Client hostname from OPTION6_FQDN or OPTION6_HOSTNAME
+    /// Client hostname from `OPTION6_FQDN` or `OPTION6_HOSTNAME`
     pub hostname: Option<String>,
     
-    /// Client DUID extracted from OPTION6_CLIENT_ID
+    /// Client DUID extracted from `OPTION6_CLIENT_ID`
     client_duid: Option<Duid>,
     
-    /// Server DUID for OPTION6_SERVER_ID in replies
+    /// Server DUID for `OPTION6_SERVER_ID` in replies
     server_duid: Option<Duid>,
     
     /// IAID (Identity Association Identifier) for current IA being processed
     current_iaid: Option<u32>,
     
-    /// IA type being processed (IA_NA=3, IA_TA=4, IA_PD=25)
+    /// IA type being processed (`IA_NA=3`, `IA_TA=4`, `IA_PD=25`)
     current_ia_type: Option<u16>,
 }
 
-impl<'a> RequestState<'a> {
+impl RequestState<'_> {
     /// Create new request state with default values
     ///
     /// # Arguments
     /// * `interface` - Network interface index
     /// * `iface_name` - Interface name for logging
     /// * `link_address` - IPv6 link address for context selection
+    #[must_use] 
     pub fn new(interface: u32, iface_name: String, link_address: Ipv6Addr) -> Self {
         Self {
             context: None,
@@ -542,12 +564,13 @@ impl<'a> RequestState<'a> {
         }
     }
 
-    /// Set client DUID from OPTION6_CLIENT_ID
+    /// Set client DUID from `OPTION6_CLIENT_ID`
     pub fn set_client_duid(&mut self, duid: Duid) {
         self.client_duid = Some(duid);
     }
 
     /// Get client DUID
+    #[must_use] 
     pub fn client_duid(&self) -> Option<&Duid> {
         self.client_duid.as_ref()
     }
@@ -558,6 +581,7 @@ impl<'a> RequestState<'a> {
     }
 
     /// Get server DUID
+    #[must_use] 
     pub fn server_duid(&self) -> Option<&Duid> {
         self.server_duid.as_ref()
     }
@@ -577,6 +601,7 @@ impl<'a> RequestState<'a> {
     }
 
     /// Get MAC address as slice
+    #[must_use] 
     pub fn mac_slice(&self) -> &[u8] {
         &self.mac[..self.mac_len]
     }
@@ -586,7 +611,7 @@ impl<'a> RequestState<'a> {
 // Option Parsing Helpers
 // ============================================================================
 
-/// DHCPv6 option parsed from TLV structure
+/// `DHCPv6` option parsed from TLV structure
 ///
 /// Represents a single option in Type-Length-Value format per RFC 3315 Section 22.1:
 /// ```text
@@ -609,18 +634,18 @@ struct Dhcp6Option {
 
 /// Parse all options from TLV-encoded buffer
 ///
-/// Replaces C's repeated opt6_find() calls with single parse operation.
-/// Returns HashMap for O(1) lookup by option code.
+/// Replaces C's repeated `opt6_find()` calls with single parse operation.
+/// Returns `HashMap` for O(1) lookup by option code.
 ///
 /// # Arguments
 /// * `options_data` - Raw TLV-encoded options bytes
 ///
 /// # Returns
-/// HashMap mapping option codes to option data. If option appears multiple times,
+/// `HashMap` mapping option codes to option data. If option appears multiple times,
 /// only the last occurrence is retained (matches C behavior).
 ///
 /// # Errors
-/// Returns ParseError if option format is invalid (truncated length field)
+/// Returns `ParseError` if option format is invalid (truncated length field)
 fn parse_options(options_data: &[u8]) -> Result<HashMap<u16, Vec<u8>>, DnsmasqError> {
     let mut options = HashMap::new();
     let mut offset = 0;
@@ -656,7 +681,7 @@ fn parse_options(options_data: &[u8]) -> Result<HashMap<u16, Vec<u8>>, DnsmasqEr
     // Check for partial option header at end
     if offset != options_data.len() {
         debug!(
-            "DHCPv6 options padding: {} bytes remain after parsing",
+            "`DHCPv6` options padding: {} bytes remain after parsing",
             options_data.len() - offset
         );
     }
@@ -667,14 +692,14 @@ fn parse_options(options_data: &[u8]) -> Result<HashMap<u16, Vec<u8>>, DnsmasqEr
 /// Extract DUID from option data
 ///
 /// # Arguments
-/// * `data` - Raw option data from OPTION6_CLIENT_ID or OPTION6_SERVER_ID
+/// * `data` - Raw option data from `OPTION6_CLIENT_ID` or `OPTION6_SERVER_ID`
 ///
 /// # Returns
 /// Parsed DUID or error if format is invalid
 fn parse_duid(data: &[u8]) -> Result<Duid, DnsmasqError> {
     Duid::parse(data).map_err(|e| {
         DnsmasqError::Dhcp(DhcpError::ParseError {
-            message: format!("Invalid DUID: {}", e),
+            message: format!("Invalid DUID: {e}"),
         })
     })
 }
@@ -703,29 +728,34 @@ fn parse_ipv6_option(data: &[u8]) -> Result<Ipv6Addr, DnsmasqError> {
 }
 
 // ============================================================================
-// Main DHCPv6 Entry Point
+// Main `DHCPv6` Entry Point
 // ============================================================================
 
-/// Main DHCPv6 message processing entry point
+/// Main `DHCPv6` message processing entry point
 ///
 /// Corresponds to C's `dhcp6_reply()` function (rfc3315.c lines 269-302).
-/// Dispatches incoming DHCPv6 messages by type and initiates relay or direct processing.
+/// Dispatches incoming `DHCPv6` messages by type and initiates relay or direct processing.
 ///
 /// # Arguments
 /// * `daemon_state` - Global daemon state with DHCP configuration and lease database
-/// * `packet_data` - Raw DHCPv6 packet starting at message type byte
+/// * `packet_data` - Raw `DHCPv6` packet starting at message type byte
 /// * `interface` - Network interface index where packet arrived
 /// * `iface_name` - Interface name for logging
 /// * `client_addr` - Client IPv6 address (or relay address if relayed)
 /// * `is_unicast` - True if packet sent to server unicast address
 ///
 /// # Returns
-/// Serialized DHCPv6 reply packet or error
+/// Serialized `DHCPv6` reply packet or error
+///
+/// # Errors
+///
+/// Returns `DnsmasqError::Parse` if the packet is malformed or too short.
+/// Returns `DnsmasqError::Dhcp` for protocol-specific errors like missing required options.
 ///
 /// # Protocol Flow
 /// 1. Parse message header (type + transaction ID or relay fields)
-/// 2. If RELAY-FORW: call dhcp6_maybe_relay() for recursive relay processing
-/// 3. Otherwise: call dhcp6_no_relay() for direct client message handling
+/// 2. If RELAY-FORW: call `dhcp6_maybe_relay()` for recursive relay processing
+/// 3. Otherwise: call `dhcp6_no_relay()` for direct client message handling
 /// 4. Construct reply message (ADVERTISE or REPLY) with allocated addresses
 pub async fn dhcp6_reply(
     daemon_state: &DaemonState,
@@ -739,7 +769,7 @@ pub async fn dhcp6_reply(
     let msg = Dhcp6Message::parse(packet_data)?;
     
     debug!(
-        "DHCPv6 received {} from {} on {} (unicast: {})",
+        "`DHCPv6` received {} from {} on {} (unicast: {})",
         msg.get_message_type(),
         client_addr,
         iface_name,
@@ -753,7 +783,7 @@ pub async fn dhcp6_reply(
     if let Some(server_duid_bytes) = daemon_state.dhcp.server_duid.as_ref() {
         let server_duid = Duid::parse(server_duid_bytes)
             .map_err(|e| DnsmasqError::Dhcp(DhcpError::ParseError {
-                message: format!("Invalid server DUID: {}", e),
+                message: format!("Invalid server DUID: {e}"),
             }))?;
         state.set_server_duid(server_duid);
     }
@@ -775,10 +805,10 @@ pub async fn dhcp6_reply(
 // Relay Agent Processing
 // ============================================================================
 
-/// Process DHCPv6 RELAY-FORW message with recursive relay chain unwrapping
+/// Process `DHCPv6` RELAY-FORW message with recursive relay chain unwrapping
 ///
 /// Corresponds to C's `dhcp6_maybe_relay()` function (rfc3315.c lines 365-534).
-/// Handles DHCPv6 relay agent messages that encapsulate client requests through
+/// Handles `DHCPv6` relay agent messages that encapsulate client requests through
 /// multiple relay hops. Recursively unwraps nested RELAY-FORW messages until
 /// reaching the original client message, then processes it and wraps reply in
 /// RELAY-REPL messages for each relay hop.
@@ -793,13 +823,18 @@ pub async fn dhcp6_reply(
 /// # Returns
 /// Serialized RELAY-REPL message or error
 ///
+/// # Errors
+///
+/// Returns `DnsmasqError::Parse` if the relay message is malformed.
+/// Returns `DnsmasqError::Dhcp` if the hop count exceeds 32 or required options are missing.
+///
 /// # Relay Message Structure (RFC 3315 Section 7.1)
 /// - hop-count: Number of relay agents forwarding (must be <32)
 /// - link-address: Address to determine client network for context selection
 /// - peer-address: Address of previous relay or client
-/// - OPTION6_RELAY_MSG: Encapsulated client message or inner relay message
-/// - OPTION6_REMOTE_ID, OPTION6_SUBSCRIBER_ID: Vendor tags for configuration
-/// - OPTION6_CLIENT_MAC: Client link-layer address from first relay
+/// - `OPTION6_RELAY_MSG`: Encapsulated client message or inner relay message
+/// - `OPTION6_REMOTE_ID`, `OPTION6_SUBSCRIBER_ID`: Vendor tags for configuration
+/// - `OPTION6_CLIENT_MAC`: Client link-layer address from first relay
 pub async fn dhcp6_maybe_relay(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -829,16 +864,16 @@ pub async fn dhcp6_maybe_relay(
     // Check hop count limit (RFC 3315 Section 20)
     if hop_count >= MAX_RELAY_HOPS {
         warn!(
-            "DHCPv6 relay hop count {} exceeds maximum {}, dropping",
+            "`DHCPv6` relay hop count {} exceeds maximum {}, dropping",
             hop_count, MAX_RELAY_HOPS
         );
         return Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
-            message: format!("Hop count {} exceeds maximum", hop_count),
+            message: format!("Hop count {hop_count} exceeds maximum"),
         }));
     }
 
     debug!(
-        "DHCPv6 processing relay (hop: {}, link: {}, peer: {})",
+        "`DHCPv6` processing relay (hop: {}, link: {}, peer: {})",
         hop_count, link_address, peer_address
     );
 
@@ -860,13 +895,13 @@ pub async fn dhcp6_maybe_relay(
     // Extract vendor tags for configuration matching
     if let Some(remote_id_data) = options.get(&OPTION6_REMOTE_ID) {
         if let Ok(remote_id_str) = String::from_utf8(remote_id_data.clone()) {
-            state.add_tag(format!("remote-id:{}", remote_id_str));
+            state.add_tag(format!("remote-id:{remote_id_str}"));
         }
     }
 
     if let Some(subscriber_id_data) = options.get(&OPTION6_SUBSCRIBER_ID) {
         if let Ok(subscriber_id_str) = String::from_utf8(subscriber_id_data.clone()) {
-            state.add_tag(format!("subscriber-id:{}", subscriber_id_str));
+            state.add_tag(format!("subscriber-id:{subscriber_id_str}"));
         }
     }
 
@@ -877,7 +912,7 @@ pub async fn dhcp6_maybe_relay(
             if mac_data.len() >= 8 {
                 // Skip 2-byte hardware type, extract 6-byte MAC
                 state.set_mac(&mac_data[2..8]);
-                debug!("DHCPv6 extracted MAC from relay: {:02x?}", state.mac_slice());
+                debug!("`DHCPv6` extracted MAC from relay: {:02x?}", state.mac_slice());
             }
         }
     }
@@ -931,7 +966,7 @@ pub async fn dhcp6_maybe_relay(
 // Direct Client Message Processing
 // ============================================================================
 
-/// Process non-relay DHCPv6 client messages by type
+/// Process non-relay `DHCPv6` client messages by type
 ///
 /// Corresponds to C's `dhcp6_no_relay()` function (rfc3315.c lines 590-1104).
 /// Handles direct client messages including SOLICIT, REQUEST, CONFIRM, RENEW,
@@ -948,10 +983,14 @@ pub async fn dhcp6_maybe_relay(
 /// # Returns
 /// Serialized reply message (ADVERTISE or REPLY)
 ///
+/// # Errors
+///
+/// Returns `DnsmasqError::Dhcp` if required options are missing or if the message type is unsupported.
+///
 /// # RFC Compliance
 /// - RFC 3315 Section 15: Message validation requirements
 /// - RFC 3315 Section 17-18: Server message processing by type
-/// - RFC 3315 Section 18.2.1: UseMulticast status for incorrectly unicast messages
+/// - RFC 3315 Section 18.2.1: `UseMulticast` status for incorrectly unicast messages
 pub async fn dhcp6_no_relay(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -962,7 +1001,7 @@ pub async fn dhcp6_no_relay(
     let transaction_id = msg.get_transaction_id();
 
     debug!(
-        "DHCPv6 processing {} (xid: 0x{:06x}) on {}",
+        "`DHCPv6` processing {} (xid: 0x{:06x}) on {}",
         msg_type, transaction_id, state.iface_name
     );
 
@@ -976,7 +1015,7 @@ pub async fn dhcp6_no_relay(
         Some(duid)
     } else if msg_type != Dhcpv6MessageType::InformationRequest {
         // Missing CLIENT-ID for stateful message - drop silently per RFC 3315 Section 15
-        warn!("DHCPv6 {} missing CLIENT-ID, dropping", msg_type);
+        warn!("`DHCPv6` {} missing CLIENT-ID, dropping", msg_type);
         return Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
             message: "Missing CLIENT-ID option".to_string(),
         }));
@@ -994,13 +1033,13 @@ pub async fn dhcp6_no_relay(
             let server_duid = parse_duid(server_id_data)?;
             // Check if SERVER-ID matches our DUID
             if Some(&server_duid) != state.server_duid() {
-                debug!("DHCPv6 {} SERVER-ID mismatch, dropping", msg_type);
+                debug!("`DHCPv6` {} SERVER-ID mismatch, dropping", msg_type);
                 return Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
                     message: "SERVER-ID does not match".to_string(),
                 }));
             }
         } else {
-            warn!("DHCPv6 {} missing SERVER-ID, dropping", msg_type);
+            warn!("`DHCPv6` {} missing SERVER-ID, dropping", msg_type);
             return Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
                 message: "Missing SERVER-ID option".to_string(),
             }));
@@ -1015,7 +1054,7 @@ pub async fn dhcp6_no_relay(
             || msg_type == Dhcpv6MessageType::Decline)
     {
         info!(
-            "DHCPv6 {} sent unicast, replying with UseMulticast status",
+            "`DHCPv6` {} sent unicast, replying with UseMulticast status",
             msg_type
         );
         return build_use_multicast_reply(state, transaction_id);
@@ -1039,9 +1078,12 @@ pub async fn dhcp6_no_relay(
 
     // Reply header: message type + transaction ID
     builder.put_u8(reply_type.to_u8());
-    builder.put_u8((transaction_id >> 16) as u8);
-    builder.put_u8((transaction_id >> 8) as u8);
-    builder.put_u8(transaction_id as u8);
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        builder.put_u8((transaction_id >> 16) as u8);
+        builder.put_u8((transaction_id >> 8) as u8);
+        builder.put_u8(transaction_id as u8);
+    }
 
     // Add CLIENT-ID (echo from request)
     if let Some(client_id_data) = options.get(&OPTION6_CLIENT_ID) {
@@ -1102,7 +1144,7 @@ pub async fn dhcp6_no_relay(
         }
         _ => {
             return Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
-                message: format!("Unexpected message type: {}", msg_type),
+                message: format!("Unexpected message type: {msg_type}"),
             }));
         }
     }
@@ -1113,7 +1155,7 @@ pub async fn dhcp6_no_relay(
     Ok(builder.build())
 }
 
-/// Build UseMulticast error reply (RFC 3315 Section 18.2.1)
+/// Build `UseMulticast` error reply (RFC 3315 Section 18.2.1)
 fn build_use_multicast_reply(
     state: &RequestState,
     transaction_id: u32,
@@ -1122,9 +1164,12 @@ fn build_use_multicast_reply(
 
     // REPLY message header
     builder.put_u8(Dhcpv6MessageType::Reply.to_u8());
-    builder.put_u8((transaction_id >> 16) as u8);
-    builder.put_u8((transaction_id >> 8) as u8);
-    builder.put_u8(transaction_id as u8);
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        builder.put_u8((transaction_id >> 16) as u8);
+        builder.put_u8((transaction_id >> 8) as u8);
+        builder.put_u8(transaction_id as u8);
+    }
 
     // Echo CLIENT-ID if present
     if let Some(client_duid) = state.client_duid() {
@@ -1268,6 +1313,7 @@ async fn handle_renew_rebind(
 }
 
 /// Handle RELEASE message (explicit lease termination)
+#[allow(clippy::unused_async)]
 async fn handle_release(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -1289,12 +1335,13 @@ async fn handle_release(
     builder.put_data(b"Release successful");
     builder.end_option(status_pos).map_err(DhcpError::from)?;
 
-    info!("DHCPv6 RELEASE from client {:?}", client_duid);
+    info!("`DHCPv6` RELEASE from client {:?}", client_duid);
 
     Ok(())
 }
 
 /// Handle DECLINE message (address conflict notification)
+#[allow(clippy::unused_async)]
 async fn handle_decline(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -1316,12 +1363,13 @@ async fn handle_decline(
     builder.put_data(b"Decline processed");
     builder.end_option(status_pos).map_err(DhcpError::from)?;
 
-    warn!("DHCPv6 DECLINE from client {:?} - address conflict detected", client_duid);
+    warn!("`DHCPv6` DECLINE from client {:?} - address conflict detected", client_duid);
 
     Ok(())
 }
 
 /// Handle INFORMATION-REQUEST message (stateless configuration)
+#[allow(clippy::unused_async)]
 async fn handle_information_request(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -1329,7 +1377,7 @@ async fn handle_information_request(
     builder: &mut OutPacketBuilder,
 ) -> Result<(), DnsmasqError> {
     // Stateless configuration - only provide options, no address allocation
-    debug!("DHCPv6 INFORMATION-REQUEST - providing stateless configuration");
+    debug!("`DHCPv6` INFORMATION-REQUEST - providing stateless configuration");
     
     // Configuration options will be added by add_configuration_options()
     Ok(())
@@ -1339,9 +1387,9 @@ async fn handle_information_request(
 // Identity Association (IA) Processing
 // ============================================================================
 
-/// Process IA_NA (Identity Association for Non-temporary Addresses)
+/// Process `IA_NA` (Identity Association for Non-temporary Addresses)
 ///
-/// Corresponds to C's check_ia() and build_ia() combined for IA_NA processing
+/// Corresponds to C's `check_ia()` and `build_ia()` combined for `IA_NA` processing
 async fn process_ia_na(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -1439,7 +1487,7 @@ async fn process_ia_na(
     Ok(())
 }
 
-/// Process IA_TA (Identity Association for Temporary Addresses)
+/// Process `IA_TA` (Identity Association for Temporary Addresses)
 async fn process_ia_ta(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -1495,7 +1543,8 @@ async fn process_ia_ta(
     Ok(())
 }
 
-/// Process IA_PD (Identity Association for Prefix Delegation)
+/// Process `IA_PD` (Identity Association for Prefix Delegation)
+#[allow(clippy::unused_async)]
 async fn process_ia_pd(
     daemon_state: &DaemonState,
     state: &mut RequestState<'_>,
@@ -1538,6 +1587,7 @@ async fn process_ia_pd(
 }
 
 /// Check if addresses in IA are on-link
+#[allow(clippy::unused_async)]
 async fn check_addresses_on_link(
     daemon_state: &DaemonState,
     state: &RequestState<'_>,
@@ -1562,7 +1612,8 @@ async fn check_addresses_on_link(
 
 /// Allocate IPv6 address from context pool
 ///
-/// Corresponds to C's add_address() function
+/// Corresponds to C's `add_address()` function
+#[allow(clippy::unused_async)]
 async fn allocate_ia_address(
     daemon_state: &DaemonState,
     state: &RequestState<'_>,
@@ -1581,7 +1632,7 @@ async fn allocate_ia_address(
     
     // Use DUID hash to deterministically select address
     let duid_bytes = client_duid.as_bytes();
-    let hash = duid_bytes.iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32));
+    let hash = duid_bytes.iter().fold(0u32, |acc, &b| acc.wrapping_add(u32::from(b)));
     let offset = (hash % 0x1000) as u16;
     
     let allocated_addr = Ipv6Addr::new(
@@ -1590,7 +1641,7 @@ async fn allocate_ia_address(
 
     // Create lease in database (simplified - real implementation uses lease6_allocate)
     info!(
-        "DHCPv6 allocated {} address {} for DUID {:?} IAID {}",
+        "`DHCPv6` allocated {} address {} for DUID {:?} IAID {}",
         if lease_type == LeaseType::TemporaryAddress { "temporary" } else { "non-temporary" },
         allocated_addr,
         client_duid,
@@ -1615,17 +1666,21 @@ fn validate_address_in_pool(
 // Public IA Validation and Construction Functions
 // ============================================================================
 
-/// Validate Identity Association options (IA_NA/IA_TA/IA_PD)
+/// Validate Identity Association options (`IA_NA/IA_TA/IA_PD`)
 ///
 /// Corresponds to C's `check_ia()` function (rfc3315.c lines 1107-1210).
 /// Validates IA option structure and extracts address/prefix suboptions.
 ///
 /// # Arguments
-/// * `ia_type` - IA type code (OPTION6_IA_NA=3, OPTION6_IA_TA=4, OPTION6_IA_PD=25)
+/// * `ia_type` - IA type code (`OPTION6_IA_NA=3`, `OPTION6_IA_TA=4`, `OPTION6_IA_PD=25`)
 /// * `ia_data` - Raw IA option data
 ///
 /// # Returns
 /// Ok if IA is valid, Err with validation details
+///
+/// # Errors
+///
+/// Returns `DnsmasqError::Dhcp` if the IA data is too short or has an invalid format.
 pub fn check_ia(ia_type: u16, ia_data: &[u8]) -> Result<(), DnsmasqError> {
     match ia_type {
         OPTION6_IA_NA | OPTION6_IA_PD => {
@@ -1670,7 +1725,7 @@ pub fn check_ia(ia_type: u16, ia_data: &[u8]) -> Result<(), DnsmasqError> {
             Ok(())
         }
         _ => Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
-            message: format!("Unknown IA type: {}", ia_type),
+            message: format!("Unknown IA type: {ia_type}"),
         })),
     }
 }
@@ -1678,7 +1733,7 @@ pub fn check_ia(ia_type: u16, ia_data: &[u8]) -> Result<(), DnsmasqError> {
 /// Construct Identity Association response with allocated addresses
 ///
 /// Corresponds to C's `build_ia()` function (rfc3315.c lines 1213-1437).
-/// Builds IA_NA/IA_TA/IA_PD response option with allocated addresses/prefixes
+/// Builds `IA_NA/IA_TA/IA_PD` response option with allocated addresses/prefixes
 /// and calculated T1/T2 timers.
 ///
 /// # Arguments
@@ -1691,6 +1746,10 @@ pub fn check_ia(ia_type: u16, ia_data: &[u8]) -> Result<(), DnsmasqError> {
 ///
 /// # Returns
 /// Ok if IA constructed successfully
+///
+/// # Errors
+///
+/// Returns `DnsmasqError::Dhcp` if the IA option cannot be built due to invalid parameters.
 pub fn build_ia(
     builder: &mut OutPacketBuilder,
     ia_type: u16,
@@ -1743,7 +1802,7 @@ pub fn build_ia(
             Ok(())
         }
         _ => Err(DnsmasqError::Dhcp(DhcpError::ValidationError {
-            message: format!("Unsupported IA type for build: {}", ia_type),
+            message: format!("Unsupported IA type for build: {ia_type}"),
         })),
     }
 }
@@ -1754,7 +1813,7 @@ pub fn build_ia(
 
 /// Add configuration options to reply (DNS servers, domain search, etc.)
 ///
-/// Corresponds to C's add_options() calls in dhcp6_no_relay()
+/// Corresponds to C's `add_options()` calls in `dhcp6_no_relay()`
 fn add_configuration_options(
     daemon_state: &DaemonState,
     state: &RequestState,
@@ -1763,6 +1822,7 @@ fn add_configuration_options(
     // Apply tag-based option filtering
     // TODO: Implement proper tag-based filtering with correct HashSet<DhcpNetId> types
     // let filtered_options = option_filter(&client_tags, &context_tags, &option_tags);
+    #[allow(clippy::no_effect_underscore_binding)]
     let _filtered_options = true; // Placeholder - all options included for now
 
     // Add DNS servers (OPTION6_DNS_SERVER = 23)
@@ -1785,7 +1845,7 @@ fn add_configuration_options(
         builder.end_option(domain_search_pos).map_err(DhcpError::from)?;
     }
 
-    debug!("Added configuration options to DHCPv6 reply");
+    debug!("Added configuration options to `DHCPv6` reply");
     Ok(())
 }
 
@@ -1799,7 +1859,11 @@ fn encode_domain_name(domain: &str) -> Vec<u8> {
         if label.is_empty() {
             continue;
         }
-        encoded.push(label.len() as u8);
+        // DNS labels are limited to 63 bytes, so this cast is safe
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            encoded.push(label.len() as u8);
+        }
         encoded.extend_from_slice(label.as_bytes());
     }
     

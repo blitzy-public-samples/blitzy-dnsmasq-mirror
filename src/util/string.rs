@@ -775,6 +775,11 @@ pub fn canonicalize_hostname(name: &str) -> Result<String, IdnError> {
 ///
 /// When the "idn" feature is not enabled, this function simply returns the input string
 /// unchanged. Non-ASCII names will not be converted to Punycode.
+///
+/// # Errors
+///
+/// This function never returns an error when IDN support is disabled. The `Result` return type
+/// is maintained for API consistency with the IDN-enabled version.
 #[cfg(not(feature = "idn"))]
 pub fn canonicalize_hostname(name: &str) -> Result<String, IdnError> {
     Ok(name.to_string())

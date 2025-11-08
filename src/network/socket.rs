@@ -1118,6 +1118,7 @@ pub fn extract_packet_info(_msg: &()) -> PacketInfo {
 /// # Ok(())
 /// # }
 /// ```
+#[allow(clippy::unused_async)]
 pub async fn create_icmpv6_socket() -> Result<i32, SocketError> {
     #[cfg(unix)]
     {

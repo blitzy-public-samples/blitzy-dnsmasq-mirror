@@ -651,6 +651,7 @@ impl NetworkPlatform for LinuxPlatform {
 /// # Ok(())
 /// # }
 /// ```
+#[allow(clippy::unused_async)]
 pub async fn init() -> Result<LinuxPlatform, LinuxPlatformError> {
     // Initialize netlink (required)
     let netlink = NetlinkSocket::new()?;

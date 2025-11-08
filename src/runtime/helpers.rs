@@ -561,13 +561,13 @@ impl HelperHandle {
 /// - The task yields between events to prevent starvation
 pub fn spawn_helper_process(
     script_path: Option<PathBuf>,
-    #[allow(unused_variables)] lua_script_path: Option<PathBuf>,
+    #[allow(unused_variables)] lua_script_path: &Option<PathBuf>,
     script_timeout: Duration,
 ) -> Result<HelperHandle, HelperError> {
     let (sender, mut receiver) = mpsc::unbounded_channel::<ScriptEvent>();
 
     #[cfg(feature = "lua")]
-    let lua = if let Some(lua_path) = lua_script_path {
+    let lua = if let Some(lua_path) = lua_script_path.as_ref() {
         info!("Loading Lua script: {}", lua_path.display());
         let lua = Lua::new();
 
@@ -1169,7 +1169,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_helper_handle_close() {
-        let handle = spawn_helper_process(None, None, DEFAULT_SCRIPT_TIMEOUT).unwrap();
+        let handle = spawn_helper_process(None, &None, DEFAULT_SCRIPT_TIMEOUT).unwrap();
 
         assert!(!handle.is_closed());
         handle.close();

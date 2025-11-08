@@ -188,7 +188,7 @@ pub struct DnsState {
     /// Corresponds to C's `struct server *servers`
     pub upstream_servers: Vec<Server>,
 
-    /// DNS servers list (alias for upstream_servers for compatibility)
+    /// DNS servers list (alias for `upstream_servers` for compatibility)
     pub servers: Vec<AllAddr>,
 
     /// Domain search list
@@ -264,7 +264,7 @@ pub struct DhcpState {
     /// DHCP lease database (active and expired leases)
     pub lease_database: DhcpLeaseDatabase,
 
-    /// DHCPv6 server DUID (DHCP Unique Identifier)
+    /// `DHCPv6` server DUID (DHCP Unique Identifier)
     pub server_duid: Option<Vec<u8>>,
 
     /// DHCP options configuration
