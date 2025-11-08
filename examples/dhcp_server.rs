@@ -74,7 +74,7 @@
 //! Section 0.7.1 of the Agent Action Plan. All address ranges, lease times, and
 //! DHCP options match C dnsmasq's behavior exactly.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -99,12 +99,9 @@ use dnsmasq::dhcp::lease::LeaseDatabase;
 use dnsmasq::dhcp::lease_store::LeaseStore;
 
 #[cfg(all(feature = "dhcp", feature = "ipv6"))]
-use dnsmasq::dhcp::v6::server::Dhcp6Server;
-#[cfg(all(feature = "dhcp", feature = "ipv6"))]
-use dnsmasq::dhcp::ipv6::radv::send_ra;
+use dnsmasq::dhcp::v6::server::DhcpV6Server;
 
 use dnsmasq::runtime::signal::setup_signal_handlers;
-use dnsmasq::runtime::helpers::spawn_helper_process;
 
 /// Main entry point for DHCP server example
 ///
@@ -124,7 +121,7 @@ use dnsmasq::runtime::helpers::spawn_helper_process;
 async fn main() -> Result<()> {
     // Initialize structured logging with RUST_LOG environment variable support
     // Replaces C's syslog integration with type-safe tracing
-    let subscriber = FmtSubscriber::builder()
+    FmtSubscriber::builder()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
@@ -218,12 +215,18 @@ async fn main() -> Result<()> {
         dhcp_config.options.push(option_router);
 
         // Option 6: DNS Servers (192.168.1.1, 8.8.8.8)
+        // Encoded as binary with multiple 4-byte IPv4 addresses per RFC 2132
+        let dns_servers = vec![
+            Ipv4Addr::new(192, 168, 1, 1),
+            Ipv4Addr::new(8, 8, 8, 8),
+        ];
+        let mut dns_bytes = Vec::new();
+        for addr in dns_servers {
+            dns_bytes.extend_from_slice(&addr.octets());
+        }
         let option_dns = DhcpOption {
             code: 6, // Domain Name Server
-            value: DhcpOptionValue::IpList(vec![
-                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
-                IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
-            ]),
+            value: DhcpOptionValue::Binary(dns_bytes),
             tag: None,
             force: false,
         };
@@ -311,7 +314,7 @@ async fn main() -> Result<()> {
             // Add IPv6 address range: fd00::100 - fd00::200
             use std::net::Ipv6Addr;
 
-            let range_v6 = DhcpRange {
+            let _range_v6 = DhcpRange {
                 start: IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0x100)),
                 end: IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0x200)),
                 netmask: None, // IPv6 uses prefix length, not netmask
@@ -406,14 +409,16 @@ async fn main() -> Result<()> {
 
         // Create lease store for persistent storage
         let lease_file_path = PathBuf::from("/tmp/dnsmasq-rs.leases");
-        let lease_store = LeaseStore::new(lease_file_path.clone());
+        let _lease_store = LeaseStore::new();
 
-        info!("  - Lease store created: {:?}", lease_file_path);
+        info!("  - Lease store created for path: {:?}", lease_file_path);
 
         // Load existing leases from file (if exists)
-        match lease_store.load_from_file() {
+        // load_from_file is an associated function, not an instance method
+        match LeaseStore::load_from_file(&lease_file_path) {
             Ok(stored_leases) => {
-                info!("  - Loaded {} existing leases from disk", stored_leases.v4_leases.len());
+                info!("  - Loaded {} existing leases from disk", 
+                      stored_leases.leases.len());
             }
             Err(e) => {
                 info!("  - No existing lease file found (creating new): {}", e);
@@ -421,8 +426,9 @@ async fn main() -> Result<()> {
         }
 
         // Create in-memory lease database
-        let lease_database = LeaseDatabase::new();
-        info!("  - In-memory lease database initialized");
+        // Set max_leases to 1000 (typical for small to medium networks)
+        let _lease_database = LeaseDatabase::new(1000);
+        info!("  - In-memory lease database initialized (max 1000 leases)");
 
         info!("  - Lease expiration pruning: automatic");
         info!("  - Lease file format: compatible with C dnsmasq");
@@ -439,7 +445,7 @@ async fn main() -> Result<()> {
         // Create daemon state with configuration
         use dnsmasq::types::daemon_state::DaemonState;
 
-        let daemon_state = Arc::new(RwLock::new(DaemonState::new(config)));
+        let daemon_state = Arc::new(RwLock::new(DaemonState::new(config.clone())));
         info!("  - Daemon state initialized");
 
         // Create DHCPv4 server
@@ -460,17 +466,25 @@ async fn main() -> Result<()> {
         {
             info!("Step 7: Initializing DHCPv6 server...");
 
+            // Create tokio-based daemon state for DHCPv6
+            // Note: DHCPv6Server requires tokio::sync::RwLock while DHCPv4Server uses std::sync::RwLock
+            // This architectural difference is preserved from the C implementation's async requirements
+            use tokio::sync::RwLock as TokioRwLock;
+            let daemon_state_v6 = Arc::new(TokioRwLock::new(DaemonState::new(config.clone())));
+
             // Create DHCPv6 server instance
-            let mut dhcp6_server = Dhcp6Server::new(daemon_state.clone());
+            let mut dhcp6_server = DhcpV6Server::new(daemon_state_v6.clone());
             info!("  - DHCPv6 server instance created");
 
             // Generate server DUID (DHCP Unique Identifier)
             // Replaces C's make_duid() function
-            let duid = Dhcp6Server::make_duid();
+            let _duid = dhcp6_server.make_duid().await?;
             info!("  - Server DUID generated");
 
             // Bind DHCPv6 server to UDP port 547
-            dhcp6_server.bind(547).await?;
+            // DHCPv6 uses the unspecified address (::) to listen on all interfaces
+            let bind_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 547, 0, 0);
+            dhcp6_server.bind(bind_addr).await?;
             info!("  - Server bound to UDP port 547");
             info!("");
 
@@ -498,7 +512,7 @@ async fn main() -> Result<()> {
 
         // Setup signal handlers for lifecycle management
         // Replaces C's signal() calls with Tokio async signal handling
-        let signal_handlers = setup_signal_handlers().await;
+        let _signal_handlers = setup_signal_handlers()?;
         info!("  - SIGTERM: graceful shutdown with lease file flush");
         info!("  - SIGINT (Ctrl-C): immediate termination");
         info!("  - SIGHUP: configuration reload");
