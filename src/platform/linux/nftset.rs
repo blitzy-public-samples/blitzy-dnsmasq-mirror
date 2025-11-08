@@ -468,7 +468,7 @@ mod tests {
         assert_ne!(ipv4_filter, ipv6_filter);
 
         // Test Debug trait
-        let debug_str = format!("{:?}", ipv4_filter);
+        let debug_str = format!("{ipv4_filter:?}");
         assert!(debug_str.contains("IPv4Only"));
     }
 
@@ -476,14 +476,14 @@ mod tests {
     fn test_error_display() {
         // Test that error messages are properly formatted
         let init_error = NftsetError::InitFailed("test failure".to_string());
-        let error_msg = format!("{}", init_error);
+        let error_msg = format!("{init_error}");
         assert!(error_msg.contains("test failure"));
 
         let mismatch_error = NftsetError::AddressFamilyMismatch {
             expected: "IPv4".to_string(),
             actual: "IPv6".to_string(),
         };
-        let error_msg = format!("{}", mismatch_error);
+        let error_msg = format!("{mismatch_error}");
         assert!(error_msg.contains("IPv4"));
         assert!(error_msg.contains("IPv6"));
     }
@@ -516,7 +516,7 @@ mod tests {
 
         for case in valid_cases {
             let result = parse_setname_and_filter(case);
-            assert!(result.is_ok(), "Failed to parse: {}", case);
+            assert!(result.is_ok(), "Failed to parse: {case}");
             let (setname, _) = result.unwrap();
             assert_eq!(setname, case);
         }
@@ -541,7 +541,7 @@ mod tests {
                 println!("I/O error during nft initialization");
             }
             Err(e) => {
-                panic!("Unexpected error type: {:?}", e);
+                panic!("Unexpected error type: {e:?}");
             }
         }
     }

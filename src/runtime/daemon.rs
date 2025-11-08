@@ -947,57 +947,6 @@ pub fn create_pid_file(config: &Config) -> DnsmasqResult<PidFile> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    /// Test PID file creation and cleanup
-    #[test]
-    fn test_pid_file_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let pid_path = temp_dir.path().join("test.pid");
-
-        // Create a minimal config with PID file
-        let mut config = Config::default();
-        config.files.pid_file = Some(pid_path.clone());
-
-        // Create PID file
-        let pid_file = create_pid_file(&config).unwrap();
-
-        // Verify file exists and contains a PID
-        assert!(pid_path.exists());
-        let contents = fs::read_to_string(&pid_path).unwrap();
-        let written_pid: i32 = contents.trim().parse().unwrap();
-        assert_eq!(written_pid, getpid().as_raw());
-
-        // Drop PidFile and verify cleanup
-        drop(pid_file);
-        assert!(!pid_path.exists());
-    }
-
-    /// Test privilege dropping validation (requires non-root for safety)
-    #[test]
-    fn test_privilege_drop_non_root() {
-        let config = Config::default();
-
-        // If not running as root, should skip without error
-        let result = drop_privileges(&config);
-        assert!(result.is_ok());
-    }
-
-    /// Test daemonization in foreground mode
-    #[test]
-    fn test_daemonize_foreground() {
-        let config = Config::default();
-
-        // With debug mode, should not fork
-        let result = daemonize(&config);
-        assert!(result.is_ok());
-    }
-}
-
 // =============================================================================
 // ERROR CONVERSIONS
 // =============================================================================
@@ -1054,5 +1003,56 @@ impl From<DaemonError> for SystemError {
 impl From<DaemonError> for DnsmasqError {
     fn from(err: DaemonError) -> Self {
         DnsmasqError::System(SystemError::from(err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Test PID file creation and cleanup
+    #[test]
+    fn test_pid_file_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let pid_path = temp_dir.path().join("test.pid");
+
+        // Create a minimal config with PID file
+        let mut config = Config::default();
+        config.files.pid_file = Some(pid_path.clone());
+
+        // Create PID file
+        let pid_file = create_pid_file(&config).unwrap();
+
+        // Verify file exists and contains a PID
+        assert!(pid_path.exists());
+        let contents = fs::read_to_string(&pid_path).unwrap();
+        let written_pid: i32 = contents.trim().parse().unwrap();
+        assert_eq!(written_pid, getpid().as_raw());
+
+        // Drop PidFile and verify cleanup
+        drop(pid_file);
+        assert!(!pid_path.exists());
+    }
+
+    /// Test privilege dropping validation (requires non-root for safety)
+    #[test]
+    fn test_privilege_drop_non_root() {
+        let config = Config::default();
+
+        // If not running as root, should skip without error
+        let result = drop_privileges(&config);
+        assert!(result.is_ok());
+    }
+
+    /// Test daemonization in foreground mode
+    #[test]
+    fn test_daemonize_foreground() {
+        let config = Config::default();
+
+        // With debug mode, should not fork
+        let result = daemonize(&config);
+        assert!(result.is_ok());
     }
 }

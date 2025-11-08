@@ -368,7 +368,7 @@ mod tests {
         let _: Option<ForwardRecord> = None;
     }
 
-    /// Verify DnsResult type alias works correctly
+    /// Verify `DnsResult` type alias works correctly
     #[test]
     fn test_dns_result_alias() {
         // Test that DnsResult<T> is equivalent to Result<T, DnsError>
@@ -379,7 +379,7 @@ mod tests {
         assert!(returns_dns_result().is_ok());
     }
 
-    /// Verify error type conversion from DnsError to DnsmasqError
+    /// Verify error type conversion from `DnsError` to `DnsmasqError`
     #[test]
     fn test_error_conversion() {
         // Test that DnsError can be converted to DnsmasqError

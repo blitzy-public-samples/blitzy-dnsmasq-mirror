@@ -1069,7 +1069,7 @@ mod tests {
 
         let err_string = dnssec_err.to_string();
         assert!(err_string.contains("example.com"));
-        assert!(err_string.contains("8"));
+        assert!(err_string.contains('8'));
     }
 
     #[test]

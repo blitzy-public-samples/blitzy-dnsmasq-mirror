@@ -1236,8 +1236,7 @@ mod tests {
             }
             Err(e) => {
                 println!(
-                    "Failed to create netlink socket (may require privileges): {}",
-                    e
+                    "Failed to create netlink socket (may require privileges): {e}"
                 );
             }
         }

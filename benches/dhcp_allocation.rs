@@ -486,8 +486,6 @@ fn bench_lease_persistence(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_update_file");
     group.sample_size(10); // Fewer samples due to disk I/O
     
-    let rt = Runtime::new().unwrap();
-    
     for db_size in [100, 1000, 10000] {
         let leases_v4 = generate_test_leases_v4(db_size / 2, Ipv4Addr::new(192, 168, 1, 100));
         let leases_v6 = generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
@@ -511,12 +509,9 @@ fn bench_lease_persistence(c: &mut Criterion) {
                     let temp_dir = TempDir::new().unwrap();
                     let lease_file = temp_dir.path().join("dnsmasq.leases");
                     
-                    rt.block_on(async {
-                        // Perform atomic write: write to temp then rename
-                        LeaseStore::write_leases(&lease_file, &database)
-                            .await
-                            .expect("Failed to write leases");
-                    });
+                    // Perform atomic write: write to temp then rename
+                    LeaseStore::write_leases(&lease_file, &database)
+                        .expect("Failed to write leases");
                     
                     black_box(temp_dir)
                 });
@@ -777,11 +772,8 @@ fn bench_lease_database_loading(c: &mut Criterion) {
         let temp_dir = TempDir::new().unwrap();
         let lease_file = temp_dir.path().join("dnsmasq.leases");
         
-        rt.block_on(async {
-            LeaseStore::write_leases(&lease_file, &database)
-                .await
-                .expect("Failed to write test lease database");
-        });
+        LeaseStore::write_leases(&lease_file, &database)
+            .expect("Failed to write test lease database");
         
         group.bench_with_input(
             BenchmarkId::new("db_size", db_size),

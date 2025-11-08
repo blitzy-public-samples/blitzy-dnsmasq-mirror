@@ -1024,7 +1024,7 @@ async fn test_whitespace_handling() {
     
     for line in variations {
         let parsed = LeaseStore::parse_lease_line(line)
-            .expect(&format!("Failed to parse: {}", line));
+            .unwrap_or_else(|_| panic!("Failed to parse: {}", line));
         
         match parsed {
             ParsedLine::Lease(lease) => {
