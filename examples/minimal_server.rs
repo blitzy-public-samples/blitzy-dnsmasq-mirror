@@ -99,8 +99,10 @@
 
 use anyhow::Result;
 use dnsmasq::{ConfigBuilder, DaemonState};
-use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, RwLock};
+use dnsmasq::config::{DnsConfig, DhcpConfig, NetworkConfig};
+use dnsmasq::config::types::{DhcpRange, UpstreamServer};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use tracing::{info, error};
 use tracing_subscriber::FmtSubscriber;
 
@@ -126,41 +128,54 @@ async fn main() -> Result<()> {
     
     // Create minimal configuration using builder pattern
     // This demonstrates programmatic configuration without a config file
-    let config = ConfigBuilder::new()
-        // DNS configuration: non-privileged port for testing
-        .dns(dnsmasq::config::DnsConfig {
-            cache_size: 150,  // Default cache size (150 entries)
-            port: 5353,       // Non-privileged port (standard is 53)
-            upstream_servers: vec![
-                IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))  // Google Public DNS
-            ],
-            ..Default::default()
-        })
-        // DHCP configuration: simple address range
-        .dhcp(dnsmasq::config::DhcpConfig {
-            ranges: vec![
-                dnsmasq::config::types::DhcpRange {
-                    start: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
-                    end: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 200)),
-                    lease_time: Some(std::time::Duration::from_secs(43200)), // 12 hours
-                    ..Default::default()
-                }
-            ],
-            ..Default::default()
-        })
-        // Network configuration: listen on all interfaces
-        .network(dnsmasq::config::NetworkConfig {
-            bind_interfaces: true,
-            listen_addresses: vec![],  // Empty means all interfaces
-            ..Default::default()
-        })
-        .build()?;
+    
+    // Configure upstream DNS server
+    let upstream = UpstreamServer::new(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+        53
+    ));
+    
+    // Create DHCP range with custom lease time
+    let mut dhcp_range = DhcpRange::new_v4(
+        Ipv4Addr::new(192, 168, 1, 100),
+        Ipv4Addr::new(192, 168, 1, 200),
+    );
+    dhcp_range.lease_time = std::time::Duration::from_secs(43200); // 12 hours
+    
+    // Build configuration using builder pattern
+    // Note: ConfigBuilder methods take &mut self, so we need to use separate statements
+    let mut config_builder = ConfigBuilder::new();
+    
+    // DNS configuration: cache size and upstream servers
+    config_builder.dns(DnsConfig {
+        cache_size: 150,  // Default cache size (150 entries)
+        upstream_servers: vec![upstream],  // Google Public DNS
+        ..Default::default()
+    });
+    
+    // DHCP configuration: simple address range
+    config_builder.dhcp(DhcpConfig {
+        ranges: vec![dhcp_range],
+        ..Default::default()
+    });
+    
+    // Network configuration: listen on all interfaces with non-privileged port
+    config_builder.network(NetworkConfig {
+        port: 5353,       // Non-privileged port (standard is 53)
+        bind_interfaces: true,
+        listen_addresses: vec![],  // Empty means all interfaces
+        ..Default::default()
+    });
+    
+    let config = config_builder.build()?;
 
     info!("Configuration built successfully");
     info!("  DNS cache size: {}", config.dns.cache_size);
-    info!("  DNS port: {}", config.dns.port);
+    info!("  DNS port: {}", config.network.port);
     info!("  Upstream DNS: {:?}", config.dns.upstream_servers);
-    info!("  DHCP ranges: {} configured", config.dhcp.ranges.len());
+    if let Some(ref dhcp_config) = config.dhcp {
+        info!("  DHCP ranges: {} configured", dhcp_config.ranges.len());
+    }
 
     // ============================================================================
     // Service Initialization
@@ -168,35 +183,31 @@ async fn main() -> Result<()> {
 
     // Create shared daemon state with thread-safe access
     // This replaces C's global `struct daemon` variable
-    let daemon_state = Arc::new(RwLock::new(
-        DaemonState::new(Arc::new(config.clone()))
+    // Using std::sync::RwLock for compatibility with server constructors
+    let daemon_state = Arc::new(std::sync::RwLock::new(
+        DaemonState::new(config.clone())
     ));
 
-    // Initialize DNS cache with default size
-    info!("Initializing DNS cache...");
-    let dns_cache = dnsmasq::dns::cache::DnsCache::new(config.dns.cache_size);
-    info!("DNS cache initialized with capacity {}", config.dns.cache_size);
-
     // Initialize DHCP lease database
+    // Note: DnsCache is created internally by DnsServer::new
     info!("Initializing DHCP lease database...");
-    let lease_db = dnsmasq::dhcp::lease::LeaseDatabase::new(
-        std::path::PathBuf::from("/var/lib/dnsmasq/dnsmasq.leases")
-    );
-    info!("DHCP lease database initialized");
+    let max_leases = 1000; // Maximum number of DHCP leases
+    let lease_db = dnsmasq::dhcp::lease::LeaseDatabase::new(max_leases);
+    info!("DHCP lease database initialized with max_leases={}", max_leases);
 
     // ============================================================================
     // DNS Server Setup
     // ============================================================================
 
-    // Create DNS server instance
-    info!("Creating DNS server on port {}...", config.dns.port);
-    let dns_server = dnsmasq::dns::server::DnsServer::new(
-        dnsmasq::dns::server::ServerConfig {
-            port: config.dns.port,
-            upstream_servers: config.dns.upstream_servers.clone(),
-            cache: Some(dns_cache),
-            ..Default::default()
-        },
+    // Create DNS server instance using builder pattern
+    info!("Creating DNS server on port {}...", config.network.port);
+    let server_config = dnsmasq::dns::server::ServerConfig::default()
+        .with_port(config.network.port)
+        .with_cache_size(config.dns.cache_size)
+        .with_query_logging(false);
+    
+    let mut dns_server = dnsmasq::dns::server::DnsServer::new(
+        server_config,
         Arc::new(config.clone())
     )?;
     info!("DNS server created successfully");
@@ -233,7 +244,7 @@ async fn main() -> Result<()> {
     // Setup signal handlers for graceful shutdown
     // Handles SIGTERM, SIGINT (Ctrl+C), SIGHUP (reload)
     info!("Setting up signal handlers...");
-    let signal_handler = dnsmasq::runtime::signal::setup_signal_handlers()?;
+    let mut signal_handler = dnsmasq::runtime::signal::setup_signal_handlers()?;
     info!("Signal handlers configured (SIGTERM, SIGINT, SIGHUP)");
 
     // ============================================================================
@@ -257,13 +268,28 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Run event loop with signal handling
-    // This coordinates DNS and DHCP tasks with signal events
-    let event_loop_result = dnsmasq::runtime::event_loop::run_event_loop(
-        Arc::new(config),
-        daemon_state.clone(),
-        signal_handler,
-    ).await;
+    // Wait for termination signal
+    // This demonstrates simple signal handling without full event loop
+    info!("Waiting for termination signal...");
+    loop {
+        if let Some(signal) = signal_handler.recv().await {
+            match signal {
+                dnsmasq::runtime::signal::SignalEvent::Terminate => {
+                    info!("Received termination signal, shutting down...");
+                    break;
+                }
+                dnsmasq::runtime::signal::SignalEvent::Reload => {
+                    info!("Received reload signal (ignored in minimal example)");
+                }
+                dnsmasq::runtime::signal::SignalEvent::DumpCache => {
+                    info!("Received cache dump signal (ignored in minimal example)");
+                }
+                _ => {
+                    info!("Received other signal (ignored in minimal example)");
+                }
+            }
+        }
+    }
 
     // ============================================================================
     // Graceful Shutdown
@@ -283,23 +309,14 @@ async fn main() -> Result<()> {
 
     // Save DHCP lease database before exit
     info!("Saving DHCP lease database...");
-    if let Ok(state) = daemon_state.read() {
+    if let Ok(_state) = daemon_state.read() {
         // Save leases to disk (lease database handles atomic writes)
         // This ensures no lease data is lost on shutdown
-        lease_db.save()?;
+        let lease_path = std::path::PathBuf::from("/var/lib/dnsmasq/dnsmasq.leases");
+        lease_db.save(lease_path, None)?;
         info!("DHCP lease database saved successfully");
     }
 
-    // Check event loop result
-    match event_loop_result {
-        Ok(()) => {
-            info!("Event loop exited successfully");
-            info!("Minimal dnsmasq server shutdown complete");
-            Ok(())
-        }
-        Err(e) => {
-            error!("Event loop error: {}", e);
-            Err(e.into())
-        }
-    }
+    info!("Minimal dnsmasq server shutdown complete");
+    Ok(())
 }
