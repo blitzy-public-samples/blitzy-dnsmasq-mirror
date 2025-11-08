@@ -331,13 +331,17 @@ mod tests {
     fn test_crypto_exports_accessible() {
         // Verify crypto module exports are accessible
         use super::crypto::Algorithm;
-        let _alg = Algorithm::RsaSha256;
+        let alg = Algorithm::RsaSha256;
+        // Verify the algorithm type is correct
+        assert!(matches!(alg, Algorithm::RsaSha256));
     }
 
     #[test]
     fn test_validation_exports_accessible() {
         // Verify validation module exports are accessible
         use super::validation::DnssecStatus;
-        let _status = DnssecStatus::Secure;
+        let status = DnssecStatus::Secure;
+        // Verify the status type is correct
+        assert!(matches!(status, DnssecStatus::Secure));
     }
 }

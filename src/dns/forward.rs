@@ -1090,12 +1090,12 @@ mod tests {
 
     #[test]
     fn test_mark_and_cleanup_servers() {
+        const MARK_FLAG: u16 = 0x1000;
+
         let mut servers = vec![
             Server::new("8.8.8.8:53".parse().unwrap()).mark_as_from_dbus(),
             Server::new("8.8.4.4:53".parse().unwrap()),
         ];
-
-        const MARK_FLAG: u16 = 0x1000;
 
         // Mark first server
         mark_servers(&mut servers[..1], MARK_FLAG, true);

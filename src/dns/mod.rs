@@ -372,11 +372,18 @@ mod tests {
     #[test]
     fn test_dns_result_alias() {
         // Test that DnsResult<T> is equivalent to Result<T, DnsError>
-        fn returns_dns_result() -> DnsResult<()> {
-            Ok(())
+        fn returns_dns_result(should_fail: bool) -> DnsResult<()> {
+            if should_fail {
+                Err(DnsError::InvalidQuery {
+                    message: "test error".to_string(),
+                })
+            } else {
+                Ok(())
+            }
         }
 
-        assert!(returns_dns_result().is_ok());
+        assert!(returns_dns_result(false).is_ok());
+        assert!(returns_dns_result(true).is_err());
     }
 
     /// Verify error type conversion from `DnsError` to `DnsmasqError`

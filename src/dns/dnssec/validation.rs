@@ -1826,7 +1826,7 @@ mod tests {
         assert_eq!(compare_serial_numbers(1, 2), Ordering::Less);
 
         // Test wraparound
-        assert_eq!(compare_serial_numbers(1, 0xFFFFFFFF), Ordering::Greater);
+        assert_eq!(compare_serial_numbers(1, 0xFFFF_FFFF), Ordering::Greater);
     }
 
     #[test]
