@@ -129,18 +129,18 @@ use tokio::sync::RwLock;
 
 // External crate imports - from external_imports schema
 use anyhow::Context;
+#[allow(unused_imports)] // Parser trait needed for Cli::parse() method
 use clap::Parser;
 use tracing::error;
 
 // Internal module imports - ONLY from depends_on_files
-use dnsmasq::{Config}; // from src/lib.rs
+use dnsmasq::Config; // from src/lib.rs
 use dnsmasq::config::options::Cli;
 use dnsmasq::constants::ExitCode;
 use dnsmasq::runtime::daemon::{create_pid_file, daemonize, drop_privileges};
 use dnsmasq::runtime::event_loop::run_event_loop;
-use dnsmasq::runtime::signal::{setup_signal_handlers, SignalEvent};
+use dnsmasq::runtime::signal::setup_signal_handlers;
 use dnsmasq::types::daemon_state::DaemonState;
-use dnsmasq::types::errors::DnsmasqResult;
 use dnsmasq::util::logging::{init_logging, LogConfig};
 
 /// Main entry point for dnsmasq-rs daemon
@@ -203,7 +203,7 @@ async fn main() {
     // Phase 2: Build configuration from CLI args, config files, and defaults
     // Replaces C: main() lines 97-150 (read_opts() call)
     // The Config struct aggregates all configuration sources with validation
-    let config = match Config::from_cli(&cli)
+    let config = match dnsmasq::config::load_config(&cli)
         .context("Failed to load and validate configuration") {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -218,7 +218,7 @@ async fn main() {
     // Phase 3: Initialize logging subsystem
     // Replaces C: main() lines 234-299 (log_start() call from log.c)
     // Build logging configuration from daemon config
-    let log_config = LogConfig::from_config(&config);
+    let log_config = build_log_config(&config);
     
     if let Err(e) = init_logging(&log_config)
         .context("Logging subsystem initialization") {
@@ -252,19 +252,8 @@ async fn main() {
     // Phase 6: Initialize daemon state before privilege drop
     // Replaces C: main() lines 300-806 (state initialization)
     // This includes binding to privileged ports which requires root
-    let state = match DaemonState::new(config.clone()).await {
-        Ok(s) => Arc::new(RwLock::new(s)),
-        Err(e) => {
-            error!("Failed to initialize daemon state: {}", e);
-            // Map error type to appropriate exit code
-            let exit_code = match e {
-                dnsmasq::types::errors::DnsmasqError::Network(_) => ExitCode::BadNet,
-                dnsmasq::types::errors::DnsmasqError::File(_) => ExitCode::FileError,
-                _ => ExitCode::InitError,
-            };
-            process::exit(exit_code.as_i32());
-        }
-    };
+    // Note: DaemonState::new() is infallible and returns DaemonState directly
+    let state = Arc::new(RwLock::new(DaemonState::new(config.clone())));
 
     // Phase 7: Drop privileges after binding privileged ports
     // Replaces C: main() lines 869-994 (privilege dropping sequence)
@@ -277,7 +266,7 @@ async fn main() {
     // Phase 8: Set up async signal handlers
     // Replaces C: main() lines 150-234 (sigaction() calls, self-pipe setup)
     // Tokio provides native async signal handling without self-pipe trick
-    let mut signal_handler = match setup_signal_handlers() {
+    let signal_handler = match setup_signal_handlers() {
         Ok(handler) => handler,
         Err(e) => {
             error!("Failed to set up signal handlers: {}", e);
@@ -288,9 +277,12 @@ async fn main() {
     // Phase 9: Run main event loop
     // Replaces C: main() lines 1056-1287 (while(1) poll loop)
     // The event loop runs until a termination signal is received
-    let event_loop_result = run_event_loop_with_signals(
+    // Note: run_event_loop handles all signal processing internally
+    let config_arc = Arc::new(config);
+    let event_loop_result = run_event_loop(
+        config_arc,
         state.clone(),
-        &mut signal_handler,
+        signal_handler,
     ).await;
 
     // Phase 10: Handle shutdown and cleanup
@@ -309,95 +301,65 @@ async fn main() {
     }
 }
 
-/// Run event loop with integrated signal handling
+/// Build LogConfig from the main Config structure
 ///
-/// This function combines the main event loop with signal processing, using `tokio::select!`
-/// to multiplex between network events and signal events. This replaces the C implementation's
-/// `poll()` loop that manually checked file descriptors and the self-pipe.
+/// Converts the `LoggingConfig` from the main configuration into a `LogConfig`
+/// suitable for initializing the tracing subsystem.
 ///
 /// # Arguments
 ///
-/// * `state` - Shared daemon state wrapped in `Arc<RwLock<>>` for concurrent access
-/// * `signal_handler` - Signal handler providing async streams for POSIX signals
+/// * `config` - Main daemon configuration
 ///
 /// # Returns
 ///
-/// - `Ok(())` on graceful shutdown via SIGTERM or SIGINT
-/// - `Err(DnsmasqError)` on fatal error during event processing
-///
-/// # Signal Handling
-///
-/// - **SIGHUP**: Reload configuration and flush caches (handled inline)
-/// - **SIGUSR1**: Dump statistics to log (handled inline)
-/// - **SIGTERM/SIGINT**: Graceful shutdown (returns Ok)
+/// A `LogConfig` with settings derived from the daemon configuration
 ///
 /// # C Source Reference
 ///
-/// Replaces: `src/dnsmasq.c` main() lines 1056-1287 (main event loop)
-async fn run_event_loop_with_signals(
-    state: Arc<RwLock<DaemonState>>,
-    signal_handler: &mut dnsmasq::runtime::signal::SignalHandler,
-) -> DnsmasqResult<()> {
-    loop {
-        tokio::select! {
-            // Handle signals
-            signal_result = signal_handler.recv() => {
-                match signal_result {
-                    Some(SignalEvent::Reload) => {
-                        // SIGHUP received - reload configuration
-                        // Replaces C: async_event() lines 1451-1543 (EVENT_RELOAD case)
-                        tracing::info!("Received SIGHUP, reloading configuration");
-                        
-                        let mut state_guard = state.write().await;
-                        if let Err(e) = state_guard.reload_config().await {
-                            error!("Failed to reload configuration: {}", e);
-                            // Continue running despite reload failure (C behavior)
-                        }
-                    }
-                    Some(SignalEvent::Dump) => {
-                        // SIGUSR1 received - dump statistics
-                        // Replaces C: async_event() lines 1544-1598 (EVENT_DUMP case)
-                        tracing::info!("Received SIGUSR1, dumping statistics");
-                        
-                        let state_guard = state.read().await;
-                        state_guard.dump_stats();
-                    }
-                    Some(SignalEvent::Terminate) => {
-                        // SIGTERM or SIGINT received - graceful shutdown
-                        // Replaces C: async_event() lines 1599-1620 (EVENT_TERM case)
-                        tracing::info!("Received termination signal, shutting down");
-                        
-                        // Flush all state to persistent storage
-                        let state_guard = state.read().await;
-                        if let Err(e) = state_guard.flush_state().await {
-                            error!("Error flushing state during shutdown: {}", e);
-                        }
-                        
-                        return Ok(());
-                    }
-                    Some(SignalEvent::Rotate) => {
-                        // SIGUSR2 received - rotate logs
-                        // This is a Rust-specific addition for log rotation
-                        tracing::info!("Received SIGUSR2, rotating logs");
-                        // Log rotation is handled automatically by tracing-appender
-                        // This event is primarily for logging the action
-                    }
-                    None => {
-                        // Signal stream closed - should not happen in normal operation
-                        error!("Signal handler stream closed unexpectedly");
-                        return Err(dnsmasq::types::errors::DnsmasqError::Runtime(
-                            "Signal handler failure".into()
-                        ));
-                    }
-                }
-            }
-            
-            // Handle network events (DNS, DHCP, TFTP)
-            result = run_event_loop(state.clone()) => {
-                // Event loop returned - this means a fatal error occurred
-                // Normal operation should continue indefinitely until signal
-                return result;
-            }
-        }
+/// Replaces: Implicit log configuration based on command-line flags in C version
+fn build_log_config(config: &Config) -> LogConfig {
+    use tracing::Level;
+    
+    // Determine log level based on configuration
+    // In C version, --log-debug enables DEBUG level, otherwise INFO
+    let max_level = if config.logging.log_queries || config.logging.log_dhcp {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
+    
+    // Enable syslog by default (Unix platforms), unless log file specified
+    let enable_syslog = config.logging.log_file.is_none();
+    
+    // Enable file logging if log_file is specified
+    let enable_file = config.logging.log_file.clone();
+    
+    // Enable stderr logging for foreground mode (determined by init_logging based on terminal)
+    let enable_stderr = true; // Will be auto-detected by init_logging
+    
+    // Convert SyslogFacility enum to numeric code
+    // Syslog facility codes: DAEMON=3, USER=1, LOCAL0-7=16-23
+    use dnsmasq::config::SyslogFacility;
+    let syslog_facility = Some(match config.logging.facility {
+        SyslogFacility::Daemon => 3,
+        SyslogFacility::User => 1,
+        SyslogFacility::Local0 => 16,
+        SyslogFacility::Local1 => 17,
+        SyslogFacility::Local2 => 18,
+        SyslogFacility::Local3 => 19,
+        SyslogFacility::Local4 => 20,
+        SyslogFacility::Local5 => 21,
+        SyslogFacility::Local6 => 22,
+        SyslogFacility::Local7 => 23,
+    });
+    
+    LogConfig {
+        enable_syslog,
+        enable_file,
+        enable_stderr,
+        enable_json: false, // JSON logging not in original C version
+        max_level,
+        syslog_facility,
+        file_rotation: None, // No rotation in C version
     }
 }
