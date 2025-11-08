@@ -4,7 +4,7 @@
 
 //! # IPv6 Stateless Address Autoconfiguration (SLAAC) - RFC 4862
 //!
-//! This module implements IPv6 SLAAC functionality for dnsmasq's DHCPv6 server,
+//! This module implements IPv6 SLAAC functionality for dnsmasq's `DHCPv6` server,
 //! translating `src/slaac.c` (475 lines) from C to safe Rust.
 //!
 //! ## Purpose
@@ -12,7 +12,7 @@
 //! SLAAC allows IPv6 hosts to automatically configure their addresses using Router
 //! Advertisement (RA) prefixes combined with their hardware addresses. This module:
 //! - Generates SLAAC IPv6 addresses from RA prefixes and hardware addresses
-//! - Performs Duplicate Address Detection (DAD) via ICMPv6 Echo Request
+//! - Performs Duplicate Address Detection (DAD) via `ICMPv6` Echo Request
 //! - Converts MAC-48 addresses to Modified EUI-64 interface identifiers
 //! - Automatically registers confirmed SLAAC addresses in DNS cache
 //! - Tracks address state with exponential backoff for DAD retries
@@ -20,8 +20,8 @@
 //! ## Key Functions
 //!
 //! - `slaac_add_addrs()`: Generate SLAAC addresses from RA prefixes and hardware addresses
-//! - `periodic_slaac()`: Perform periodic DAD via ICMPv6 Echo Request with exponential backoff
-//! - `slaac_ping_reply()`: Process ICMPv6 Echo Reply to detect address conflicts and confirm uniqueness
+//! - `periodic_slaac()`: Perform periodic DAD via `ICMPv6` Echo Request with exponential backoff
+//! - `slaac_ping_reply()`: Process `ICMPv6` Echo Reply to detect address conflicts and confirm uniqueness
 //!
 //! ## EUI-64 Conversion (RFC 2464 Section 4)
 //!
@@ -37,7 +37,7 @@
 //!
 //! ## Duplicate Address Detection (DAD)
 //!
-//! Uses ICMPv6 Echo Request (ping) as an alternative to Neighbor Solicitation for DAD:
+//! Uses `ICMPv6` Echo Request (ping) as an alternative to Neighbor Solicitation for DAD:
 //! - Exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048 seconds
 //! - Random jitter added to prevent synchronization
 //! - Gives up after 12 retries with EHOSTUNREACH error
@@ -47,7 +47,7 @@
 //!
 //! - RFC 4862 Section 5.5.3: IPv6 address formation from prefix and IID
 //! - RFC 4291 Appendix A: Modified EUI-64 interface identifier derivation
-//! - RFC 4443: ICMPv6 Echo Request/Reply for DAD
+//! - RFC 4443: `ICMPv6` Echo Request/Reply for DAD
 //! - RFC 2464 Section 4: MAC-48 to EUI-64 conversion
 //!
 //! ## Memory Safety
@@ -92,29 +92,29 @@ use crate::util::time::monotonic_time;
 // CONSTANTS
 // =============================================================================
 
-/// ICMPv6 Echo Request type (RFC 4443 Section 4.1)
+/// `ICMPv6` Echo Request type (RFC 4443 Section 4.1)
 const ICMP6_ECHO_REQUEST: u8 = 128;
 
-/// ICMPv6 Echo Reply type (RFC 4443 Section 4.2)
+/// `ICMPv6` Echo Reply type (RFC 4443 Section 4.2)
 const ICMP6_ECHO_REPLY: u8 = 129;
 
-/// ICMPv6 protocol number for IPv6
+/// `ICMPv6` protocol number for IPv6
 const IPPROTO_ICMPV6: u16 = 58;
 
 /// Maximum DAD backoff attempts before giving up
 const MAX_DAD_BACKOFF: u32 = 12;
 
-/// Hardware address type: Ethernet (from if_arp.h)
+/// Hardware address type: Ethernet (from `if_arp.h`)
 const ARPHRD_ETHER: u16 = 1;
 
-/// Hardware address type: IEEE 802.11 wireless (from if_arp.h)
+/// Hardware address type: IEEE 802.11 wireless (from `if_arp.h`)
 const ARPHRD_IEEE802: u16 = 6;
 
-/// Hardware address type: EUI-64 (from if_arp.h)
+/// Hardware address type: EUI-64 (from `if_arp.h`)
 #[cfg(target_os = "linux")]
 const ARPHRD_EUI64: u16 = 27;
 
-/// Hardware address type: IEEE 1394 FireWire (from if_arp.h)
+/// Hardware address type: IEEE 1394 `FireWire` (from `if_arp.h`)
 #[cfg(target_os = "linux")]
 const ARPHRD_IEEE1394: u16 = 24;
 
@@ -133,7 +133,7 @@ pub enum SlaacError {
     #[error("Duplicate Address Detection timeout for {0}")]
     DadTimeout(Ipv6Addr),
 
-    /// ICMPv6 packet construction error
+    /// `ICMPv6` packet construction error
     #[error("Failed to construct ICMPv6 packet: {0}")]
     PacketConstruction(String),
 
@@ -187,7 +187,7 @@ impl SlaacAddress {
     ///
     /// # Returns
     ///
-    /// New `SlaacAddress` with backoff=1 and ping_time=now for immediate DAD
+    /// New `SlaacAddress` with `backoff=1` and `ping_time=now` for immediate DAD
     fn new(addr: Ipv6Addr, now: u64) -> Self {
         Self {
             addr,
@@ -210,23 +210,23 @@ impl SlaacAddress {
     ///
     /// # Returns
     ///
-    /// `true` if ping_time is zero (given up), `false` otherwise
+    /// `true` if `ping_time` is zero (given up), `false` otherwise
     fn is_given_up(&self) -> bool {
         self.ping_time == 0
     }
 }
 
-/// ICMPv6 Echo Request/Reply packet structure
+/// `ICMPv6` Echo Request/Reply packet structure
 ///
-/// Corresponds to C's `struct ping_packet` from radv-protocol.h:20-25
+/// Corresponds to C's `struct ping_packet` from `radv-protocol.h:20-25`
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct PingPacket {
-    /// ICMPv6 type (128 for Echo Request, 129 for Echo Reply)
+    /// `ICMPv6` type (128 for Echo Request, 129 for Echo Reply)
     type_: u8,
-    /// ICMPv6 code (0 for Echo Request/Reply)
+    /// `ICMPv6` code (0 for Echo Request/Reply)
     code: u8,
-    /// ICMPv6 checksum (calculated by kernel for raw sockets)
+    /// `ICMPv6` checksum (calculated by kernel for raw sockets)
     checksum: u16,
     /// Echo identifier (used to match replies to requests)
     identifier: u16,
@@ -246,17 +246,17 @@ static mut PING_ID: u16 = 0;
 
 /// Generate and validate SLAAC IPv6 addresses from Router Advertisement prefixes
 ///
-/// Constructs SLAAC IPv6 addresses by combining RA prefixes from configured DHCPv6
+/// Constructs SLAAC IPv6 addresses by combining RA prefixes from configured `DHCPv6`
 /// contexts with Modified EUI-64 interface identifiers derived from the lease's
-/// hardware address. Supports MAC-48 (Ethernet), EUI-64, and FireWire hardware
+/// hardware address. Supports MAC-48 (Ethernet), EUI-64, and `FireWire` hardware
 /// address formats. Performs the universal/local bit flip required by Modified EUI-64.
-/// Initiates Duplicate Address Detection (DAD) via ICMPv6 ping for newly created
+/// Initiates Duplicate Address Detection (DAD) via `ICMPv6` ping for newly created
 /// addresses. Reuses existing confirmed addresses to avoid unnecessary re-validation.
 /// Updates DNS cache with hostname mappings for all SLAAC addresses.
 ///
 /// # Arguments
 ///
-/// * `state` - Mutable reference to daemon state containing DHCPv6 contexts, ICMPv6 socket, and packet buffer
+/// * `state` - Mutable reference to daemon state containing `DHCPv6` contexts, `ICMPv6` socket, and packet buffer
 /// * `lease` - DHCP lease containing hardware address and hostname
 /// * `now` - Current time in seconds since epoch for initializing ping timing
 /// * `force` - If true, forces re-validation of existing SLAAC addresses by resetting ping timers
@@ -295,17 +295,17 @@ pub fn slaac_add_addrs(
     dns_cache: &mut DnsCache,
 ) -> SlaacResult<()> {
     // Extract lease information (varies by protocol version)
-    let (hwaddr, hwaddr_len, hwaddr_type, hostname, last_interface, flags, clid) = match lease {
-        Lease::V4(v4_lease) => {
+    match lease {
+        Lease::V4(_v4_lease) => {
             // DHCPv4 leases don't support SLAAC
             return Ok(());
         }
-        Lease::V6(v6_lease) => {
+        Lease::V6(_v6_lease) => {
             // For DHCPv6, we need to extract hardware address from DUID or other source
             // For now, return as SLAAC primarily works with DHCPv4 leases that have hardware addresses
             return Ok(());
         }
-    };
+    }
 
     // Note: The actual implementation requires extending the Lease structure to include:
     // - slaac_address: Option<Box<SlaacAddress>> field
@@ -321,19 +321,19 @@ pub fn slaac_add_addrs(
     Ok(())
 }
 
-/// Perform periodic Duplicate Address Detection for SLAAC addresses via ICMPv6 ping
+/// Perform periodic Duplicate Address Detection for SLAAC addresses via `ICMPv6` ping
 ///
-/// Implements timer-driven DAD by sending ICMPv6 Echo Request packets to SLAAC addresses
+/// Implements timer-driven DAD by sending `ICMPv6` Echo Request packets to SLAAC addresses
 /// that require validation. Uses exponential backoff strategy starting at 1 second, doubling
 /// up to 2048 seconds (backoff 12), with random jitter to avoid synchronization. Gives up
 /// after 12 retries if EHOSTUNREACH error persists (address unreachable). Initializes global
-/// ping_id on first invocation. Returns next scheduled event time for event loop timer management.
+/// `ping_id` on first invocation. Returns next scheduled event time for event loop timer management.
 ///
 /// # Arguments
 ///
 /// * `now` - Current time in seconds since epoch for determining which pings are due
 /// * `leases` - Mutable reference to lease database for iterating through all leases
-/// * `icmp6fd` - ICMPv6 raw socket file descriptor for sending Echo Requests
+/// * `icmp6fd` - `ICMPv6` raw socket file descriptor for sending Echo Requests
 ///
 /// # Returns
 ///
@@ -392,20 +392,20 @@ pub fn periodic_slaac(
     Ok(next_event)
 }
 
-/// Process ICMPv6 Echo Reply to confirm SLAAC address uniqueness or detect conflicts
+/// Process `ICMPv6` Echo Reply to confirm SLAAC address uniqueness or detect conflicts
 ///
-/// Handles incoming ICMPv6 Echo Reply packets to complete Duplicate Address Detection (DAD)
-/// for SLAAC addresses. Verifies packet identifier matches our ping_id to confirm it's a
+/// Handles incoming `ICMPv6` Echo Reply packets to complete Duplicate Address Detection (DAD)
+/// for SLAAC addresses. Verifies packet identifier matches our `ping_id` to confirm it's a
 /// response to our DAD probe. Searches all leases for SLAAC addresses matching the reply
 /// sender address. On match, sets backoff to 0 indicating address confirmed and available.
-/// Logs confirmation to syslog unless OPT_QUIET_DHCP6 is set. Updates DNS cache with confirmed
+/// Logs confirmation to syslog unless `OPT_QUIET_DHCP6` is set. Updates DNS cache with confirmed
 /// addresses to enable hostname resolution. Receipt of Echo Reply from a SLAAC address we're
 /// probing indicates another host is already using that address (duplicate detected).
 ///
 /// # Arguments
 ///
 /// * `sender` - IPv6 address that sent the Echo Reply packet
-/// * `packet` - Received ICMPv6 packet buffer containing Echo Reply
+/// * `packet` - Received `ICMPv6` packet buffer containing Echo Reply
 /// * `interface` - Network interface name where packet was received
 /// * `leases` - Mutable reference to lease database for finding matching SLAAC addresses
 /// * `dns_cache` - Mutable reference to DNS cache for registering confirmed addresses
@@ -414,6 +414,13 @@ pub fn periodic_slaac(
 /// # Returns
 ///
 /// `Ok(())` on success, `Err(SlaacError)` if processing fails
+///
+/// # Errors
+///
+/// Returns error if:
+/// - Packet is too short to contain valid `ICMPv6` Echo Reply header
+/// - Packet identifier doesn't match our `ping_id`
+/// - DNS cache update fails
 ///
 /// # C Source Reference
 ///
@@ -523,10 +530,10 @@ pub fn slaac_ping_reply(
 ///
 /// ```ignore
 /// let mac = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-/// let eui64 = mac_to_eui64(&mac);
+/// let eui64 = mac_to_eui64(mac);
 /// assert_eq!(eui64, [0x02, 0x11, 0x22, 0xFF, 0xFE, 0x33, 0x44, 0x55]);
 /// ```
-fn mac_to_eui64(mac: &[u8; 6]) -> [u8; 8] {
+fn mac_to_eui64(mac: [u8; 6]) -> [u8; 8] {
     let mut eui64 = [0u8; 8];
 
     // Copy first 3 bytes of MAC
@@ -562,7 +569,7 @@ fn mac_to_eui64(mac: &[u8; 6]) -> [u8; 8] {
 /// # Returns
 ///
 /// Complete IPv6 address
-fn ipv6_from_prefix_and_iid(prefix: &Ipv6Addr, iid: &[u8; 8]) -> Ipv6Addr {
+fn ipv6_from_prefix_and_iid(prefix: &Ipv6Addr, iid: [u8; 8]) -> Ipv6Addr {
     let prefix_bytes = prefix.octets();
     let mut addr_bytes = [0u8; 16];
 
@@ -570,7 +577,7 @@ fn ipv6_from_prefix_and_iid(prefix: &Ipv6Addr, iid: &[u8; 8]) -> Ipv6Addr {
     addr_bytes[0..8].copy_from_slice(&prefix_bytes[0..8]);
 
     // Copy interface identifier (last 8 bytes)
-    addr_bytes[8..16].copy_from_slice(iid);
+    addr_bytes[8..16].copy_from_slice(&iid);
 
     Ipv6Addr::from(addr_bytes)
 }
@@ -587,7 +594,7 @@ mod tests {
     fn test_mac_to_eui64_conversion() {
         // Test case from RFC 2464 Section 4
         let mac = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-        let eui64 = mac_to_eui64(&mac);
+        let eui64 = mac_to_eui64(mac);
 
         // Expected: 02:11:22:FF:FE:33:44:55
         assert_eq!(eui64[0], 0x02); // Universal bit flipped
@@ -604,7 +611,7 @@ mod tests {
     fn test_mac_to_eui64_universal_bit_flip() {
         // Test with MAC that has universal bit set
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
-        let eui64 = mac_to_eui64(&mac);
+        let eui64 = mac_to_eui64(mac);
 
         // Universal bit should be flipped to 0
         assert_eq!(eui64[0] & 0x02, 0x00);
@@ -615,7 +622,7 @@ mod tests {
         let prefix = Ipv6Addr::new(0x2001, 0x0db8, 0x0000, 0x0000, 0, 0, 0, 0);
         let iid = [0x02, 0x11, 0x22, 0xFF, 0xFE, 0x33, 0x44, 0x55];
 
-        let addr = ipv6_from_prefix_and_iid(&prefix, &iid);
+        let addr = ipv6_from_prefix_and_iid(&prefix, iid);
 
         // Expected: 2001:db8::211:22ff:fe33:4455
         assert_eq!(
