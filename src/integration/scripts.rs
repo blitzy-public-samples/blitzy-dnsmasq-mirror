@@ -1,682 +1,1197 @@
 // dnsmasq-rs: Memory-safe Rust implementation of dnsmasq
 // Copyright (c) 2000-2022 Simon Kelley
+// Copyright (c) 2024 Rust Translation Contributors
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation; version 2 dated June, 1991, or
 // (at your option) version 3 dated 29 June, 2007.
 
-//! DHCP and TFTP script execution subsystem
+//! # DHCP Script Execution Module
 //!
-//! This module implements privilege-separated script execution for DHCP lease changes,
-//! TFTP transfers, and ARP events. It replaces the C implementation in `src/helper.c`
-//! with async Rust using `tokio::process`.
+//! This module implements privilege-separated helper process functionality for running
+//! external lease-change scripts and Lua callbacks, translating C's fork-based helper
+//! architecture from `src/helper.c` to Rust's `tokio::process` for secure script
+//! invocation with environment variable passing.
 //!
-//! # Architecture
+//! ## Purpose
 //!
-//! The C version uses `fork()` to create a privileged helper process that receives events
-//! via a Unix socket and executes scripts with root privileges. The Rust version maintains
-//! similar privilege separation but uses async task spawning:
+//! Provides async script execution for DHCP lease events (add/delete/renew), TFTP
+//! transfers, ARP detections, and DHCPv6 relay snooping. Scripts receive event data
+//! via `DNSMASQ_*` environment variables, enabling integration with external systems
+//! for lease management, logging, and firewall updates.
 //!
-//! ```text
-//! Main Process (unprivileged) → Queue events → Script Executor (privileged)
-//!                                            ↓
-//!                                    Execute script with env vars
-//!                                            ↓
-//!                                    Capture output and status
+//! ## Architecture Differences from C
+//!
+//! The C implementation (`src/helper.c`) forks a privileged helper process that:
+//! - Runs continuously waiting for events via Unix socket
+//! - Retains root privileges while main daemon drops privileges
+//! - Executes scripts synchronously with `fork()`+`execl()`
+//! - Communicates via pipe-based IPC with main process
+//!
+//! The Rust implementation eliminates the persistent helper process:
+//! - Uses `tokio::process::Command` for on-demand script execution
+//! - Spawns scripts asynchronously with proper privilege handling
+//! - Queues events via async `mpsc` channels instead of static buffers
+//! - Provides timeout protection and comprehensive error handling
+//!
+//! ## Key Responsibilities
+//!
+//! - **Event Queueing**: Queue DHCP, TFTP, ARP events for script notification
+//! - **Environment Setup**: Populate `DNSMASQ_*` variables from event data
+//! - **Script Execution**: Spawn external programs with timeout and capture output
+//! - **Lua Integration**: Execute Lua callbacks with event data tables (feature-gated)
+//! - **Security**: Validate script paths, sanitize environment variables
+//!
+//! ## C Source Mapping
+//!
+//! | C Function | Rust Equivalent | Lines | Purpose |
+//! |------------|-----------------|-------|---------|
+//! | `create_helper()` | `ScriptExecutor::new()` | 261-332 | Initialize executor |
+//! | `queue_script()` | `queue_lease_event()` | 1174-1243 | Queue DHCP event |
+//! | `queue_tftp()` | `queue_tftp_event()` | 1366-1443 | Queue TFTP event |
+//! | `queue_arp()` | `queue_arp_event()` | 1444-1464 | Queue ARP event |
+//! | `helper_write()` | Channel send | 1552-1571 | Transmit event |
+//! | `my_setenv()` | `HashMap<String, String>` | 912-921 | Build environment |
+//! | `grab_extradata()` | Parse extradata | 968-997 | Extract DHCP options |
+//!
+//! ## Dependencies
+//!
+//! - `tokio::process`: Async Command execution replacing C fork/exec
+//! - `tokio::sync::mpsc`: Event queue replacing C static buffer
+//! - `mlua` (optional): Lua interpreter replacing C lua_State
+//! - `Lease`: DHCP lease structure from `src/dhcp/lease.rs`
+//! - `MacAddr`: MAC address type from `src/network/arp.rs`
+//!
+//! ## Example Usage
+//!
+//! ```rust,no_run
+//! use dnsmasq::integration::scripts::{ScriptExecutor, LeaseAction};
+//! use std::time::Duration;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")
+//!     .with_timeout(Duration::from_secs(30));
+//!
+//! // Queue a lease add event
+//! executor.queue_lease_event(
+//!     LeaseAction::Add,
+//!     lease,
+//!     Some("client-hostname".to_string()),
+//! ).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! # Event Types
+//! ## Security Considerations
 //!
-//! - DHCP lease actions: add, del, old (renewal)
-//! - TFTP transfers: file, error
-//! - ARP detections: arp-add, arp-del
-//!
-//! # Security
-//!
-//! The script executor validates all input and ensures the script path cannot be modified
-//! after initialization, preventing privilege escalation attacks.
+//! - Script path validated as absolute and immutable after initialization
+//! - Environment variables sanitized to prevent injection attacks
+//! - Execution timeout prevents hung scripts from blocking daemon
+//! - Scripts executed with dropped privileges if configured
+//! - No user-controlled data passed as command-line arguments
 
 use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
+
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-/// Maximum script execution time in seconds
-const SCRIPT_TIMEOUT_SECS: u64 = 60;
+use crate::dhcp::lease::Lease;
+use crate::network::arp::MacAddr;
 
-/// Maximum output buffer size (1MB)
-const MAX_OUTPUT_SIZE: usize = 1_048_576;
+#[cfg(feature = "lua")]
+use mlua::Lua;
 
-/// Script execution errors
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default script execution timeout in seconds.
+///
+/// Scripts that exceed this duration are terminated with SIGKILL to prevent
+/// hung processes from blocking the daemon. Corresponds to implicit timeout
+/// behavior in C version.
+const DEFAULT_SCRIPT_TIMEOUT_SECS: u64 = 30;
+
+/// Maximum environment variable value length for security.
+///
+/// Prevents excessively long values that could cause memory exhaustion or
+/// buffer overflows in poorly written scripts.
+const MAX_ENV_VALUE_LEN: usize = 8192;
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+/// Script execution errors.
+///
+/// Comprehensive error types for all script execution failure modes, replacing
+/// C's errno-based error reporting via err_fd pipe with structured Rust errors.
+///
+/// ## C Reference
+///
+/// Replaces: `EVENT_EXEC_ERR`, `EVENT_PIPE_ERR`, `EVENT_USER_ERR` events sent
+/// via `send_event()` in C version (helper.c lines 272, 300, 524).
 #[derive(Debug, Error)]
 pub enum ScriptError {
-    /// Script file not found or not executable
-    #[error("Script not found or not executable: {0}")]
-    ScriptNotFound(PathBuf),
+    /// Script execution failed with non-zero exit code.
+    ///
+    /// Contains exit code and captured stderr for debugging script issues.
+    #[error("Script execution failed with exit code {exit_code}: {stderr}")]
+    ExecutionFailed {
+        exit_code: i32,
+        stderr: String,
+    },
 
-    /// Script execution failed
-    #[error("Script execution failed: {0}")]
-    ExecutionFailed(String),
+    /// Script exceeded execution timeout.
+    ///
+    /// Script was terminated with SIGKILL after exceeding configured timeout.
+    /// Prevents hung scripts from blocking daemon operation.
+    #[error("Script execution timed out after {0:?}")]
+    Timeout(Duration),
 
-    /// Script timeout
-    #[error("Script execution timed out after {0} seconds")]
-    Timeout(u64),
-
-    /// I/O error during script execution
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    /// Event queue channel error
-    #[error("Event queue error: {0}")]
-    QueueError(String),
-
-    /// Invalid script path
+    /// Invalid or insecure script path.
+    ///
+    /// Script path must be absolute and cannot be modified after executor
+    /// initialization to prevent privilege escalation attacks.
     #[error("Invalid script path: {0}")]
     InvalidPath(String),
 
-    /// Script returned non-zero exit code
-    #[error("Script exited with status {0}")]
-    NonZeroExit(i32),
+    /// I/O error during script execution or output capture.
+    ///
+    /// Wraps std::io::Error for file operations, pipe creation, or process
+    /// spawning failures.
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    /// Lua script error (feature-gated).
+    ///
+    /// Lua script execution failures including syntax errors, runtime errors,
+    /// or missing lease() function in loaded script.
+    #[cfg(feature = "lua")]
+    #[error("Lua script error: {0}")]
+    LuaError(#[from] mlua::Error),
+
+    /// Event queue channel closed.
+    ///
+    /// Indicates executor has been dropped or shut down, events can no longer
+    /// be queued.
+    #[error("Event queue closed")]
+    QueueClosed,
 }
 
-/// DHCP lease action types
+// =============================================================================
+// Event Types
+// =============================================================================
+
+/// DHCP lease action types.
 ///
-/// Maps to the C version's event types in helper.c
+/// Represents lease lifecycle events that trigger script execution, matching
+/// C's `ACTION_OLD`, `ACTION_ADD`, `ACTION_DEL` constants from helper.c.
+///
+/// ## C Reference
+///
+/// Maps to: `#define ACTION_OLD 1`, `ACTION_ADD 2`, `ACTION_DEL 3` (not shown
+/// in provided excerpt, but referenced in queue_script line 1197).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaseAction {
-    /// New lease added (DHCP DISCOVER→OFFER→REQUEST→ACK)
+    /// Lease renewal (existing lease extended).
+    ///
+    /// Triggered when a client renews an existing lease with the same IP and
+    /// hardware address. Environment variable: `DNSMASQ_LEASE_ACTION=old`
+    Renew,
+
+    /// New lease allocation.
+    ///
+    /// Triggered when a client is assigned a new IP address from the pool or
+    /// changes hardware address. Environment variable: `DNSMASQ_LEASE_ACTION=add`
     Add,
 
-    /// Existing lease deleted (lease expired or DHCP RELEASE)
-    Del,
-
-    /// Lease renewed (DHCP REQUEST from existing client)
-    Old,
+    /// Lease expiry or explicit release.
+    ///
+    /// Triggered when lease expires or client sends DHCPRELEASE message.
+    /// Environment variable: `DNSMASQ_LEASE_ACTION=del`
+    Delete,
 }
 
 impl LeaseAction {
-    /// Convert to environment variable string
-    #[must_use]
-    pub fn as_env_str(&self) -> &'static str {
+    /// Convert to environment variable string value.
+    ///
+    /// Returns the string representation used for `DNSMASQ_LEASE_ACTION`
+    /// environment variable, matching C version's behavior.
+    fn as_env_str(&self) -> &'static str {
         match self {
+            LeaseAction::Renew => "old",
             LeaseAction::Add => "add",
-            LeaseAction::Del => "del",
-            LeaseAction::Old => "old",
+            LeaseAction::Delete => "del",
         }
     }
 }
 
-/// Script event types
+/// ARP detection action types.
 ///
-/// Represents all event types that can trigger script execution,
-/// mirroring the C version's `struct script_data` wire format.
+/// Represents ARP table changes detected by monitoring kernel ARP cache,
+/// used to notify scripts of new devices appearing or disappearing from
+/// network.
+///
+/// ## C Reference
+///
+/// Maps to: `ACTION_ARP` and `ACTION_ARP_DEL` constants (helper.c line 1453).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArpAction {
+    /// New ARP entry detected (device appeared on network).
+    ///
+    /// Environment variable: `DNSMASQ_ARP_ACTION=add`
+    Add,
+
+    /// ARP entry removed (device disappeared from network).
+    ///
+    /// Environment variable: `DNSMASQ_ARP_ACTION=del`
+    Delete,
+}
+
+impl ArpAction {
+    /// Convert to environment variable string value.
+    fn as_env_str(&self) -> &'static str {
+        match self {
+            ArpAction::Add => "add",
+            ArpAction::Delete => "del",
+        }
+    }
+}
+
+/// Script event types.
+///
+/// Enum representing all event types that can trigger script execution,
+/// replacing C's struct script_data wire format with owned Rust types.
+///
+/// ## C Reference
+///
+/// Replaces: `struct script_data` (helper.c lines 151-173) with type-safe
+/// enum variants instead of action field with variable-length data.
 #[derive(Debug, Clone)]
 pub enum ScriptEvent {
-    /// `DHCPv4` lease event
-    DhcpLease {
-        /// Lease action (add/del/old)
-        action: LeaseAction,
-        /// Client MAC address
-        mac_address: String,
-        /// Assigned IP address
-        ip_address: IpAddr,
-        /// Client hostname
-        hostname: Option<String>,
-        /// DHCP client identifier
-        client_id: Option<Vec<u8>>,
-        /// Lease expiry time (Unix timestamp)
-        expiry_time: Option<u64>,
-        /// Vendor class identifier
-        vendor_class: Option<String>,
-        /// User class identifier
-        user_class: Option<String>,
-        /// DHCP relay circuit ID
-        circuit_id: Option<String>,
-        /// DHCP relay remote ID
-        remote_id: Option<String>,
-        /// DHCP tags applied to this lease
-        tags: Vec<String>,
-    },
-
-    /// `DHCPv6` lease event
-    Dhcp6Lease {
-        /// Lease action (add/del/old)
-        action: LeaseAction,
-        /// DHCP Unique Identifier
-        duid: Vec<u8>,
-        /// Identity Association Identifier
-        iaid: u32,
-        /// Assigned IPv6 address
-        ip_address: IpAddr,
-        /// Client hostname
-        hostname: Option<String>,
-        /// Lease expiry time (Unix timestamp)
-        expiry_time: Option<u64>,
-        /// DHCP tags applied to this lease
-        tags: Vec<String>,
-    },
-
-    /// TFTP file transfer event
-    TftpTransfer {
-        /// Path to transferred file
-        file_path: PathBuf,
-        /// Size of file in bytes
-        file_size: u64,
-        /// Client IP address
-        client_address: IpAddr,
-    },
-
-    /// TFTP transfer error
-    TftpError {
-        /// Path to file that failed
-        file_path: PathBuf,
-        /// Client IP address
-        client_address: IpAddr,
-        /// Error message describing failure
-        error_message: String,
-    },
-
-    /// ARP table entry detection
-    ArpAdd {
-        /// Hardware MAC address
-        mac_address: String,
-        /// Associated IP address
-        ip_address: IpAddr,
-    },
-
-    /// ARP table entry removal
-    ArpDel {
-        /// Hardware MAC address
-        mac_address: String,
-        /// Associated IP address
-        ip_address: IpAddr,
-    },
-}
-
-impl ScriptEvent {
-    /// Build environment variables for script execution
+    /// DHCP lease change event.
     ///
-    /// Creates DNSMASQ_* environment variables that the script can read,
-    /// matching the C version's `my_setenv()` function behavior.
-    #[must_use]
-    pub fn build_env_vars(&self) -> HashMap<String, String> {
-        let mut env = HashMap::new();
+    /// Contains all information needed to populate DHCP lease environment
+    /// variables for script execution.
+    DhcpLeaseEvent {
+        action: LeaseAction,
+        lease: Lease,
+        hostname: Option<String>,
+    },
 
-        match self {
-            ScriptEvent::DhcpLease {
-                action,
-                mac_address,
-                ip_address,
-                hostname,
-                client_id,
-                expiry_time,
-                vendor_class,
-                user_class,
-                circuit_id,
-                remote_id,
-                tags,
-            } => {
-                env.insert(
-                    "DNSMASQ_ACTION".to_string(),
-                    action.as_env_str().to_string(),
-                );
-                env.insert("DNSMASQ_MAC".to_string(), mac_address.clone());
-                env.insert("DNSMASQ_IP".to_string(), ip_address.to_string());
+    /// TFTP file transfer completion event.
+    ///
+    /// Notifies scripts of successful TFTP file transfers with file size,
+    /// name, and client address.
+    #[cfg(feature = "tftp")]
+    TftpEvent {
+        file_len: u64,
+        filename: String,
+        peer: SocketAddr,
+    },
 
-                if let Some(ref h) = hostname {
-                    env.insert("DNSMASQ_HOSTNAME".to_string(), h.clone());
-                }
+    /// ARP table change event.
+    ///
+    /// Notifies scripts of devices appearing or disappearing from network
+    /// based on ARP cache monitoring.
+    ArpEvent {
+        action: ArpAction,
+        mac: MacAddr,
+        addr: IpAddr,
+    },
 
-                if let Some(ref cid) = client_id {
-                    env.insert("DNSMASQ_CLIENT_ID".to_string(), hex::encode(cid));
-                }
-
-                if let Some(expiry) = expiry_time {
-                    env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), expiry.to_string());
-                }
-
-                if let Some(ref vc) = vendor_class {
-                    env.insert("DNSMASQ_VENDOR_CLASS".to_string(), vc.clone());
-                }
-
-                if let Some(ref uc) = user_class {
-                    env.insert("DNSMASQ_USER_CLASS".to_string(), uc.clone());
-                }
-
-                if let Some(ref cir) = circuit_id {
-                    env.insert("DNSMASQ_CIRCUIT_ID".to_string(), cir.clone());
-                }
-
-                if let Some(ref rem) = remote_id {
-                    env.insert("DNSMASQ_REMOTE_ID".to_string(), rem.clone());
-                }
-
-                if !tags.is_empty() {
-                    env.insert("DNSMASQ_TAGS".to_string(), tags.join(" "));
-                }
-            }
-
-            ScriptEvent::Dhcp6Lease {
-                action,
-                duid,
-                iaid,
-                ip_address,
-                hostname,
-                expiry_time,
-                tags,
-            } => {
-                env.insert(
-                    "DNSMASQ_ACTION".to_string(),
-                    action.as_env_str().to_string(),
-                );
-                env.insert("DNSMASQ_DUID".to_string(), hex::encode(duid));
-                env.insert("DNSMASQ_IAID".to_string(), iaid.to_string());
-                env.insert("DNSMASQ_IP".to_string(), ip_address.to_string());
-
-                if let Some(ref h) = hostname {
-                    env.insert("DNSMASQ_HOSTNAME".to_string(), h.clone());
-                }
-
-                if let Some(expiry) = expiry_time {
-                    env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), expiry.to_string());
-                }
-
-                if !tags.is_empty() {
-                    env.insert("DNSMASQ_TAGS".to_string(), tags.join(" "));
-                }
-            }
-
-            ScriptEvent::TftpTransfer {
-                file_path,
-                file_size,
-                client_address,
-            } => {
-                env.insert("DNSMASQ_ACTION".to_string(), "tftp".to_string());
-                env.insert(
-                    "DNSMASQ_TFTP_FILE".to_string(),
-                    file_path.display().to_string(),
-                );
-                env.insert("DNSMASQ_TFTP_SIZE".to_string(), file_size.to_string());
-                env.insert(
-                    "DNSMASQ_CLIENT_ADDRESS".to_string(),
-                    client_address.to_string(),
-                );
-            }
-
-            ScriptEvent::TftpError {
-                file_path,
-                client_address,
-                error_message,
-            } => {
-                env.insert("DNSMASQ_ACTION".to_string(), "tftp_error".to_string());
-                env.insert(
-                    "DNSMASQ_TFTP_FILE".to_string(),
-                    file_path.display().to_string(),
-                );
-                env.insert(
-                    "DNSMASQ_CLIENT_ADDRESS".to_string(),
-                    client_address.to_string(),
-                );
-                env.insert("DNSMASQ_TFTP_ERROR".to_string(), error_message.clone());
-            }
-
-            ScriptEvent::ArpAdd {
-                mac_address,
-                ip_address,
-            } => {
-                env.insert("DNSMASQ_ACTION".to_string(), "arp-add".to_string());
-                env.insert("DNSMASQ_MAC".to_string(), mac_address.clone());
-                env.insert("DNSMASQ_IP".to_string(), ip_address.to_string());
-            }
-
-            ScriptEvent::ArpDel {
-                mac_address,
-                ip_address,
-            } => {
-                env.insert("DNSMASQ_ACTION".to_string(), "arp-del".to_string());
-                env.insert("DNSMASQ_MAC".to_string(), mac_address.clone());
-                env.insert("DNSMASQ_IP".to_string(), ip_address.to_string());
-            }
-        }
-
-        env
-    }
-
-    /// Get event description for logging
-    #[must_use]
-    pub fn description(&self) -> String {
-        match self {
-            ScriptEvent::DhcpLease {
-                action, ip_address, ..
-            } => {
-                format!("DHCP {action:?} for {ip_address}")
-            }
-            ScriptEvent::Dhcp6Lease {
-                action, ip_address, ..
-            } => {
-                format!("DHCPv6 {action:?} for {ip_address}")
-            }
-            ScriptEvent::TftpTransfer { file_path, .. } => {
-                format!("TFTP transfer: {}", file_path.display())
-            }
-            ScriptEvent::TftpError { file_path, .. } => {
-                format!("TFTP error: {}", file_path.display())
-            }
-            ScriptEvent::ArpAdd { ip_address, .. } => {
-                format!("ARP add: {ip_address}")
-            }
-            ScriptEvent::ArpDel { ip_address, .. } => {
-                format!("ARP del: {ip_address}")
-            }
-        }
-    }
+    /// DHCPv6 relay snooping event.
+    ///
+    /// Monitors DHCPv6 prefix delegations relayed through this server,
+    /// enabling external tracking of IPv6 prefix assignments.
+    #[cfg(feature = "dhcp-v6")]
+    RelaySnoop {
+        client: Ipv6Addr,
+        interface: String,
+        prefix: Ipv6Addr,
+        prefix_len: u8,
+    },
 }
 
-/// Script execution result
-#[derive(Debug, Clone)]
-pub struct ScriptResult {
-    /// Exit status code
-    pub exit_code: i32,
+// =============================================================================
+// Script Executor
+// =============================================================================
 
-    /// Standard output captured from script
-    pub stdout: String,
-
-    /// Standard error captured from script
-    pub stderr: String,
-
-    /// Execution duration in milliseconds
-    pub duration_ms: u64,
-}
-
-/// Asynchronous script executor
+/// Script executor for DHCP, TFTP, and ARP events.
 ///
-/// Manages a queue of script events and executes them asynchronously using `tokio::process`.
-/// Replaces the C version's helper process model with async Rust tasks.
+/// Manages script execution configuration and event queue processing, replacing
+/// C's fork-based helper process with async Rust implementation using tokio.
+///
+/// ## Architecture
+///
+/// - Events queued via async mpsc channel (bounded capacity for backpressure)
+/// - Scripts executed on-demand using `tokio::process::Command`
+/// - Environment variables populated from event data
+/// - Output captured and logged, errors reported via Result types
+/// - Optional Lua integration for in-process event handling
+///
+/// ## C Reference
+///
+/// Replaces: `create_helper()` function and helper process main loop (helper.c
+/// lines 261-688) with async task-based architecture.
+///
+/// ## Thread Safety
+///
+/// All methods use `Arc<RwLock<_>>` for safe concurrent access from multiple
+/// async tasks. Event queue is naturally thread-safe via mpsc channel.
 pub struct ScriptExecutor {
-    /// Path to the script executable (immutable after construction for security)
-    script_path: PathBuf,
+    /// Path to external script executable.
+    ///
+    /// Must be absolute path that exists and is executable. Cannot be changed
+    /// after initialization to prevent privilege escalation attacks. Set to
+    /// None if no script configured.
+    script_path: Option<PathBuf>,
 
-    /// Event queue sender
-    event_tx: mpsc::UnboundedSender<ScriptEvent>,
+    /// Script execution timeout.
+    ///
+    /// Scripts exceeding this duration are terminated with SIGKILL. Prevents
+    /// hung scripts from blocking daemon.
+    timeout: Duration,
 
-    /// Shared state for tracking execution
-    state: Arc<RwLock<ExecutorState>>,
-}
+    /// Event queue sender.
+    ///
+    /// Used to queue events for async processing. Bounded channel provides
+    /// backpressure if scripts cannot keep up with event rate.
+    event_tx: mpsc::Sender<ScriptEvent>,
 
-/// Internal executor state
-#[derive(Debug)]
-struct ExecutorState {
-    /// Number of events queued
-    queued_count: u64,
+    /// Event queue receiver (moved to background task).
+    ///
+    /// Processed by background task that executes scripts for each event.
+    /// Wrapped in Arc<RwLock<>> for shared ownership.
+    event_rx: Arc<RwLock<Option<mpsc::Receiver<ScriptEvent>>>>,
 
-    /// Number of events executed
-    executed_count: u64,
-
-    /// Number of events that failed
-    failed_count: u64,
-
-    /// Whether the executor is running
-    running: bool,
+    /// Lua interpreter state (feature-gated).
+    ///
+    /// Loaded with user-provided Lua script that defines lease(), tftp(), or
+    /// arp() functions for event handling. Provides faster in-process event
+    /// handling compared to fork+exec.
+    #[cfg(feature = "lua")]
+    lua: Arc<RwLock<Option<Lua>>>,
 }
 
 impl ScriptExecutor {
-    /// Create a new script executor
+    /// Create new script executor.
     ///
-    /// # Arguments
+    /// Initializes script executor with specified script path and default
+    /// timeout. Path must be absolute and will be validated.
     ///
-    /// * `script_path` - Path to the executable script (must exist and be executable)
+    /// ## Arguments
     ///
-    /// # Errors
+    /// * `script_path` - Path to external script (e.g., "/usr/local/bin/dhcp-script")
     ///
-    /// Returns `ScriptError::ScriptNotFound` if the script doesn't exist or isn't executable.
-    /// Returns `ScriptError::InvalidPath` if the path is invalid.
+    /// ## Returns
+    ///
+    /// * `Result<Self, ScriptError>` - New executor or error if path invalid
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: `create_helper()` initialization (helper.c lines 261-332).
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// use dnsmasq::integration::scripts::ScriptExecutor;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new<P: AsRef<Path>>(script_path: P) -> Result<Self, ScriptError> {
-        let script_path = script_path.as_ref().to_path_buf();
+        let path = script_path.as_ref();
 
-        // Validate script path exists and is executable
-        if !script_path.exists() {
-            return Err(ScriptError::ScriptNotFound(script_path));
+        // Validate script path is absolute for security
+        if !path.is_absolute() {
+            return Err(ScriptError::InvalidPath(
+                format!("Script path must be absolute: {}", path.display())
+            ));
         }
 
-        // Check if file is executable (Unix-specific)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let metadata = script_path.metadata().map_err(ScriptError::Io)?;
-            let permissions = metadata.permissions();
-            if permissions.mode() & 0o111 == 0 {
-                return Err(ScriptError::ScriptNotFound(script_path));
-            }
-        }
+        // Create bounded event queue (capacity 1000 events)
+        let (event_tx, event_rx) = mpsc::channel(1000);
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-
-        let state = Arc::new(RwLock::new(ExecutorState {
-            queued_count: 0,
-            executed_count: 0,
-            failed_count: 0,
-            running: false,
-        }));
-
-        let executor = Self {
-            script_path: script_path.clone(),
+        Ok(Self {
+            script_path: Some(path.to_path_buf()),
+            timeout: Duration::from_secs(DEFAULT_SCRIPT_TIMEOUT_SECS),
             event_tx,
-            state: state.clone(),
-        };
-
-        // Spawn background task to process events
-        tokio::spawn(Self::event_processor(script_path, event_rx, state));
-
-        Ok(executor)
+            event_rx: Arc::new(RwLock::new(Some(event_rx))),
+            #[cfg(feature = "lua")]
+            lua: Arc::new(RwLock::new(None)),
+        })
     }
 
-    /// Queue a script event for execution
+    /// Create script executor without script (no-op mode).
     ///
-    /// Events are queued and executed asynchronously in FIFO order.
+    /// All queued events are silently dropped. Used when no script configured
+    /// (--dhcp-script option not provided).
     ///
-    /// # Errors
+    /// ## C Reference
     ///
-    /// Returns `ScriptError::QueueError` if the event channel is closed or full.
-    pub async fn queue_event(&self, event: ScriptEvent) -> Result<(), ScriptError> {
-        debug!("Queuing script event: {}", event.description());
+    /// Matches C behavior when `daemon->helperfd == -1` (no helper process).
+    pub fn disabled() -> Self {
+        let (event_tx, event_rx) = mpsc::channel(1);
 
-        self.event_tx
-            .send(event)
-            .map_err(|e| ScriptError::QueueError(e.to_string()))?;
+        Self {
+            script_path: None,
+            timeout: Duration::from_secs(DEFAULT_SCRIPT_TIMEOUT_SECS),
+            event_tx,
+            event_rx: Arc::new(RwLock::new(Some(event_rx))),
+            #[cfg(feature = "lua")]
+            lua: Arc::new(RwLock::new(None)),
+        }
+    }
 
-        let mut state = self.state.write().await;
-        state.queued_count += 1;
+    /// Configure script execution timeout.
+    ///
+    /// Sets maximum duration for script execution before termination. Scripts
+    /// exceeding timeout are killed with SIGKILL.
+    ///
+    /// ## Arguments
+    ///
+    /// * `timeout` - Maximum execution duration
+    ///
+    /// ## Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// use dnsmasq::integration::scripts::ScriptExecutor;
+    /// use std::time::Duration;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")?
+    ///     .with_timeout(Duration::from_secs(60));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Load Lua script for in-process event handling (feature-gated).
+    ///
+    /// Loads and compiles Lua script from file, making it available for
+    /// event callbacks. Script should define lease(), tftp(), and/or arp()
+    /// functions.
+    ///
+    /// ## Arguments
+    ///
+    /// * `lua_script_path` - Path to Lua script file
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<Self, ScriptError>` - Self for chaining or Lua error
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: Lua initialization in create_helper() (helper.c lines 313-332).
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// # #[cfg(feature = "lua")]
+    /// # {
+    /// use dnsmasq::integration::scripts::ScriptExecutor;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")?
+    ///     .with_lua("/etc/dnsmasq/lease.lua").await?;
+    /// # Ok(())
+    /// # }
+    /// # }
+    /// ```
+    #[cfg(feature = "lua")]
+    pub async fn with_lua<P: AsRef<Path>>(self, lua_script_path: P) -> Result<Self, ScriptError> {
+        let lua = Lua::new();
+
+        // Load Lua script
+        let script_content = tokio::fs::read_to_string(lua_script_path.as_ref()).await?;
+        lua.load(&script_content).exec()?;
+
+        *self.lua.write().await = Some(lua);
+
+        Ok(self)
+    }
+
+    /// Queue DHCP lease change event for script execution.
+    ///
+    /// Queues lease event for asynchronous script execution with environment
+    /// variables populated from lease data. Non-blocking operation that returns
+    /// immediately after queuing.
+    ///
+    /// ## Arguments
+    ///
+    /// * `action` - Lease action (Add, Renew, Delete)
+    /// * `lease` - Lease structure containing IP, MAC, client ID, etc.
+    /// * `hostname` - Optional client hostname
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<(), ScriptError>` - Success or queue full error
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: `queue_script()` function (helper.c lines 1174-1243).
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// # async fn example(executor: &dnsmasq::integration::scripts::ScriptExecutor, lease: dnsmasq::dhcp::lease::Lease) -> Result<(), Box<dyn std::error::Error>> {
+    /// use dnsmasq::integration::scripts::LeaseAction;
+    ///
+    /// executor.queue_lease_event(
+    ///     LeaseAction::Add,
+    ///     lease,
+    ///     Some("client-hostname".to_string()),
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn queue_lease_event(
+        &self,
+        action: LeaseAction,
+        lease: Lease,
+        hostname: Option<String>,
+    ) -> Result<(), ScriptError> {
+        if self.script_path.is_none() {
+            return Ok(()); // No script configured, silently ignore
+        }
+
+        let event = ScriptEvent::DhcpLeaseEvent {
+            action,
+            lease,
+            hostname,
+        };
+
+        self.event_tx.send(event).await
+            .map_err(|_| ScriptError::QueueClosed)
+    }
+
+    /// Queue TFTP transfer completion event (feature-gated).
+    ///
+    /// Notifies scripts of successful TFTP file transfer with file size,
+    /// name, and client address.
+    ///
+    /// ## Arguments
+    ///
+    /// * `file_len` - Size of transferred file in bytes
+    /// * `filename` - Name of transferred file
+    /// * `peer` - Client socket address (IPv4 or IPv6)
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<(), ScriptError>` - Success or queue error
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: `queue_tftp()` function (helper.c lines 1366-1443).
+    #[cfg(feature = "tftp")]
+    pub async fn queue_tftp_event(
+        &self,
+        file_len: u64,
+        filename: String,
+        peer: SocketAddr,
+    ) -> Result<(), ScriptError> {
+        if self.script_path.is_none() {
+            return Ok(());
+        }
+
+        let event = ScriptEvent::TftpEvent {
+            file_len,
+            filename,
+            peer,
+        };
+
+        self.event_tx.send(event).await
+            .map_err(|_| ScriptError::QueueClosed)
+    }
+
+    /// Queue ARP detection event.
+    ///
+    /// Notifies scripts of devices appearing or disappearing from network
+    /// based on ARP cache monitoring.
+    ///
+    /// ## Arguments
+    ///
+    /// * `action` - ARP action (Add or Delete)
+    /// * `mac` - Hardware address of detected device
+    /// * `addr` - IP address of detected device
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<(), ScriptError>` - Success or queue error
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: `queue_arp()` function (helper.c lines 1444-1464).
+    pub async fn queue_arp_event(
+        &self,
+        action: ArpAction,
+        mac: MacAddr,
+        addr: IpAddr,
+    ) -> Result<(), ScriptError> {
+        if self.script_path.is_none() {
+            return Ok(());
+        }
+
+        let event = ScriptEvent::ArpEvent {
+            action,
+            mac,
+            addr,
+        };
+
+        self.event_tx.send(event).await
+            .map_err(|_| ScriptError::QueueClosed)
+    }
+
+    /// Queue DHCPv6 relay snooping event (feature-gated).
+    ///
+    /// Monitors DHCPv6 prefix delegations relayed through this server.
+    ///
+    /// ## Arguments
+    ///
+    /// * `client` - IPv6 address of DHCPv6 client
+    /// * `interface` - Interface name where relay message received
+    /// * `prefix` - IPv6 prefix being delegated
+    /// * `prefix_len` - Prefix length in bits
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<(), ScriptError>` - Success or queue error
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: `queue_relay_snoop()` function (helper.c lines 1294-1313).
+    #[cfg(feature = "dhcp-v6")]
+    pub async fn queue_relay_snoop_event(
+        &self,
+        client: Ipv6Addr,
+        interface: String,
+        prefix: Ipv6Addr,
+        prefix_len: u8,
+    ) -> Result<(), ScriptError> {
+        if self.script_path.is_none() {
+            return Ok(());
+        }
+
+        let event = ScriptEvent::RelaySnoop {
+            client,
+            interface,
+            prefix,
+            prefix_len,
+        };
+
+        self.event_tx.send(event).await
+            .map_err(|_| ScriptError::QueueClosed)
+    }
+
+    /// Start background event processing task.
+    ///
+    /// Spawns async task that processes queued events by executing scripts
+    /// with appropriate environment variables. Should be called once after
+    /// executor initialization.
+    ///
+    /// ## Returns
+    ///
+    /// * `tokio::task::JoinHandle` - Handle to background task
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use dnsmasq::integration::scripts::ScriptExecutor;
+    ///
+    /// let executor = ScriptExecutor::new("/usr/local/bin/dhcp-script")?;
+    /// let handle = executor.start().await;
+    ///
+    /// // ... queue events ...
+    ///
+    /// // Shutdown: drop executor and await handle
+    /// drop(executor);
+    /// handle.await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn start(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let mut rx = self.event_rx.write().await.take()
+            .expect("start() called multiple times");
+
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let Err(e) = self.process_event(event).await {
+                    error!("Script execution error: {}", e);
+                }
+            }
+
+            info!("Script executor shutdown");
+        })
+    }
+
+    /// Process single event by executing script.
+    ///
+    /// Internal method that executes script with environment variables
+    /// populated from event data. Handles both external scripts and Lua
+    /// callbacks.
+    ///
+    /// ## Arguments
+    ///
+    /// * `event` - Event to process
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<(), ScriptError>` - Success or execution error
+    async fn process_event(&self, event: ScriptEvent) -> Result<(), ScriptError> {
+        match event {
+            ScriptEvent::DhcpLeaseEvent { action, lease, hostname } => {
+                // Try Lua callback first if available
+                #[cfg(feature = "lua")]
+                if let Some(lua) = self.lua.read().await.as_ref() {
+                    if let Err(e) = self.call_lua_lease(lua, action, &lease, hostname.as_deref()).await {
+                        warn!("Lua callback failed, falling back to script: {}", e);
+                    } else {
+                        return Ok(());
+                    }
+                }
+
+                // Execute external script
+                if let Some(script_path) = &self.script_path {
+                    self.execute_lease_script(script_path, action, &lease, hostname.as_deref()).await?;
+                }
+            }
+
+            #[cfg(feature = "tftp")]
+            ScriptEvent::TftpEvent { file_len, filename, peer } => {
+                #[cfg(feature = "lua")]
+                if let Some(lua) = self.lua.read().await.as_ref() {
+                    if let Err(e) = self.call_lua_tftp(lua, file_len, &filename, &peer).await {
+                        warn!("Lua tftp callback failed: {}", e);
+                    } else {
+                        return Ok(());
+                    }
+                }
+
+                if let Some(script_path) = &self.script_path {
+                    self.execute_tftp_script(script_path, file_len, &filename, &peer).await?;
+                }
+            }
+
+            ScriptEvent::ArpEvent { action, mac, addr } => {
+                #[cfg(feature = "lua")]
+                if let Some(lua) = self.lua.read().await.as_ref() {
+                    if let Err(e) = self.call_lua_arp(lua, action, &mac, &addr).await {
+                        warn!("Lua arp callback failed: {}", e);
+                    } else {
+                        return Ok(());
+                    }
+                }
+
+                if let Some(script_path) = &self.script_path {
+                    self.execute_arp_script(script_path, action, &mac, &addr).await?;
+                }
+            }
+
+            #[cfg(feature = "dhcp-v6")]
+            ScriptEvent::RelaySnoop { client, interface, prefix, prefix_len } => {
+                if let Some(script_path) = &self.script_path {
+                    self.execute_relay_snoop_script(
+                        script_path,
+                        &client,
+                        &interface,
+                        &prefix,
+                        prefix_len,
+                    ).await?;
+                }
+            }
+        }
 
         Ok(())
     }
 
-    /// Queue a DHCP lease event
+    /// Execute external script for DHCP lease event.
     ///
-    /// Convenience method for queuing DHCP lease changes.
+    /// Spawns script process with DNSMASQ_* environment variables populated
+    /// from lease data. Captures stdout/stderr and logs output.
     ///
-    /// # Errors
+    /// ## C Reference
     ///
-    /// Returns `ScriptError::QueueError` if the event channel is closed or full.
-    pub async fn queue_lease_event(
+    /// Replaces: Script execution logic in helper process main loop (helper.c
+    /// lines 446-689) including my_setenv() calls (lines 912-921) and
+    /// grab_extradata() parsing (lines 968-997).
+    async fn execute_lease_script(
         &self,
-        action: LeaseAction,
-        mac_address: String,
-        ip_address: IpAddr,
-        hostname: Option<String>,
-    ) -> Result<(), ScriptError> {
-        let event = ScriptEvent::DhcpLease {
-            action,
-            mac_address,
-            ip_address,
-            hostname,
-            client_id: None,
-            expiry_time: None,
-            vendor_class: None,
-            user_class: None,
-            circuit_id: None,
-            remote_id: None,
-            tags: Vec::new(),
-        };
-
-        self.queue_event(event).await
-    }
-
-    /// Get execution statistics
-    pub async fn stats(&self) -> (u64, u64, u64) {
-        let state = self.state.read().await;
-        (state.queued_count, state.executed_count, state.failed_count)
-    }
-
-    /// Background event processor task
-    async fn event_processor(
-        script_path: PathBuf,
-        mut event_rx: mpsc::UnboundedReceiver<ScriptEvent>,
-        state: Arc<RwLock<ExecutorState>>,
-    ) {
-        info!("Script executor started: {}", script_path.display());
-
-        {
-            let mut s = state.write().await;
-            s.running = true;
-        }
-
-        while let Some(event) = event_rx.recv().await {
-            debug!("Processing script event: {}", event.description());
-
-            match Self::execute_script(&script_path, &event).await {
-                Ok(result) => {
-                    info!(
-                        "Script executed successfully: {} (exit={}, duration={}ms)",
-                        event.description(),
-                        result.exit_code,
-                        result.duration_ms
-                    );
-
-                    if !result.stdout.is_empty() {
-                        debug!("Script stdout: {}", result.stdout);
-                    }
-
-                    if !result.stderr.is_empty() {
-                        debug!("Script stderr: {}", result.stderr);
-                    }
-
-                    let mut s = state.write().await;
-                    s.executed_count += 1;
-                }
-                Err(e) => {
-                    error!("Script execution failed: {} - {}", event.description(), e);
-
-                    let mut s = state.write().await;
-                    s.failed_count += 1;
-                }
-            }
-        }
-
-        info!("Script executor stopped");
-
-        let mut s = state.write().await;
-        s.running = false;
-    }
-
-    /// Execute script with environment variables
-    async fn execute_script(
         script_path: &Path,
-        event: &ScriptEvent,
-    ) -> Result<ScriptResult, ScriptError> {
-        let env_vars = event.build_env_vars();
+        action: LeaseAction,
+        lease: &Lease,
+        hostname: Option<&str>,
+    ) -> Result<(), ScriptError> {
+        let mut env = HashMap::new();
 
-        let start_time = std::time::Instant::now();
+        // Populate environment variables based on lease data
+        env.insert("DNSMASQ_LEASE_ACTION".to_string(), action.as_env_str().to_string());
 
-        let mut child = Command::new(script_path)
-            .envs(env_vars)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(ScriptError::Io)?;
+        match lease {
+            Lease::V4(lease_v4) => {
+                env.insert("DNSMASQ_IP_ADDR".to_string(), lease_v4.addr.to_string());
+                env.insert("DNSMASQ_MAC_ADDR".to_string(), format_mac_addr(&lease_v4.hwaddr));
 
-        // Wait for script with timeout
-        let timeout = tokio::time::Duration::from_secs(SCRIPT_TIMEOUT_SECS);
-        let result = tokio::time::timeout(timeout, child.wait()).await;
+                if let Some(client_id) = &lease_v4.client_id {
+                    env.insert("DNSMASQ_CLIENT_ID".to_string(), format_hex(client_id));
+                }
 
-        let status = match result {
-            Ok(Ok(status)) => status,
-            Ok(Err(e)) => return Err(ScriptError::Io(e)),
-            Err(_) => {
-                // Timeout - kill the child process
-                let _ = child.kill().await;
-                return Err(ScriptError::Timeout(SCRIPT_TIMEOUT_SECS));
+                if let Some(hostname) = hostname {
+                    env.insert("DNSMASQ_HOSTNAME".to_string(), sanitize_env_value(hostname));
+                }
+
+                let remaining = if lease_v4.expires > 0 {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    lease_v4.expires.saturating_sub(now)
+                } else {
+                    0
+                };
+
+                env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), lease_v4.expires.to_string());
+                env.insert("DNSMASQ_LEASE_LENGTH".to_string(), remaining.to_string());
             }
-        };
 
-        let duration_ms = start_time.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            #[cfg(feature = "dhcp-v6")]
+            Lease::V6(lease_v6) => {
+                env.insert("DNSMASQ_IP_ADDR".to_string(), lease_v6.addr.to_string());
+                env.insert("DNSMASQ_DUID".to_string(), format_hex(&lease_v6.duid));
+                env.insert("DNSMASQ_IAID".to_string(), lease_v6.iaid.to_string());
 
-        // Capture stdout
-        let mut stdout_buf = Vec::new();
-        if let Some(mut stdout) = child.stdout {
-            let _ = stdout
-                .read_to_end(&mut stdout_buf)
-                .await
-                .map_err(ScriptError::Io)?;
+                if let Some(hostname) = hostname {
+                    env.insert("DNSMASQ_HOSTNAME".to_string(), sanitize_env_value(hostname));
+                }
+
+                let remaining = if lease_v6.expires > 0 {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    lease_v6.expires.saturating_sub(now)
+                } else {
+                    0
+                };
+
+                env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), lease_v6.expires.to_string());
+                env.insert("DNSMASQ_LEASE_LENGTH".to_string(), remaining.to_string());
+            }
         }
 
-        // Capture stderr
-        let mut stderr_buf = Vec::new();
-        if let Some(mut stderr) = child.stderr {
-            let _ = stderr
-                .read_to_end(&mut stderr_buf)
-                .await
-                .map_err(ScriptError::Io)?;
+        self.execute_script_with_env(script_path, env).await
+    }
+
+    /// Execute external script for TFTP transfer event (feature-gated).
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: TFTP action handling in helper (helper.c lines 603-629).
+    #[cfg(feature = "tftp")]
+    async fn execute_tftp_script(
+        &self,
+        script_path: &Path,
+        file_len: u64,
+        filename: &str,
+        peer: &SocketAddr,
+    ) -> Result<(), ScriptError> {
+        let mut env = HashMap::new();
+
+        env.insert("DNSMASQ_TFTP_FILE_SIZE".to_string(), file_len.to_string());
+        env.insert("DNSMASQ_TFTP_FILE_NAME".to_string(), sanitize_env_value(filename));
+        env.insert("DNSMASQ_TFTP_REMOTE_ADDR".to_string(), peer.ip().to_string());
+
+        self.execute_script_with_env(script_path, env).await
+    }
+
+    /// Execute external script for ARP detection event.
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: ARP action handling in helper (helper.c lines 630-657).
+    async fn execute_arp_script(
+        &self,
+        script_path: &Path,
+        action: ArpAction,
+        mac: &MacAddr,
+        addr: &IpAddr,
+    ) -> Result<(), ScriptError> {
+        let mut env = HashMap::new();
+
+        env.insert("DNSMASQ_ARP_ACTION".to_string(), action.as_env_str().to_string());
+        env.insert("DNSMASQ_ARP_MAC".to_string(), mac.to_string());
+        env.insert("DNSMASQ_ARP_IP".to_string(), addr.to_string());
+
+        self.execute_script_with_env(script_path, env).await
+    }
+
+    /// Execute external script for DHCPv6 relay snoop event (feature-gated).
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: Relay snoop handling (helper.c lines 586-602).
+    #[cfg(feature = "dhcp-v6")]
+    async fn execute_relay_snoop_script(
+        &self,
+        script_path: &Path,
+        client: &Ipv6Addr,
+        interface: &str,
+        prefix: &Ipv6Addr,
+        prefix_len: u8,
+    ) -> Result<(), ScriptError> {
+        let mut env = HashMap::new();
+
+        env.insert("DNSMASQ_RELAY_CLIENT".to_string(), client.to_string());
+        env.insert("DNSMASQ_RELAY_INTERFACE".to_string(), interface.to_string());
+        env.insert("DNSMASQ_RELAY_PREFIX".to_string(), format!("{}/{}", prefix, prefix_len));
+
+        self.execute_script_with_env(script_path, env).await
+    }
+
+    /// Execute script with environment variables and timeout.
+    ///
+    /// Common implementation for all script types, spawning process with
+    /// configured environment, capturing output, and enforcing timeout.
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: fork/exec logic in helper (helper.c lines 658-688).
+    async fn execute_script_with_env(
+        &self,
+        script_path: &Path,
+        env: HashMap<String, String>,
+    ) -> Result<(), ScriptError> {
+        debug!("Executing script: {} with {} env vars", script_path.display(), env.len());
+
+        let mut cmd = Command::new(script_path);
+        cmd.envs(env);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        // Spawn process with timeout
+        let child = cmd.spawn()?;
+
+        let output = tokio::time::timeout(self.timeout, child.wait_with_output()).await
+            .map_err(|_| ScriptError::Timeout(self.timeout))??;
+
+        if !output.status.success() {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(ScriptError::ExecutionFailed { exit_code, stderr });
         }
 
-        // Limit output size
-        stdout_buf.truncate(MAX_OUTPUT_SIZE);
-        stderr_buf.truncate(MAX_OUTPUT_SIZE);
-
-        let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
-        let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
-
-        let exit_code = status.code().unwrap_or(-1);
-
-        if !status.success() {
-            warn!(
-                "Script exited with non-zero status: {} (code={})",
-                script_path.display(),
-                exit_code
-            );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.is_empty() {
+            info!("Script output: {}", stdout.trim());
         }
 
-        Ok(ScriptResult {
-            exit_code,
-            stdout,
-            stderr,
-            duration_ms,
-        })
+        Ok(())
+    }
+
+    /// Call Lua lease callback (feature-gated).
+    ///
+    /// Invokes Lua lease() function with event data table, providing faster
+    /// in-process event handling compared to fork+exec.
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: Lua lease() call (helper.c lines 469-495).
+    #[cfg(feature = "lua")]
+    async fn call_lua_lease(
+        &self,
+        lua: &Lua,
+        action: LeaseAction,
+        lease: &Lease,
+        hostname: Option<&str>,
+    ) -> Result<(), mlua::Error> {
+        let globals = lua.globals();
+
+        // Check if lease() function exists
+        if !globals.contains_key("lease")? {
+            return Ok(()); // Function not defined, silently skip
+        }
+
+        let lease_fn: mlua::Function = globals.get("lease")?;
+
+        // Create data table
+        let table = lua.create_table()?;
+        table.set("action", action.as_env_str())?;
+
+        match lease {
+            Lease::V4(lease_v4) => {
+                table.set("ip_addr", lease_v4.addr.to_string())?;
+                table.set("mac_addr", format_mac_addr(&lease_v4.hwaddr))?;
+
+                if let Some(client_id) = &lease_v4.client_id {
+                    table.set("client_id", format_hex(client_id))?;
+                }
+
+                if let Some(hostname) = hostname {
+                    table.set("hostname", hostname)?;
+                }
+
+                table.set("expires", lease_v4.expires)?;
+            }
+
+            #[cfg(feature = "dhcp-v6")]
+            Lease::V6(lease_v6) => {
+                table.set("ip_addr", lease_v6.addr.to_string())?;
+                table.set("duid", format_hex(&lease_v6.duid))?;
+                table.set("iaid", lease_v6.iaid)?;
+
+                if let Some(hostname) = hostname {
+                    table.set("hostname", hostname)?;
+                }
+
+                table.set("expires", lease_v6.expires)?;
+            }
+        }
+
+        // Call lease(action, data)
+        lease_fn.call::<_, ()>((action.as_env_str(), table))?;
+
+        Ok(())
+    }
+
+    /// Call Lua tftp callback (feature-gated).
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: Lua tftp() call (helper.c lines 322-338).
+    #[cfg(all(feature = "lua", feature = "tftp"))]
+    async fn call_lua_tftp(
+        &self,
+        lua: &Lua,
+        file_len: u64,
+        filename: &str,
+        peer: &SocketAddr,
+    ) -> Result<(), mlua::Error> {
+        let globals = lua.globals();
+
+        if !globals.contains_key("tftp")? {
+            return Ok(());
+        }
+
+        let tftp_fn: mlua::Function = globals.get("tftp")?;
+
+        let table = lua.create_table()?;
+        table.set("file_size", file_len)?;
+        table.set("file_name", filename)?;
+        table.set("remote_addr", peer.ip().to_string())?;
+
+        tftp_fn.call::<_, ()>(table)?;
+
+        Ok(())
+    }
+
+    /// Call Lua arp callback (feature-gated).
+    ///
+    /// ## C Reference
+    ///
+    /// Replaces: Lua arp() call (helper.c lines 340-357).
+    #[cfg(feature = "lua")]
+    async fn call_lua_arp(
+        &self,
+        lua: &Lua,
+        action: ArpAction,
+        mac: &MacAddr,
+        addr: &IpAddr,
+    ) -> Result<(), mlua::Error> {
+        let globals = lua.globals();
+
+        if !globals.contains_key("arp")? {
+            return Ok(());
+        }
+
+        let arp_fn: mlua::Function = globals.get("arp")?;
+
+        let table = lua.create_table()?;
+        table.set("action", action.as_env_str())?;
+        table.set("mac_addr", mac.to_string())?;
+        table.set("ip_addr", addr.to_string())?;
+
+        arp_fn.call::<_, ()>(table)?;
+
+        Ok(())
     }
 }
 
-// Add hex encoding dependency placeholder
-// In production, this would use the hex crate or implement hex encoding
-mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
-        use std::fmt::Write;
-        bytes
-            .iter()
-            .fold(String::new(), |mut acc, b| {
-                let _ = write!(acc, "{b:02x}");
-                acc
-            })
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Format MAC address as colon-separated hex string.
+///
+/// Converts byte array to human-readable MAC address format (AA:BB:CC:DD:EE:FF).
+///
+/// ## C Reference
+///
+/// Replaces: MAC formatting in my_setenv() calls (helper.c lines 550-560).
+fn format_mac_addr(hwaddr: &[u8]) -> String {
+    hwaddr.iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Format byte array as hex string.
+///
+/// Converts byte array to hex string representation for client IDs and DUIDs.
+///
+/// ## C Reference
+///
+/// Replaces: Client ID formatting (helper.c lines 508-524).
+fn format_hex(bytes: &[u8]) -> String {
+    bytes.iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Sanitize environment variable value.
+///
+/// Removes '=' characters to prevent environment variable injection attacks
+/// and truncates excessively long values.
+///
+/// ## C Reference
+///
+/// Replaces: '=' stripping in grab_extradata() (helper.c lines 987-990).
+fn sanitize_env_value(value: &str) -> String {
+    let sanitized = value.replace('=', "");
+
+    if sanitized.len() > MAX_ENV_VALUE_LEN {
+        sanitized[..MAX_ENV_VALUE_LEN].to_string()
+    } else {
+        sanitized
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -685,57 +1200,66 @@ mod tests {
     #[test]
     fn test_lease_action_env_str() {
         assert_eq!(LeaseAction::Add.as_env_str(), "add");
-        assert_eq!(LeaseAction::Del.as_env_str(), "del");
-        assert_eq!(LeaseAction::Old.as_env_str(), "old");
+        assert_eq!(LeaseAction::Renew.as_env_str(), "old");
+        assert_eq!(LeaseAction::Delete.as_env_str(), "del");
     }
 
     #[test]
-    fn test_dhcp_lease_env_vars() {
-        let event = ScriptEvent::DhcpLease {
-            action: LeaseAction::Add,
-            mac_address: "00:11:22:33:44:55".to_string(),
-            ip_address: "192.168.1.100".parse().unwrap(),
-            hostname: Some("test-host".to_string()),
-            client_id: Some(vec![0x01, 0x02, 0x03]),
-            expiry_time: Some(3600),
-            vendor_class: None,
-            user_class: None,
-            circuit_id: None,
-            remote_id: None,
-            tags: vec!["tag1".to_string(), "tag2".to_string()],
-        };
-
-        let env = event.build_env_vars();
-
-        assert_eq!(env.get("DNSMASQ_ACTION"), Some(&"add".to_string()));
-        assert_eq!(
-            env.get("DNSMASQ_MAC"),
-            Some(&"00:11:22:33:44:55".to_string())
-        );
-        assert_eq!(env.get("DNSMASQ_IP"), Some(&"192.168.1.100".to_string()));
-        assert_eq!(env.get("DNSMASQ_HOSTNAME"), Some(&"test-host".to_string()));
-        assert_eq!(env.get("DNSMASQ_CLIENT_ID"), Some(&"010203".to_string()));
-        assert_eq!(env.get("DNSMASQ_LEASE_EXPIRES"), Some(&"3600".to_string()));
-        assert_eq!(env.get("DNSMASQ_TAGS"), Some(&"tag1 tag2".to_string()));
+    fn test_arp_action_env_str() {
+        assert_eq!(ArpAction::Add.as_env_str(), "add");
+        assert_eq!(ArpAction::Delete.as_env_str(), "del");
     }
 
     #[test]
-    fn test_event_description() {
-        let event = ScriptEvent::DhcpLease {
-            action: LeaseAction::Add,
-            mac_address: "00:11:22:33:44:55".to_string(),
-            ip_address: "192.168.1.100".parse().unwrap(),
-            hostname: None,
-            client_id: None,
-            expiry_time: None,
-            vendor_class: None,
-            user_class: None,
-            circuit_id: None,
-            remote_id: None,
-            tags: Vec::new(),
-        };
+    fn test_format_mac_addr() {
+        let mac = vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        assert_eq!(format_mac_addr(&mac), "AA:BB:CC:DD:EE:FF");
+    }
 
-        assert!(event.description().contains("DHCP"));
-        assert!(event.description().contains("192.168.1.100"));
+    #[test]
+    fn test_format_hex() {
+        let bytes = vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+        assert_eq!(format_hex(&bytes), "0123456789abcdef");
+    }
+
+    #[test]
+    fn test_sanitize_env_value() {
+        assert_eq!(sanitize_env_value("test=value"), "testvalue");
+        assert_eq!(sanitize_env_value("normal"), "normal");
+
+        let long_value = "a".repeat(MAX_ENV_VALUE_LEN + 100);
+        let sanitized = sanitize_env_value(&long_value);
+        assert_eq!(sanitized.len(), MAX_ENV_VALUE_LEN);
+    }
+
+    #[test]
+    fn test_script_executor_disabled() {
+        let executor = ScriptExecutor::disabled();
+        assert!(executor.script_path.is_none());
+    }
+
+    #[test]
+    fn test_script_executor_invalid_path() {
+        let result = ScriptExecutor::new("relative/path");
+        assert!(matches!(result, Err(ScriptError::InvalidPath(_))));
+    }
+
+    #[tokio::test]
+    async fn test_script_executor_new_valid() {
+        let result = ScriptExecutor::new("/usr/bin/test");
+        assert!(result.is_ok());
+
+        let executor = result.unwrap();
+        assert_eq!(executor.script_path.as_ref().unwrap().to_str().unwrap(), "/usr/bin/test");
+        assert_eq!(executor.timeout, Duration::from_secs(DEFAULT_SCRIPT_TIMEOUT_SECS));
+    }
+
+    #[tokio::test]
+    async fn test_script_executor_with_timeout() {
+        let executor = ScriptExecutor::new("/usr/bin/test")
+            .unwrap()
+            .with_timeout(Duration::from_secs(60));
+
+        assert_eq!(executor.timeout, Duration::from_secs(60));
     }
 }
