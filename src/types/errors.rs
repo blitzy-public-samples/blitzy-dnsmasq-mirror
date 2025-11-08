@@ -320,6 +320,38 @@ pub enum DhcpError {
         #[source]
         source: io::Error,
     },
+
+    /// DHCP packet parsing error
+    #[error("DHCP packet parse error: {message}")]
+    ParseError {
+        /// Description of parsing failure
+        message: String,
+    },
+
+    /// DHCP validation error
+    #[error("DHCP validation error: {message}")]
+    ValidationError {
+        /// Description of validation failure
+        message: String,
+    },
+
+    /// Address allocation error
+    #[error("Address allocation error: {message}")]
+    AllocationError {
+        /// Description of allocation failure
+        message: String,
+    },
+
+    /// Lease management error
+    #[error("Lease error: {message}")]
+    LeaseError {
+        /// Description of lease operation failure
+        message: String,
+    },
+
+    /// Packet building error
+    #[error("Packet build error: {0}")]
+    PacketBuildError(#[from] crate::dhcp::outpacket::PacketBuildError),
 }
 
 /// Network I/O errors
