@@ -109,8 +109,8 @@ use tracing::warn;
 
 use crate::dhcp::lease::LeaseV4;
 use crate::dhcp::v4::options::{
-    DhcpOption, OPTION_CLIENT_ID, OPTION_LEASE_TIME, OPTION_REQUESTED_IP,
-    OPTION_SERVER_IDENTIFIER, OPTION_T1, OPTION_T2,
+    DhcpOption, OPTION_CLIENT_ID, OPTION_LEASE_TIME, OPTION_REQUESTED_IP, OPTION_SERVER_IDENTIFIER,
+    OPTION_T1, OPTION_T2,
 };
 use crate::dhcp::v4::protocol::MessageType;
 use crate::types::addresses::AllAddr;
@@ -256,7 +256,7 @@ pub enum StateTransitionError {
         /// Expected transaction ID
         expected: u32,
         /// Actual transaction ID received
-        actual: u32
+        actual: u32,
     },
 
     /// Client identifier mismatch in lease lookup
@@ -277,7 +277,7 @@ pub enum StateTransitionError {
     #[error("Requested address {address} is not available")]
     AddressUnavailable {
         /// Requested IP address
-        address: Ipv4Addr
+        address: Ipv4Addr,
     },
 
     /// Server identifier does not match this server
@@ -431,7 +431,10 @@ impl DhcpTransaction {
                     })
                 }
             }
-            DhcpState::InitReboot | DhcpState::Renewing | DhcpState::Rebinding | DhcpState::Bound => {
+            DhcpState::InitReboot
+            | DhcpState::Renewing
+            | DhcpState::Rebinding
+            | DhcpState::Bound => {
                 // In renewal states, update requested IP
                 self.requested_ip = Some(requested_ip);
                 if let Some(sid) = server_id {
@@ -619,7 +622,11 @@ impl DhcpTransaction {
     /// assert_eq!(t1, 3600);
     /// ```
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
     pub fn calculate_t1(lease_time: u64, override_t1: Option<u64>) -> u64 {
         override_t1.unwrap_or((lease_time as f64 * DEFAULT_T1_FRACTION) as u64)
     }
@@ -650,7 +657,11 @@ impl DhcpTransaction {
     /// assert_eq!(t2, 72000);
     /// ```
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
     pub fn calculate_t2(lease_time: u64, override_t2: Option<u64>) -> u64 {
         override_t2.unwrap_or((lease_time as f64 * DEFAULT_T2_FRACTION) as u64)
     }
@@ -671,7 +682,10 @@ impl DhcpTransaction {
     /// # Errors
     ///
     /// Returns `ServerIdMismatch` if identifier doesn't match
-    pub fn validate_server_id(&self, expected_server_id: Ipv4Addr) -> Result<(), StateTransitionError> {
+    pub fn validate_server_id(
+        &self,
+        expected_server_id: Ipv4Addr,
+    ) -> Result<(), StateTransitionError> {
         if let Some(provided) = self.server_id {
             if provided != expected_server_id {
                 return Err(StateTransitionError::ServerIdMismatch {
@@ -759,13 +773,16 @@ mod tests {
     fn test_handle_discover_invalid_state() {
         let mut transaction = DhcpTransaction::new(0x2222_2222);
         transaction.state = DhcpState::Bound;
-        
+
         let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
         let result = transaction.handle_discover(mac, None, None);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
-            StateTransitionError::InvalidMessageType { state, message_type } => {
+            StateTransitionError::InvalidMessageType {
+                state,
+                message_type,
+            } => {
                 assert_eq!(state, DhcpState::Bound);
                 assert_eq!(message_type, MessageType::Discover);
             }
@@ -777,10 +794,10 @@ mod tests {
     fn test_handle_request_from_selecting() {
         let mut transaction = DhcpTransaction::new(0x3333_3333);
         transaction.state = DhcpState::Selecting;
-        
+
         let requested = Ipv4Addr::new(192, 168, 1, 100);
         let server_id = Some(Ipv4Addr::new(192, 168, 1, 1));
-        
+
         let result = transaction.handle_request(requested, server_id);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), DhcpState::Requesting);
@@ -790,10 +807,10 @@ mod tests {
     fn test_handle_request_selecting_without_server_id() {
         let mut transaction = DhcpTransaction::new(0x4444_4444);
         transaction.state = DhcpState::Selecting;
-        
+
         let requested = Ipv4Addr::new(192, 168, 1, 100);
         let result = transaction.handle_request(requested, None);
-        
+
         assert!(result.is_err());
     }
 
@@ -802,7 +819,7 @@ mod tests {
         let mut transaction = DhcpTransaction::new(0x5555_5555);
         transaction.state = DhcpState::Bound;
         transaction.offered_ip = Some(Ipv4Addr::new(192, 168, 1, 100));
-        
+
         let result = transaction.handle_release();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), DhcpState::Init);
@@ -813,7 +830,7 @@ mod tests {
     fn test_handle_release_invalid_state() {
         let mut transaction = DhcpTransaction::new(0x6666_6666);
         transaction.state = DhcpState::Init;
-        
+
         let result = transaction.handle_release();
         assert!(result.is_err());
     }
@@ -823,7 +840,7 @@ mod tests {
         let mut transaction = DhcpTransaction::new(0x7777_7777);
         transaction.state = DhcpState::Selecting;
         transaction.offered_ip = Some(Ipv4Addr::new(192, 168, 1, 100));
-        
+
         let result = transaction.handle_decline();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), DhcpState::Init);
@@ -865,7 +882,7 @@ mod tests {
         let mut transaction = DhcpTransaction::new(0x8888_8888);
         let server_addr = Ipv4Addr::new(192, 168, 1, 1);
         transaction.server_id = Some(server_addr);
-        
+
         let result = transaction.validate_server_id(server_addr);
         assert!(result.is_ok());
     }
@@ -874,7 +891,7 @@ mod tests {
     fn test_validate_server_id_mismatch() {
         let mut transaction = DhcpTransaction::new(0x9999_9999);
         transaction.server_id = Some(Ipv4Addr::new(192, 168, 1, 2));
-        
+
         let result = transaction.validate_server_id(Ipv4Addr::new(192, 168, 1, 1));
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -890,7 +907,7 @@ mod tests {
     fn test_validate_xid_match() {
         let xid = 0xAAAA_AAAA;
         let transaction = DhcpTransaction::new(xid);
-        
+
         let result = transaction.validate_xid(xid);
         assert!(result.is_ok());
     }
@@ -898,7 +915,7 @@ mod tests {
     #[test]
     fn test_validate_xid_mismatch() {
         let transaction = DhcpTransaction::new(0xBBBB_BBBB);
-        
+
         let result = transaction.validate_xid(0xCCCC_CCCC);
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -913,22 +930,22 @@ mod tests {
     #[test]
     fn test_state_transitions() {
         let mut transaction = DhcpTransaction::new(0xDDDD_DDDD);
-        
+
         // INIT → SELECTING
         assert_eq!(transaction.get_state(), DhcpState::Init);
         let _ = transaction.handle_discover(vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55], None, None);
         assert_eq!(transaction.get_state(), DhcpState::Selecting);
-        
+
         // SELECTING → REQUESTING
         let _ = transaction.handle_request(
             Ipv4Addr::new(192, 168, 1, 100),
             Some(Ipv4Addr::new(192, 168, 1, 1)),
         );
         assert_eq!(transaction.get_state(), DhcpState::Requesting);
-        
+
         // Manually set to BOUND for testing RELEASE
         transaction.state = DhcpState::Bound;
-        
+
         // BOUND → INIT (via RELEASE)
         let _ = transaction.handle_release();
         assert_eq!(transaction.get_state(), DhcpState::Init);

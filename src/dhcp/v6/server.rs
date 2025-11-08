@@ -75,7 +75,7 @@ use tracing::{debug, info, warn};
 
 // Internal imports from depends_on_files
 use super::options::{Duid, OPTION6_SERVER_ID};
-use super::protocol::{Dhcp6Message, DHCPV6_CLIENT_PORT, DHCPV6_SERVER_PORT};
+use super::protocol::{DHCPV6_CLIENT_PORT, DHCPV6_SERVER_PORT, Dhcp6Message};
 use crate::dhcp::common::recv_dhcp_packet;
 #[cfg(feature = "ipv6")]
 use crate::dhcp::ipv6::radv::ra_start_unsolicited;
@@ -162,12 +162,12 @@ pub enum Dhcp6Error {
 /// Replaces C's global daemon->dhcp6fd with structured server instance.
 /// Maintains DHCPv6 socket, server DUID, and references to daemon state.
 pub struct DhcpV6Server {
-    /// UDP socket bound to port 547
-    socket: Arc<UdpSocket>,
-    
+    /// UDP socket bound to port 547 (None until bind() is called)
+    socket: Option<Arc<UdpSocket>>,
+
     /// Server DUID (DHCP Unique Identifier)
     duid: Duid,
-    
+
     /// Reference to daemon state
     daemon_state: Arc<RwLock<DaemonState>>,
 }
@@ -179,17 +179,17 @@ impl DhcpV6Server {
     /// * `daemon_state` - Shared daemon state
     ///
     /// # Returns
-    /// New server instance (not yet bound to socket)
+    /// New server instance (not yet bound to socket - call bind() to initialize socket)
     #[must_use]
     pub fn new(daemon_state: Arc<RwLock<DaemonState>>) -> Self {
-        // Generate initial DUID (will be replaced by make_duid)
+        // Generate initial DUID (will be replaced by make_duid in bind())
         let duid = Duid::LL {
             hw_type: HWTYPE_ETHERNET,
             ll_addr: vec![0; 6], // Placeholder, replaced by bind()
         };
 
         Self {
-            socket: Arc::new(UdpSocket::from_std(std::net::UdpSocket::bind("[::]:0").unwrap()).unwrap()),
+            socket: None, // Socket created in bind()
             duid,
             daemon_state,
         }
@@ -214,53 +214,64 @@ impl DhcpV6Server {
     /// `src/dhcp6.c:146-198` - `dhcp6_init()` function
     pub async fn bind(&mut self, bind_addr: SocketAddrV6) -> Result<(), Dhcp6Error> {
         // Create raw socket for low-level option setting (socket2 crate)
-        let raw_socket = Socket::new(
-            Domain::IPV6,
-            SocketType::DGRAM,
-            Some(Protocol::UDP),
-        ).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to create socket: {}", e),
-        })?;
+        let raw_socket = Socket::new(Domain::IPV6, SocketType::DGRAM, Some(Protocol::UDP))
+            .map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to create socket: {}", e),
+            })?;
 
         // Set SO_REUSEADDR to allow multiple bind on same address
-        raw_socket.set_reuse_address(true).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to set SO_REUSEADDR: {}", e),
-        })?;
+        raw_socket
+            .set_reuse_address(true)
+            .map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to set SO_REUSEADDR: {}", e),
+            })?;
 
         // Set SO_REUSEPORT if available (for bind-interfaces mode)
         #[cfg(not(target_os = "windows"))]
-        raw_socket.set_reuse_port(true).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to set SO_REUSEPORT: {}", e),
-        })?;
+        raw_socket
+            .set_reuse_port(true)
+            .map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to set SO_REUSEPORT: {}", e),
+            })?;
 
         // Set IPV6_V6ONLY to prevent IPv4-mapped IPv6 addresses
-        raw_socket.set_only_v6(true).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to set IPV6_V6ONLY: {}", e),
-        })?;
+        raw_socket
+            .set_only_v6(true)
+            .map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to set IPV6_V6ONLY: {}", e),
+            })?;
 
         // Bind to DHCPv6 server port
         let sockaddr: std::net::SocketAddr = bind_addr.into();
-        raw_socket.bind(&sockaddr.into()).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to bind to {}: {}", bind_addr, e),
-        })?;
+        raw_socket
+            .bind(&sockaddr.into())
+            .map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to bind to {}: {}", bind_addr, e),
+            })?;
 
         // Set non-blocking for tokio
-        raw_socket.set_nonblocking(true).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to set non-blocking: {}", e),
-        })?;
+        raw_socket
+            .set_nonblocking(true)
+            .map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to set non-blocking: {}", e),
+            })?;
 
         // Convert socket2::Socket to std::net::UdpSocket, then to tokio::net::UdpSocket
         let std_socket: std::net::UdpSocket = raw_socket.into();
-        let tokio_socket = UdpSocket::from_std(std_socket).map_err(|e| Dhcp6Error::SocketError {
-            message: format!("Failed to convert to tokio socket: {}", e),
-        })?;
+        let tokio_socket =
+            UdpSocket::from_std(std_socket).map_err(|e| Dhcp6Error::SocketError {
+                message: format!("Failed to convert to tokio socket: {}", e),
+            })?;
 
-        self.socket = Arc::new(tokio_socket);
+        self.socket = Some(Arc::new(tokio_socket));
 
         // Generate server DUID
         self.duid = make_duid(&self.daemon_state).await?;
 
-        info!("DHCPv6 server bound to {} with DUID {:?}", bind_addr, self.duid);
+        info!(
+            "DHCPv6 server bound to {} with DUID {:?}",
+            bind_addr, self.duid
+        );
 
         Ok(())
     }
@@ -295,7 +306,9 @@ impl DhcpV6Server {
         })?;
 
         // Get interface name
-        let if_name = index_to_name(if_index).await.unwrap_or_else(|_| format!("if{}", if_index));
+        let if_name = index_to_name(if_index)
+            .await
+            .unwrap_or_else(|_| format!("if{}", if_index));
 
         debug!(
             "Received DHCPv6 {} from {} on interface {}",
@@ -396,11 +409,7 @@ impl DhcpV6Server {
     ///
     /// # C Source Reference
     /// `src/dhcp6.c:278-310` - `get_client_mac()` function
-    pub async fn get_client_mac(
-        &self,
-        client_addr: Ipv6Addr,
-        if_index: u32,
-    ) -> Option<Vec<u8>> {
+    pub async fn get_client_mac(&self, client_addr: Ipv6Addr, if_index: u32) -> Option<Vec<u8>> {
         get_client_mac(client_addr, if_index).await
     }
 }
@@ -440,20 +449,21 @@ pub async fn dhcp6_init(
     daemon_state: &Arc<RwLock<DaemonState>>,
 ) -> Result<Arc<UdpSocket>, Dhcp6Error> {
     // Create socket using socket2 for low-level control
-    let raw_socket = Socket::new(
-        Domain::IPV6,
-        SocketType::DGRAM,
-        Some(Protocol::UDP),
-    ).map_err(|e| Dhcp6Error::SocketError {
-        message: format!("Failed to create DHCPv6 socket: {}", e),
-    })?;
+    let raw_socket =
+        Socket::new(Domain::IPV6, SocketType::DGRAM, Some(Protocol::UDP)).map_err(|e| {
+            Dhcp6Error::SocketError {
+                message: format!("Failed to create DHCPv6 socket: {}", e),
+            }
+        })?;
 
     // Configure socket options matching C implementation
 
     // SO_REUSEADDR: Allow multiple binds (for bind-interfaces mode)
-    raw_socket.set_reuse_address(true).map_err(|e| Dhcp6Error::SocketError {
-        message: format!("Failed to set SO_REUSEADDR: {}", e),
-    })?;
+    raw_socket
+        .set_reuse_address(true)
+        .map_err(|e| Dhcp6Error::SocketError {
+            message: format!("Failed to set SO_REUSEADDR: {}", e),
+        })?;
 
     // SO_REUSEPORT: Allow multiple server instances on same port (Linux/BSD)
     #[cfg(not(target_os = "windows"))]
@@ -462,21 +472,27 @@ pub async fn dhcp6_init(
     }
 
     // IPV6_V6ONLY: Disable IPv4-mapped IPv6 addresses
-    raw_socket.set_only_v6(true).map_err(|e| Dhcp6Error::SocketError {
-        message: format!("Failed to set IPV6_V6ONLY: {}", e),
-    })?;
+    raw_socket
+        .set_only_v6(true)
+        .map_err(|e| Dhcp6Error::SocketError {
+            message: format!("Failed to set IPV6_V6ONLY: {}", e),
+        })?;
 
     // Bind to DHCPv6 server port (547) on all interfaces
     let bind_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, DHCP6_SERVER_PORT, 0, 0);
     let sockaddr: std::net::SocketAddr = bind_addr.into();
-    raw_socket.bind(&sockaddr.into()).map_err(|e| Dhcp6Error::SocketError {
-        message: format!("Failed to bind to {}: {}", bind_addr, e),
-    })?;
+    raw_socket
+        .bind(&sockaddr.into())
+        .map_err(|e| Dhcp6Error::SocketError {
+            message: format!("Failed to bind to {}: {}", bind_addr, e),
+        })?;
 
     // Set non-blocking for async operation
-    raw_socket.set_nonblocking(true).map_err(|e| Dhcp6Error::SocketError {
-        message: format!("Failed to set non-blocking: {}", e),
-    })?;
+    raw_socket
+        .set_nonblocking(true)
+        .map_err(|e| Dhcp6Error::SocketError {
+            message: format!("Failed to set non-blocking: {}", e),
+        })?;
 
     // Convert to tokio UdpSocket
     let std_socket: std::net::UdpSocket = raw_socket.into();
@@ -484,7 +500,10 @@ pub async fn dhcp6_init(
         message: format!("Failed to convert to tokio socket: {}", e),
     })?;
 
-    info!("DHCPv6 server socket initialized on port {}", DHCP6_SERVER_PORT);
+    info!(
+        "DHCPv6 server socket initialized on port {}",
+        DHCP6_SERVER_PORT
+    );
 
     Ok(Arc::new(tokio_socket))
 }
@@ -521,9 +540,10 @@ pub async fn dhcp6_packet(
     let mut buf = vec![0u8; 4096]; // Standard DHCPv6 packet buffer size
 
     // Receive packet (async)
-    let (len, src_addr) = socket.recv_from(&mut buf).await.map_err(|e| {
-        Dhcp6Error::IoError(e)
-    })?;
+    let (len, src_addr) = socket
+        .recv_from(&mut buf)
+        .await
+        .map_err(|e| Dhcp6Error::IoError(e))?;
 
     buf.truncate(len);
 
@@ -537,9 +557,8 @@ pub async fn dhcp6_packet(
     };
 
     // Parse DHCPv6 message
-    let message = Dhcp6Message::parse(&buf).map_err(|e| Dhcp6Error::NetworkError(
-        format!("Failed to parse DHCPv6 packet: {}", e)
-    ))?;
+    let message = Dhcp6Message::parse(&buf)
+        .map_err(|e| Dhcp6Error::NetworkError(format!("Failed to parse DHCPv6 packet: {}", e)))?;
 
     // Get message type for logging
     let msg_type = message.get_message_type();
@@ -666,20 +685,20 @@ pub async fn make_duid(daemon_state: &Arc<RwLock<DaemonState>>) -> Result<Duid, 
         // On Linux: AF_PACKET with link-layer address
         // On BSD/macOS: AF_LINK with link-layer address
         // Attempt to extract MAC address if available
-        
+
         // For simplified implementation, attempt to read MAC via system calls
         // In production, would use platform-specific methods:
         // - Linux: netlink or sysfs (/sys/class/net/<iface>/address)
         // - BSD: getifaddrs with AF_LINK filtering
         // - macOS: IOKit framework
-        
+
         // Simplified: Try to get IPv6 link-local address and derive from it
         if let Some(addr) = iface.address {
             if let Some(_sockaddr_in6) = addr.as_sockaddr_in6() {
                 // Found an IPv6 address on this interface
                 // In full implementation, would extract MAC from link-local address
                 // or use platform-specific API to get hardware address
-                
+
                 // For now, create a deterministic DUID based on interface name
                 // This ensures consistent DUID across restarts
                 let if_bytes = if_name.as_bytes();
@@ -687,31 +706,31 @@ pub async fn make_duid(daemon_state: &Arc<RwLock<DaemonState>>) -> Result<Duid, 
                 for (i, &byte) in if_bytes.iter().take(6).enumerate() {
                     hw_addr[i] = byte;
                 }
-                
+
                 // Pad with zeros if interface name < 6 chars
                 if if_bytes.len() < 6 {
                     for i in if_bytes.len()..6 {
                         hw_addr[i] = 0;
                     }
                 }
-                
+
                 // Set locally-administered bit
                 hw_addr[0] = (hw_addr[0] & 0xfc) | 0x02;
 
                 // Determine DUID type based on RTC availability
                 #[cfg(feature = "broken-rtc")]
                 let duid_type_is_llt = false;
-                
+
                 #[cfg(not(feature = "broken-rtc"))]
                 let duid_type_is_llt = true;
 
                 let duid = if duid_type_is_llt {
                     // DUID-LLT: Include timestamp
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map_err(|e| Dhcp6Error::DuidError {
+                    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
+                        Dhcp6Error::DuidError {
                             message: format!("Failed to get system time: {}", e),
-                        })?;
+                        }
+                    })?;
 
                     // Convert to DUID epoch (seconds since Jan 1, 2000)
                     let duid_time = now.as_secs().saturating_sub(DUID_EPOCH) as u32;
@@ -730,7 +749,7 @@ pub async fn make_duid(daemon_state: &Arc<RwLock<DaemonState>>) -> Result<Duid, 
                 };
 
                 info!("Generated DUID from interface {}: {:?}", if_name, duid);
-                
+
                 // Store DUID in daemon state
                 {
                     let mut daemon = daemon_state.write().await;
@@ -745,14 +764,14 @@ pub async fn make_duid(daemon_state: &Arc<RwLock<DaemonState>>) -> Result<Duid, 
     // Fallback: Generate DUID-LL with pseudo-random link-layer address
     // Use system entropy for generating locally-administered MAC address
     warn!("No suitable interface found for DUID generation, using fallback address");
-    
+
     // Generate a locally-administered unicast MAC address
     // Bit 0 of first octet = 0 (unicast), Bit 1 = 1 (locally administered)
     let time_based_seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    
+
     let random_addr = vec![
         0x02, // Locally administered unicast
         ((time_based_seed >> 8) & 0xff) as u8,
@@ -820,12 +839,12 @@ pub async fn address6_allocate(
 
     // Compute SDBM hash of client DUID + IAID for deterministic allocation
     let mut hash: u64 = 0;
-    
+
     // Hash client DUID
     for &byte in client_duid {
         hash = hash.wrapping_mul(65599).wrapping_add(u64::from(byte));
     }
-    
+
     // Hash IAID (4 bytes, network byte order)
     let iaid_bytes = iaid.to_be_bytes();
     for &byte in &iaid_bytes {
@@ -854,7 +873,7 @@ pub async fn address6_allocate(
         // For DHCPv6, typically allocating from large ranges like ::/64
         let start_u128 = u128::from(start_v6);
         let end_u128 = u128::from(end_v6);
-        
+
         if end_u128 < start_u128 {
             warn!("Invalid address range: start > end");
             continue;
@@ -920,10 +939,7 @@ pub async fn address6_allocate(
 ///
 /// # Returns
 /// true if address can be allocated, false if in use
-pub async fn is_address_available(
-    daemon_state: &Arc<RwLock<DaemonState>>,
-    addr: Ipv6Addr,
-) -> bool {
+pub async fn is_address_available(daemon_state: &Arc<RwLock<DaemonState>>, addr: Ipv6Addr) -> bool {
     let daemon = daemon_state.read().await;
 
     // Check if address is in lease database
@@ -972,15 +988,15 @@ pub async fn is_address_available(
 /// - Waits for neighbor advertisement response with timeout
 /// - Extracts target link-layer address option from response
 /// - Cached in neighbor table by kernel after first resolution
-pub async fn get_client_mac(
-    client_addr: Ipv6Addr,
-    if_index: u32,
-) -> Option<Vec<u8>> {
+pub async fn get_client_mac(client_addr: Ipv6Addr, if_index: u32) -> Option<Vec<u8>> {
     // Create ICMPv6 socket for neighbor discovery
     let icmpv6_socket = match create_icmpv6_socket().await {
         Ok(sock) => sock,
         Err(e) => {
-            warn!("Failed to create ICMPv6 socket for neighbor discovery: {}", e);
+            warn!(
+                "Failed to create ICMPv6 socket for neighbor discovery: {}",
+                e
+            );
             return None;
         }
     };
@@ -994,7 +1010,7 @@ pub async fn get_client_mac(
 
     // For now, attempt to read neighbor cache from kernel
     // (Real implementation would use netlink on Linux or routing socket on BSD)
-    
+
     debug!(
         "Neighbor discovery for {} on interface {} (not fully implemented)",
         client_addr, if_index
@@ -1065,10 +1081,7 @@ pub async fn dhcp_construct_contexts(
 
                 active_interfaces.insert(if_name.clone());
 
-                debug!(
-                    "Found IPv6 address {} on interface {}",
-                    ipv6_addr, if_name
-                );
+                debug!("Found IPv6 address {} on interface {}", ipv6_addr, if_name);
             }
         }
     }
@@ -1176,17 +1189,20 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Test requires socket creation which conflicts with Tokio runtime. Constructor should be refactored to delay socket creation until bind()"]
     fn test_dhcp6_server_new() {
-        use crate::types::daemon_state::DaemonState;
         use crate::config::Config;
-        
+        use crate::types::daemon_state::DaemonState;
+
         let config = Config::default();
         let daemon_state = Arc::new(RwLock::new(DaemonState::new(config)));
         let server = DhcpV6Server::new(daemon_state);
 
-        // Server should be created with placeholder DUID
+        // Server should be created with placeholder DUID and no socket (created in bind())
         assert!(matches!(server.duid, Duid::LL { .. }));
+        assert!(
+            server.socket.is_none(),
+            "Socket should not be created until bind() is called"
+        );
     }
 
     #[test]

@@ -219,9 +219,9 @@ impl ClientSubnetInfo {
         let source_prefix = cursor.read_u8().map_err(|e| {
             EdnsError::MalformedOption(format!("Failed to read source prefix: {e}"))
         })?;
-        let scope_prefix = cursor.read_u8().map_err(|e| {
-            EdnsError::MalformedOption(format!("Failed to read scope prefix: {e}"))
-        })?;
+        let scope_prefix = cursor
+            .read_u8()
+            .map_err(|e| EdnsError::MalformedOption(format!("Failed to read scope prefix: {e}")))?;
 
         let address = match family {
             1 => {
@@ -479,8 +479,9 @@ impl OptRecord {
     pub fn to_bytes(&self) -> (u16, u32, Vec<u8>) {
         // Construct TTL field: extended_rcode | version | flags
         let flags = if self.dnssec_ok { 0x8000u16 } else { 0u16 };
-        let ttl_bytes =
-            (u32::from(self.extended_rcode) << 24) | (u32::from(self.version) << 16) | u32::from(flags);
+        let ttl_bytes = (u32::from(self.extended_rcode) << 24)
+            | (u32::from(self.version) << 16)
+            | u32::from(flags);
 
         // Serialize all options
         let mut rdata = BytesMut::new();

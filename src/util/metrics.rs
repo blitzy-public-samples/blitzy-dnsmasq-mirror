@@ -524,12 +524,10 @@ impl MetricsCollector {
             let value = self.get(metric);
 
             // Write HELP comment
-            writeln!(&mut output, "# HELP {name} {help}")
-                .expect("String write should never fail");
+            writeln!(&mut output, "# HELP {name} {help}").expect("String write should never fail");
 
             // Write TYPE declaration (all metrics are counters)
-            writeln!(&mut output, "# TYPE {name} counter")
-                .expect("String write should never fail");
+            writeln!(&mut output, "# TYPE {name} counter").expect("String write should never fail");
 
             // Write metric value
             writeln!(&mut output, "{name} {value}").expect("String write should never fail");
@@ -678,12 +676,10 @@ impl AtomicMetricsCollector {
             let value = self.get(metric);
 
             // Write HELP comment
-            writeln!(&mut output, "# HELP {name} {help}")
-                .expect("String write should never fail");
+            writeln!(&mut output, "# HELP {name} {help}").expect("String write should never fail");
 
             // Write TYPE declaration (all metrics are counters)
-            writeln!(&mut output, "# TYPE {name} counter")
-                .expect("String write should never fail");
+            writeln!(&mut output, "# TYPE {name} counter").expect("String write should never fail");
 
             // Write metric value
             writeln!(&mut output, "{name} {value}").expect("String write should never fail");

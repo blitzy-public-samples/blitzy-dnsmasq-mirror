@@ -242,7 +242,7 @@ fn match_glob_label(pattern: &str, value: &str) -> bool {
                 }
                 continue;
             }
-            
+
             // Ordinary character
             if value_index < value_bytes.len() {
                 let mut value_char = value_bytes[value_index] as char;

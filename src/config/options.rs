@@ -1186,10 +1186,14 @@ impl Cli {
         // Validate EDNS packet size
         if let Some(size) = self.edns_packet_max {
             if size < 512 {
-                return Err(ConfigError::InvalidPort(size.try_into().unwrap_or(u16::MAX)));
+                return Err(ConfigError::InvalidPort(
+                    size.try_into().unwrap_or(u16::MAX),
+                ));
             }
             if size > 65535 {
-                return Err(ConfigError::InvalidPort(size.try_into().unwrap_or(u16::MAX)));
+                return Err(ConfigError::InvalidPort(
+                    size.try_into().unwrap_or(u16::MAX),
+                ));
             }
         }
 

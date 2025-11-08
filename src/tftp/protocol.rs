@@ -778,10 +778,9 @@ impl ErrorPacket {
             ProtocolError::InvalidOptions(format!("Invalid error code: {error_code_val}"))
         })?;
 
-        let message = extract_null_terminated_string(&data[4..])
-            .ok_or_else(|| {
-                ProtocolError::MalformedPacket("Missing error message null terminator".to_string())
-            })?;
+        let message = extract_null_terminated_string(&data[4..]).ok_or_else(|| {
+            ProtocolError::MalformedPacket("Missing error message null terminator".to_string())
+        })?;
 
         Ok(ErrorPacket {
             error_code,

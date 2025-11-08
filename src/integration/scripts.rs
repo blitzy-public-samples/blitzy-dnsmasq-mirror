@@ -110,8 +110,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::dhcp::lease::Lease;
@@ -446,9 +446,10 @@ impl ScriptExecutor {
 
         // Validate script path is absolute for security
         if !path.is_absolute() {
-            return Err(ScriptError::InvalidPath(
-                format!("Script path must be absolute: {}", path.display())
-            ));
+            return Err(ScriptError::InvalidPath(format!(
+                "Script path must be absolute: {}",
+                path.display()
+            )));
         }
 
         // Create bounded event queue (capacity 1000 events)
@@ -621,7 +622,9 @@ impl ScriptExecutor {
             hostname,
         };
 
-        self.event_tx.send(event).await
+        self.event_tx
+            .send(event)
+            .await
             .map_err(|_| ScriptError::QueueClosed)
     }
 
@@ -664,7 +667,9 @@ impl ScriptExecutor {
             peer,
         };
 
-        self.event_tx.send(event).await
+        self.event_tx
+            .send(event)
+            .await
             .map_err(|_| ScriptError::QueueClosed)
     }
 
@@ -700,13 +705,11 @@ impl ScriptExecutor {
             return Ok(());
         }
 
-        let event = ScriptEvent::ArpEvent {
-            action,
-            mac,
-            addr,
-        };
+        let event = ScriptEvent::ArpEvent { action, mac, addr };
 
-        self.event_tx.send(event).await
+        self.event_tx
+            .send(event)
+            .await
             .map_err(|_| ScriptError::QueueClosed)
     }
 
@@ -751,7 +754,9 @@ impl ScriptExecutor {
             prefix_len,
         };
 
-        self.event_tx.send(event).await
+        self.event_tx
+            .send(event)
+            .await
             .map_err(|_| ScriptError::QueueClosed)
     }
 
@@ -789,7 +794,11 @@ impl ScriptExecutor {
     /// # }
     /// ```
     pub async fn start(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
-        let mut rx = self.event_rx.write().await.take()
+        let mut rx = self
+            .event_rx
+            .write()
+            .await
+            .take()
             .expect("start() called multiple times");
 
         // Clone necessary fields to avoid holding Arc in spawned task
@@ -806,8 +815,10 @@ impl ScriptExecutor {
                     timeout,
                     #[cfg(feature = "lua")]
                     lua.clone(),
-                    event
-                ).await {
+                    event,
+                )
+                .await
+                {
                     error!("Script execution error: {}", e);
                 }
             }
@@ -835,16 +846,26 @@ impl ScriptExecutor {
     async fn process_event_internal(
         script_path: Option<&PathBuf>,
         timeout: Duration,
-        #[cfg(feature = "lua")]
-        lua: Arc<RwLock<Option<mlua::Lua>>>,
+        #[cfg(feature = "lua")] lua: Arc<RwLock<Option<mlua::Lua>>>,
         event: ScriptEvent,
     ) -> Result<(), ScriptError> {
         match event {
-            ScriptEvent::DhcpLeaseEvent { action, lease, hostname } => {
+            ScriptEvent::DhcpLeaseEvent {
+                action,
+                lease,
+                hostname,
+            } => {
                 // Try Lua callback first if available
                 #[cfg(feature = "lua")]
                 if let Some(lua_instance) = lua.read().await.as_ref() {
-                    if let Err(e) = Self::call_lua_lease_internal(lua_instance, action, &lease, hostname.as_deref()).await {
+                    if let Err(e) = Self::call_lua_lease_internal(
+                        lua_instance,
+                        action,
+                        &lease,
+                        hostname.as_deref(),
+                    )
+                    .await
+                    {
                         warn!("Lua callback failed, falling back to script: {}", e);
                     } else {
                         return Ok(());
@@ -853,15 +874,28 @@ impl ScriptExecutor {
 
                 // Execute external script
                 if let Some(path) = script_path {
-                    Self::execute_lease_script_internal(path, timeout, action, &lease, hostname.as_deref()).await?;
+                    Self::execute_lease_script_internal(
+                        path,
+                        timeout,
+                        action,
+                        &lease,
+                        hostname.as_deref(),
+                    )
+                    .await?;
                 }
             }
 
             #[cfg(feature = "tftp")]
-            ScriptEvent::TftpEvent { file_len, filename, peer } => {
+            ScriptEvent::TftpEvent {
+                file_len,
+                filename,
+                peer,
+            } => {
                 #[cfg(feature = "lua")]
                 if let Some(lua_instance) = lua.read().await.as_ref() {
-                    if let Err(e) = Self::call_lua_tftp_internal(lua_instance, file_len, &filename, &peer).await {
+                    if let Err(e) =
+                        Self::call_lua_tftp_internal(lua_instance, file_len, &filename, &peer).await
+                    {
                         warn!("Lua tftp callback failed: {}", e);
                     } else {
                         return Ok(());
@@ -869,14 +903,17 @@ impl ScriptExecutor {
                 }
 
                 if let Some(path) = script_path {
-                    Self::execute_tftp_script_internal(path, timeout, file_len, &filename, &peer).await?;
+                    Self::execute_tftp_script_internal(path, timeout, file_len, &filename, &peer)
+                        .await?;
                 }
             }
 
             ScriptEvent::ArpEvent { action, mac, addr } => {
                 #[cfg(feature = "lua")]
                 if let Some(lua_instance) = lua.read().await.as_ref() {
-                    if let Err(e) = Self::call_lua_arp_internal(lua_instance, action, &mac, &addr).await {
+                    if let Err(e) =
+                        Self::call_lua_arp_internal(lua_instance, action, &mac, &addr).await
+                    {
                         warn!("Lua arp callback failed: {}", e);
                     } else {
                         return Ok(());
@@ -889,16 +926,17 @@ impl ScriptExecutor {
             }
 
             #[cfg(feature = "dhcp-v6")]
-            ScriptEvent::RelaySnoop { client, interface, prefix, prefix_len } => {
+            ScriptEvent::RelaySnoop {
+                client,
+                interface,
+                prefix,
+                prefix_len,
+            } => {
                 if let Some(path) = script_path {
                     Self::execute_relay_snoop_script_internal(
-                        path,
-                        timeout,
-                        &client,
-                        &interface,
-                        &prefix,
-                        prefix_len,
-                    ).await?;
+                        path, timeout, &client, &interface, &prefix, prefix_len,
+                    )
+                    .await?;
                 }
             }
         }
@@ -926,12 +964,18 @@ impl ScriptExecutor {
         let mut env = HashMap::new();
 
         // Populate environment variables based on lease data
-        env.insert("DNSMASQ_LEASE_ACTION".to_string(), action.as_env_str().to_string());
+        env.insert(
+            "DNSMASQ_LEASE_ACTION".to_string(),
+            action.as_env_str().to_string(),
+        );
 
         match lease {
             Lease::V4(lease_v4) => {
                 env.insert("DNSMASQ_IP_ADDR".to_string(), lease_v4.addr.to_string());
-                env.insert("DNSMASQ_MAC_ADDR".to_string(), format_mac_addr(&lease_v4.hwaddr));
+                env.insert(
+                    "DNSMASQ_MAC_ADDR".to_string(),
+                    format_mac_addr(&lease_v4.hwaddr),
+                );
 
                 if let Some(client_id) = &lease_v4.client_id {
                     env.insert("DNSMASQ_CLIENT_ID".to_string(), format_hex(client_id));
@@ -951,7 +995,10 @@ impl ScriptExecutor {
                     0
                 };
 
-                env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), lease_v4.expires.to_string());
+                env.insert(
+                    "DNSMASQ_LEASE_EXPIRES".to_string(),
+                    lease_v4.expires.to_string(),
+                );
                 env.insert("DNSMASQ_LEASE_LENGTH".to_string(), remaining.to_string());
             }
 
@@ -975,7 +1022,10 @@ impl ScriptExecutor {
                     0
                 };
 
-                env.insert("DNSMASQ_LEASE_EXPIRES".to_string(), lease_v6.expires.to_string());
+                env.insert(
+                    "DNSMASQ_LEASE_EXPIRES".to_string(),
+                    lease_v6.expires.to_string(),
+                );
                 env.insert("DNSMASQ_LEASE_LENGTH".to_string(), remaining.to_string());
             }
         }
@@ -999,8 +1049,14 @@ impl ScriptExecutor {
         let mut env = HashMap::new();
 
         env.insert("DNSMASQ_TFTP_FILE_SIZE".to_string(), file_len.to_string());
-        env.insert("DNSMASQ_TFTP_FILE_NAME".to_string(), sanitize_env_value(filename));
-        env.insert("DNSMASQ_TFTP_REMOTE_ADDR".to_string(), peer.ip().to_string());
+        env.insert(
+            "DNSMASQ_TFTP_FILE_NAME".to_string(),
+            sanitize_env_value(filename),
+        );
+        env.insert(
+            "DNSMASQ_TFTP_REMOTE_ADDR".to_string(),
+            peer.ip().to_string(),
+        );
 
         Self::execute_script_with_env_internal(script_path, timeout, env).await
     }
@@ -1019,7 +1075,10 @@ impl ScriptExecutor {
     ) -> Result<(), ScriptError> {
         let mut env = HashMap::new();
 
-        env.insert("DNSMASQ_ARP_ACTION".to_string(), action.as_env_str().to_string());
+        env.insert(
+            "DNSMASQ_ARP_ACTION".to_string(),
+            action.as_env_str().to_string(),
+        );
         env.insert("DNSMASQ_ARP_MAC".to_string(), mac.to_string());
         env.insert("DNSMASQ_ARP_IP".to_string(), addr.to_string());
 
@@ -1044,7 +1103,10 @@ impl ScriptExecutor {
 
         env.insert("DNSMASQ_RELAY_CLIENT".to_string(), client.to_string());
         env.insert("DNSMASQ_RELAY_INTERFACE".to_string(), interface.to_string());
-        env.insert("DNSMASQ_RELAY_PREFIX".to_string(), format!("{prefix}/{prefix_len}"));
+        env.insert(
+            "DNSMASQ_RELAY_PREFIX".to_string(),
+            format!("{prefix}/{prefix_len}"),
+        );
 
         Self::execute_script_with_env_internal(script_path, timeout, env).await
     }
@@ -1062,7 +1124,11 @@ impl ScriptExecutor {
         timeout: Duration,
         env: HashMap<String, String>,
     ) -> Result<(), ScriptError> {
-        debug!("Executing script: {} with {} env vars", script_path.display(), env.len());
+        debug!(
+            "Executing script: {} with {} env vars",
+            script_path.display(),
+            env.len()
+        );
 
         let mut cmd = Command::new(script_path);
         cmd.envs(env);
@@ -1073,7 +1139,8 @@ impl ScriptExecutor {
         // Spawn process with timeout
         let child = cmd.spawn()?;
 
-        let output = tokio::time::timeout(timeout, child.wait_with_output()).await
+        let output = tokio::time::timeout(timeout, child.wait_with_output())
+            .await
             .map_err(|_| ScriptError::Timeout(timeout))??;
 
         if !output.status.success() {
@@ -1230,7 +1297,8 @@ impl ScriptExecutor {
 ///
 /// Replaces: MAC formatting in `my_setenv()` calls (helper.c lines 550-560).
 fn format_mac_addr(hwaddr: &[u8]) -> String {
-    hwaddr.iter()
+    hwaddr
+        .iter()
         .map(|b| format!("{b:02X}"))
         .collect::<Vec<_>>()
         .join(":")
@@ -1245,11 +1313,10 @@ fn format_mac_addr(hwaddr: &[u8]) -> String {
 /// Replaces: Client ID formatting (helper.c lines 508-524).
 fn format_hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
-    bytes.iter()
-        .fold(String::new(), |mut acc, b| {
-            let _ = write!(acc, "{b:02x}");
-            acc
-        })
+    bytes.iter().fold(String::new(), |mut acc, b| {
+        let _ = write!(acc, "{b:02x}");
+        acc
+    })
 }
 
 /// Sanitize environment variable value.
@@ -1331,8 +1398,14 @@ mod tests {
         assert!(result.is_ok());
 
         let executor = result.unwrap();
-        assert_eq!(executor.script_path.as_ref().unwrap().to_str().unwrap(), "/usr/bin/test");
-        assert_eq!(executor.timeout, Duration::from_secs(DEFAULT_SCRIPT_TIMEOUT_SECS));
+        assert_eq!(
+            executor.script_path.as_ref().unwrap().to_str().unwrap(),
+            "/usr/bin/test"
+        );
+        assert_eq!(
+            executor.timeout,
+            Duration::from_secs(DEFAULT_SCRIPT_TIMEOUT_SECS)
+        );
     }
 
     #[tokio::test]

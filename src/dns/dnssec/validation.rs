@@ -647,7 +647,7 @@ fn compute_nsec3_hash(
     iterations: u16,
     salt: &[u8],
 ) -> Result<Vec<u8>, DnssecError> {
-    use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY};
+    use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 
     if hash_algo != 1 {
         return Err(DnssecError::CryptoError {

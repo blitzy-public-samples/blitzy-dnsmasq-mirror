@@ -13,7 +13,7 @@
 //! ## Purpose
 //!
 //! These tests validate the complete DHCP lease persistence layer, ensuring:
-//! 
+//!
 //! 1. **Format Compatibility**: 100% byte-compatible file format with C version
 //!    for seamless upgrades (Section 0.1.1)
 //! 2. **Atomic Updates**: Write-to-temp-then-rename prevents corruption during
@@ -73,17 +73,23 @@ use dnsmasq::dhcp::lease_store::{DuidEntry, LeaseDatabase, LeaseEntry, LeaseStor
 async fn test_dhcpv4_lease_format_complete() {
     // DHCPv4 lease with all fields: expiry, MAC, IP, hostname, client_id
     let lease_line = "1609459200 00:11:22:33:44:55 192.168.1.100 client1 01:00:11:22:33:44:55";
-    
-    let parsed = LeaseStore::parse_lease_line(lease_line)
-        .expect("Failed to parse valid DHCPv4 lease");
-    
+
+    let parsed =
+        LeaseStore::parse_lease_line(lease_line).expect("Failed to parse valid DHCPv4 lease");
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert_eq!(lease.expiry, 1609459200);
             assert_eq!(lease.address, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
-            assert_eq!(lease.hardware_address, vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+            assert_eq!(
+                lease.hardware_address,
+                vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]
+            );
             assert_eq!(lease.hostname, Some("client1".to_string()));
-            assert_eq!(lease.client_id, Some(vec![0x01, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55]));
+            assert_eq!(
+                lease.client_id,
+                Some(vec![0x01, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55])
+            );
             assert_eq!(lease.iaid, None); // DHCPv4 doesn't use IAID
             assert!(!lease.is_temporary_address);
         }
@@ -99,15 +105,18 @@ async fn test_dhcpv4_lease_format_complete() {
 async fn test_dhcpv4_lease_format_missing_fields() {
     // DHCPv4 lease with * for missing hostname and client_id
     let lease_line = "1609459800 00:aa:bb:cc:dd:ee 192.168.1.101 * *";
-    
+
     let parsed = LeaseStore::parse_lease_line(lease_line)
         .expect("Failed to parse DHCPv4 lease with missing fields");
-    
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert_eq!(lease.expiry, 1609459800);
             assert_eq!(lease.address, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)));
-            assert_eq!(lease.hardware_address, vec![0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee]);
+            assert_eq!(
+                lease.hardware_address,
+                vec![0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee]
+            );
             assert_eq!(lease.hostname, None);
             assert_eq!(lease.client_id, None);
         }
@@ -123,15 +132,18 @@ async fn test_dhcpv4_lease_format_missing_fields() {
 async fn test_dhcpv4_lease_format_with_hw_type() {
     // DHCPv4 lease with hardware type prefix (01- for Ethernet is explicit here)
     let lease_line = "1609460000 01-00:11:22:33:44:55 192.168.1.102 client2 *";
-    
+
     let parsed = LeaseStore::parse_lease_line(lease_line)
         .expect("Failed to parse DHCPv4 lease with hw_type");
-    
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert_eq!(lease.address, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 102)));
             // Hardware type is parsed but stored in hardware_address
-            assert_eq!(lease.hardware_address, vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+            assert_eq!(
+                lease.hardware_address,
+                vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]
+            );
         }
         _ => panic!("Expected ParsedLine::Lease"),
     }
@@ -149,16 +161,17 @@ async fn test_dhcpv4_lease_format_with_hw_type() {
 async fn test_duid_parsing() {
     // DHCPv6 DUID line with colon-separated hex
     let duid_line = "duid 00:01:00:01:12:34:56:78:00:11:22:33:44:55";
-    
-    let parsed = LeaseStore::parse_lease_line(duid_line)
-        .expect("Failed to parse DUID line");
-    
+
+    let parsed = LeaseStore::parse_lease_line(duid_line).expect("Failed to parse DUID line");
+
     match parsed {
         ParsedLine::Duid(duid) => {
             assert_eq!(
                 duid.duid_bytes,
-                vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 
-                     0x00, 0x11, 0x22, 0x33, 0x44, 0x55]
+                vec![
+                    0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 0x00, 0x11, 0x22, 0x33, 0x44,
+                    0x55
+                ]
             );
         }
         _ => panic!("Expected ParsedLine::Duid"),
@@ -173,10 +186,9 @@ async fn test_duid_parsing() {
 async fn test_dhcpv6_lease_format_non_temporary() {
     // DHCPv6 NA lease (no T prefix)
     let lease_line = "1609459200 12345678 2001:db8::1 client-v6 *";
-    
-    let parsed = LeaseStore::parse_lease_line(lease_line)
-        .expect("Failed to parse DHCPv6 NA lease");
-    
+
+    let parsed = LeaseStore::parse_lease_line(lease_line).expect("Failed to parse DHCPv6 NA lease");
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert_eq!(lease.expiry, 1609459200);
@@ -198,10 +210,9 @@ async fn test_dhcpv6_lease_format_non_temporary() {
 async fn test_dhcpv6_lease_format_temporary() {
     // DHCPv6 TA lease (T prefix indicates temporary address)
     let lease_line = "1609459800 T87654321 2001:db8::2 * 00:01:00:01:87:65:43:21";
-    
-    let parsed = LeaseStore::parse_lease_line(lease_line)
-        .expect("Failed to parse DHCPv6 TA lease");
-    
+
+    let parsed = LeaseStore::parse_lease_line(lease_line).expect("Failed to parse DHCPv6 TA lease");
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert_eq!(lease.expiry, 1609459800);
@@ -230,7 +241,7 @@ async fn test_dhcpv6_lease_format_temporary() {
 async fn test_atomic_file_update() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create initial database with DHCPv4 lease
     let mut database = LeaseDatabase::new();
     database.leases.push(LeaseEntry {
@@ -242,18 +253,18 @@ async fn test_atomic_file_update() {
         iaid: None,
         is_temporary_address: false,
     });
-    
+
     // Write database
-    database.save_to_file(&lease_file)
+    database
+        .save_to_file(&lease_file)
         .expect("Failed to save lease database");
-    
+
     // Verify file exists and is readable
     assert!(lease_file.exists());
-    let content = fs::read_to_string(&lease_file)
-        .expect("Failed to read lease file");
+    let content = fs::read_to_string(&lease_file).expect("Failed to read lease file");
     assert!(content.contains("192.168.1.100"));
     assert!(content.contains("client1"));
-    
+
     // Update database (add second lease)
     database.leases.push(LeaseEntry {
         expiry: 1609459800,
@@ -264,22 +275,23 @@ async fn test_atomic_file_update() {
         iaid: None,
         is_temporary_address: false,
     });
-    
+
     // Write updated database (atomic update)
-    database.save_to_file(&lease_file)
+    database
+        .save_to_file(&lease_file)
         .expect("Failed to save updated lease database");
-    
+
     // Verify both leases are present
-    let updated_content = fs::read_to_string(&lease_file)
-        .expect("Failed to read updated lease file");
+    let updated_content =
+        fs::read_to_string(&lease_file).expect("Failed to read updated lease file");
     assert!(updated_content.contains("192.168.1.100"));
     assert!(updated_content.contains("192.168.1.101"));
     assert!(updated_content.contains("client1"));
     assert!(updated_content.contains("client2"));
-    
+
     // Verify file can be loaded back
-    let reloaded = LeaseDatabase::load_from_file(&lease_file)
-        .expect("Failed to reload lease database");
+    let reloaded =
+        LeaseDatabase::load_from_file(&lease_file).expect("Failed to reload lease database");
     assert_eq!(reloaded.leases.len(), 2);
 }
 
@@ -291,7 +303,7 @@ async fn test_atomic_file_update() {
 async fn test_atomic_update_preserves_old_data() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create initial database
     let mut database = LeaseDatabase::new();
     database.leases.push(LeaseEntry {
@@ -303,26 +315,23 @@ async fn test_atomic_update_preserves_old_data() {
         iaid: None,
         is_temporary_address: false,
     });
-    
+
     // Write initial database
-    database.save_to_file(&lease_file)
+    database
+        .save_to_file(&lease_file)
         .expect("Failed to save initial database");
-    
-    let _original_content = fs::read_to_string(&lease_file)
-        .expect("Failed to read lease file");
-    
+
+    let _original_content = fs::read_to_string(&lease_file).expect("Failed to read lease file");
+
     // Attempt to write to read-only directory (simulates filesystem error)
     // First, set the parent directory to read-only (platform-dependent test)
     // For now, just verify that old data remains readable after successful writes
-    
+
     // Verify original data is intact
-    let reloaded = LeaseDatabase::load_from_file(&lease_file)
-        .expect("Failed to reload lease database");
+    let reloaded =
+        LeaseDatabase::load_from_file(&lease_file).expect("Failed to reload lease database");
     assert_eq!(reloaded.leases.len(), 1);
-    assert_eq!(
-        reloaded.leases[0].hostname,
-        Some("original".to_string())
-    );
+    assert_eq!(reloaded.leases[0].hostname, Some("original".to_string()));
 }
 
 // ============================================================================
@@ -338,10 +347,10 @@ async fn test_atomic_update_preserves_old_data() {
 async fn test_broken_rtc_mode_duration_storage() {
     // In broken-rtc mode, expiry field is duration (seconds from now)
     let lease_line = "3600 00:11:22:33:44:55 192.168.1.100 client1 *";
-    
-    let parsed = LeaseStore::parse_lease_line(lease_line)
-        .expect("Failed to parse lease in broken-rtc mode");
-    
+
+    let parsed =
+        LeaseStore::parse_lease_line(lease_line).expect("Failed to parse lease in broken-rtc mode");
+
     match parsed {
         ParsedLine::Lease(lease) => {
             // In broken-rtc mode, expiry is duration (3600 seconds)
@@ -361,7 +370,7 @@ async fn test_broken_rtc_mode_duration_storage() {
 async fn test_broken_rtc_mode_expiry_calculation() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create lease with duration
     let duration_secs = 3600u64;
     let database = LeaseDatabase {
@@ -376,11 +385,11 @@ async fn test_broken_rtc_mode_expiry_calculation() {
         }],
         duid: None,
     };
-    
+
     // Save and reload
     database.save_to_file(&lease_file).expect("Failed to save");
     let reloaded = LeaseDatabase::load_from_file(&lease_file).expect("Failed to reload");
-    
+
     // Verify duration is preserved in file format
     assert_eq!(reloaded.leases[0].expiry, duration_secs);
 }
@@ -398,7 +407,7 @@ async fn test_lease_expiration_detection() {
     let now = 1609459200u64;
     let future = now + 3600;
     let past = now - 3600;
-    
+
     // Create leases with different expiration times
     let valid_lease = LeaseEntry {
         expiry: future,
@@ -409,7 +418,7 @@ async fn test_lease_expiration_detection() {
         iaid: None,
         is_temporary_address: false,
     };
-    
+
     let expired_lease = LeaseEntry {
         expiry: past,
         address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101)),
@@ -419,7 +428,7 @@ async fn test_lease_expiration_detection() {
         iaid: None,
         is_temporary_address: false,
     };
-    
+
     // Verify expiration detection
     assert!(valid_lease.expiry > now);
     assert!(expired_lease.expiry < now);
@@ -434,12 +443,12 @@ async fn test_lease_expiration_2038_overflow() {
     // Year 2038 problem: max signed 32-bit timestamp is 2147483647 (2038-01-19)
     let year_2038 = 2147483647u64;
     let beyond_2038 = year_2038 + 86400; // One day after max 32-bit time_t
-    
+
     let lease_line = format!("{} 00:11:22:33:44:55 192.168.1.100 client1 *", beyond_2038);
-    
+
     let parsed = LeaseStore::parse_lease_line(&lease_line)
         .expect("Failed to parse lease with 2038+ timestamp");
-    
+
     match parsed {
         ParsedLine::Lease(lease) => {
             // Verify that u64 can represent timestamps beyond 2038
@@ -461,7 +470,7 @@ async fn test_lease_expiration_2038_overflow() {
 async fn test_hostname_conflict_detection() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create database with two leases sharing same hostname
     let database = LeaseDatabase {
         leases: vec![
@@ -486,11 +495,11 @@ async fn test_hostname_conflict_detection() {
         ],
         duid: None,
     };
-    
+
     // Save and reload to verify both leases are preserved
     database.save_to_file(&lease_file).expect("Failed to save");
     let reloaded = LeaseDatabase::load_from_file(&lease_file).expect("Failed to reload");
-    
+
     // Both leases should be present (conflict resolution is policy decision,
     // not enforced during parsing/serialization)
     assert_eq!(reloaded.leases.len(), 2);
@@ -508,10 +517,10 @@ async fn test_hostname_conflict_detection() {
 #[tokio::test]
 async fn test_filesystem_error_nonexistent_directory() {
     let invalid_path = PathBuf::from("/nonexistent/directory/dnsmasq.leases");
-    
+
     let database = LeaseDatabase::new();
     let result = database.save_to_file(&invalid_path);
-    
+
     // Should return error, not panic
     assert!(result.is_err());
 }
@@ -524,7 +533,7 @@ async fn test_filesystem_error_nonexistent_directory() {
 async fn test_filesystem_error_corrupted_file() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create file with mixed valid and invalid lines
     let corrupted_content = "\
 1609459200 00:11:22:33:44:55 192.168.1.100 valid1 *
@@ -534,16 +543,16 @@ ANOTHER INVALID LINE
 INCOMPLETE LEASE WITH ONLY TWO FIELDS
 1609460000 00:bb:cc:dd:ee:ff 192.168.1.102 valid3 *
 ";
-    
+
     fs::write(&lease_file, corrupted_content).expect("Failed to write test file");
-    
+
     // Load database (should skip invalid lines with warnings)
     let result = LeaseDatabase::load_from_file(&lease_file);
-    
+
     // Should succeed and load valid leases only
     assert!(result.is_ok());
     let database = result.unwrap();
-    
+
     // Should have loaded 3 valid leases, skipped 3 invalid lines
     assert_eq!(database.leases.len(), 3);
     assert_eq!(database.leases[0].hostname, Some("valid1".to_string()));
@@ -562,28 +571,27 @@ INCOMPLETE LEASE WITH ONLY TWO FIELDS
 #[tokio::test]
 async fn test_dhcpv4_lease_round_trip() {
     let original_line = "1609459200 00:11:22:33:44:55 192.168.1.100 client1 01:00:11:22:33:44:55";
-    
+
     // Parse the line
-    let parsed = LeaseStore::parse_lease_line(original_line)
-        .expect("Failed to parse lease");
-    
+    let parsed = LeaseStore::parse_lease_line(original_line).expect("Failed to parse lease");
+
     let lease = match parsed {
         ParsedLine::Lease(l) => l,
         _ => panic!("Expected lease"),
     };
-    
+
     // Serialize it back
     let serialized = LeaseStore::format_lease_line(&lease);
-    
+
     // Parse the serialized version
-    let reparsed = LeaseStore::parse_lease_line(&serialized)
-        .expect("Failed to reparse serialized lease");
-    
+    let reparsed =
+        LeaseStore::parse_lease_line(&serialized).expect("Failed to reparse serialized lease");
+
     let reparsed_lease = match reparsed {
         ParsedLine::Lease(l) => l,
         _ => panic!("Expected lease"),
     };
-    
+
     // Compare all fields
     assert_eq!(lease.expiry, reparsed_lease.expiry);
     assert_eq!(lease.address, reparsed_lease.address);
@@ -599,7 +607,7 @@ async fn test_dhcpv4_lease_round_trip() {
 async fn test_dhcpv6_lease_round_trip() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create database with DUID and DHCPv6 leases
     let original = LeaseDatabase {
         leases: vec![
@@ -626,30 +634,36 @@ async fn test_dhcpv6_lease_round_trip() {
             duid_bytes: vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78],
         }),
     };
-    
+
     // Save to file
     original.save_to_file(&lease_file).expect("Failed to save");
-    
+
     // Load back
     let reloaded = LeaseDatabase::load_from_file(&lease_file).expect("Failed to reload");
-    
+
     // Verify DUID
     assert!(reloaded.duid.is_some());
     assert_eq!(
         reloaded.duid.unwrap().duid_bytes,
         vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78]
     );
-    
+
     // Verify leases
     assert_eq!(reloaded.leases.len(), 2);
-    
+
     // First lease (NA)
-    assert_eq!(reloaded.leases[0].address, "2001:db8::1".parse::<IpAddr>().unwrap());
+    assert_eq!(
+        reloaded.leases[0].address,
+        "2001:db8::1".parse::<IpAddr>().unwrap()
+    );
     assert_eq!(reloaded.leases[0].iaid, Some(12345678));
     assert!(!reloaded.leases[0].is_temporary_address);
-    
+
     // Second lease (TA)
-    assert_eq!(reloaded.leases[1].address, "2001:db8::2".parse::<IpAddr>().unwrap());
+    assert_eq!(
+        reloaded.leases[1].address,
+        "2001:db8::2".parse::<IpAddr>().unwrap()
+    );
     assert_eq!(reloaded.leases[1].iaid, Some(87654321));
     assert!(reloaded.leases[1].is_temporary_address);
 }
@@ -667,15 +681,17 @@ fn arb_dhcpv4_lease() -> impl Strategy<Value = LeaseEntry> {
         prop::option::of("[a-z]{1,20}"),
         prop::option::of(prop::collection::vec(any::<u8>(), 1..=255)),
     )
-        .prop_map(|(expiry, hwaddr, ip_bytes, hostname, client_id)| LeaseEntry {
-            expiry,
-            address: IpAddr::V4(Ipv4Addr::from(ip_bytes)),
-            hardware_address: hwaddr,
-            hostname,
-            client_id,
-            iaid: None,
-            is_temporary_address: false,
-        })
+        .prop_map(
+            |(expiry, hwaddr, ip_bytes, hostname, client_id)| LeaseEntry {
+                expiry,
+                address: IpAddr::V4(Ipv4Addr::from(ip_bytes)),
+                hardware_address: hwaddr,
+                hostname,
+                client_id,
+                iaid: None,
+                is_temporary_address: false,
+            },
+        )
 }
 
 /// Generate arbitrary valid DHCPv6 lease entries for property testing.
@@ -688,15 +704,17 @@ fn arb_dhcpv6_lease() -> impl Strategy<Value = LeaseEntry> {
         prop::option::of(prop::collection::vec(any::<u8>(), 1..=130)),
         any::<bool>(),
     )
-        .prop_map(|(expiry, ip_bytes, iaid, hostname, client_id, is_ta)| LeaseEntry {
-            expiry,
-            address: IpAddr::V6(Ipv6Addr::from(ip_bytes)),
-            hardware_address: vec![],
-            hostname,
-            client_id,
-            iaid: Some(iaid),
-            is_temporary_address: is_ta,
-        })
+        .prop_map(
+            |(expiry, ip_bytes, iaid, hostname, client_id, is_ta)| LeaseEntry {
+                expiry,
+                address: IpAddr::V6(Ipv6Addr::from(ip_bytes)),
+                hardware_address: vec![],
+                hostname,
+                client_id,
+                iaid: Some(iaid),
+                is_temporary_address: is_ta,
+            },
+        )
 }
 
 proptest! {
@@ -708,16 +726,16 @@ proptest! {
     fn prop_dhcpv4_lease_round_trip(lease in arb_dhcpv4_lease()) {
         // Serialize the lease
         let serialized = LeaseStore::format_lease_line(&lease);
-        
+
         // Parse it back
         let parsed = LeaseStore::parse_lease_line(&serialized)
             .expect("Failed to parse serialized lease");
-        
+
         let reparsed_lease = match parsed {
             ParsedLine::Lease(l) => l,
             _ => panic!("Expected lease"),
         };
-        
+
         // Verify round-trip preserves all fields
         prop_assert_eq!(lease.expiry, reparsed_lease.expiry);
         prop_assert_eq!(lease.address, reparsed_lease.address);
@@ -725,7 +743,7 @@ proptest! {
         prop_assert_eq!(lease.hostname, reparsed_lease.hostname);
         // Note: client_id may differ in representation but should be semantically equal
     }
-    
+
     /// Property test: Parse(Serialize(lease)) == lease for all valid DHCPv6 leases.
     ///
     /// C Source: Round-trip through read_leases and lease_update_file for v6
@@ -733,16 +751,16 @@ proptest! {
     fn prop_dhcpv6_lease_round_trip(lease in arb_dhcpv6_lease()) {
         // Serialize the lease
         let serialized = LeaseStore::format_lease_line(&lease);
-        
+
         // Parse it back
         let parsed = LeaseStore::parse_lease_line(&serialized)
             .expect("Failed to parse serialized DHCPv6 lease");
-        
+
         let reparsed_lease = match parsed {
             ParsedLine::Lease(l) => l,
             _ => panic!("Expected lease"),
         };
-        
+
         // Verify round-trip preserves all fields
         prop_assert_eq!(lease.expiry, reparsed_lease.expiry);
         prop_assert_eq!(lease.address, reparsed_lease.address);
@@ -750,14 +768,14 @@ proptest! {
         prop_assert_eq!(lease.is_temporary_address, reparsed_lease.is_temporary_address);
         prop_assert_eq!(lease.hostname, reparsed_lease.hostname);
     }
-    
+
     /// Property test: Serialized lease format never produces invalid syntax.
     ///
     /// Validates that all serialized leases can be parsed back successfully.
     #[test]
     fn prop_serialized_format_always_parseable(lease in arb_dhcpv4_lease()) {
         let serialized = LeaseStore::format_lease_line(&lease);
-        
+
         // Should always be parseable
         let result = LeaseStore::parse_lease_line(&serialized);
         prop_assert!(result.is_ok());
@@ -778,9 +796,9 @@ async fn test_duid_llt_format() {
     // Example: 00:01:00:01:12:34:56:78:00:11:22:33:44:55
     //          type=1, hw_type=1 (Ethernet), time=0x12345678, MAC=00:11:22:33:44:55
     let duid_line = "duid 00:01:00:01:12:34:56:78:00:11:22:33:44:55";
-    
+
     let parsed = LeaseStore::parse_lease_line(duid_line).expect("Failed to parse DUID-LLT");
-    
+
     match parsed {
         ParsedLine::Duid(duid) => {
             assert_eq!(duid.duid_bytes.len(), 14);
@@ -801,9 +819,9 @@ async fn test_duid_en_format() {
     // Example: 00:02:00:00:13:37:01:02:03:04
     //          type=2, enterprise=0x1337, id=01:02:03:04
     let duid_line = "duid 00:02:00:00:13:37:01:02:03:04";
-    
+
     let parsed = LeaseStore::parse_lease_line(duid_line).expect("Failed to parse DUID-EN");
-    
+
     match parsed {
         ParsedLine::Duid(duid) => {
             assert_eq!(duid.duid_bytes.len(), 10);
@@ -824,9 +842,9 @@ async fn test_duid_ll_format() {
     // Example: 00:03:00:01:00:11:22:33:44:55
     //          type=3, hw_type=1 (Ethernet), MAC=00:11:22:33:44:55
     let duid_line = "duid 00:03:00:01:00:11:22:33:44:55";
-    
+
     let parsed = LeaseStore::parse_lease_line(duid_line).expect("Failed to parse DUID-LL");
-    
+
     match parsed {
         ParsedLine::Duid(duid) => {
             assert_eq!(duid.duid_bytes.len(), 10);
@@ -849,7 +867,7 @@ async fn test_duid_ll_format() {
 async fn test_full_database_load() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create a comprehensive lease database
     let full_content = "\
 duid 00:01:00:01:12:34:56:78:00:11:22:33:44:55
@@ -858,27 +876,37 @@ duid 00:01:00:01:12:34:56:78:00:11:22:33:44:55
 1609460000 12345678 2001:db8::1 dhcpv6-host1 *
 1609460600 T87654321 2001:db8::2 dhcpv6-host2 00:01:00:01:87:65:43:21
 ";
-    
+
     fs::write(&lease_file, full_content).expect("Failed to write test file");
-    
+
     // Load the database
-    let database = LeaseDatabase::load_from_file(&lease_file)
-        .expect("Failed to load database");
-    
+    let database = LeaseDatabase::load_from_file(&lease_file).expect("Failed to load database");
+
     // Verify DUID
     assert!(database.duid.is_some());
-    
+
     // Verify all leases loaded
     assert_eq!(database.leases.len(), 4);
-    
+
     // Count by protocol version
-    let v4_count = database.leases.iter().filter(|l| l.address.is_ipv4()).count();
-    let v6_count = database.leases.iter().filter(|l| l.address.is_ipv6()).count();
+    let v4_count = database
+        .leases
+        .iter()
+        .filter(|l| l.address.is_ipv4())
+        .count();
+    let v6_count = database
+        .leases
+        .iter()
+        .filter(|l| l.address.is_ipv6())
+        .count();
     assert_eq!(v4_count, 2);
     assert_eq!(v6_count, 2);
-    
+
     // Verify specific lease details
-    assert_eq!(database.leases[0].hostname, Some("dhcpv4-host1".to_string()));
+    assert_eq!(
+        database.leases[0].hostname,
+        Some("dhcpv4-host1".to_string())
+    );
     assert_eq!(database.leases[2].iaid, Some(12345678));
     assert!(database.leases[3].is_temporary_address); // TA lease
 }
@@ -890,7 +918,7 @@ duid 00:01:00:01:12:34:56:78:00:11:22:33:44:55
 async fn test_large_database_performance() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create database with 1000 leases
     let mut database = LeaseDatabase::new();
     for i in 0..1000 {
@@ -904,24 +932,34 @@ async fn test_large_database_performance() {
             is_temporary_address: false,
         });
     }
-    
+
     // Save database
     let start = std::time::Instant::now();
-    database.save_to_file(&lease_file).expect("Failed to save large database");
+    database
+        .save_to_file(&lease_file)
+        .expect("Failed to save large database");
     let save_duration = start.elapsed();
-    
+
     // Load database
     let start = std::time::Instant::now();
-    let reloaded = LeaseDatabase::load_from_file(&lease_file)
-        .expect("Failed to reload large database");
+    let reloaded =
+        LeaseDatabase::load_from_file(&lease_file).expect("Failed to reload large database");
     let load_duration = start.elapsed();
-    
+
     // Verify all leases reloaded
     assert_eq!(reloaded.leases.len(), 1000);
-    
+
     // Performance assertions (should be fast for 1000 leases)
-    assert!(save_duration.as_millis() < 1000, "Save took too long: {:?}", save_duration);
-    assert!(load_duration.as_millis() < 1000, "Load took too long: {:?}", load_duration);
+    assert!(
+        save_duration.as_millis() < 1000,
+        "Save took too long: {:?}",
+        save_duration
+    );
+    assert!(
+        load_duration.as_millis() < 1000,
+        "Load took too long: {:?}",
+        load_duration
+    );
 }
 
 // ============================================================================
@@ -933,14 +971,14 @@ async fn test_large_database_performance() {
 async fn test_empty_lease_file() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create empty file
     fs::write(&lease_file, "").expect("Failed to write empty file");
-    
+
     // Load should succeed with empty database
-    let database = LeaseDatabase::load_from_file(&lease_file)
-        .expect("Failed to load empty database");
-    
+    let database =
+        LeaseDatabase::load_from_file(&lease_file).expect("Failed to load empty database");
+
     assert_eq!(database.leases.len(), 0);
     assert!(database.duid.is_none());
 }
@@ -950,7 +988,7 @@ async fn test_empty_lease_file() {
 async fn test_lease_file_with_comments() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
-    
+
     // Create file with comments
     let content = "\
 # This is a comment
@@ -959,13 +997,13 @@ async fn test_lease_file_with_comments() {
 # Comment between leases
 1609459800 00:aa:bb:cc:dd:ee 192.168.1.101 client2 *
 ";
-    
+
     fs::write(&lease_file, content).expect("Failed to write file with comments");
-    
+
     // Load should skip comments
-    let database = LeaseDatabase::load_from_file(&lease_file)
-        .expect("Failed to load database with comments");
-    
+    let database =
+        LeaseDatabase::load_from_file(&lease_file).expect("Failed to load database with comments");
+
     assert_eq!(database.leases.len(), 2);
 }
 
@@ -978,10 +1016,10 @@ async fn test_long_hostname() {
         "1609459200 00:11:22:33:44:55 192.168.1.100 {} *",
         long_hostname
     );
-    
+
     let parsed = LeaseStore::parse_lease_line(&lease_line)
         .expect("Failed to parse lease with long hostname");
-    
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert_eq!(lease.hostname, Some(long_hostname));
@@ -994,15 +1032,18 @@ async fn test_long_hostname() {
 #[tokio::test]
 async fn test_max_length_client_id() {
     // Client ID can be up to 255 bytes
-    let client_id_hex = (0..255).map(|i| format!("{:02x}", i % 256)).collect::<Vec<_>>().join(":");
+    let client_id_hex = (0..255)
+        .map(|i| format!("{:02x}", i % 256))
+        .collect::<Vec<_>>()
+        .join(":");
     let lease_line = format!(
         "1609459200 00:11:22:33:44:55 192.168.1.100 client1 {}",
         client_id_hex
     );
-    
+
     let parsed = LeaseStore::parse_lease_line(&lease_line)
         .expect("Failed to parse lease with max client ID");
-    
+
     match parsed {
         ParsedLine::Lease(lease) => {
             assert!(lease.client_id.is_some());
@@ -1021,11 +1062,11 @@ async fn test_whitespace_handling() {
         "1609459200   00:11:22:33:44:55   192.168.1.100   client1   *",
         "  1609459200 00:11:22:33:44:55 192.168.1.100 client1 *  ",
     ];
-    
+
     for line in variations {
         let parsed = LeaseStore::parse_lease_line(line)
             .unwrap_or_else(|_| panic!("Failed to parse: {}", line));
-        
+
         match parsed {
             ParsedLine::Lease(lease) => {
                 assert_eq!(lease.expiry, 1609459200);

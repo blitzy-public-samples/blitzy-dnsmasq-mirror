@@ -480,7 +480,7 @@ pub fn slaac_ping_reply(
         // if slaac.backoff != 0 && &slaac.addr == sender {
         //     slaac.backoff = 0;  // Mark as confirmed
         //     gotone = true;
-        //     
+        //
         //     // Log confirmation unless quiet mode
         //     if !log_config.is_quiet_dhcp6() {
         //         info!(
@@ -630,7 +630,9 @@ mod tests {
         // Expected: 2001:db8::211:22ff:fe33:4455
         assert_eq!(
             addr,
-            Ipv6Addr::new(0x2001, 0x0db8, 0x0000, 0x0000, 0x0211, 0x22FF, 0xFE33, 0x4455)
+            Ipv6Addr::new(
+                0x2001, 0x0db8, 0x0000, 0x0000, 0x0211, 0x22FF, 0xFE33, 0x4455
+            )
         );
     }
 

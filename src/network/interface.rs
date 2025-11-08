@@ -204,7 +204,9 @@ impl InterfaceCache {
         Self {
             interfaces: HashMap::new(),
             index_to_name_map: HashMap::new(),
-            last_update: Instant::now().checked_sub(Duration::from_secs(3600)).unwrap(), // Force initial update
+            last_update: Instant::now()
+                .checked_sub(Duration::from_secs(3600))
+                .unwrap(), // Force initial update
             update_interval: Duration::from_secs(5),
         }
     }
@@ -235,7 +237,9 @@ impl InterfaceCache {
 
     /// Get interface name by index
     fn get_name_by_index(&self, index: u32) -> Option<&str> {
-        self.index_to_name_map.get(&index).map(std::string::String::as_str)
+        self.index_to_name_map
+            .get(&index)
+            .map(std::string::String::as_str)
     }
 }
 

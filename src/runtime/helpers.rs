@@ -887,9 +887,9 @@ fn populate_environment_variables(env: &mut HashMap<String, String>, event: &Scr
             }
         }
 
-        ScriptEvent::DhcpLeaseDel { interface, .. } 
-        | ScriptEvent::ArpAdd { interface, .. } 
-        | ScriptEvent::ArpDel { interface, .. } 
+        ScriptEvent::DhcpLeaseDel { interface, .. }
+        | ScriptEvent::ArpAdd { interface, .. }
+        | ScriptEvent::ArpDel { interface, .. }
         | ScriptEvent::RelaySnoop { interface, .. } => {
             if !interface.is_empty() {
                 env.insert("DNSMASQ_INTERFACE".to_string(), interface.clone());

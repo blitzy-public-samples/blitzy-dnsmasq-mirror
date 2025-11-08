@@ -65,7 +65,7 @@ pub enum ParseError {
         /// Line number where the syntax error occurred
         line: usize,
         /// Content of the problematic line
-        content: String
+        content: String,
     },
 
     /// Unknown configuration option
@@ -74,7 +74,7 @@ pub enum ParseError {
         /// Line number where the unknown option was found
         line: usize,
         /// Name of the unrecognized option
-        option: String
+        option: String,
     },
 
     /// Invalid value for a configuration option
@@ -96,7 +96,7 @@ pub enum ParseError {
     #[error("Configuration file not found: {path}")]
     FileNotFound {
         /// Path to the configuration file that could not be found
-        path: PathBuf
+        path: PathBuf,
     },
 
     /// Circular include detected in configuration files
@@ -105,7 +105,7 @@ pub enum ParseError {
         /// Path that caused the circular include
         path: PathBuf,
         /// String representation of the include chain
-        chain: String
+        chain: String,
     },
 
     /// Maximum recursion depth exceeded for includes
@@ -114,7 +114,7 @@ pub enum ParseError {
         /// Line number where the recursion depth was exceeded
         line: usize,
         /// Maximum allowed recursion depth
-        max_depth: usize
+        max_depth: usize,
     },
 
     /// I/O error while reading configuration file
@@ -123,7 +123,7 @@ pub enum ParseError {
         /// Path to the file that caused the I/O error
         path: PathBuf,
         /// Error message from the I/O operation
-        error: String
+        error: String,
     },
 
     /// Configuration validation error

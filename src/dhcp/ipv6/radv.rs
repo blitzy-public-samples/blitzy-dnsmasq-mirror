@@ -536,7 +536,7 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
     // Create ICMPv6 socket with appropriate filters
     // Note: create_icmpv6_socket function should be implemented in network/socket.rs
     // For now, we'll create the socket directly here
-    
+
     let socket = Socket::new(Domain::IPV6, Type::RAW, Some(SocketProtocol::ICMPV6))
         .map_err(|e| RadVError::SocketCreation(e.to_string()))?;
 
@@ -544,12 +544,14 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
     // These options are not fully supported in nix 0.29, so we use direct syscalls
     // This is platform-specific FFI code which is permitted per Section 0.7.2
     let hop_limit: i32 = 255; // RFC 4861 requires hop limit of 255
-    
+
     #[cfg(target_os = "linux")]
     {
-        use libc_constants::{ICMP6_FILTER, IPPROTO_ICMPV6, IPPROTO_IPV6, 
-                              IPV6_MULTICAST_HOPS, IPV6_TCLASS, IPV6_UNICAST_HOPS};
-        
+        use libc_constants::{
+            ICMP6_FILTER, IPPROTO_ICMPV6, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, IPV6_TCLASS,
+            IPV6_UNICAST_HOPS,
+        };
+
         // Helper function for setting socket options with error handling
         fn set_sockopt(fd: RawFd, level: i32, optname: i32, optval: &i32) -> Result<(), RadVError> {
             // SAFETY: This is safe because:
@@ -567,7 +569,7 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
                     std::mem::size_of::<i32>() as libc::socklen_t,
                 )
             };
-            
+
             if result < 0 {
                 let err = std::io::Error::last_os_error();
                 Err(RadVError::SocketOption(err.to_string()))
@@ -575,23 +577,23 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
                 Ok(())
             }
         }
-        
+
         let fd = socket.as_raw_fd();
-        
+
         // Set unicast hop limit (RFC 4861 requires 255)
         set_sockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hop_limit)?;
-        
+
         // Set multicast hop limit (RFC 4861 requires 255)
         set_sockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hop_limit)?;
-        
+
         // Set traffic class (CS6 for router-to-router priority per RFC 4594)
         set_sockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &IPTOS_CLASS_CS6)?;
-        
+
         // Set up ICMP6 filter to only receive Router Solicitations and Echo Replies
         let mut filter = Icmp6Filter::new_block_all();
         filter.set_pass(ND_ROUTER_SOLICIT);
         filter.set_pass(ICMP6_ECHO_REPLY);
-        
+
         // SAFETY: This is safe because:
         // 1. fd is a valid file descriptor from a successfully created ICMPv6 socket
         // 2. IPPROTO_ICMPV6 and ICMP6_FILTER are valid constants
@@ -607,7 +609,7 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
                 std::mem::size_of::<Icmp6Filter>() as libc::socklen_t,
             )
         };
-        
+
         if result < 0 {
             let err = std::io::Error::last_os_error();
             return Err(RadVError::SocketOption(err.to_string()));
@@ -615,13 +617,14 @@ pub async fn ra_init(state: &mut DaemonState, now: Duration) -> RadVResult<()> {
     }
 
     // Configure socket for non-blocking I/O
-    socket.set_nonblocking(true)
+    socket
+        .set_nonblocking(true)
         .map_err(|e| RadVError::SocketOption(e.to_string()))?;
 
     // Convert to Tokio UdpSocket for async operations
     // Note: In production, this would be stored in DaemonState
     // For now, we log successful initialization
-    
+
     info!("ICMPv6 socket initialized for Router Advertisement");
 
     // Schedule initial unsolicited RAs if configured
@@ -766,7 +769,8 @@ pub async fn icmp6_packet(
     }
 
     // Get interface name
-    let interface_name = index_to_name(if_index).await
+    let interface_name = index_to_name(if_index)
+        .await
         .map_err(|_| RadVError::InterfaceError(format!("Invalid interface index: {if_index}")))?;
 
     match icmp_type {
@@ -794,8 +798,12 @@ pub async fn icmp6_packet(
                     let mac_bytes = &packet[offset + 2..offset + 8];
                     mac_str = format!(
                         "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        mac_bytes[0], mac_bytes[1], mac_bytes[2],
-                        mac_bytes[3], mac_bytes[4], mac_bytes[5]
+                        mac_bytes[0],
+                        mac_bytes[1],
+                        mac_bytes[2],
+                        mac_bytes[3],
+                        mac_bytes[4],
+                        mac_bytes[5]
                     );
                 }
 
@@ -997,10 +1005,10 @@ pub async fn periodic_ra(state: &mut DaemonState, now: Duration) -> RadVResult<(
     //     if ctx.ra_time > Duration::ZERO && ctx.ra_time <= now {
     //         let if_name = ctx.interface.clone().unwrap_or_default();
     //         let if_index = ctx.interface_index;
-    //         
+    //
     //         // Send RA
     //         send_ra(state, now, if_index, &if_name, None).await?;
-    //         
+    //
     //         // Reschedule next RA
     //         let interval = calc_next_ra_interval(ctx, now);
     //         ctx.ra_time = now + interval;
@@ -1059,9 +1067,7 @@ fn add_prefix_options(
     // Example: Add a /64 prefix for link-local
     if let Some(link_local) = param.link_local {
         let prefix_opt = PrefixOpt::new(
-            link_local,
-            64,
-            0xC0, // On-link (0x80) + Autonomous (0x40)
+            link_local, 64, 0xC0, // On-link (0x80) + Autonomous (0x40)
             7200, // Valid lifetime: 2 hours
             1800, // Preferred lifetime: 30 minutes
         );
@@ -1106,7 +1112,7 @@ fn add_adv_interval_option(interval_secs: u32, buf: &mut Vec<u8>) -> RadVResult<
     buf.push(1); // Length in units of 8 bytes
     buf.write_u16::<NetworkEndian>(0) // Reserved
         .map_err(|e| RadVError::PacketConstruction(e.to_string()))?;
-    
+
     // Interval value is in milliseconds
     let interval_ms = interval_secs * 1000;
     buf.write_u32::<NetworkEndian>(interval_ms)
@@ -1174,7 +1180,7 @@ mod tests {
         let ra = RaPacket::new(255, 0x80, 1800u16.to_be());
         let mut buf = Vec::new();
         ra.serialize(&mut buf).unwrap();
-        
+
         assert_eq!(buf.len(), 16); // RA packet is 16 bytes
         assert_eq!(buf[0], ND_ROUTER_ADVERT);
         assert_eq!(buf[1], 0);
@@ -1188,7 +1194,7 @@ mod tests {
         let opt = PrefixOpt::new(prefix, 64, 0xC0, 7200, 1800);
         let mut buf = Vec::new();
         opt.serialize(&mut buf).unwrap();
-        
+
         assert_eq!(buf.len(), 32); // Prefix option is 32 bytes
         assert_eq!(buf[0], ICMP6_OPT_PREFIX);
         assert_eq!(buf[1], 4); // Length in units of 8 bytes

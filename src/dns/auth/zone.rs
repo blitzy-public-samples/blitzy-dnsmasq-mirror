@@ -920,9 +920,7 @@ fn parse_ptr_name(name: &str) -> Result<IpAddr, AuthError> {
         Ok(IpAddr::V6(Ipv6Addr::from(bytes)))
     } else {
         Err(AuthError::MalformedQuery {
-            message: format!(
-                "PTR query name {name} does not end with .in-addr.arpa or .ip6.arpa"
-            ),
+            message: format!("PTR query name {name} does not end with .in-addr.arpa or .ip6.arpa"),
         })
     }
 }

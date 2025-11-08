@@ -326,8 +326,7 @@ impl OutPacketBuilder {
         // Update length field at container + 2 (after option code)
         let len_pos = container + 2;
         // Safe: validated data_len <= u16::MAX above
-        let data_len_u16 = u16::try_from(data_len)
-            .expect("data_len validated to be <= u16::MAX");
+        let data_len_u16 = u16::try_from(data_len).expect("data_len validated to be <= u16::MAX");
         self.buffer[len_pos] = (data_len_u16 >> 8) as u8;
         self.buffer[len_pos + 1] = (data_len_u16 & 0xff) as u8;
 

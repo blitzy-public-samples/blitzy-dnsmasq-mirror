@@ -98,12 +98,12 @@
 //! - `src/option.c` - Configuration setup and defaults
 
 use anyhow::Result;
-use dnsmasq::{ConfigBuilder, DaemonState};
-use dnsmasq::config::{DnsConfig, DhcpConfig, NetworkConfig};
 use dnsmasq::config::types::{DhcpRange, UpstreamServer};
+use dnsmasq::config::{DhcpConfig, DnsConfig, NetworkConfig};
+use dnsmasq::{ConfigBuilder, DaemonState};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
     FmtSubscriber::builder()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
@@ -125,48 +125,45 @@ async fn main() -> Result<()> {
     // ============================================================================
     // Configuration Setup
     // ============================================================================
-    
+
     // Create minimal configuration using builder pattern
     // This demonstrates programmatic configuration without a config file
-    
+
     // Configure upstream DNS server
-    let upstream = UpstreamServer::new(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
-        53
-    ));
-    
+    let upstream = UpstreamServer::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53));
+
     // Create DHCP range with custom lease time
     let mut dhcp_range = DhcpRange::new_v4(
         Ipv4Addr::new(192, 168, 1, 100),
         Ipv4Addr::new(192, 168, 1, 200),
     );
     dhcp_range.lease_time = std::time::Duration::from_secs(43200); // 12 hours
-    
+
     // Build configuration using builder pattern
     // Note: ConfigBuilder methods take &mut self, so we need to use separate statements
     let mut config_builder = ConfigBuilder::new();
-    
+
     // DNS configuration: cache size and upstream servers
     config_builder.dns(DnsConfig {
-        cache_size: 150,  // Default cache size (150 entries)
-        upstream_servers: vec![upstream],  // Google Public DNS
+        cache_size: 150,                  // Default cache size (150 entries)
+        upstream_servers: vec![upstream], // Google Public DNS
         ..Default::default()
     });
-    
+
     // DHCP configuration: simple address range
     config_builder.dhcp(DhcpConfig {
         ranges: vec![dhcp_range],
         ..Default::default()
     });
-    
+
     // Network configuration: listen on all interfaces with non-privileged port
     config_builder.network(NetworkConfig {
-        port: 5353,       // Non-privileged port (standard is 53)
+        port: 5353, // Non-privileged port (standard is 53)
         bind_interfaces: true,
-        listen_addresses: vec![],  // Empty means all interfaces
+        listen_addresses: vec![], // Empty means all interfaces
         ..Default::default()
     });
-    
+
     let config = config_builder.build()?;
 
     info!("Configuration built successfully");
@@ -184,16 +181,17 @@ async fn main() -> Result<()> {
     // Create shared daemon state with thread-safe access
     // This replaces C's global `struct daemon` variable
     // Using std::sync::RwLock for compatibility with server constructors
-    let daemon_state = Arc::new(std::sync::RwLock::new(
-        DaemonState::new(config.clone())
-    ));
+    let daemon_state = Arc::new(std::sync::RwLock::new(DaemonState::new(config.clone())));
 
     // Initialize DHCP lease database
     // Note: DnsCache is created internally by DnsServer::new
     info!("Initializing DHCP lease database...");
     let max_leases = 1000; // Maximum number of DHCP leases
     let lease_db = dnsmasq::dhcp::lease::LeaseDatabase::new(max_leases);
-    info!("DHCP lease database initialized with max_leases={}", max_leases);
+    info!(
+        "DHCP lease database initialized with max_leases={}",
+        max_leases
+    );
 
     // ============================================================================
     // DNS Server Setup
@@ -205,11 +203,9 @@ async fn main() -> Result<()> {
         .with_port(config.network.port)
         .with_cache_size(config.dns.cache_size)
         .with_query_logging(false);
-    
-    let mut dns_server = dnsmasq::dns::server::DnsServer::new(
-        server_config,
-        Arc::new(config.clone())
-    )?;
+
+    let mut dns_server =
+        dnsmasq::dns::server::DnsServer::new(server_config, Arc::new(config.clone()))?;
     info!("DNS server created successfully");
 
     // ============================================================================
@@ -218,10 +214,8 @@ async fn main() -> Result<()> {
 
     // Create DHCPv4 server instance
     info!("Creating DHCPv4 server...");
-    let mut dhcp_server = dnsmasq::dhcp::v4::server::DhcpV4Server::new(
-        daemon_state.clone()
-    );
-    
+    let mut dhcp_server = dnsmasq::dhcp::v4::server::DhcpV4Server::new(daemon_state.clone());
+
     // Bind to DHCP port (67 requires root, 1067 for testing)
     // For testing without root, use port 1067:
     // dhcp_server.bind(1067, false).await?;
@@ -302,7 +296,9 @@ async fn main() -> Result<()> {
     match tokio::time::timeout(shutdown_timeout, async {
         let _ = dns_handle.await;
         let _ = dhcp_handle.await;
-    }).await {
+    })
+    .await
+    {
         Ok(()) => info!("All server tasks shut down successfully"),
         Err(_) => error!("Shutdown timeout - some tasks may not have completed"),
     }

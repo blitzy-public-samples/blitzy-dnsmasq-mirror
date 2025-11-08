@@ -104,8 +104,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use nix::unistd::{
-    close, dup2, fchown, fork, getpid, getuid, setgid, setgroups, setsid, setuid, ForkResult, Gid,
-    Group, Uid, User,
+    ForkResult, Gid, Group, Uid, User, close, dup2, fchown, fork, getpid, getuid, setgid,
+    setgroups, setsid, setuid,
 };
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -175,7 +175,7 @@ pub enum DaemonError {
     #[error("User not found: {username}")]
     UserNotFound {
         /// Username that could not be found
-        username: String
+        username: String,
     },
 
     /// Group lookup failed during privilege dropping
@@ -184,7 +184,7 @@ pub enum DaemonError {
     #[error("Group not found: {groupname}")]
     GroupNotFound {
         /// Group name that could not be found
-        groupname: String
+        groupname: String,
     },
 
     /// Linux capability operations failed
@@ -423,7 +423,7 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
     // Extract daemon settings from config
     // Check debug mode from logging config
     let debug = config.logging.log_file.is_some(); // Simplified: actual debug flag would be in CLI
-    
+
     // Skip daemonization in debug mode (matches C line 783: `if (!option_bool(OPT_NO_DAEMON))`)
     if debug {
         info!("Running in debug mode, staying in foreground");
@@ -476,7 +476,10 @@ pub fn daemonize(config: &Config) -> DnsmasqResult<()> {
         }
     }
 
-    info!("Daemonization complete, running in background as PID {}", getpid());
+    info!(
+        "Daemonization complete, running in background as PID {}",
+        getpid()
+    );
 
     // Redirect `stdin`/`stdout`/`stderr` to `/dev/null` unless in debug mode
     // Matches C code `dnsmasq.c` lines 883-893
@@ -697,7 +700,10 @@ pub fn drop_privileges(config: &Config) -> DnsmasqResult<()> {
         source: e,
     })?;
 
-    info!("Successfully dropped privileges to {} ({})", target_user, user_entry.uid);
+    info!(
+        "Successfully dropped privileges to {} ({})",
+        target_user, user_entry.uid
+    );
 
     // Linux: Clean up CAP_SETUID after dropping privileges
     #[cfg(target_os = "linux")]
@@ -968,10 +974,12 @@ impl From<DaemonError> for SystemError {
                 message: "Failed to create or write PID file".to_string(),
                 source: Some(source),
             },
-            DaemonError::PrivilegeDropFailed { operation, source } => SystemError::DaemonizationFailed {
-                message: format!("Privilege drop failed during {operation}: {source}"),
-                source: std::io::Error::from_raw_os_error(source as i32),
-            },
+            DaemonError::PrivilegeDropFailed { operation, source } => {
+                SystemError::DaemonizationFailed {
+                    message: format!("Privilege drop failed during {operation}: {source}"),
+                    source: std::io::Error::from_raw_os_error(source as i32),
+                }
+            }
             DaemonError::UserNotFound { username } => SystemError::DaemonizationFailed {
                 message: format!("User '{username}' not found in system user database"),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, "user not found"),

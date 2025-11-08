@@ -1040,7 +1040,12 @@ impl DnsServer {
                         record_class: question.qclass,
                     };
                     // Use minimum TTL from all answer records
-                    let min_ttl = response.answers.iter().map(super::protocol::ResourceRecord::ttl).min().unwrap_or(0);
+                    let min_ttl = response
+                        .answers
+                        .iter()
+                        .map(super::protocol::ResourceRecord::ttl)
+                        .min()
+                        .unwrap_or(0);
                     cache.insert(
                         cache_key,
                         response.answers.clone(),
@@ -1090,10 +1095,7 @@ impl DnsServer {
     /// Truncate response to fit in UDP payload
     ///
     /// Sets TC bit and removes answers/authority/additional records
-    fn truncate_response(
-        mut response: DnsMessage,
-        max_size: usize,
-    ) -> ServerResult<Vec<u8>> {
+    fn truncate_response(mut response: DnsMessage, max_size: usize) -> ServerResult<Vec<u8>> {
         // Set truncation flag
         response.header.flags.tc = true;
 
@@ -1317,16 +1319,16 @@ impl ServerContext {
 
         loop {
             // Read length prefix
-            let Ok(Ok(length)) = tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await else {
+            let Ok(Ok(length)) =
+                tokio::time::timeout(timeout, self.read_tcp_length(&mut stream)).await
+            else {
                 return Ok(());
             };
 
             // Read query data
-            let Ok(Ok(query_data)) = tokio::time::timeout(
-                timeout,
-                self.read_tcp_data(&mut stream, length),
-            )
-            .await else {
+            let Ok(Ok(query_data)) =
+                tokio::time::timeout(timeout, self.read_tcp_data(&mut stream, length)).await
+            else {
                 return Ok(());
             };
 
@@ -1408,7 +1410,12 @@ impl ServerContext {
                         record_type: question.qtype,
                         record_class: question.qclass,
                     };
-                    let min_ttl = response.answers.iter().map(super::protocol::ResourceRecord::ttl).min().unwrap_or(0);
+                    let min_ttl = response
+                        .answers
+                        .iter()
+                        .map(super::protocol::ResourceRecord::ttl)
+                        .min()
+                        .unwrap_or(0);
                     cache.insert(
                         cache_key,
                         response.answers.clone(),
@@ -1465,10 +1472,7 @@ impl ServerContext {
         Ok(())
     }
 
-    fn truncate_response(
-        mut response: DnsMessage,
-        max_size: usize,
-    ) -> ServerResult<Vec<u8>> {
+    fn truncate_response(mut response: DnsMessage, max_size: usize) -> ServerResult<Vec<u8>> {
         response.header.flags.tc = true;
         response.additional.clear();
 
@@ -1515,7 +1519,7 @@ impl ServerContext {
         use tokio::io::AsyncWriteExt;
         let length = u16::try_from(data.len())
             .map_err(|_| DnsError::ProtocolError {
-                message: "DNS response too large for TCP".to_string()
+                message: "DNS response too large for TCP".to_string(),
             })?
             .to_be_bytes();
         stream

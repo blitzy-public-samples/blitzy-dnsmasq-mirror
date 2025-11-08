@@ -141,7 +141,7 @@ use dnsmasq::runtime::daemon::{create_pid_file, daemonize, drop_privileges};
 use dnsmasq::runtime::event_loop::run_event_loop;
 use dnsmasq::runtime::signal::setup_signal_handlers;
 use dnsmasq::types::daemon_state::DaemonState;
-use dnsmasq::util::logging::{init_logging, LogConfig};
+use dnsmasq::util::logging::{LogConfig, init_logging};
 
 /// Main entry point for dnsmasq-rs daemon
 ///
@@ -204,7 +204,8 @@ async fn main() {
     // Replaces C: main() lines 97-150 (read_opts() call)
     // The Config struct aggregates all configuration sources with validation
     let config = match dnsmasq::config::load_config(&cli)
-        .context("Failed to load and validate configuration") {
+        .context("Failed to load and validate configuration")
+    {
         Ok(cfg) => cfg,
         Err(e) => {
             // Configuration error - print to stderr and exit with BadConfig code
@@ -219,9 +220,8 @@ async fn main() {
     // Replaces C: main() lines 234-299 (log_start() call from log.c)
     // Build logging configuration from daemon config
     let log_config = build_log_config(&config);
-    
-    if let Err(e) = init_logging(&log_config)
-        .context("Logging subsystem initialization") {
+
+    if let Err(e) = init_logging(&log_config).context("Logging subsystem initialization") {
         // If logging initialization fails, print to stderr and continue with degraded logging
         // Replaces C: Implicit fallback to stderr if syslog unavailable
         eprintln!("Warning: Failed to initialize logging: {:#}", e);
@@ -279,11 +279,7 @@ async fn main() {
     // The event loop runs until a termination signal is received
     // Note: run_event_loop handles all signal processing internally
     let config_arc = Arc::new(config);
-    let event_loop_result = run_event_loop(
-        config_arc,
-        state.clone(),
-        signal_handler,
-    ).await;
+    let event_loop_result = run_event_loop(config_arc, state.clone(), signal_handler).await;
 
     // Phase 10: Handle shutdown and cleanup
     // Replaces C: main() lines 1288-1295 (cleanup on exit)
@@ -319,7 +315,7 @@ async fn main() {
 /// Replaces: Implicit log configuration based on command-line flags in C version
 fn build_log_config(config: &Config) -> LogConfig {
     use tracing::Level;
-    
+
     // Determine log level based on configuration
     // In C version, --log-debug enables DEBUG level, otherwise INFO
     let max_level = if config.logging.log_queries || config.logging.log_dhcp {
@@ -327,16 +323,16 @@ fn build_log_config(config: &Config) -> LogConfig {
     } else {
         Level::INFO
     };
-    
+
     // Enable syslog by default (Unix platforms), unless log file specified
     let enable_syslog = config.logging.log_file.is_none();
-    
+
     // Enable file logging if log_file is specified
     let enable_file = config.logging.log_file.clone();
-    
+
     // Enable stderr logging for foreground mode (determined by init_logging based on terminal)
     let enable_stderr = true; // Will be auto-detected by init_logging
-    
+
     // Convert SyslogFacility enum to numeric code
     // Syslog facility codes: DAEMON=3, USER=1, LOCAL0-7=16-23
     use dnsmasq::config::SyslogFacility;
@@ -352,7 +348,7 @@ fn build_log_config(config: &Config) -> LogConfig {
         SyslogFacility::Local6 => 22,
         SyslogFacility::Local7 => 23,
     });
-    
+
     LogConfig {
         enable_syslog,
         enable_file,

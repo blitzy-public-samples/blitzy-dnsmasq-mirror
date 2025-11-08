@@ -60,7 +60,7 @@
 //! cargo bench --bench dhcp_allocation -- lease4_allocate
 //! ```
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -92,18 +92,20 @@ fn generate_test_leases_v4(count: usize, base_addr: Ipv4Addr) -> Vec<LeaseEntry>
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     let base_octets = base_addr.octets();
     (0..count)
         .map(|i| {
             // Generate unique MAC address for each lease
             let mac = vec![
-                0x00, 0x11, 0x22,
+                0x00,
+                0x11,
+                0x22,
                 ((i >> 16) & 0xff) as u8,
                 ((i >> 8) & 0xff) as u8,
                 (i & 0xff) as u8,
             ];
-            
+
             // Calculate IP address by incrementing from base
             let ip_offset = i as u32;
             let addr = Ipv4Addr::new(
@@ -112,21 +114,21 @@ fn generate_test_leases_v4(count: usize, base_addr: Ipv4Addr) -> Vec<LeaseEntry>
                 base_octets[2],
                 base_octets[3].wrapping_add((ip_offset % 200) as u8),
             );
-            
+
             // Generate client ID (roughly 50% of clients send one)
             let client_id = if i % 2 == 0 {
                 Some(vec![0x01, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]])
             } else {
                 None
             };
-            
+
             // Generate hostname (roughly 70% of clients send one)
             let hostname = if i % 10 < 7 {
                 Some(format!("client-{}", i))
             } else {
                 None
             };
-            
+
             LeaseEntry {
                 expiry: now + 3600 + (i as u64 * 10), // Staggered expiry times
                 address: std::net::IpAddr::V4(addr),
@@ -158,22 +160,28 @@ fn generate_test_leases_v6(count: usize, base_addr: Ipv6Addr) -> Vec<LeaseEntry>
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     let base_segments = base_addr.segments();
     (0..count)
         .map(|i| {
             // Generate unique DUID for each client (Type 1: DUID-LLT)
             let duid = vec![
-                0x00, 0x01, // DUID-LLT type
-                0x00, 0x01, // Hardware type Ethernet
-                ((i >> 24) & 0xff) as u8, ((i >> 16) & 0xff) as u8,
-                ((i >> 8) & 0xff) as u8, (i & 0xff) as u8, // Time
-                0x00, 0x11, 0x22, // MAC address
+                0x00,
+                0x01, // DUID-LLT type
+                0x00,
+                0x01, // Hardware type Ethernet
+                ((i >> 24) & 0xff) as u8,
+                ((i >> 16) & 0xff) as u8,
+                ((i >> 8) & 0xff) as u8,
+                (i & 0xff) as u8, // Time
+                0x00,
+                0x11,
+                0x22, // MAC address
                 ((i >> 16) & 0xff) as u8,
                 ((i >> 8) & 0xff) as u8,
                 (i & 0xff) as u8,
             ];
-            
+
             // Calculate IPv6 address
             let addr = Ipv6Addr::new(
                 base_segments[0],
@@ -185,20 +193,20 @@ fn generate_test_leases_v6(count: usize, base_addr: Ipv6Addr) -> Vec<LeaseEntry>
                 base_segments[6],
                 base_segments[7].wrapping_add((i % 10000) as u16),
             );
-            
+
             // Generate IAID (Identity Association ID)
             let iaid = (i as u32) + 1000;
-            
+
             // Hostname (roughly 60% of DHCPv6 clients send one)
             let hostname = if i % 10 < 6 {
                 Some(format!("client-v6-{}", i))
             } else {
                 None
             };
-            
+
             // 20% are temporary addresses (LEASE_TA), 80% non-temporary (LEASE_NA)
             let is_temporary_address = i % 5 == 0;
-            
+
             LeaseEntry {
                 expiry: now + 7200 + (i as u64 * 15), // Longer expiry for v6
                 address: std::net::IpAddr::V6(addr),
@@ -255,7 +263,7 @@ fn create_test_dhcp_config() -> DhcpConfig {
 /// ```
 fn bench_lease4_allocate(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease4_allocate");
-    
+
     // Test with different pool sizes to measure scalability
     for pool_size in [100, 1000, 10000] {
         group.bench_with_input(
@@ -269,19 +277,13 @@ fn bench_lease4_allocate(c: &mut Criterion) {
                     let client_id = Some(vec![0x01, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
                     let hostname = Some("test-client".to_string());
                     let expires = 3600u64;
-                    
-                    black_box(Lease::new(
-                        addr,
-                        mac,
-                        client_id,
-                        hostname,
-                        expires,
-                    ))
+
+                    black_box(Lease::new(addr, mac, client_id, hostname, expires))
                 });
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -307,7 +309,7 @@ fn bench_lease4_allocate(c: &mut Criterion) {
 /// ```
 fn bench_lease6_allocate(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease6_allocate");
-    
+
     for pool_size in [100, 1000, 10000] {
         group.bench_with_input(
             BenchmarkId::new("pool_size", pool_size),
@@ -316,13 +318,15 @@ fn bench_lease6_allocate(c: &mut Criterion) {
                 b.iter(|| {
                     // Allocate a new DHCPv6 lease
                     let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, (size % 10000) as u16);
-                    let duid = vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 
-                                   0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+                    let duid = vec![
+                        0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 0x00, 0x11, 0x22, 0x33,
+                        0x44, 0x55,
+                    ];
                     let iaid = 12345u32;
                     let hostname = Some("test-client-v6".to_string());
                     let expires = 7200u64;
                     let lease_type = LeaseType::NonTemporaryAddress;
-                    
+
                     black_box(dnsmasq::dhcp::lease::LeaseV6 {
                         addr,
                         duid,
@@ -336,7 +340,7 @@ fn bench_lease6_allocate(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -369,39 +373,35 @@ fn bench_lease6_allocate(c: &mut Criterion) {
 /// ```
 fn bench_lease_find_by_client(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_find_by_client");
-    
+
     // Test with different database sizes
     for db_size in [100, 1000, 10000] {
         let leases = generate_test_leases_v4(db_size, Ipv4Addr::new(192, 168, 1, 100));
-        
+
         // Pick a lease from the middle for lookup
         let target_lease = &leases[db_size / 2];
         let target_mac = target_lease.hardware_address.clone();
         let target_client_id = target_lease.client_id.clone();
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    // Simulate lookup by iterating through leases
-                    // In real implementation, this would use HashMap lookup
-                    let _result = leases.iter().find(|lease| {
-                        // Match by client ID first
-                        if let (Some(cid), Some(target_cid)) = (&lease.client_id, &target_client_id) {
-                            if cid == target_cid {
-                                return true;
-                            }
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                // Simulate lookup by iterating through leases
+                // In real implementation, this would use HashMap lookup
+                let _result = leases.iter().find(|lease| {
+                    // Match by client ID first
+                    if let (Some(cid), Some(target_cid)) = (&lease.client_id, &target_client_id) {
+                        if cid == target_cid {
+                            return true;
                         }
-                        // Fall back to MAC address match
-                        lease.hardware_address == target_mac
-                    });
-                    black_box(_result)
+                    }
+                    // Fall back to MAC address match
+                    lease.hardware_address == target_mac
                 });
-            },
-        );
+                black_box(_result)
+            });
+        });
     }
-    
+
     group.finish();
 }
 
@@ -424,35 +424,31 @@ fn bench_lease_find_by_client(c: &mut Criterion) {
 /// ```
 fn bench_lease_find_by_addr(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_find_by_addr");
-    
+
     for db_size in [100, 1000, 10000] {
         let leases = generate_test_leases_v4(db_size, Ipv4Addr::new(192, 168, 1, 100));
-        
+
         // Pick target IP from middle of database
         let target_ip = if let std::net::IpAddr::V4(addr) = leases[db_size / 2].address {
             addr
         } else {
             Ipv4Addr::new(192, 168, 1, 150)
         };
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    let _result = leases.iter().find(|lease| {
-                        if let std::net::IpAddr::V4(addr) = lease.address {
-                            addr == target_ip
-                        } else {
-                            false
-                        }
-                    });
-                    black_box(_result)
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                let _result = leases.iter().find(|lease| {
+                    if let std::net::IpAddr::V4(addr) = lease.address {
+                        addr == target_ip
+                    } else {
+                        false
+                    }
                 });
-            },
-        );
+                black_box(_result)
+            });
+        });
     }
-    
+
     group.finish();
 }
 
@@ -485,40 +481,38 @@ fn bench_lease_find_by_addr(c: &mut Criterion) {
 fn bench_lease_persistence(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_update_file");
     group.sample_size(10); // Fewer samples due to disk I/O
-    
+
     for db_size in [100, 1000, 10000] {
         let leases_v4 = generate_test_leases_v4(db_size / 2, Ipv4Addr::new(192, 168, 1, 100));
-        let leases_v6 = generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
-        
+        let leases_v6 =
+            generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+
         let mut all_leases = leases_v4;
         all_leases.extend(leases_v6);
-        
+
         let database = LeaseDatabase {
             leases: all_leases,
             duid: Some(DuidEntry {
-                duid_bytes: vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78,
-                               0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+                duid_bytes: vec![
+                    0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 0x00, 0x11, 0x22, 0x33, 0x44,
+                    0x55,
+                ],
             }),
         };
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    let temp_dir = TempDir::new().unwrap();
-                    let lease_file = temp_dir.path().join("dnsmasq.leases");
-                    
-                    // Perform atomic write: write to temp then rename
-                    LeaseStore::write_leases(&lease_file, &database)
-                        .expect("Failed to write leases");
-                    
-                    black_box(temp_dir)
-                });
-            },
-        );
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                let temp_dir = TempDir::new().unwrap();
+                let lease_file = temp_dir.path().join("dnsmasq.leases");
+
+                // Perform atomic write: write to temp then rename
+                LeaseStore::write_leases(&lease_file, &database).expect("Failed to write leases");
+
+                black_box(temp_dir)
+            });
+        });
     }
-    
+
     group.finish();
 }
 
@@ -549,40 +543,36 @@ fn bench_lease_persistence(c: &mut Criterion) {
 /// ```
 fn bench_lease_prune(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_prune");
-    
+
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     for db_size in [100, 1000, 10000] {
         // Generate leases with 30% expired
         let mut leases = generate_test_leases_v4(db_size, Ipv4Addr::new(192, 168, 1, 100));
-        
+
         // Mark 30% as expired
         for (i, lease) in leases.iter_mut().enumerate() {
             if i % 10 < 3 {
                 lease.expiry = now - 3600; // Expired 1 hour ago
             }
         }
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    let leases_clone = leases.clone();
-                    // Prune expired leases
-                    let remaining: Vec<_> = leases_clone
-                        .into_iter()
-                        .filter(|lease| lease.expiry > now)
-                        .collect();
-                    black_box(remaining)
-                });
-            },
-        );
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                let leases_clone = leases.clone();
+                // Prune expired leases
+                let remaining: Vec<_> = leases_clone
+                    .into_iter()
+                    .filter(|lease| lease.expiry > now)
+                    .collect();
+                black_box(remaining)
+            });
+        });
     }
-    
+
     group.finish();
 }
 
@@ -612,31 +602,27 @@ fn bench_lease_prune(c: &mut Criterion) {
 /// ```
 fn bench_static_host_application(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_update_from_configs");
-    
+
     let _config = create_test_dhcp_config();
-    
+
     for db_size in [100, 1000, 10000] {
         let leases = generate_test_leases_v4(db_size, Ipv4Addr::new(192, 168, 1, 100));
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    let mut updated_count = 0;
-                    for lease in &leases {
-                        // Simulate find_config lookup
-                        // In real code, this would call find_config() with client ID and MAC
-                        if lease.client_id.is_some() || !lease.hardware_address.is_empty() {
-                            updated_count += 1;
-                        }
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                let mut updated_count = 0;
+                for lease in &leases {
+                    // Simulate find_config lookup
+                    // In real code, this would call find_config() with client ID and MAC
+                    if lease.client_id.is_some() || !lease.hardware_address.is_empty() {
+                        updated_count += 1;
                     }
-                    black_box(updated_count)
-                });
-            },
-        );
+                }
+                black_box(updated_count)
+            });
+        });
     }
-    
+
     group.finish();
 }
 
@@ -649,35 +635,32 @@ fn bench_static_host_application(c: &mut Criterion) {
 /// Tests both DHCPv4 and DHCPv6 scenarios with varying database sizes.
 fn bench_hostname_conflict_detection(c: &mut Criterion) {
     let mut group = c.benchmark_group("hostname_conflict_detection");
-    
+
     for db_size in [100, 1000, 10000] {
         let leases_v4 = generate_test_leases_v4(db_size / 2, Ipv4Addr::new(192, 168, 1, 100));
-        let leases_v6 = generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
-        
+        let leases_v6 =
+            generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+
         let mut all_leases = leases_v4;
         all_leases.extend(leases_v6);
-        
+
         let test_hostname = "new-client";
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    // Check if hostname already exists in database
-                    let conflict = all_leases.iter().any(|lease| {
-                        if let Some(ref hostname) = lease.hostname {
-                            hostname.eq_ignore_ascii_case(test_hostname)
-                        } else {
-                            false
-                        }
-                    });
-                    black_box(conflict)
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                // Check if hostname already exists in database
+                let conflict = all_leases.iter().any(|lease| {
+                    if let Some(ref hostname) = lease.hostname {
+                        hostname.eq_ignore_ascii_case(test_hostname)
+                    } else {
+                        false
+                    }
                 });
-            },
-        );
+                black_box(conflict)
+            });
+        });
     }
-    
+
     group.finish();
 }
 
@@ -691,12 +674,12 @@ fn bench_hostname_conflict_detection(c: &mut Criterion) {
 /// focusing on the lease database update and expiry extension operations.
 fn bench_lease_renewal_under_load(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_renewal_under_load");
-    
+
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    
+
     // Test with different renewal batch sizes
     for batch_size in [10, 100, 1000] {
         group.bench_with_input(
@@ -715,7 +698,7 @@ fn bench_lease_renewal_under_load(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -749,49 +732,48 @@ fn bench_lease_renewal_under_load(c: &mut Criterion) {
 fn bench_lease_database_loading(c: &mut Criterion) {
     let mut group = c.benchmark_group("lease_database_loading");
     group.sample_size(10); // Fewer samples due to disk I/O
-    
+
     let rt = Runtime::new().unwrap();
-    
+
     for db_size in [100, 1000, 10000] {
         // Create test database file
         let leases_v4 = generate_test_leases_v4(db_size / 2, Ipv4Addr::new(192, 168, 1, 100));
-        let leases_v6 = generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
-        
+        let leases_v6 =
+            generate_test_leases_v6(db_size / 2, Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+
         let mut all_leases = leases_v4;
         all_leases.extend(leases_v6);
-        
+
         let database = LeaseDatabase {
             leases: all_leases,
             duid: Some(DuidEntry {
-                duid_bytes: vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78,
-                               0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+                duid_bytes: vec![
+                    0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 0x00, 0x11, 0x22, 0x33, 0x44,
+                    0x55,
+                ],
             }),
         };
-        
+
         // Write database to temp file once
         let temp_dir = TempDir::new().unwrap();
         let lease_file = temp_dir.path().join("dnsmasq.leases");
-        
+
         LeaseStore::write_leases(&lease_file, &database)
             .expect("Failed to write test lease database");
-        
-        group.bench_with_input(
-            BenchmarkId::new("db_size", db_size),
-            &db_size,
-            |b, _| {
-                b.iter(|| {
-                    rt.block_on(async {
-                        // Load lease database from file
-                        let loaded = LeaseStore::read_leases(&lease_file)
-                            .await
-                            .expect("Failed to load leases");
-                        black_box(loaded)
-                    })
-                });
-            },
-        );
+
+        group.bench_with_input(BenchmarkId::new("db_size", db_size), &db_size, |b, _| {
+            b.iter(|| {
+                rt.block_on(async {
+                    // Load lease database from file
+                    let loaded = LeaseStore::read_leases(&lease_file)
+                        .await
+                        .expect("Failed to load leases");
+                    black_box(loaded)
+                })
+            });
+        });
     }
-    
+
     group.finish();
 }
 

@@ -109,10 +109,10 @@ use zbus::{Connection, SignalContext};
 
 // Internal imports - ONLY from depends_on_files
 use crate::constants::VERSION;
-use crate::dns::cache::DnsCache;
-use crate::dns::forward::{Server, SERV_FROM_DBUS};
 #[cfg(feature = "dhcp")]
 use crate::dhcp::lease::Lease;
+use crate::dns::cache::DnsCache;
+use crate::dns::forward::{SERV_FROM_DBUS, Server};
 use crate::types::daemon_state::DaemonState;
 #[cfg(feature = "metrics")]
 use crate::util::metrics::MetricsCollector;
@@ -268,14 +268,14 @@ impl DbusInterface {
     #[instrument(skip(self))]
     pub async fn clear_cache_impl(&self) -> Result<(), DbusError> {
         info!("`D-Bus` `ClearCache` called");
-        
+
         let mut state = self.state.write().await;
-        
+
         // Clear DNS cache by creating new empty cache
         // Note: In the real implementation, we would call state.dns_cache.clear()
         // but since the method doesn't exist in DnsCache yet, we document the intention
         info!("Clearing DNS cache and reloading configuration");
-        
+
         Ok(())
     }
 
@@ -298,36 +298,36 @@ impl DbusInterface {
     #[instrument(skip(self, servers))]
     pub async fn set_servers_impl(&self, servers: Vec<ServerSpec>) -> Result<(), DbusError> {
         info!("`D-Bus` `SetServers` called with {} servers", servers.len());
-        
+
         let mut state = self.state.write().await;
-        
+
         // Mark all existing SERV_FROM_DBUS servers for potential removal
         // Then add/update servers from new configuration
         // Finally remove unmarked SERV_FROM_DBUS servers
-        
+
         for server_spec in servers {
             debug!(
                 "Adding server: address={}, domains={:?}",
                 server_spec.address, server_spec.domains
             );
-            
+
             // Convert address to SocketAddr (default to port 53)
             let addr = format!("{}:53", server_spec.address)
                 .parse()
                 .map_err(|e| DbusError::InvalidArgs(format!("Invalid address: {e}")))?;
-            
+
             let mut server = Server::new(addr).mark_as_from_dbus();
-            
+
             // Add domain restrictions if specified
             if !server_spec.domains.is_empty() {
                 let domains_str = server_spec.domains.join(",");
                 server = server.with_domains(domains_str);
             }
-            
+
             // In real implementation, would call state.add_upstream_server(server)
             info!("Server configured: {:?}", server);
         }
-        
+
         Ok(())
     }
 
@@ -348,36 +348,39 @@ impl DbusInterface {
     /// Returns error if parsing fails
     #[instrument(skip(self, servers))]
     pub async fn set_servers_ex_impl(&self, servers: Vec<ServerSpecEx>) -> Result<(), DbusError> {
-        info!("`D-Bus` `SetServersEx` called with {} servers", servers.len());
-        
+        info!(
+            "`D-Bus` `SetServersEx` called with {} servers",
+            servers.len()
+        );
+
         let mut state = self.state.write().await;
-        
+
         for server_spec in servers {
             debug!(
                 "Adding extended server: address={}, interface={:?}, domains={:?}",
                 server_spec.address, server_spec.interface, server_spec.domains
             );
-            
+
             let addr = format!("{}:53", server_spec.address)
                 .parse()
                 .map_err(|e| DbusError::InvalidArgs(format!("Invalid address: {e}")))?;
-            
+
             let mut server = Server::new(addr).mark_as_from_dbus();
-            
+
             // Add interface binding if specified
             if !server_spec.interface.is_empty() {
                 server = server.with_interface(server_spec.interface.clone());
             }
-            
+
             // Add domain restrictions
             if !server_spec.domains.is_empty() {
                 let domains_str = server_spec.domains.join(",");
                 server = server.with_domains(domains_str);
             }
-            
+
             info!("Extended server configured: {:?}", server);
         }
-        
+
         Ok(())
     }
 
@@ -397,9 +400,9 @@ impl DbusInterface {
     #[instrument(skip(self))]
     pub async fn get_loop_servers_impl(&self) -> Vec<String> {
         info!("D-Bus GetLoopServers called");
-        
+
         let state = self.state.read().await;
-        
+
         // Query loop detection module for servers in forwarding loops
         // In real implementation: state.dns_loop_detect.get_loop_servers()
         vec![]
@@ -417,11 +420,11 @@ impl DbusInterface {
     #[instrument(skip(self))]
     pub async fn set_filter_win2k_option_impl(&self, enable: bool) -> Result<(), DbusError> {
         info!("D-Bus SetFilterWin2KOption called: enable={}", enable);
-        
+
         let mut state = self.state.write().await;
         // Update configuration flag
         info!("Windows 2000 option filtering set to: {}", enable);
-        
+
         Ok(())
     }
 
@@ -437,11 +440,11 @@ impl DbusInterface {
     #[instrument(skip(self))]
     pub async fn set_bogus_priv_impl(&self, enable: bool) -> Result<(), DbusError> {
         info!("D-Bus SetBogusPriv called: enable={}", enable);
-        
+
         let mut state = self.state.write().await;
         // Update configuration flag
         info!("Bogus private IP filtering set to: {}", enable);
-        
+
         Ok(())
     }
 
@@ -457,11 +460,11 @@ impl DbusInterface {
     #[instrument(skip(self))]
     pub async fn set_domain_needed_impl(&self, enable: bool) -> Result<(), DbusError> {
         info!("D-Bus SetDomainNeeded called: enable={}", enable);
-        
+
         let mut state = self.state.write().await;
         // Update configuration flag
         info!("Domain-required filtering set to: {}", enable);
-        
+
         Ok(())
     }
 
@@ -488,17 +491,17 @@ impl DbusInterface {
             "D-Bus AddDhcpLease called: address={}, mac={}",
             lease_info.address, lease_info.mac
         );
-        
+
         let mut state = self.state.write().await;
-        
+
         // Validate lease info
         if lease_info.mac.is_empty() {
             return Err(DbusError::InvalidArgs("MAC address required".to_string()));
         }
-        
+
         // In real implementation: state.dhcp_leases.add_lease(lease)
         info!("DHCP lease added successfully");
-        
+
         Ok(())
     }
 
@@ -521,17 +524,17 @@ impl DbusInterface {
     #[instrument(skip(self, ip_addr))]
     pub async fn delete_dhcp_lease_impl(&self, ip_addr: String) -> Result<bool, DbusError> {
         info!("`D-Bus` `DeleteDhcpLease` called: ip={ip_addr}");
-        
+
         let mut state = self.state.write().await;
-        
+
         // Parse IP address
         let addr: IpAddr = ip_addr
             .parse()
             .map_err(|e| DbusError::InvalidArgs(format!("Invalid IP address: {e}")))?;
-        
+
         // In real implementation: state.dhcp_leases.remove_lease(addr)
         info!("DHCP lease lookup for deletion: {}", addr);
-        
+
         Ok(true) // Return whether lease was actually found and deleted
     }
 
@@ -550,32 +553,31 @@ impl DbusInterface {
     #[instrument(skip(self))]
     pub async fn get_metrics_impl(&self) -> HashMap<String, u64> {
         info!("D-Bus GetMetrics called");
-        
+
         let state = self.state.read().await;
         let mut metrics = HashMap::new();
-        
+
         // Export DNS cache statistics
         metrics.insert("dns_cache_size".to_string(), 0);
         metrics.insert("dns_cache_insertions".to_string(), 0);
         metrics.insert("dns_cache_evictions".to_string(), 0);
         metrics.insert("dns_cache_hits".to_string(), 0);
         metrics.insert("dns_cache_misses".to_string(), 0);
-        
+
         // Export DHCP statistics if enabled
         #[cfg(feature = "dhcp")]
         {
             metrics.insert("dhcp_leases_active".to_string(), 0);
             metrics.insert("dhcp_leases_expired".to_string(), 0);
         }
-        
+
         // Export upstream server statistics
         metrics.insert("upstream_queries_total".to_string(), 0);
         metrics.insert("upstream_query_failures".to_string(), 0);
-        
+
         debug!("Exported {} metrics", metrics.len());
         metrics
     }
-
 }
 
 /// D-Bus interface declaration with automatic introspection
@@ -666,17 +668,32 @@ impl DbusInterface {
     /// Signal: DHCP lease added
     #[cfg(feature = "dhcp")]
     #[zbus(signal)]
-    async fn dhcp_lease_added(ctxt: &SignalContext<'_>, ip: &str, mac: &str, hostname: &str) -> zbus::Result<()>;
+    async fn dhcp_lease_added(
+        ctxt: &SignalContext<'_>,
+        ip: &str,
+        mac: &str,
+        hostname: &str,
+    ) -> zbus::Result<()>;
 
     /// Signal: DHCP lease deleted
     #[cfg(feature = "dhcp")]
     #[zbus(signal)]
-    async fn dhcp_lease_deleted(ctxt: &SignalContext<'_>, ip: &str, mac: &str, hostname: &str) -> zbus::Result<()>;
+    async fn dhcp_lease_deleted(
+        ctxt: &SignalContext<'_>,
+        ip: &str,
+        mac: &str,
+        hostname: &str,
+    ) -> zbus::Result<()>;
 
     /// Signal: DHCP lease updated
     #[cfg(feature = "dhcp")]
     #[zbus(signal)]
-    async fn dhcp_lease_updated(ctxt: &SignalContext<'_>, ip: &str, mac: &str, hostname: &str) -> zbus::Result<()>;
+    async fn dhcp_lease_updated(
+        ctxt: &SignalContext<'_>,
+        ip: &str,
+        mac: &str,
+        hostname: &str,
+    ) -> zbus::Result<()>;
 
     /// Signal: Daemon started/restarted
     #[zbus(signal)]
@@ -709,13 +726,13 @@ pub async fn emit_lease_added(
     hostname: &str,
 ) -> zbus::Result<()> {
     info!("Emitting `DhcpLeaseAdded`: ip={ip}, mac={mac}, hostname={hostname}");
-    
+
     // Get interface reference to obtain signal context
     let iface_ref = connection
         .object_server()
         .interface::<_, DbusInterface>(DBUS_OBJECT_PATH)
         .await?;
-    
+
     // Get signal context and emit signal as associated function
     let signal_ctxt = iface_ref.signal_context();
     DbusInterface::dhcp_lease_added(signal_ctxt, ip, mac, hostname).await
@@ -747,13 +764,13 @@ pub async fn emit_lease_deleted(
     hostname: &str,
 ) -> zbus::Result<()> {
     info!("Emitting `DhcpLeaseDeleted`: ip={ip}, mac={mac}, hostname={hostname}");
-    
+
     // Get interface reference to obtain signal context
     let iface_ref = connection
         .object_server()
         .interface::<_, DbusInterface>(DBUS_OBJECT_PATH)
         .await?;
-    
+
     // Get signal context and emit signal as associated function
     let signal_ctxt = iface_ref.signal_context();
     DbusInterface::dhcp_lease_deleted(signal_ctxt, ip, mac, hostname).await
@@ -785,13 +802,13 @@ pub async fn emit_lease_updated(
     hostname: &str,
 ) -> zbus::Result<()> {
     info!("Emitting `DhcpLeaseUpdated`: ip={ip}, mac={mac}, hostname={hostname}");
-    
+
     // Get interface reference to obtain signal context
     let iface_ref = connection
         .object_server()
         .interface::<_, DbusInterface>(DBUS_OBJECT_PATH)
         .await?;
-    
+
     // Get signal context and emit signal as associated function
     let signal_ctxt = iface_ref.signal_context();
     DbusInterface::dhcp_lease_updated(signal_ctxt, ip, mac, hostname).await
@@ -822,54 +839,56 @@ pub async fn emit_lease_updated(
 #[instrument(skip(interface))]
 pub async fn connect(interface: DbusInterface) -> Result<Connection, DbusError> {
     info!("Initializing D-Bus connection");
-    
+
     // Connect to system bus
-    let connection = Connection::system()
-        .await
-        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to connect to system bus: {e}")))?;
-    
+    let connection = Connection::system().await.map_err(|e| {
+        DbusError::ConnectionFailed(format!("Failed to connect to system bus: {e}"))
+    })?;
+
     info!("Connected to system D-Bus");
-    
+
     // Configure connection to not exit on disconnect
     // (zbus handles this automatically, no manual configuration needed)
-    
+
     // Export interface at object path
     connection
         .object_server()
         .at(DBUS_OBJECT_PATH, interface)
         .await
-        .map_err(|e| {
-            DbusError::ConnectionFailed(format!("Failed to export interface: {e}"))
-        })?;
-    
+        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to export interface: {e}")))?;
+
     info!("Interface exported at {}", DBUS_OBJECT_PATH);
-    
+
     // Request well-known service name
     connection
         .request_name(DBUS_SERVICE_NAME)
         .await
         .map_err(|e| {
-            DbusError::ConnectionFailed(format!("Failed to request name '{DBUS_SERVICE_NAME}': {e}"))
+            DbusError::ConnectionFailed(format!(
+                "Failed to request name '{DBUS_SERVICE_NAME}': {e}"
+            ))
         })?;
-    
+
     info!("Service name '{}' registered", DBUS_SERVICE_NAME);
-    
+
     // Emit "Up" signal to notify that daemon is ready
     // Get interface reference to obtain signal context
     let iface_ref = connection
         .object_server()
         .interface::<_, DbusInterface>(DBUS_OBJECT_PATH)
         .await
-        .map_err(|e| DbusError::ConnectionFailed(format!("Failed to get interface reference: {e}")))?;
-    
+        .map_err(|e| {
+            DbusError::ConnectionFailed(format!("Failed to get interface reference: {e}"))
+        })?;
+
     // Get signal context and emit Up signal as an associated function
     let signal_ctxt = iface_ref.signal_context();
     DbusInterface::up(signal_ctxt)
         .await
         .map_err(|e| DbusError::ConnectionFailed(format!("Failed to emit Up signal: {e}")))?;
-    
+
     info!("D-Bus interface initialized successfully");
-    
+
     Ok(connection)
 }
 
@@ -883,7 +902,7 @@ mod tests {
             address: "8.8.8.8".parse().unwrap(),
             domains: vec!["example.com".to_string()],
         };
-        
+
         // Test that ServerSpec can be constructed
         assert_eq!(spec.address.to_string(), "8.8.8.8");
         assert_eq!(spec.domains.len(), 1);
@@ -896,7 +915,7 @@ mod tests {
             interface: "eth0".to_string(),
             domains: vec![],
         };
-        
+
         assert_eq!(spec.interface, "eth0");
     }
 
@@ -912,7 +931,7 @@ mod tests {
             iaid: 0,
             is_temporary: false,
         };
-        
+
         assert_eq!(lease.mac, "00:11:22:33:44:55");
         assert_eq!(lease.hostname, "test-host");
     }
@@ -921,7 +940,7 @@ mod tests {
     fn test_dbus_error_display() {
         let err = DbusError::InvalidArgs("test error".to_string());
         assert!(err.to_string().contains("Invalid arguments"));
-        
+
         let err = DbusError::ConnectionFailed("connection lost".to_string());
         assert!(err.to_string().contains("D-Bus connection failed"));
     }

@@ -259,9 +259,8 @@ impl FromStr for MacAddress {
 
         let mut bytes = [0u8; 6];
         for (i, part) in parts.iter().enumerate() {
-            bytes[i] = u8::from_str_radix(part, 16).map_err(|_| {
-                ConfigError::InvalidMacAddress(format!("Invalid hex byte: {part}"))
-            })?;
+            bytes[i] = u8::from_str_radix(part, 16)
+                .map_err(|_| ConfigError::InvalidMacAddress(format!("Invalid hex byte: {part}")))?;
         }
 
         Ok(MacAddress(bytes))
@@ -573,10 +572,14 @@ impl DhcpRange {
         // Validate lease time is reasonable (at least 60 seconds, at most 1 year)
         let secs = self.lease_time.as_secs();
         if secs < 60 {
-            return Err(ConfigError::InvalidLeaseTime(u32::try_from(secs).unwrap_or(u32::MAX)));
+            return Err(ConfigError::InvalidLeaseTime(
+                u32::try_from(secs).unwrap_or(u32::MAX),
+            ));
         }
         if secs > 365 * 24 * 3600 {
-            return Err(ConfigError::InvalidLeaseTime(u32::try_from(secs).unwrap_or(u32::MAX)));
+            return Err(ConfigError::InvalidLeaseTime(
+                u32::try_from(secs).unwrap_or(u32::MAX),
+            ));
         }
 
         Ok(())

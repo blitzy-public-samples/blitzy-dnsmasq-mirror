@@ -267,7 +267,11 @@ impl CacheEntry {
                 if now >= expires {
                     0
                 } else {
-                    expires.duration_since(now).as_secs().try_into().unwrap_or(u32::MAX)
+                    expires
+                        .duration_since(now)
+                        .as_secs()
+                        .try_into()
+                        .unwrap_or(u32::MAX)
                 }
             }
             None => u32::MAX, // Permanent entry

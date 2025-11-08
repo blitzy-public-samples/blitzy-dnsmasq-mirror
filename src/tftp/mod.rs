@@ -129,23 +129,17 @@ use thiserror::Error;
 
 // Module declarations
 pub mod protocol;
-pub mod transfer;
 pub mod server;
+pub mod transfer;
 
 // Re-export protocol types
-pub use protocol::{
-    TftpOpcode, TftpErrorCode, TftpPacket, TransferMode, ProtocolError,
-};
+pub use protocol::{ProtocolError, TftpErrorCode, TftpOpcode, TftpPacket, TransferMode};
 
 // Re-export transfer types
-pub use transfer::{
-    Transfer, TftpFile, TransferOptions,
-};
+pub use transfer::{TftpFile, Transfer, TransferOptions};
 
 // Re-export server types
-pub use server::{
-    TftpServer, TftpConfig, ServerError, handle_request,
-};
+pub use server::{ServerError, TftpConfig, TftpServer, handle_request};
 
 /// Unified TFTP error type wrapping all submodule errors
 ///

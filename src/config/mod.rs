@@ -369,7 +369,10 @@ pub fn load_config(cli: &Cli) -> Result<Config, ConfigError> {
     // Perform comprehensive validation
     validate_config(&config).map_err(|errors| {
         // Convert Vec<ConfigError> to a single ConfigError
-        let error_msgs: Vec<String> = errors.iter().map(std::string::ToString::to_string).collect();
+        let error_msgs: Vec<String> = errors
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ConfigError::ValidationError(format!(
             "Configuration validation failed:\n{}",
             error_msgs.join("\n")

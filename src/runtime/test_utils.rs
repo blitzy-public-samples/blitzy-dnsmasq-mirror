@@ -6,7 +6,7 @@ use super::*;
 use std::time::Duration;
 
 /// Create a test `DaemonConfig` with reasonable defaults
-#[must_use] 
+#[must_use]
 pub fn test_daemon_config() -> DaemonConfig {
     DaemonConfig {
         daemonize: false,
@@ -16,7 +16,7 @@ pub fn test_daemon_config() -> DaemonConfig {
 }
 
 /// Create a test `PrivilegeConfig` for non-root testing
-#[must_use] 
+#[must_use]
 pub fn test_privilege_config() -> PrivilegeConfig {
     PrivilegeConfig {
         user: None,

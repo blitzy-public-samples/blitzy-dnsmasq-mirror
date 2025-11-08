@@ -90,13 +90,13 @@ use dnsmasq::ConfigBuilder;
 use dnsmasq::config::types::DhcpConfig;
 
 #[cfg(feature = "dhcp")]
-use dnsmasq::dhcp::v4::server::DhcpV4Server;
-#[cfg(feature = "dhcp")]
-use dnsmasq::dhcp::v4::protocol::MessageType;
-#[cfg(feature = "dhcp")]
 use dnsmasq::dhcp::lease::LeaseDatabase;
 #[cfg(feature = "dhcp")]
 use dnsmasq::dhcp::lease_store::LeaseStore;
+#[cfg(feature = "dhcp")]
+use dnsmasq::dhcp::v4::protocol::MessageType;
+#[cfg(feature = "dhcp")]
+use dnsmasq::dhcp::v4::server::DhcpV4Server;
 
 #[cfg(all(feature = "dhcp", feature = "ipv6"))]
 use dnsmasq::dhcp::v6::server::DhcpV6Server;
@@ -216,10 +216,7 @@ async fn main() -> Result<()> {
 
         // Option 6: DNS Servers (192.168.1.1, 8.8.8.8)
         // Encoded as binary with multiple 4-byte IPv4 addresses per RFC 2132
-        let dns_servers = vec![
-            Ipv4Addr::new(192, 168, 1, 1),
-            Ipv4Addr::new(8, 8, 8, 8),
-        ];
+        let dns_servers = vec![Ipv4Addr::new(192, 168, 1, 1), Ipv4Addr::new(8, 8, 8, 8)];
         let mut dns_bytes = Vec::new();
         for addr in dns_servers {
             dns_bytes.extend_from_slice(&addr.octets());
@@ -348,12 +345,12 @@ async fn main() -> Result<()> {
         info!("Step 3: Configuring network and logging...");
 
         // Configure network settings
-        use dnsmasq::config::types::{NetworkConfig, ListenAddress, Protocol};
+        use dnsmasq::config::types::{ListenAddress, NetworkConfig, Protocol};
 
         let mut network_config = NetworkConfig::default();
         network_config.port = 67; // Standard DHCP server port
         network_config.bind_interfaces = true; // Bind to specific interfaces only
-        
+
         // Listen on all interfaces (0.0.0.0) for DHCP
         let listen_addr = ListenAddress {
             address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -417,8 +414,10 @@ async fn main() -> Result<()> {
         // load_from_file is an associated function, not an instance method
         match LeaseStore::load_from_file(&lease_file_path) {
             Ok(stored_leases) => {
-                info!("  - Loaded {} existing leases from disk", 
-                      stored_leases.leases.len());
+                info!(
+                    "  - Loaded {} existing leases from disk",
+                    stored_leases.leases.len()
+                );
             }
             Err(e) => {
                 info!("  - No existing lease file found (creating new): {}", e);
@@ -532,7 +531,7 @@ async fn main() -> Result<()> {
         // Example: Spawn helper process for DHCP lease events
         // In production, this would be configured via --dhcp-script option
         let helper_script = PathBuf::from("/usr/local/bin/dhcp-event.sh");
-        
+
         if helper_script.exists() {
             info!("  - Helper script: {:?}", helper_script);
             info!("  - Events: add (new lease), del (expired), old (renewed)");
@@ -541,7 +540,7 @@ async fn main() -> Result<()> {
             info!("    * DNSMASQ_LEASE_IP: assigned IP address");
             info!("    * DNSMASQ_LEASE_MAC: client MAC address");
             info!("    * DNSMASQ_LEASE_HOSTNAME: client hostname (if provided)");
-            
+
             // Note: spawn_helper_process() would be called on lease events
             // This is a demonstration of the integration point
         } else {
@@ -637,7 +636,7 @@ async fn main() -> Result<()> {
         // Example of how the main event loop would look:
         /*
         use tokio::select;
-        
+
         loop {
             select! {
                 // Handle incoming DHCPv4 packets
@@ -646,7 +645,7 @@ async fn main() -> Result<()> {
                         error!("DHCP packet handling error: {}", e);
                     }
                 }
-                
+
                 // Handle incoming DHCPv6 packets (if enabled)
                 #[cfg(feature = "ipv6")]
                 result = dhcp6_server.handle_packet() => {
@@ -654,7 +653,7 @@ async fn main() -> Result<()> {
                         error!("DHCPv6 packet handling error: {}", e);
                     }
                 }
-                
+
                 // Handle shutdown signal
                 _ = signal_handlers.recv_shutdown() => {
                     info!("Shutdown signal received, flushing leases...");
@@ -662,7 +661,7 @@ async fn main() -> Result<()> {
                     info!("DHCP server shutdown complete");
                     break;
                 }
-                
+
                 // Periodic lease expiration check (every 60 seconds)
                 _ = tokio::time::sleep(Duration::from_secs(60)) => {
                     lease_database.prune_expired();

@@ -186,7 +186,7 @@ pub enum PlatformError {
     #[error("Operation '{operation}' not supported on this platform")]
     UnsupportedOperation {
         /// Operation that is unsupported
-        operation: String
+        operation: String,
     },
 
     /// Invalid network interface specified
@@ -195,14 +195,14 @@ pub enum PlatformError {
         /// Interface name or identifier
         interface: String,
         /// Reason the interface is invalid
-        reason: String
+        reason: String,
     },
 
     /// Insufficient permissions for operation
     #[error("Permission denied: {operation} requires elevated privileges")]
     PermissionDenied {
         /// Operation that requires elevated privileges
-        operation: String
+        operation: String,
     },
 }
 
@@ -391,7 +391,7 @@ pub enum InterfaceEvent {
         /// Interface index
         index: u32,
         /// Interface name
-        name: String
+        name: String,
     },
 
     /// Interface address was added or removed

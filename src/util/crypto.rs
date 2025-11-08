@@ -808,23 +808,17 @@ pub fn verify_rsa_signature(
                 signature,
             )
             .map_err(|_| DnssecError::CryptoError {
-                message: format!(
-                    "RSA-SHA1 signature verification failed for algorithm {algo}"
-                ),
+                message: format!("RSA-SHA1 signature verification failed for algorithm {algo}"),
             }),
         DnssecAlgorithm::RsaSha256 => public_key
             .verify(&signature::RSA_PKCS1_2048_8192_SHA256, data, signature)
             .map_err(|_| DnssecError::CryptoError {
-                message: format!(
-                    "RSA-SHA256 signature verification failed for algorithm {algo}"
-                ),
+                message: format!("RSA-SHA256 signature verification failed for algorithm {algo}"),
             }),
         DnssecAlgorithm::RsaSha512 => public_key
             .verify(&signature::RSA_PKCS1_2048_8192_SHA512, data, signature)
             .map_err(|_| DnssecError::CryptoError {
-                message: format!(
-                    "RSA-SHA512 signature verification failed for algorithm {algo}"
-                ),
+                message: format!("RSA-SHA512 signature verification failed for algorithm {algo}"),
             }),
         _ => Err(DnssecError::CryptoError {
             message: format!("Algorithm {algo} is not RSA"),

@@ -83,14 +83,14 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 // tokio::fs::File not needed for current tests
 use tokio::net::UdpSocket;
 // tokio::time::{sleep, timeout} not needed for current tests
 
 // Internal imports from dependency whitelist (per schema requirements)
 // Note: Using tokio::net::UdpSocket directly as network::socket::UdpSocket is not re-exported
-use dnsmasq::tftp::protocol::{TransferMode, TftpErrorCode, TftpOpcode};
+use dnsmasq::tftp::protocol::{TftpErrorCode, TftpOpcode, TransferMode};
 use dnsmasq::tftp::server::TftpConfig;
 use dnsmasq::tftp::transfer::Transfer;
 
@@ -120,25 +120,25 @@ const MAX_RETRIES: u8 = 7;
 /// Returns a TempDir that will be automatically cleaned up when dropped
 async fn create_tftp_test_root() -> std::io::Result<TempDir> {
     let temp_dir = tempdir()?;
-    
+
     // Create a simple text file for basic transfers
     let test_file = temp_dir.path().join("test.txt");
     tokio::fs::write(&test_file, b"Hello, TFTP!\n").await?;
-    
+
     // Create a binary file
     let binary_file = temp_dir.path().join("binary.bin");
     let binary_data: Vec<u8> = (0..1024).map(|i| (i % 256) as u8).collect();
     tokio::fs::write(&binary_file, &binary_data).await?;
-    
+
     // Create a large file for multi-block testing (10KB)
     let large_file = temp_dir.path().join("large.dat");
     let large_data = vec![0x42u8; 10240];
     tokio::fs::write(&large_file, &large_data).await?;
-    
+
     // Create a file for netascii mode testing with LF characters
     let netascii_file = temp_dir.path().join("netascii.txt");
     tokio::fs::write(&netascii_file, b"Line 1\nLine 2\nLine 3\n").await?;
-    
+
     Ok(temp_dir)
 }
 
@@ -152,18 +152,18 @@ async fn create_tftp_test_root() -> std::io::Result<TempDir> {
 /// [optional] string: option value
 fn build_rrq_packet(filename: &str, mode: TransferMode, options: &[(String, String)]) -> Bytes {
     let mut packet = BytesMut::new();
-    
+
     // Opcode: RRQ (1)
     packet.put_u16(TftpOpcode::RRQ.to_u16());
-    
+
     // Filename
     packet.put_slice(filename.as_bytes());
     packet.put_u8(0);
-    
+
     // Mode
     packet.put_slice(mode.to_str().as_bytes());
     packet.put_u8(0);
-    
+
     // Options
     for (name, value) in options {
         packet.put_slice(name.as_bytes());
@@ -171,7 +171,7 @@ fn build_rrq_packet(filename: &str, mode: TransferMode, options: &[(String, Stri
         packet.put_slice(value.as_bytes());
         packet.put_u8(0);
     }
-    
+
     packet.freeze()
 }
 
@@ -191,15 +191,15 @@ fn parse_data_packet(packet: &[u8]) -> Option<(u16, &[u8])> {
     if packet.len() < 4 {
         return None;
     }
-    
+
     let opcode = u16::from_be_bytes([packet[0], packet[1]]);
     if opcode != TftpOpcode::DATA.to_u16() {
         return None;
     }
-    
+
     let block = u16::from_be_bytes([packet[2], packet[3]]);
     let data = &packet[4..];
-    
+
     Some((block, data))
 }
 
@@ -208,12 +208,12 @@ fn parse_ack_packet(packet: &[u8]) -> Option<u16> {
     if packet.len() < 4 {
         return None;
     }
-    
+
     let opcode = u16::from_be_bytes([packet[0], packet[1]]);
     if opcode != TftpOpcode::ACK.to_u16() {
         return None;
     }
-    
+
     let block = u16::from_be_bytes([packet[2], packet[3]]);
     Some(block)
 }
@@ -223,20 +223,23 @@ fn parse_error_packet(packet: &[u8]) -> Option<(TftpErrorCode, String)> {
     if packet.len() < 4 {
         return None;
     }
-    
+
     let opcode = u16::from_be_bytes([packet[0], packet[1]]);
     if opcode != TftpOpcode::ERROR.to_u16() {
         return None;
     }
-    
+
     let error_code = u16::from_be_bytes([packet[2], packet[3]]);
     let code = TftpErrorCode::from_u16(error_code)?;
-    
+
     // Extract error message (null-terminated string)
     let message_bytes = &packet[4..];
-    let message_end = message_bytes.iter().position(|&b| b == 0).unwrap_or(message_bytes.len());
+    let message_end = message_bytes
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(message_bytes.len());
     let message = String::from_utf8_lossy(&message_bytes[..message_end]).to_string();
-    
+
     Some((code, message))
 }
 
@@ -245,33 +248,33 @@ fn parse_oack_packet(packet: &[u8]) -> Option<Vec<(String, String)>> {
     if packet.len() < 2 {
         return None;
     }
-    
+
     let opcode = u16::from_be_bytes([packet[0], packet[1]]);
     if opcode != TftpOpcode::OACK.to_u16() {
         return None;
     }
-    
+
     let mut options = Vec::new();
     let mut pos = 2;
-    
+
     while pos < packet.len() {
         // Parse option name
         let name_end = packet[pos..].iter().position(|&b| b == 0)?;
         let name = String::from_utf8_lossy(&packet[pos..pos + name_end]).to_string();
         pos += name_end + 1;
-        
+
         if pos >= packet.len() {
             break;
         }
-        
+
         // Parse option value
         let value_end = packet[pos..].iter().position(|&b| b == 0)?;
         let value = String::from_utf8_lossy(&packet[pos..pos + value_end]).to_string();
         pos += value_end + 1;
-        
+
         options.push((name, value));
     }
-    
+
     Some(options)
 }
 
@@ -299,7 +302,7 @@ fn build_ack_packet(block: u16) -> Bytes {
 #[tokio::test]
 async fn test_basic_rrq_single_block() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create test configuration (for documentation purposes)
     let _config = TftpConfig {
         root_dir: temp_dir.path().to_path_buf(),
@@ -308,31 +311,40 @@ async fn test_basic_rrq_single_block() {
         max_blocksize: DEFAULT_BLOCKSIZE,
         ..Default::default()
     };
-    
+
     // Create a simple small file (< 512 bytes)
     let test_content = b"Hello, TFTP World!";
     let test_file = temp_dir.path().join("small.txt");
     tokio::fs::write(&test_file, test_content).await.unwrap();
-    
+
     // Create client socket
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
-    
+
     // Create server socket
-    let server_socket = Arc::new(UdpSocket::bind(format!("127.0.0.1:{}", TFTP_PORT)).await.unwrap());
-    
+    let server_socket = Arc::new(
+        UdpSocket::bind(format!("127.0.0.1:{}", TFTP_PORT))
+            .await
+            .unwrap(),
+    );
+
     // Send RRQ packet
     let rrq = build_rrq_packet("small.txt", TransferMode::Octet, &[]);
-    client_socket.send_to(&rrq, server_socket.local_addr().unwrap()).await.unwrap();
-    
+    client_socket
+        .send_to(&rrq, server_socket.local_addr().unwrap())
+        .await
+        .unwrap();
+
     // Simulate server receiving RRQ and creating transfer
     // In real implementation, this would be handled by TftpServer::handle_request()
     // For this test, we directly test the Transfer API
-    
+
     // Open file for transfer
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     // Create transfer
     let transfer = Transfer::new(
         server_socket.clone(),
@@ -343,8 +355,9 @@ async fn test_basic_rrq_single_block() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Verify transfer was created successfully
     assert_eq!(transfer.block, 1); // No options, so block starts at 1
     assert_eq!(transfer.blocksize, DEFAULT_BLOCKSIZE);
@@ -363,21 +376,23 @@ async fn test_basic_rrq_single_block() {
 #[tokio::test]
 async fn test_multi_block_transfer() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create a file larger than one block (e.g., 2048 bytes = 4 blocks of 512 bytes)
     let test_content = vec![0x55u8; 2048];
     let test_file = temp_dir.path().join("multi.dat");
     tokio::fs::write(&test_file, &test_content).await.unwrap();
-    
+
     // Open file for transfer
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     // Create sockets
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     // Create transfer
     let mut transfer = Transfer::new(
         server_socket.clone(),
@@ -388,38 +403,39 @@ async fn test_multi_block_transfer() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     let mut total_data_received = Vec::new();
     let mut expected_block = 1u16;
-    
+
     // Simulate transfer of all blocks
     while !transfer.is_complete() {
         // Get next block from server
         let data_packet = transfer.get_block().await.unwrap();
-        
+
         // Parse DATA packet
         let (block_num, block_data) = parse_data_packet(&data_packet).expect("Invalid DATA packet");
-        
+
         // Verify block number
         assert_eq!(block_num, expected_block, "Block number mismatch");
-        
+
         // Collect data
         total_data_received.extend_from_slice(block_data);
-        
+
         // Send ACK
         let ack_packet = build_ack_packet(block_num);
         let _action = transfer.handle_packet(&ack_packet).unwrap();
-        
+
         // Check if we should continue
         if block_data.len() < DEFAULT_BLOCKSIZE as usize {
             // Last block
             break;
         }
-        
+
         expected_block = expected_block.wrapping_add(1);
     }
-    
+
     // Verify all data received correctly
     assert_eq!(total_data_received.len(), test_content.len());
     assert_eq!(total_data_received, test_content);
@@ -435,15 +451,18 @@ async fn test_multi_block_transfer() {
 #[tokio::test]
 async fn test_error_file_not_found() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Attempt to open non-existent file
     let non_existent = temp_dir.path().join("does_not_exist.txt");
     let result = dnsmasq::tftp::transfer::TftpFile::open(&non_existent, false).await;
-    
+
     // Verify error
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(matches!(err, dnsmasq::tftp::transfer::TransferError::FileNotFound(_)));
+    assert!(matches!(
+        err,
+        dnsmasq::tftp::transfer::TransferError::FileNotFound(_)
+    ));
 }
 
 /// Test ERROR packet generation for permission denied
@@ -455,30 +474,43 @@ async fn test_error_file_not_found() {
 #[cfg(unix)]
 async fn test_error_permission_denied() {
     use std::os::unix::fs::PermissionsExt;
-    
+
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create a file with no read permissions
     let restricted_file = temp_dir.path().join("no_read.txt");
     tokio::fs::write(&restricted_file, b"Secret").await.unwrap();
-    
+
     // Remove read permissions
-    let mut perms = tokio::fs::metadata(&restricted_file).await.unwrap().permissions();
+    let mut perms = tokio::fs::metadata(&restricted_file)
+        .await
+        .unwrap()
+        .permissions();
     perms.set_mode(0o000);
-    tokio::fs::set_permissions(&restricted_file, perms).await.unwrap();
-    
+    tokio::fs::set_permissions(&restricted_file, perms)
+        .await
+        .unwrap();
+
     // Attempt to open file
     let result = dnsmasq::tftp::transfer::TftpFile::open(&restricted_file, false).await;
-    
+
     // Verify permission error
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(matches!(err, dnsmasq::tftp::transfer::TransferError::PermissionDenied(_)));
-    
+    assert!(matches!(
+        err,
+        dnsmasq::tftp::transfer::TransferError::PermissionDenied(_)
+    ));
+
     // Cleanup: restore permissions so temp_dir can be deleted
-    let mut restore_perms = tokio::fs::metadata(&restricted_file).await.unwrap().permissions();
+    let mut restore_perms = tokio::fs::metadata(&restricted_file)
+        .await
+        .unwrap()
+        .permissions();
     restore_perms.set_mode(0o644);
-    tokio::fs::set_permissions(&restricted_file, restore_perms).await.ok();
+    tokio::fs::set_permissions(&restricted_file, restore_perms)
+        .await
+        .ok();
 }
 
 //
@@ -496,22 +528,24 @@ async fn test_error_permission_denied() {
 #[tokio::test]
 async fn test_oack_blocksize_negotiation() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     let test_file = temp_dir.path().join("test.txt");
     tokio::fs::write(&test_file, b"Test data").await.unwrap();
-    
+
     // Open file
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     // Create sockets
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     // Request blocksize negotiation
     let options = dnsmasq::tftp::transfer::TransferOptions::new().with_blocksize();
-    
+
     // Create transfer with options
     let mut transfer = Transfer::new(
         server_socket.clone(),
@@ -522,20 +556,21 @@ async fn test_oack_blocksize_negotiation() {
         1024, // Request 1024-byte blocks
         TransferMode::Octet,
         options,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Get OACK packet (block 0)
     assert_eq!(transfer.block, 0); // OACK is sent as block 0
     let oack_packet = transfer.get_block().await.unwrap();
-    
+
     // Verify OACK opcode
     let opcode = parse_opcode(&oack_packet).unwrap();
     assert_eq!(opcode, TftpOpcode::OACK);
-    
+
     // Parse OACK options
     let parsed_options = parse_oack_packet(&oack_packet).unwrap();
     assert!(!parsed_options.is_empty());
-    
+
     // Verify blocksize option present
     let blocksize_opt = parsed_options.iter().find(|(name, _)| name == "blksize");
     assert!(blocksize_opt.is_some());
@@ -555,14 +590,16 @@ async fn test_blocksize_range_validation() {
     let temp_dir = create_tftp_test_root().await.unwrap();
     let test_file = temp_dir.path().join("test.txt");
     tokio::fs::write(&test_file, b"Test").await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     // Test minimum valid blocksize (8 bytes)
     let result = Transfer::new(
         server_socket.clone(),
@@ -575,7 +612,7 @@ async fn test_blocksize_range_validation() {
         dnsmasq::tftp::transfer::TransferOptions::new(),
     );
     assert!(result.is_ok());
-    
+
     // Test too small blocksize (should fail)
     let result = Transfer::new(
         server_socket.clone(),
@@ -588,7 +625,7 @@ async fn test_blocksize_range_validation() {
         dnsmasq::tftp::transfer::TransferOptions::new(),
     );
     assert!(result.is_err());
-    
+
     // Test maximum valid blocksize (65464 bytes)
     let result = Transfer::new(
         server_socket.clone(),
@@ -601,7 +638,7 @@ async fn test_blocksize_range_validation() {
         dnsmasq::tftp::transfer::TransferOptions::new(),
     );
     assert!(result.is_ok());
-    
+
     // Test too large blocksize (should fail)
     let result = Transfer::new(
         server_socket.clone(),
@@ -625,25 +662,27 @@ async fn test_blocksize_range_validation() {
 #[tokio::test]
 async fn test_tsize_option() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create file with known size
     let test_data = vec![0xAAu8; 5000];
     let test_file = temp_dir.path().join("sized.dat");
     tokio::fs::write(&test_file, &test_data).await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_size = file.size();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     // Request tsize option
     let options = dnsmasq::tftp::transfer::TransferOptions::new()
         .with_tsize()
         .with_blocksize();
-    
+
     let mut transfer = Transfer::new(
         server_socket.clone(),
         client_addr,
@@ -653,12 +692,13 @@ async fn test_tsize_option() {
         1024,
         TransferMode::Octet,
         options,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Get OACK
     let oack_packet = transfer.get_block().await.unwrap();
     let parsed_options = parse_oack_packet(&oack_packet).unwrap();
-    
+
     // Verify tsize option present with correct value
     let tsize_opt = parsed_options.iter().find(|(name, _)| name == "tsize");
     assert!(tsize_opt.is_some());
@@ -682,19 +722,21 @@ async fn test_tsize_option() {
 #[tokio::test]
 async fn test_netascii_crlf_translation() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create file with LF line endings
     let test_content = b"Line1\nLine2\nLine3\n";
     let test_file = temp_dir.path().join("netascii.txt");
     tokio::fs::write(&test_file, test_content).await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     // Create transfer in netascii mode
     let mut transfer = Transfer::new(
         server_socket.clone(),
@@ -705,12 +747,13 @@ async fn test_netascii_crlf_translation() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Netascii, // Netascii mode
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Get first data block
     let data_packet = transfer.get_block().await.unwrap();
     let (_block_num, block_data) = parse_data_packet(&data_packet).unwrap();
-    
+
     // Verify CR-LF translation occurred
     let expected = b"Line1\r\nLine2\r\nLine3\r\n";
     assert_eq!(block_data, expected);
@@ -725,19 +768,21 @@ async fn test_netascii_crlf_translation() {
 #[tokio::test]
 async fn test_octet_mode_binary_preservation() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create file with various byte values including CR and LF
     let test_content: Vec<u8> = (0..=255).collect();
     let test_file = temp_dir.path().join("binary.dat");
     tokio::fs::write(&test_file, &test_content).await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     // Create transfer in octet mode
     let mut transfer = Transfer::new(
         server_socket.clone(),
@@ -748,12 +793,13 @@ async fn test_octet_mode_binary_preservation() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet, // Octet mode (binary)
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Get first data block
     let data_packet = transfer.get_block().await.unwrap();
     let (_, block_data) = parse_data_packet(&data_packet).unwrap();
-    
+
     // Verify exact byte match (no translation)
     assert_eq!(block_data, &test_content[..block_data.len()]);
 }
@@ -773,21 +819,23 @@ async fn test_octet_mode_binary_preservation() {
 #[tokio::test]
 async fn test_path_traversal_prevention() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create a file outside the TFTP root
     let outside_dir = tempdir().unwrap();
     let outside_file = outside_dir.path().join("secret.txt");
-    tokio::fs::write(&outside_file, b"Secret data").await.unwrap();
-    
+    tokio::fs::write(&outside_file, b"Secret data")
+        .await
+        .unwrap();
+
     // Attempt to access using ../ traversal
     let traversal_path = format!("../../{}", outside_file.display());
     let _traversal_file = temp_dir.path().join(&traversal_path);
-    
+
     // This should fail because ../ should be blocked
     // In real implementation, the server's sanitize() function would reject this
     // For this test, we verify the path is not resolved to outside root
     let _canonical_root = temp_dir.path().canonicalize().unwrap();
-    
+
     // If we attempted to canonicalize the traversal path, it would escape root
     // The implementation should reject this before canonicalization
     assert!(traversal_path.contains(".."));
@@ -802,18 +850,18 @@ async fn test_path_traversal_prevention() {
 #[cfg(unix)]
 async fn test_secure_mode_ownership() {
     use std::os::unix::fs::MetadataExt;
-    
+
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     let test_file = temp_dir.path().join("owned.txt");
     tokio::fs::write(&test_file, b"Data").await.unwrap();
-    
+
     // Get current user ID
     let current_uid = unsafe { libc::geteuid() };
-    
+
     // Open file in secure mode (checks ownership)
     let result = dnsmasq::tftp::transfer::TftpFile::open(&test_file, true).await;
-    
+
     // If running as the file owner, should succeed
     // If not, should fail with permission error
     let metadata = tokio::fs::metadata(&test_file).await.unwrap();
@@ -833,32 +881,44 @@ async fn test_secure_mode_ownership() {
 #[cfg(unix)]
 async fn test_world_readable_requirement_for_root() {
     use std::os::unix::fs::PermissionsExt;
-    
+
     // This test only applies when running as root
     let uid = unsafe { libc::geteuid() };
     if uid != 0 {
         // Skip test if not root
         return;
     }
-    
+
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create a non-world-readable file
     let restricted_file = temp_dir.path().join("not_world_readable.txt");
-    tokio::fs::write(&restricted_file, b"Private").await.unwrap();
-    
-    let mut perms = tokio::fs::metadata(&restricted_file).await.unwrap().permissions();
+    tokio::fs::write(&restricted_file, b"Private")
+        .await
+        .unwrap();
+
+    let mut perms = tokio::fs::metadata(&restricted_file)
+        .await
+        .unwrap()
+        .permissions();
     perms.set_mode(0o600); // Owner read/write only, not world-readable
-    tokio::fs::set_permissions(&restricted_file, perms).await.unwrap();
-    
+    tokio::fs::set_permissions(&restricted_file, perms)
+        .await
+        .unwrap();
+
     // Attempt to open (should fail for root)
     let result = dnsmasq::tftp::transfer::TftpFile::open(&restricted_file, false).await;
     assert!(result.is_err());
-    
+
     // Cleanup
-    let mut restore_perms = tokio::fs::metadata(&restricted_file).await.unwrap().permissions();
+    let mut restore_perms = tokio::fs::metadata(&restricted_file)
+        .await
+        .unwrap()
+        .permissions();
     restore_perms.set_mode(0o644);
-    tokio::fs::set_permissions(&restricted_file, restore_perms).await.ok();
+    tokio::fs::set_permissions(&restricted_file, restore_perms)
+        .await
+        .ok();
 }
 
 //
@@ -877,14 +937,16 @@ async fn test_timeout_after_max_retries() {
     let temp_dir = create_tftp_test_root().await.unwrap();
     let test_file = temp_dir.path().join("test.txt");
     tokio::fs::write(&test_file, b"Data").await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     let mut transfer = Transfer::new(
         server_socket.clone(),
         client_addr,
@@ -894,15 +956,16 @@ async fn test_timeout_after_max_retries() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Initially not timed out
     assert!(!transfer.is_timed_out());
-    
+
     // Simulate exceeding max backoff
     transfer.backoff = MAX_RETRIES + 1;
     transfer.timeout = Instant::now() - Duration::from_secs(1); // Timeout in past
-    
+
     // Now should be timed out
     assert!(transfer.is_timed_out());
 }
@@ -923,23 +986,25 @@ async fn test_timeout_after_max_retries() {
 #[tokio::test]
 async fn test_concurrent_multi_client_transfers() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create a test file
     let test_content = vec![0xBBu8; 2048];
     let test_file = temp_dir.path().join("shared.dat");
     tokio::fs::write(&test_file, &test_content).await.unwrap();
-    
+
     // Open file once, share among transfers
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     // Create three concurrent transfers
     let mut transfers = Vec::new();
     for _i in 0..3 {
         let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let client_addr = client_socket.local_addr().unwrap();
         let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        
+
         let transfer = Transfer::new(
             server_socket,
             client_addr,
@@ -949,20 +1014,21 @@ async fn test_concurrent_multi_client_transfers() {
             DEFAULT_BLOCKSIZE,
             TransferMode::Octet,
             dnsmasq::tftp::transfer::TransferOptions::new(),
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         transfers.push(transfer);
     }
-    
+
     // Verify all transfers independent
     assert_eq!(transfers[0].block, 1);
     assert_eq!(transfers[1].block, 1);
     assert_eq!(transfers[2].block, 1);
-    
+
     // Simulate advancing one transfer
     let ack = build_ack_packet(1);
     transfers[0].handle_packet(&ack).unwrap();
-    
+
     // Verify only first transfer advanced
     assert_eq!(transfers[0].block, 2);
     assert_eq!(transfers[1].block, 1); // Unchanged
@@ -984,19 +1050,21 @@ async fn test_concurrent_multi_client_transfers() {
 #[tokio::test]
 async fn test_block_number_wraparound() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // For this test, we don't need an actual huge file
     // We'll just test the wraparound logic
     let test_file = temp_dir.path().join("test.txt");
     tokio::fs::write(&test_file, b"Data").await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     let mut transfer = Transfer::new(
         server_socket,
         client_addr,
@@ -1006,15 +1074,16 @@ async fn test_block_number_wraparound() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Manually set block to near wraparound
     transfer.block = 65535;
-    
+
     // Send ACK
     let ack = build_ack_packet(65535);
     transfer.handle_packet(&ack).unwrap();
-    
+
     // Verify wraparound to 0 (actually 0, not 1, due to wrapping_add)
     assert_eq!(transfer.block, 0);
 }
@@ -1040,13 +1109,13 @@ proptest! {
         packet.put_u16(block_num);
         packet.extend_from_slice(&data);
         let original = packet.freeze();
-        
+
         // Parse it
         let parsed = parse_data_packet(&original);
         prop_assert!(parsed.is_some());
-        
+
         let (parsed_block, parsed_data) = parsed.unwrap();
-        
+
         // Verify round-trip
         prop_assert_eq!(parsed_block, block_num);
         prop_assert_eq!(parsed_data, &data[..]);
@@ -1062,7 +1131,7 @@ proptest! {
     fn prop_ack_packet_roundtrip(block_num: u16) {
         let ack = build_ack_packet(block_num);
         let parsed_block = parse_ack_packet(&ack);
-        
+
         prop_assert!(parsed_block.is_some());
         prop_assert_eq!(parsed_block.unwrap(), block_num);
     }
@@ -1084,13 +1153,13 @@ proptest! {
             ("blksize".to_string(), blocksize.to_string()),
             ("tsize".to_string(), "0".to_string()),
         ];
-        
+
         let packet = build_rrq_packet(&filename, TransferMode::Octet, &options);
-        
+
         // Verify packet has correct opcode
         let opcode = parse_opcode(&packet);
         prop_assert_eq!(opcode, Some(TftpOpcode::RRQ));
-        
+
         // Verify packet is well-formed (at minimum has opcode + filename + mode)
         prop_assert!(packet.len() > 2 + filename.len() + 1 + 5); // 2 (opcode) + filename\0 + octet\0
     }
@@ -1105,16 +1174,16 @@ proptest! {
     #[test]
     fn prop_blocksize_validation(blocksize: u16) {
         let _temp_dir_result = std::sync::Arc::new(std::sync::Mutex::new(None::<TempDir>));
-        
+
         // This property test is a bit complex due to async nature
         // We validate the logic without actual file I/O
-        
+
         let is_valid = (8..=65464).contains(&blocksize);
-        
+
         // The Transfer::new() function validates blocksize
         // Valid blocksizes should not return InvalidBlockSize error
         // Invalid ones should
-        
+
         // We can't easily test async code in proptest without tokio runtime
         // So we just verify the range logic matches expectations
         prop_assert!(is_valid == (8..=65464).contains(&blocksize));
@@ -1139,19 +1208,19 @@ async fn test_malformed_packet_handling() {
     // Empty packet
     let empty: Vec<u8> = vec![];
     assert!(parse_opcode(&empty).is_none());
-    
+
     // Too short packet (only 1 byte)
     let too_short = vec![0];
     assert!(parse_opcode(&too_short).is_none());
-    
+
     // Invalid opcode
     let invalid_opcode = vec![0xFF, 0xFF];
     assert!(parse_opcode(&invalid_opcode).is_none());
-    
+
     // Truncated DATA packet (missing block number)
     let truncated_data = vec![0, 3]; // DATA opcode but no block number
     assert!(parse_data_packet(&truncated_data).is_none());
-    
+
     // Truncated ACK packet
     let truncated_ack = vec![0, 4]; // ACK opcode but no block number
     assert!(parse_ack_packet(&truncated_ack).is_none());
@@ -1171,7 +1240,7 @@ async fn test_malformed_packet_handling() {
 #[test]
 fn test_tftp_config_defaults() {
     let config = TftpConfig::default();
-    
+
     assert_eq!(config.root_dir, PathBuf::from("/var/ftpd"));
     assert!(!config.secure_mode);
     assert!(!config.single_port);
@@ -1191,7 +1260,7 @@ fn test_tftp_config_defaults() {
 fn test_tftp_config_new() {
     let custom_root = PathBuf::from("/custom/tftp");
     let config = TftpConfig::new(custom_root.clone());
-    
+
     assert_eq!(config.root_dir, custom_root);
     assert!(!config.secure_mode); // Defaults
     assert!(!config.single_port);
@@ -1229,20 +1298,22 @@ fn test_transfer_mode_strings() {
 #[tokio::test]
 async fn test_transfer_completion_detection() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Small file that fits in one block
     let test_content = b"Small";
     let test_file = temp_dir.path().join("small.txt");
     tokio::fs::write(&test_file, test_content).await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let _file_size = file.size();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     let mut transfer = Transfer::new(
         server_socket,
         client_addr,
@@ -1252,19 +1323,20 @@ async fn test_transfer_completion_detection() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Before any data sent, not complete
     assert!(!transfer.is_complete());
-    
+
     // Get the data block
     let data_packet = transfer.get_block().await.unwrap();
     let (block_num, _block_data) = parse_data_packet(&data_packet).unwrap();
-    
+
     // After sending last block (< blocksize), should be complete after ACK
     let ack = build_ack_packet(block_num);
     transfer.handle_packet(&ack).unwrap();
-    
+
     // Now complete
     assert!(transfer.is_complete());
 }
@@ -1295,12 +1367,12 @@ fn test_tftp_error_codes() {
     assert!(TftpErrorCode::from_u16(3).is_some()); // DiskFull
     assert!(TftpErrorCode::from_u16(4).is_some()); // IllegalOperation
     assert!(TftpErrorCode::from_u16(5).is_some()); // UnknownTransferId
-    
+
     // Error codes 6 (FileExists) and 7 (NoSuchUser) are RFC 1782 extensions
     // not implemented in the C version, so they should be None
     assert!(TftpErrorCode::from_u16(6).is_none()); // FileExists (not implemented)
     assert!(TftpErrorCode::from_u16(7).is_none()); // NoSuchUser (not implemented)
-    
+
     // Invalid error code
     assert!(TftpErrorCode::from_u16(99).is_none());
 }
@@ -1318,13 +1390,13 @@ fn test_error_packet_parsing() {
     packet.put_u16(1); // Error code: File not found
     packet.put_slice(b"File not found");
     packet.put_u8(0); // Null terminator
-    
+
     let error_packet = packet.freeze();
-    
+
     // Parse it
     let parsed = parse_error_packet(&error_packet);
     assert!(parsed.is_some());
-    
+
     let (code, message) = parsed.unwrap();
     assert_eq!(code, TftpErrorCode::FileNotFound);
     assert_eq!(message, "File not found");
@@ -1348,7 +1420,7 @@ fn test_single_port_mode_config() {
         single_port: true,
         ..Default::default()
     };
-    
+
     assert!(config.single_port);
 }
 
@@ -1365,7 +1437,7 @@ fn test_multi_port_mode_config() {
         port_range: Some(1024..65535),
         ..Default::default()
     };
-    
+
     assert!(!config.single_port);
     assert_eq!(config.port_range, Some(1024..65535));
 }
@@ -1388,7 +1460,7 @@ fn test_lowercase_filename_option() {
         lowercase_filenames: true,
         ..Default::default()
     };
-    
+
     assert!(config.lowercase_filenames);
 }
 
@@ -1408,19 +1480,15 @@ fn test_filename_sanitization() {
         "file\0name", // Null byte
         "dir/../../../etc/passwd",
     ];
-    
+
     for filename in invalid_filenames {
         // In real implementation, sanitize_filename() would reject these
         assert!(filename.contains("..") || filename.starts_with('/') || filename.contains('\0'));
     }
-    
+
     // Valid filenames
-    let valid_filenames = vec![
-        "boot.img",
-        "subdir/file.txt",
-        "pxelinux.0",
-    ];
-    
+    let valid_filenames = vec!["boot.img", "subdir/file.txt", "pxelinux.0"];
+
     for filename in valid_filenames {
         assert!(!filename.contains(".."));
         assert!(!filename.starts_with('/'));
@@ -1443,30 +1511,39 @@ fn test_filename_sanitization() {
 #[test]
 fn test_unique_root_mode_config() {
     use dnsmasq::tftp::server::UniqueRootMode;
-    
+
     // IP mode
     let config_ip = TftpConfig {
         root_dir: PathBuf::from("/tftp"),
         unique_root_mode: Some(UniqueRootMode::IpAddress),
         ..Default::default()
     };
-    assert!(matches!(config_ip.unique_root_mode, Some(UniqueRootMode::IpAddress)));
-    
+    assert!(matches!(
+        config_ip.unique_root_mode,
+        Some(UniqueRootMode::IpAddress)
+    ));
+
     // MAC mode
     let config_mac = TftpConfig {
         root_dir: PathBuf::from("/tftp"),
         unique_root_mode: Some(UniqueRootMode::MacAddress),
         ..Default::default()
     };
-    assert!(matches!(config_mac.unique_root_mode, Some(UniqueRootMode::MacAddress)));
-    
+    assert!(matches!(
+        config_mac.unique_root_mode,
+        Some(UniqueRootMode::MacAddress)
+    ));
+
     // Network mode
     let config_net = TftpConfig {
         root_dir: PathBuf::from("/tftp"),
         unique_root_mode: Some(UniqueRootMode::Network),
         ..Default::default()
     };
-    assert!(matches!(config_net.unique_root_mode, Some(UniqueRootMode::Network)));
+    assert!(matches!(
+        config_net.unique_root_mode,
+        Some(UniqueRootMode::Network)
+    ));
 }
 
 //
@@ -1483,26 +1560,32 @@ fn test_unique_root_mode_config() {
 #[tokio::test]
 async fn test_stale_file_detection() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     let test_file = temp_dir.path().join("mutable.txt");
-    tokio::fs::write(&test_file, b"Original content").await.unwrap();
-    
+    tokio::fs::write(&test_file, b"Original content")
+        .await
+        .unwrap();
+
     // Open file and get metadata
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false).await.unwrap();
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&test_file, false)
+        .await
+        .unwrap();
     let _original_inode = file.metadata().inode;
-    
+
     // File should be accessible initially
     assert!(file.validate_access().await.is_ok());
-    
+
     // Remove and recreate the file (changes inode on most filesystems)
     tokio::fs::remove_file(&test_file).await.ok();
     tokio::time::sleep(Duration::from_millis(100)).await; // Ensure filesystem processes deletion
-    tokio::fs::write(&test_file, b"New file with different inode").await.unwrap();
-    
+    tokio::fs::write(&test_file, b"New file with different inode")
+        .await
+        .unwrap();
+
     // Check if file is still valid - should fail since inode changed
     // Note: validate_access checks if the file is still accessible
     let _result = file.validate_access().await;
-    
+
     // The validation may fail if inode changed (filesystem dependent)
     // This test documents the staleness detection behavior
 }
@@ -1523,19 +1606,21 @@ async fn test_stale_file_detection() {
 #[tokio::test]
 async fn test_large_file_transfer() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create a 1MB file
     let large_data = vec![0xCCu8; 1024 * 1024];
     let large_file = temp_dir.path().join("large_1mb.dat");
     tokio::fs::write(&large_file, &large_data).await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&large_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&large_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     let mut transfer = Transfer::new(
         server_socket,
         client_addr,
@@ -1545,32 +1630,33 @@ async fn test_large_file_transfer() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     let mut total_bytes = 0;
     let mut block_count = 0;
-    
+
     // Transfer all blocks
     while !transfer.is_complete() {
         let data_packet = transfer.get_block().await.unwrap();
         let (block_num, block_data) = parse_data_packet(&data_packet).unwrap();
-        
+
         total_bytes += block_data.len();
         block_count += 1;
-        
+
         // Send ACK
         let ack = build_ack_packet(block_num);
         transfer.handle_packet(&ack).unwrap();
-        
+
         // Safety check to prevent infinite loop
         if block_count > 10000 {
             panic!("Too many blocks, possible infinite loop");
         }
     }
-    
+
     // Verify total bytes match file size
     assert_eq!(total_bytes, 1024 * 1024);
-    
+
     // Verify expected number of blocks (1MB / 512 bytes = 2048 blocks)
     assert_eq!(block_count, 2048);
 }
@@ -1591,19 +1677,19 @@ async fn test_large_file_transfer() {
 fn test_exponential_backoff_calculation() {
     // Initial timeout: 2 seconds
     let base_timeout = Duration::from_secs(TFTP_TIMEOUT_SECS);
-    
+
     // Backoff 0: 2 seconds
     let timeout_0 = base_timeout * 2_u32.pow(0);
     assert_eq!(timeout_0, Duration::from_secs(2));
-    
+
     // Backoff 1: 4 seconds
     let timeout_1 = base_timeout * 2_u32.pow(1);
     assert_eq!(timeout_1, Duration::from_secs(4));
-    
+
     // Backoff 2: 8 seconds
     let timeout_2 = base_timeout * 2_u32.pow(2);
     assert_eq!(timeout_2, Duration::from_secs(8));
-    
+
     // Backoff 7 (max): 256 seconds
     let timeout_7 = base_timeout * 2_u32.pow(7);
     assert_eq!(timeout_7, Duration::from_secs(256));
@@ -1624,19 +1710,21 @@ fn test_exponential_backoff_calculation() {
 #[tokio::test]
 async fn test_zero_length_file_transfer() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create empty file
     let empty_file = temp_dir.path().join("empty.txt");
     tokio::fs::write(&empty_file, b"").await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&empty_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&empty_file, false)
+        .await
+        .unwrap();
     assert_eq!(file.size(), 0);
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     let mut transfer = Transfer::new(
         server_socket,
         client_addr,
@@ -1646,19 +1734,20 @@ async fn test_zero_length_file_transfer() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Get the single data block (should be empty)
     let data_packet = transfer.get_block().await.unwrap();
     let (block_num, block_data) = parse_data_packet(&data_packet).unwrap();
-    
+
     assert_eq!(block_num, 1);
     assert_eq!(block_data.len(), 0); // Empty data
-    
+
     // Send ACK
     let ack = build_ack_packet(block_num);
     transfer.handle_packet(&ack).unwrap();
-    
+
     // Should be complete
     assert!(transfer.is_complete());
 }
@@ -1686,7 +1775,7 @@ fn test_tftp_opcodes() {
     assert_eq!(TftpOpcode::ACK.to_u16(), 4);
     assert_eq!(TftpOpcode::ERROR.to_u16(), 5);
     assert_eq!(TftpOpcode::OACK.to_u16(), 6);
-    
+
     // Verify from_u16 round-trip
     assert_eq!(TftpOpcode::from_u16(1), Some(TftpOpcode::RRQ));
     assert_eq!(TftpOpcode::from_u16(2), Some(TftpOpcode::WRQ));
@@ -1694,7 +1783,7 @@ fn test_tftp_opcodes() {
     assert_eq!(TftpOpcode::from_u16(4), Some(TftpOpcode::ACK));
     assert_eq!(TftpOpcode::from_u16(5), Some(TftpOpcode::ERROR));
     assert_eq!(TftpOpcode::from_u16(6), Some(TftpOpcode::OACK));
-    
+
     // Invalid opcode
     assert_eq!(TftpOpcode::from_u16(0), None);
     assert_eq!(TftpOpcode::from_u16(7), None);
@@ -1715,19 +1804,21 @@ fn test_tftp_opcodes() {
 #[tokio::test]
 async fn test_exact_block_size_file() {
     let temp_dir = create_tftp_test_root().await.unwrap();
-    
+
     // Create file exactly 512 bytes
     let exact_data = vec![0xDDu8; DEFAULT_BLOCKSIZE as usize];
     let exact_file = temp_dir.path().join("exact_512.dat");
     tokio::fs::write(&exact_file, &exact_data).await.unwrap();
-    
-    let file = dnsmasq::tftp::transfer::TftpFile::open(&exact_file, false).await.unwrap();
+
+    let file = dnsmasq::tftp::transfer::TftpFile::open(&exact_file, false)
+        .await
+        .unwrap();
     let file_arc = Arc::new(file);
-    
+
     let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let client_addr = client_socket.local_addr().unwrap();
     let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-    
+
     let mut transfer = Transfer::new(
         server_socket,
         client_addr,
@@ -1737,26 +1828,27 @@ async fn test_exact_block_size_file() {
         DEFAULT_BLOCKSIZE,
         TransferMode::Octet,
         dnsmasq::tftp::transfer::TransferOptions::new(),
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // First block: full 512 bytes
     let data1 = transfer.get_block().await.unwrap();
     let (block1, bytes1) = parse_data_packet(&data1).unwrap();
     assert_eq!(block1, 1);
     assert_eq!(bytes1.len(), DEFAULT_BLOCKSIZE as usize);
-    
+
     // ACK first block
     transfer.handle_packet(&build_ack_packet(block1)).unwrap();
-    
+
     // Second block: zero-length terminator
     let data2 = transfer.get_block().await.unwrap();
     let (block2, bytes2) = parse_data_packet(&data2).unwrap();
     assert_eq!(block2, 2);
     assert_eq!(bytes2.len(), 0); // Terminator block
-    
+
     // ACK second block
     transfer.handle_packet(&build_ack_packet(block2)).unwrap();
-    
+
     // Now complete
     assert!(transfer.is_complete());
 }
@@ -1780,12 +1872,12 @@ proptest! {
         packet.put_u16(error_code);
         packet.put_slice(message.as_bytes());
         packet.put_u8(0);
-        
+
         let error_packet = packet.freeze();
-        
+
         // Parse it
         let parsed = parse_error_packet(&error_packet);
-        
+
         if let Some(code) = TftpErrorCode::from_u16(error_code) {
             prop_assert!(parsed.is_some());
             let (parsed_code, parsed_message) = parsed.unwrap();
@@ -1805,34 +1897,34 @@ proptest! {
         // Construct OACK packet with options
         let mut packet = BytesMut::new();
         packet.put_u16(TftpOpcode::OACK.to_u16());
-        
+
         // Add blksize option
         packet.put_slice(b"blksize");
         packet.put_u8(0);
         packet.put_slice(blocksize.to_string().as_bytes());
         packet.put_u8(0);
-        
+
         // Add timeout option
         packet.put_slice(b"timeout");
         packet.put_u8(0);
         packet.put_slice(timeout.to_string().as_bytes());
         packet.put_u8(0);
-        
+
         let oack_packet = packet.freeze();
-        
+
         // Parse it
         let parsed = parse_oack_packet(&oack_packet);
         prop_assert!(parsed.is_some());
-        
+
         let options = parsed.unwrap();
         prop_assert_eq!(options.len(), 2);
-        
+
         // Verify blksize option
         let blksize = options.iter().find(|(name, _)| name == "blksize");
         prop_assert!(blksize.is_some());
         let (_, blksize_val) = blksize.unwrap();
         prop_assert_eq!(blksize_val.parse::<u16>().unwrap(), blocksize);
-        
+
         // Verify timeout option
         let timeout_opt = options.iter().find(|(name, _)| name == "timeout");
         prop_assert!(timeout_opt.is_some());
@@ -1885,4 +1977,3 @@ fn test_coverage_summary() {
     // It always passes but documents the test suite structure
     // Test coverage documented in function comment above
 }
-

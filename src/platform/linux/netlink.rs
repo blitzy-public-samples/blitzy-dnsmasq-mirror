@@ -238,7 +238,9 @@ impl AddressFamily {
         match self {
             AddressFamily::Inet => netlink_packet_route::AddressFamily::Inet,
             AddressFamily::Inet6 => netlink_packet_route::AddressFamily::Inet6,
-            AddressFamily::Local | AddressFamily::Unspec => netlink_packet_route::AddressFamily::Unspec,
+            AddressFamily::Local | AddressFamily::Unspec => {
+                netlink_packet_route::AddressFamily::Unspec
+            }
         }
     }
 }
@@ -533,7 +535,7 @@ impl NetlinkSocket {
                     result.map_err(|e| NetlinkError::SendFailed(e.to_string()))?;
                     return Ok(());
                 }
-                Err(_would_block) => {},
+                Err(_would_block) => {}
             }
         }
     }
@@ -573,7 +575,7 @@ impl NetlinkSocket {
                     let messages = Self::parse_messages(&buf[..len])?;
                     return Ok(messages);
                 }
-                Err(_would_block) => {},
+                Err(_would_block) => {}
             }
         }
     }
@@ -1170,7 +1172,11 @@ fn interface_record_to_interface(record: InterfaceRecord) -> Interface {
     Interface {
         index: record.index,
         name: record.name,
-        addresses: record.addresses.iter().map(std::net::SocketAddr::ip).collect(),
+        addresses: record
+            .addresses
+            .iter()
+            .map(std::net::SocketAddr::ip)
+            .collect(),
         flags: platform_flags,
     }
 }
@@ -1235,9 +1241,7 @@ mod tests {
                 println!("Netlink socket created with PID: {}", socket.pid);
             }
             Err(e) => {
-                println!(
-                    "Failed to create netlink socket (may require privileges): {e}"
-                );
+                println!("Failed to create netlink socket (may require privileges): {e}");
             }
         }
     }

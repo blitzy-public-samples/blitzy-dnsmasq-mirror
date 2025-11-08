@@ -168,7 +168,7 @@ pub enum InotifyError {
     #[error("directory {path} for resolv-file is missing, cannot poll")]
     DirectoryMissing {
         /// Path to the missing directory
-        path: PathBuf
+        path: PathBuf,
     },
 
     /// General I/O error
@@ -179,7 +179,7 @@ pub enum InotifyError {
     #[error("{path} is not a directory")]
     NotADirectory {
         /// Path that is not a directory
-        path: PathBuf
+        path: PathBuf,
     },
 }
 

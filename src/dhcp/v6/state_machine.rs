@@ -318,16 +318,19 @@ impl Dhcpv6StateMachine {
     /// )?; // Error
     /// ```
     pub fn validate(from: Dhcpv6State, to: Dhcpv6State) -> Result<(), DnsmasqError> {
-        use Dhcpv6State::{Solicit, Advertise, Request, Reply, Renew, Rebind, Confirm, Release, Decline, InformationRequest};
+        use Dhcpv6State::{
+            Advertise, Confirm, Decline, InformationRequest, Rebind, Release, Renew, Reply,
+            Request, Solicit,
+        };
 
         let valid = match (from, to) {
             // Valid transitions organized by source state
-            (Solicit, Advertise | Request | InformationRequest | Reply | Confirm) |
-            (Advertise, Request) |
-            (Request, Reply | Decline) |
-            (Reply, Renew | Rebind | Confirm | Release | Decline) |
-            (Renew | Rebind, Reply | Release) |
-            (Confirm | Release | Decline | InformationRequest, Reply) => true,
+            (Solicit, Advertise | Request | InformationRequest | Reply | Confirm)
+            | (Advertise, Request)
+            | (Request, Reply | Decline)
+            | (Reply, Renew | Rebind | Confirm | Release | Decline)
+            | (Renew | Rebind, Reply | Release)
+            | (Confirm | Release | Decline | InformationRequest, Reply) => true,
 
             // Self-transitions for retransmissions
             (s1, s2) if s1 == s2 => true,
@@ -477,14 +480,16 @@ impl Dhcpv6StateMachine {
     /// ```
     #[must_use]
     pub fn response_message_type(&self) -> Dhcpv6MessageType {
-        use Dhcpv6State::{Solicit, Advertise, Request, Renew, Rebind, Confirm, Release, Decline, InformationRequest, Reply};
+        use Dhcpv6State::{
+            Advertise, Confirm, Decline, InformationRequest, Rebind, Release, Renew, Reply,
+            Request, Solicit,
+        };
 
         match self.current_state {
             Solicit if self.rapid_commit => Dhcpv6MessageType::Reply,
             Solicit => Dhcpv6MessageType::Advertise,
-            Advertise | Request | Renew | Rebind | Confirm | Release | Decline | InformationRequest | Reply => {
-                Dhcpv6MessageType::Reply
-            }
+            Advertise | Request | Renew | Rebind | Confirm | Release | Decline
+            | InformationRequest | Reply => Dhcpv6MessageType::Reply,
         }
     }
 

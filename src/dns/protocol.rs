@@ -90,7 +90,7 @@ pub enum ProtocolError {
         /// Expected minimum packet size
         expected: usize,
         /// Actual packet size received
-        actual: usize
+        actual: usize,
     },
 
     /// Invalid DNS response code

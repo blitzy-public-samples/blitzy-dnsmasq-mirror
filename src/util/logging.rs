@@ -463,9 +463,7 @@ pub fn init_logging(config: &LogConfig) -> Result<(), LogError> {
 
     // Add file layer if enabled
     let subscriber = if let Some(ref log_path) = config.enable_file {
-        let rotation = config
-            .file_rotation
-            .map_or(Rotation::NEVER, Rotation::from);
+        let rotation = config.file_rotation.map_or(Rotation::NEVER, Rotation::from);
 
         // Extract directory and filename
         let directory = log_path.parent().ok_or_else(|| {

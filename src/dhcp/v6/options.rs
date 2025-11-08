@@ -189,7 +189,7 @@ pub enum Dhcp6OptionError {
         /// Expected length
         expected: usize,
         /// Actual length found
-        actual: usize
+        actual: usize,
     },
 
     /// Unknown or unrecognized option code
@@ -210,7 +210,7 @@ pub enum Dhcp6OptionError {
         /// Required size
         need: usize,
         /// Available size
-        have: usize
+        have: usize,
     },
 
     /// Invalid UTF-8 in status message or domain name
@@ -1163,7 +1163,7 @@ pub enum Dhcp6Option {
         /// Option code
         code: u16,
         /// Option data
-        data: Vec<u8>
+        data: Vec<u8>,
     },
 }
 
@@ -1371,7 +1371,12 @@ impl Dhcp6Option {
         let data = self.option_data();
 
         buf.write_u16::<BigEndian>(code).unwrap();
-        buf.write_u16::<BigEndian>(data.len().try_into().expect("DHCPv6 option data exceeds maximum length of 65535 bytes")).unwrap();
+        buf.write_u16::<BigEndian>(
+            data.len()
+                .try_into()
+                .expect("DHCPv6 option data exceeds maximum length of 65535 bytes"),
+        )
+        .unwrap();
         buf.extend_from_slice(&data);
 
         buf

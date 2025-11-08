@@ -87,7 +87,7 @@
 //!     // Build configuration with defaults
 //!     let config = ConfigBuilder::new().build()?;
 //!     
-//!     println!("Configuration built with DNS cache size: {}", 
+//!     println!("Configuration built with DNS cache size: {}",
 //!              config.dns.cache_size);
 //!     Ok(())
 //! }
@@ -199,12 +199,10 @@
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
 #![warn(clippy::cargo)]
-
 // Allow specific clippy lints where Rust idioms differ from pedantic defaults
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::struct_excessive_bools)]
-
 // Temporary allowance during development - will be removed
 #![allow(unused)]
 
@@ -269,7 +267,7 @@ pub mod integration;
 /// - DNSSEC validation (with `dnssec` feature)
 /// - Authoritative DNS server (with `auth-dns` feature)
 ///
-/// **C Source Reference**: `src/rfc1035.c`, `src/cache.c`, `src/forward.c`, 
+/// **C Source Reference**: `src/rfc1035.c`, `src/cache.c`, `src/forward.c`,
 /// `src/dnssec.c`, `src/auth.c`
 #[cfg(feature = "dns")]
 pub mod dns;
@@ -284,7 +282,7 @@ pub mod dns;
 /// - IPv6 Router Advertisements (with `ipv6` feature)
 /// - SLAAC support (with `ipv6` feature)
 ///
-/// **C Source Reference**: `src/dhcp.c`, `src/rfc2131.c`, `src/dhcp6.c`, 
+/// **C Source Reference**: `src/dhcp.c`, `src/rfc2131.c`, `src/dhcp6.c`,
 /// `src/rfc3315.c`, `src/lease.c`, `src/radv.c`, `src/slaac.c`
 #[cfg(feature = "dhcp")]
 pub mod dhcp;
@@ -314,7 +312,7 @@ pub mod network;
 /// - macOS: launchd integration
 /// - Generic: POSIX fallback implementations
 ///
-/// **C Source Reference**: `src/netlink.c`, `src/bpf.c`, `src/inotify.c`, 
+/// **C Source Reference**: `src/netlink.c`, `src/bpf.c`, `src/inotify.c`,
 /// `src/ipset.c`, `src/nftset.c`, `src/conntrack.c`
 pub mod platform;
 
@@ -328,7 +326,7 @@ pub mod platform;
 /// - Pattern matching
 /// - Performance metrics collection
 ///
-/// **C Source Reference**: `src/util.c`, `src/log.c`, `src/crypto.c`, 
+/// **C Source Reference**: `src/util.c`, `src/log.c`, `src/crypto.c`,
 /// `src/metrics.c`, `src/pattern.c`, `src/tables.c`
 pub mod util;
 

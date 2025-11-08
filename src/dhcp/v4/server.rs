@@ -81,18 +81,18 @@ use crate::config::types::DhcpContext;
 use crate::dhcp::common::extract_client_id;
 use crate::dhcp::lease::Lease;
 use crate::dhcp::v4::options::{
-    DhcpOption, OPTION_BROADCAST, OPTION_CLIENT_ID, OPTION_DNSSERVER, OPTION_DOMAINNAME,
-    OPTION_FILENAME, OPTION_HOSTNAME, OPTION_LEASE_TIME, OPTION_MESSAGE_TYPE, OPTION_NETMASK,
-    OPTION_REQUESTED_IP, OPTION_REQUESTED_OPTIONS, OPTION_ROUTER, OPTION_SERVER_IDENTIFIER,
-    OPTION_SNAME, OPTION_T1, OPTION_T2, OPTION_AGENT_ID, OPTION_SUBNET_SELECT,
+    DhcpOption, OPTION_AGENT_ID, OPTION_BROADCAST, OPTION_CLIENT_ID, OPTION_DNSSERVER,
+    OPTION_DOMAINNAME, OPTION_FILENAME, OPTION_HOSTNAME, OPTION_LEASE_TIME, OPTION_MESSAGE_TYPE,
+    OPTION_NETMASK, OPTION_REQUESTED_IP, OPTION_REQUESTED_OPTIONS, OPTION_ROUTER,
+    OPTION_SERVER_IDENTIFIER, OPTION_SNAME, OPTION_SUBNET_SELECT, OPTION_T1, OPTION_T2,
 };
 use crate::dhcp::v4::protocol::DhcpPacket;
 use crate::dhcp::v4::state_machine::{DhcpState, DhcpTransaction};
 use crate::dns::cache::DnsCache;
-use tokio::net::UdpSocket;
 use crate::types::addresses::AllAddr;
 use crate::types::daemon_state::DaemonState;
 use crate::types::errors::{DhcpError, DnsmasqError, DnsmasqResult, NetworkError};
+use tokio::net::UdpSocket;
 
 // External imports from schema (validated against external_imports)
 use tokio::time::interval;
@@ -165,17 +165,17 @@ struct PingResult {
 pub struct DhcpV4Server {
     /// Shared daemon state with configuration, lease database, and DNS cache
     daemon_state: Arc<RwLock<DaemonState>>,
-    
+
     /// UDP socket bound to DHCP server port (67 or configured alternate)
     /// Initialized in `bind()` method
     socket: Option<Arc<UdpSocket>>,
-    
+
     /// Optional PXE boot socket bound to port 4011 for PXE client support
     pxe_socket: Option<Arc<UdpSocket>>,
-    
+
     /// Server's own IP address (used as DHCP server identifier in Option 54)
     server_addr: Ipv4Addr,
-    
+
     /// Ping result cache for address conflict detection (protected by Mutex)
     ping_cache: Arc<Mutex<HashMap<Ipv4Addr, PingResult>>>,
 }
@@ -207,7 +207,8 @@ impl DhcpV4Server {
         // For now, use the first IPv4 address from the first DHCP range as a placeholder
         let server_addr = {
             let state = daemon_state.read().unwrap();
-            state.get_config()
+            state
+                .get_config()
                 .dhcp
                 .as_ref()
                 .and_then(|dhcp| dhcp.ranges.first())
@@ -257,27 +258,25 @@ impl DhcpV4Server {
     /// - Rust: `tokio::net::UdpSocket` with socket2 for options
     pub async fn bind(&mut self, port: u16, enable_pxe: bool) -> DnsmasqResult<()> {
         let bind_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
-        
+
         info!("Binding DHCPv4 server socket to {bind_addr}");
-        
+
         // Create socket with SO_REUSEADDR and SO_BROADCAST options
-        let socket = UdpSocket::bind(bind_addr)
-            .await
-            .map_err(|e| {
-                error!("Failed to bind DHCP socket to {bind_addr}: {e}");
-                DnsmasqError::Dhcp(DhcpError::DatabaseError {
-                    message: format!("Failed to bind DHCP socket to {bind_addr}"),
-                    source: Some(e),
-                })
-            })?;
-        
+        let socket = UdpSocket::bind(bind_addr).await.map_err(|e| {
+            error!("Failed to bind DHCP socket to {bind_addr}: {e}");
+            DnsmasqError::Dhcp(DhcpError::DatabaseError {
+                message: format!("Failed to bind DHCP socket to {bind_addr}"),
+                source: Some(e),
+            })
+        })?;
+
         self.socket = Some(Arc::new(socket));
-        
+
         // Bind optional PXE socket for network boot support
         if enable_pxe {
             let pxe_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, PXE_SERVER_PORT));
             info!("Binding PXE boot socket to {pxe_addr}");
-            
+
             match UdpSocket::bind(pxe_addr).await {
                 Ok(pxe_sock) => {
                     self.pxe_socket = Some(Arc::new(pxe_sock));
@@ -288,7 +287,7 @@ impl DhcpV4Server {
                 }
             }
         }
-        
+
         info!("DHCPv4 server initialized successfully on port {port}");
         Ok(())
     }
@@ -325,7 +324,7 @@ impl DhcpV4Server {
     /// socket file descriptor becomes readable via `poll()`.
     pub async fn run(&self) -> DnsmasqResult<()> {
         info!("Starting DHCPv4 server main loop");
-        
+
         // Spawn periodic lease pruning task (every 60 seconds)
         let daemon_state_clone = self.daemon_state.clone();
         tokio::spawn(async move {
@@ -337,10 +336,10 @@ impl DhcpV4Server {
                 }
             }
         });
-        
+
         // Main packet reception loop
         let mut buffer = vec![0u8; MAX_DHCP_PACKET_SIZE];
-        
+
         loop {
             // Receive packet from network (async, non-blocking)
             let socket = self.socket.as_ref().ok_or_else(|| {
@@ -349,15 +348,15 @@ impl DhcpV4Server {
                     source: None,
                 })
             })?;
-            
+
             match socket.recv_from(&mut buffer).await {
                 Ok((len, src_addr)) => {
                     trace!("Received {len} bytes from {src_addr}");
-                    
+
                     // Process packet asynchronously (spawn task to avoid blocking)
                     let packet_data = buffer[..len].to_vec();
                     let server_clone = (*self).clone();
-                    
+
                     tokio::spawn(async move {
                         if let Err(e) = server_clone.handle_packet(&packet_data, src_addr).await {
                             debug!("Packet processing error from {src_addr}: {e}");
@@ -413,25 +412,27 @@ impl DhcpV4Server {
                 message: format!("Packet too small: {len} bytes (minimum {MIN_DHCP_PACKET_SIZE})"),
             }));
         }
-        
+
         // Parse packet into structured format
-        let packet = DhcpPacket::parse(data)
-            .map_err(|e| DnsmasqError::Dhcp(DhcpError::ParseError {
+        let packet = DhcpPacket::parse(data).map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::ParseError {
                 message: format!("Failed to parse DHCP packet: {e}"),
-            }))?;
-        
+            })
+        })?;
+
         // Extract message type from Option 53
-        let message_type = packet.get_message_type()
-            .map_err(|e| DnsmasqError::Dhcp(DhcpError::InvalidPacket {
+        let message_type = packet.get_message_type().map_err(|e| {
+            DnsmasqError::Dhcp(DhcpError::InvalidPacket {
                 message: format!("Missing or invalid message type: {e}"),
-            }))?;
-        
+            })
+        })?;
+
         let xid = packet.get_xid();
         debug!("Received DHCP {message_type:?} from {src_addr} (xid: {xid:#010x})");
-        
+
         // Determine DHCP context for this packet
         let context = self.determine_context(&packet).await?;
-        
+
         // Dispatch to message-type-specific handler
         match message_type {
             crate::dhcp::v4::protocol::MessageType::Discover => {
@@ -449,8 +450,8 @@ impl DhcpV4Server {
             crate::dhcp::v4::protocol::MessageType::Inform => {
                 self.handle_inform(&packet, src_addr, &context).await
             }
-            crate::dhcp::v4::protocol::MessageType::Offer 
-            | crate::dhcp::v4::protocol::MessageType::Ack 
+            crate::dhcp::v4::protocol::MessageType::Offer
+            | crate::dhcp::v4::protocol::MessageType::Ack
             | crate::dhcp::v4::protocol::MessageType::Nak => {
                 debug!("Ignoring server-to-client message type: {message_type:?}");
                 Ok(())
@@ -496,12 +497,12 @@ impl DhcpV4Server {
         let client_id = packet.get_client_id();
         let client_id_vec = Some(client_id.as_bytes().to_vec());
         let formatted_mac = Self::format_mac(client_mac);
-        
+
         info!("DHCPDISCOVER from MAC {formatted_mac} (client_id: {client_id:?})");
-        
+
         // Check for static host reservation first
         let reserved_ip = self.find_static_reservation(client_mac, client_id_vec.as_ref(), context);
-        
+
         // Allocate IP address (prefer reserved, then check existing lease, then new allocation)
         let offered_ip = if let Some(ip) = reserved_ip {
             info!("Using static reservation {ip} for MAC {formatted_mac}");
@@ -513,27 +514,32 @@ impl DhcpV4Server {
                 let lease_db = state.get_lease_database();
                 lease_db.find_by_mac(client_mac)
             };
-            
+
             if let Some(lease) = existing_lease {
                 match lease {
                     Lease::V4(v4_lease) => v4_lease.addr,
                     Lease::V6(_) => {
                         // Allocate new address if existing lease is wrong type
-                        self.allocate_address(client_mac, &client_id_vec, context).await?
+                        self.allocate_address(client_mac, &client_id_vec, context)
+                            .await?
                     }
                 }
             } else {
                 // No existing lease, allocate new address
-                self.allocate_address(client_mac, &client_id_vec, context).await?
+                self.allocate_address(client_mac, &client_id_vec, context)
+                    .await?
             }
         };
-        
+
         // Perform ping-before-offer if enabled
         if let Err(e) = self.ping_before_offer(offered_ip).await {
-            warn!("Ping check failed for {}: {}, skipping address", offered_ip, e);
+            warn!(
+                "Ping check failed for {}: {}, skipping address",
+                offered_ip, e
+            );
             return Err(e);
         }
-        
+
         // Send DHCPOFFER response
         self.send_offer(packet, offered_ip, context, src_addr).await
     }
@@ -574,26 +580,28 @@ impl DhcpV4Server {
         let client_mac = packet.get_chaddr();
         let client_id = packet.get_client_id();
         let client_id_vec = Some(client_id.as_bytes().to_vec());
-        let requested_ip = packet.get_option(OPTION_REQUESTED_IP)
-            .and_then(|opt| {
-                if let DhcpOption::RequestedIpAddress(ip) = opt {
-                    Some(ip)
-                } else {
-                    None
-                }
-            });
-        let server_id = packet.get_option(OPTION_SERVER_IDENTIFIER)
-            .and_then(|opt| {
-                if let DhcpOption::ServerIdentifier(ip) = opt {
-                    Some(ip)
-                } else {
-                    None
-                }
-            });
-        
-        info!("DHCPREQUEST from MAC {} (requested: {:?}, server: {:?})", 
-              Self::format_mac(client_mac), requested_ip, server_id);
-        
+        let requested_ip = packet.get_option(OPTION_REQUESTED_IP).and_then(|opt| {
+            if let DhcpOption::RequestedIpAddress(ip) = opt {
+                Some(ip)
+            } else {
+                None
+            }
+        });
+        let server_id = packet.get_option(OPTION_SERVER_IDENTIFIER).and_then(|opt| {
+            if let DhcpOption::ServerIdentifier(ip) = opt {
+                Some(ip)
+            } else {
+                None
+            }
+        });
+
+        info!(
+            "DHCPREQUEST from MAC {} (requested: {:?}, server: {:?})",
+            Self::format_mac(client_mac),
+            requested_ip,
+            server_id
+        );
+
         // Determine request type based on presence of server identifier
         if let Some(sid) = server_id {
             // SELECTING state: client selecting our OFFER
@@ -601,7 +609,7 @@ impl DhcpV4Server {
                 debug!("REQUEST for different server {}, ignoring", sid);
                 return Ok(());
             }
-            
+
             // Validate requested IP
             let requested = requested_ip.ok_or_else(|| {
                 DnsmasqError::Dhcp(DhcpError::InvalidOption {
@@ -609,65 +617,72 @@ impl DhcpV4Server {
                     message: "Missing required option: Requested IP Address".to_string(),
                 })
             })?;
-            
+
             // Check if address is in our range
             if !self.is_address_in_context(requested, context) {
                 warn!("Requested address {} not in configured range", requested);
-                return self.send_nak(packet, src_addr, "Address not in range").await;
+                return self
+                    .send_nak(packet, src_addr, "Address not in range")
+                    .await;
             }
-            
+
             // Check for conflicts with existing leases
             let conflict = {
                 let state = self.daemon_state.read().unwrap();
                 let lease_db = state.get_lease_database();
-                lease_db.find_by_ip(IpAddr::V4(requested))
-                    .filter(|lease| {
-                        // Conflict if lease exists for different MAC
-                        match lease {
-                            Lease::V4(v4_lease) => v4_lease.hwaddr != client_mac,
-                            Lease::V6(_) => false,
-                        }
-                    })
+                lease_db.find_by_ip(IpAddr::V4(requested)).filter(|lease| {
+                    // Conflict if lease exists for different MAC
+                    match lease {
+                        Lease::V4(v4_lease) => v4_lease.hwaddr != client_mac,
+                        Lease::V6(_) => false,
+                    }
+                })
             };
-            
+
             if conflict.is_some() {
                 warn!("Address {} already leased to different client", requested);
                 return self.send_nak(packet, src_addr, "Address unavailable").await;
             }
-            
+
             // Create or update lease
-            self.create_or_update_lease(requested, client_mac, client_id_vec.as_ref(), context).await?;
-            
+            self.create_or_update_lease(requested, client_mac, client_id_vec.as_ref(), context)
+                .await?;
+
             // Send DHCPACK
             self.send_ack(packet, requested, context, src_addr).await
         } else {
             // RENEWING or REBINDING state: client renewing existing lease
             let ciaddr = packet.get_ciaddr();
-            
+
             if ciaddr.is_unspecified() {
                 warn!("REQUEST without server ID and without ciaddr");
                 return self.send_nak(packet, src_addr, "Invalid request").await;
             }
-            
+
             // Verify lease exists
             let lease_valid = {
                 let state = self.daemon_state.read().unwrap();
                 let lease_db = state.get_lease_database();
-                lease_db.find_by_mac(client_mac)
+                lease_db
+                    .find_by_mac(client_mac)
                     .is_some_and(|lease| match lease {
                         Lease::V4(v4_lease) => v4_lease.addr == ciaddr,
                         Lease::V6(_) => false,
                     })
             };
-            
+
             if !lease_valid {
-                warn!("No valid lease for MAC {} at {}", Self::format_mac(client_mac), ciaddr);
+                warn!(
+                    "No valid lease for MAC {} at {}",
+                    Self::format_mac(client_mac),
+                    ciaddr
+                );
                 return self.send_nak(packet, src_addr, "No lease found").await;
             }
-            
+
             // Renew lease
             self.renew_lease(ciaddr, client_mac, context).await?;
-            
+
             // Send DHCPACK
             self.send_ack(packet, ciaddr, context, src_addr).await
         }
@@ -706,24 +721,28 @@ impl DhcpV4Server {
     ) -> DnsmasqResult<()> {
         let client_mac = packet.get_chaddr();
         let ciaddr = packet.get_ciaddr();
-        
-        info!("DHCPRELEASE from MAC {} for {}", Self::format_mac(client_mac), ciaddr);
-        
+
+        info!(
+            "DHCPRELEASE from MAC {} for {}",
+            Self::format_mac(client_mac),
+            ciaddr
+        );
+
         if ciaddr.is_unspecified() {
             debug!("RELEASE with zero ciaddr, ignoring");
             return Ok(());
         }
-        
+
         // Remove lease from database
         let removed_lease = {
             let state = self.daemon_state.read().unwrap();
             let lease_db = state.get_lease_database();
             lease_db.remove_lease(IpAddr::V4(ciaddr))
         };
-        
+
         if removed_lease.is_some() {
             info!("Released lease for {}", ciaddr);
-            
+
             // Remove from DNS cache
             let state = self.daemon_state.read().unwrap();
             let dns_cache = state.get_dns_cache();
@@ -733,7 +752,7 @@ impl DhcpV4Server {
         } else {
             debug!("No lease found to release for {}", ciaddr);
         }
-        
+
         Ok(())
     }
 
@@ -769,30 +788,32 @@ impl DhcpV4Server {
         _src_addr: SocketAddr,
     ) -> DnsmasqResult<()> {
         let client_mac = packet.get_chaddr();
-        let requested_ip = packet.get_option(OPTION_REQUESTED_IP)
-            .and_then(|opt| {
-                if let DhcpOption::RequestedIpAddress(ip) = opt {
-                    Some(ip)
-                } else {
-                    None
-                }
-            });
-        
+        let requested_ip = packet.get_option(OPTION_REQUESTED_IP).and_then(|opt| {
+            if let DhcpOption::RequestedIpAddress(ip) = opt {
+                Some(ip)
+            } else {
+                None
+            }
+        });
+
         if let Some(declined_ip) = requested_ip {
-            warn!("DHCPDECLINE from MAC {} for {} (address conflict detected)",
-                  Self::format_mac(client_mac), declined_ip);
-            
+            warn!(
+                "DHCPDECLINE from MAC {} for {} (address conflict detected)",
+                Self::format_mac(client_mac),
+                declined_ip
+            );
+
             // Mark address as declined (implementation would add to blacklist)
             // For now, just remove any existing lease
             let state = self.daemon_state.read().unwrap();
             let lease_db = state.get_lease_database();
             lease_db.remove_lease(IpAddr::V4(declined_ip));
-            
+
             info!("Marked address {} as declined", declined_ip);
         } else {
             debug!("DECLINE without requested IP, ignoring");
         }
-        
+
         Ok(())
     }
 
@@ -827,14 +848,18 @@ impl DhcpV4Server {
     ) -> DnsmasqResult<()> {
         let client_mac = packet.get_chaddr();
         let ciaddr = packet.get_ciaddr();
-        
-        info!("DHCPINFORM from MAC {} at {}", Self::format_mac(client_mac), ciaddr);
-        
+
+        info!(
+            "DHCPINFORM from MAC {} at {}",
+            Self::format_mac(client_mac),
+            ciaddr
+        );
+
         if ciaddr.is_unspecified() {
             debug!("INFORM with zero ciaddr, ignoring");
             return Ok(());
         }
-        
+
         // Build and send DHCPACK with configuration options (no lease time)
         let mut response = DhcpPacket::new();
         response.set_op(BOOTREPLY);
@@ -842,16 +867,18 @@ impl DhcpV4Server {
         response.set_flags(packet.get_flags());
         response.set_ciaddr(ciaddr);
         response.set_chaddr(client_mac);
-        
+
         // Add message type option
-        response.set_option(&DhcpOption::MessageType(crate::dhcp::v4::protocol::MessageType::Ack.to_u8()));
-        
+        response.set_option(&DhcpOption::MessageType(
+            crate::dhcp::v4::protocol::MessageType::Ack.to_u8(),
+        ));
+
         // Add server identifier
         response.set_option(&DhcpOption::ServerIdentifier(self.server_addr));
-        
+
         // Add network configuration options
         self.add_network_options(&mut response, context);
-        
+
         // Send response
         self.send_packet(&response, src_addr).await
     }
@@ -895,28 +922,38 @@ impl DhcpV4Server {
         context: &DhcpContext,
     ) -> DnsmasqResult<Ipv4Addr> {
         // Check for static host reservation
-        if let Some(static_ip) = self.find_static_reservation(client_mac, client_id.as_ref(), context) {
-            debug!("Using static reservation {} for MAC {}", 
-                   static_ip, Self::format_mac(client_mac));
+        if let Some(static_ip) =
+            self.find_static_reservation(client_mac, client_id.as_ref(), context)
+        {
+            debug!(
+                "Using static reservation {} for MAC {}",
+                static_ip,
+                Self::format_mac(client_mac)
+            );
             return Ok(static_ip);
         }
-        
+
         // Check for existing lease
         let state = self.daemon_state.read().unwrap();
         let lease_db = state.get_lease_database();
-        
+
         if let Some(existing_lease) = lease_db.find_by_mac(client_mac) {
             if let Lease::V4(v4_lease) = &existing_lease {
-                if self.is_address_in_context(v4_lease.addr, context) && !existing_lease.is_expired() {
-                    debug!("Reusing existing lease {} for MAC {}",
-                           v4_lease.addr, Self::format_mac(client_mac));
+                if self.is_address_in_context(v4_lease.addr, context)
+                    && !existing_lease.is_expired()
+                {
+                    debug!(
+                        "Reusing existing lease {} for MAC {}",
+                        v4_lease.addr,
+                        Self::format_mac(client_mac)
+                    );
                     return Ok(v4_lease.addr);
                 }
             }
         }
-        
+
         drop(state);
-        
+
         // Find available address in range
         // Extract IPv4 addresses from IpAddr enum
         let (IpAddr::V4(start_v4), IpAddr::V4(end_v4)) = (context.start, context.end) else {
@@ -925,31 +962,31 @@ impl DhcpV4Server {
                 message: "DHCPv4 context must have IPv4 address ranges".to_string(),
             }));
         };
-        
+
         let start_octets = start_v4.octets();
         let end_octets = end_v4.octets();
         let start_u32 = u32::from_be_bytes(start_octets);
         let end_u32 = u32::from_be_bytes(end_octets);
-        
+
         for addr_u32 in start_u32..=end_u32 {
             let candidate = Ipv4Addr::from(addr_u32.to_be_bytes());
-            
+
             // Skip broadcast and network addresses
             if self.is_special_address(candidate, context) {
                 continue;
             }
-            
+
             // Check if address is already leased
             let state = self.daemon_state.read().unwrap();
             let lease_db = state.get_lease_database();
-            
+
             if lease_db.find_by_ip(IpAddr::V4(candidate)).is_some() {
                 drop(state);
                 continue;
             }
-            
+
             drop(state);
-            
+
             // TODO: Perform ping-before-offer if enabled
             // The ping-before-offer feature needs to be added to DhcpConfig
             // For now, skip the ping check
@@ -970,14 +1007,25 @@ impl DhcpV4Server {
             //         }
             //     }
             // }
-            
-            debug!("Allocated address {} for MAC {}", candidate, Self::format_mac(client_mac));
+
+            debug!(
+                "Allocated address {} for MAC {}",
+                candidate,
+                Self::format_mac(client_mac)
+            );
             return Ok(candidate);
         }
-        
+
         Err(DnsmasqError::Dhcp(DhcpError::NoAvailableAddress {
-            client_id: format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", 
-                client_mac[0], client_mac[1], client_mac[2], client_mac[3], client_mac[4], client_mac[5]),
+            client_id: format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                client_mac[0],
+                client_mac[1],
+                client_mac[2],
+                client_mac[3],
+                client_mac[4],
+                client_mac[5]
+            ),
         }))
     }
 
@@ -1017,29 +1065,30 @@ impl DhcpV4Server {
                 }
             }
         }
-        
+
         // Perform ICMP ping with 1-second timeout
         // Note: Simplified implementation - production would use raw ICMP socket
-        let ping_result = tokio::time::timeout(
-            Duration::from_secs(1),
-            self.send_icmp_ping(addr)
-        ).await;
-        
+        let ping_result =
+            tokio::time::timeout(Duration::from_secs(1), self.send_icmp_ping(addr)).await;
+
         let in_use = match ping_result {
             Ok(Ok(true)) => true,
             Ok(Ok(false) | Err(_)) | Err(_) => false, // Timeout = no response = available
         };
-        
+
         // Update cache
         {
             let mut cache = self.ping_cache.lock().unwrap();
-            cache.insert(addr, PingResult {
-                address: addr,
-                in_use,
-                timestamp: Instant::now(),
-            });
+            cache.insert(
+                addr,
+                PingResult {
+                    address: addr,
+                    in_use,
+                    timestamp: Instant::now(),
+                },
+            );
         }
-        
+
         Ok(in_use)
     }
 
@@ -1096,7 +1145,7 @@ impl DhcpV4Server {
         dest_addr: SocketAddr,
     ) -> DnsmasqResult<()> {
         let mut response = DhcpPacket::new();
-        
+
         // Set fixed fields
         response.set_op(BOOTREPLY);
         response.set_xid(request.get_xid());
@@ -1104,22 +1153,28 @@ impl DhcpV4Server {
         response.set_yiaddr(offered_ip);
         response.set_chaddr(request.get_chaddr());
         response.set_giaddr(request.get_giaddr());
-        
+
         // Add DHCP options
-        response.set_option(&DhcpOption::MessageType(crate::dhcp::v4::protocol::MessageType::Offer.to_u8()));
+        response.set_option(&DhcpOption::MessageType(
+            crate::dhcp::v4::protocol::MessageType::Offer.to_u8(),
+        ));
         response.set_option(&DhcpOption::ServerIdentifier(self.server_addr));
         #[allow(clippy::cast_possible_truncation)] // DHCPv4 lease time is u32 in protocol
         response.set_option(&DhcpOption::LeaseTime(context.lease_time.as_secs() as u32));
-        
+
         // Add network configuration options
         self.add_network_options(&mut response, context);
-        
+
         // Add requested options from parameter request list
         self.add_requested_options(&mut response, request, context);
-        
-        info!("Sending DHCPOFFER of {} to MAC {} (XID: 0x{:08x})",
-              offered_ip, Self::format_mac(request.get_chaddr()), request.get_xid());
-        
+
+        info!(
+            "Sending DHCPOFFER of {} to MAC {} (XID: 0x{:08x})",
+            offered_ip,
+            Self::format_mac(request.get_chaddr()),
+            request.get_xid()
+        );
+
         // Send packet
         self.send_packet(&response, dest_addr).await
     }
@@ -1154,7 +1209,7 @@ impl DhcpV4Server {
         dest_addr: SocketAddr,
     ) -> DnsmasqResult<()> {
         let mut response = DhcpPacket::new();
-        
+
         // Set fixed fields
         response.set_op(BOOTREPLY);
         response.set_xid(request.get_xid());
@@ -1163,22 +1218,28 @@ impl DhcpV4Server {
         response.set_ciaddr(request.get_ciaddr());
         response.set_chaddr(request.get_chaddr());
         response.set_giaddr(request.get_giaddr());
-        
+
         // Add DHCP options
-        response.set_option(&DhcpOption::MessageType(crate::dhcp::v4::protocol::MessageType::Ack.to_u8()));
+        response.set_option(&DhcpOption::MessageType(
+            crate::dhcp::v4::protocol::MessageType::Ack.to_u8(),
+        ));
         response.set_option(&DhcpOption::ServerIdentifier(self.server_addr));
         #[allow(clippy::cast_possible_truncation)] // DHCPv4 lease time is u32 in protocol
         response.set_option(&DhcpOption::LeaseTime(context.lease_time.as_secs() as u32));
-        
+
         // Add network configuration options
         self.add_network_options(&mut response, context);
-        
+
         // Add requested options
         self.add_requested_options(&mut response, request, context);
-        
-        info!("Sending DHCPACK of {} to MAC {} (XID: 0x{:08x})",
-              assigned_ip, Self::format_mac(request.get_chaddr()), request.get_xid());
-        
+
+        info!(
+            "Sending DHCPACK of {} to MAC {} (XID: 0x{:08x})",
+            assigned_ip,
+            Self::format_mac(request.get_chaddr()),
+            request.get_xid()
+        );
+
         // Send packet
         self.send_packet(&response, dest_addr).await
     }
@@ -1211,26 +1272,30 @@ impl DhcpV4Server {
         reason: &str,
     ) -> DnsmasqResult<()> {
         let mut response = DhcpPacket::new();
-        
+
         // Set fixed fields
         response.set_op(BOOTREPLY);
         response.set_xid(request.get_xid());
         response.set_flags(request.get_flags());
         response.set_chaddr(request.get_chaddr());
         response.set_giaddr(request.get_giaddr());
-        
+
         // Add DHCP options
-        response.set_option(&DhcpOption::MessageType(crate::dhcp::v4::protocol::MessageType::Nak.to_u8()));
+        response.set_option(&DhcpOption::MessageType(
+            crate::dhcp::v4::protocol::MessageType::Nak.to_u8(),
+        ));
         response.set_option(&DhcpOption::ServerIdentifier(self.server_addr));
-        
-        warn!("Sending DHCPNAK to MAC {} (XID: 0x{:08x}): {}",
-              Self::format_mac(request.get_chaddr()), request.get_xid(), reason);
-        
-        // Send packet (always broadcast for NAK)
-        let broadcast_addr = SocketAddr::new(
-            std::net::IpAddr::V4(Ipv4Addr::BROADCAST),
-            dest_addr.port()
+
+        warn!(
+            "Sending DHCPNAK to MAC {} (XID: 0x{:08x}): {}",
+            Self::format_mac(request.get_chaddr()),
+            request.get_xid(),
+            reason
         );
+
+        // Send packet (always broadcast for NAK)
+        let broadcast_addr =
+            SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::BROADCAST), dest_addr.port());
         self.send_packet(&response, broadcast_addr).await
     }
 
@@ -1245,37 +1310,39 @@ impl DhcpV4Server {
         if let Some(netmask) = context.netmask {
             response.set_option(&DhcpOption::SubnetMask(netmask));
         }
-        
+
         // Router (Option 3)
         if let Some(router) = context.router {
             if !router.is_unspecified() {
                 response.set_option(&DhcpOption::Router(vec![router]));
             }
         }
-        
+
         // DNS servers (Option 6)
         let state = self.daemon_state.read().unwrap();
         let config = state.get_config();
-        
+
         // Extract IPv4 addresses from upstream DNS servers
-        let dns_servers: Vec<Ipv4Addr> = config.dns.upstream_servers
+        let dns_servers: Vec<Ipv4Addr> = config
+            .dns
+            .upstream_servers
             .iter()
             .filter_map(|server| match server.address.ip() {
                 IpAddr::V4(ipv4) => Some(ipv4),
                 IpAddr::V6(_) => None, // Skip IPv6 addresses for DHCPv4
             })
             .collect();
-        
+
         if !dns_servers.is_empty() {
             response.set_option(&DhcpOption::DnsServer(dns_servers));
         }
-        
+
         // Domain name (Option 15)
         // TODO: Add domain_name to Config or DhcpConfig
         // if let Some(ref domain) = config.domain_name {
         //     response.set_option(&DhcpOption::DomainName(domain.clone()));
         // }
-        
+
         // Broadcast address (Option 28)
         if let Some(broadcast) = context.broadcast {
             response.set_option(&DhcpOption::Broadcast(broadcast));
@@ -1292,10 +1359,12 @@ impl DhcpV4Server {
         request: &DhcpPacket,
         _context: &DhcpContext,
     ) {
-        if let Some(DhcpOption::RequestedOptions(requested_opts)) = request.get_option(OPTION_REQUESTED_OPTIONS) {
+        if let Some(DhcpOption::RequestedOptions(requested_opts)) =
+            request.get_option(OPTION_REQUESTED_OPTIONS)
+        {
             let state = self.daemon_state.read().unwrap();
             let config = state.get_config();
-            
+
             for opt_code in &requested_opts {
                 match *opt_code {
                     // NTP Server option (42) - not currently implemented in DhcpOption enum
@@ -1338,16 +1407,16 @@ impl DhcpV4Server {
     ) -> Option<Ipv4Addr> {
         let state = self.daemon_state.read().unwrap();
         let static_hosts = state.get_static_hosts();
-        
+
         // Match by MAC address
         // Convert client_mac slice to [u8; 6] for comparison
         if client_mac.len() != 6 {
             return None;
         }
-        
+
         let mut mac_array = [0u8; 6];
         mac_array.copy_from_slice(client_mac);
-        
+
         for host in static_hosts {
             if host.mac_address == mac_array {
                 // Extract IPv4 address if available
@@ -1356,7 +1425,7 @@ impl DhcpV4Server {
                 }
             }
         }
-        
+
         None
     }
 
@@ -1367,11 +1436,11 @@ impl DhcpV4Server {
         let (IpAddr::V4(start_v4), IpAddr::V4(end_v4)) = (context.start, context.end) else {
             return false; // Non-IPv4 context doesn't match
         };
-        
+
         let addr_u32 = u32::from_be_bytes(addr.octets());
         let start_u32 = u32::from_be_bytes(start_v4.octets());
         let end_u32 = u32::from_be_bytes(end_v4.octets());
-        
+
         addr_u32 >= start_u32 && addr_u32 <= end_u32
     }
 
@@ -1382,25 +1451,25 @@ impl DhcpV4Server {
             IpAddr::V4(addr) => addr,
             IpAddr::V6(_) => return false, // Non-IPv4 context
         };
-        
+
         // Network address (all host bits zero)
         let network = self.apply_netmask(start_v4, context.netmask);
         if addr == network {
             return true;
         }
-        
+
         // Broadcast address
         if let Some(broadcast) = context.broadcast {
             if addr == broadcast {
                 return true;
             }
         }
-        
+
         // Server's own address
         if addr == self.server_addr {
             return true;
         }
-        
+
         false
     }
 
@@ -1434,14 +1503,14 @@ impl DhcpV4Server {
     ) -> DnsmasqResult<()> {
         let state = self.daemon_state.read().unwrap();
         let lease_db = state.get_lease_database();
-        
+
         // Calculate expiration time (seconds since Unix epoch)
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let expires = now + context.lease_time.as_secs();
-        
+
         // Create lease
         let lease = Lease::V4(crate::dhcp::lease::LeaseV4 {
             addr,
@@ -1451,10 +1520,10 @@ impl DhcpV4Server {
             expires,
             state: crate::dhcp::lease::LeaseState::New,
         });
-        
+
         // Add to database
         lease_db.add_lease(lease.clone())?;
-        
+
         // Add to DNS cache if hostname present
         if let Lease::V4(ref v4_lease) = lease {
             if let Some(ref hostname) = v4_lease.hostname {
@@ -1468,7 +1537,7 @@ impl DhcpV4Server {
                 // );
             }
         }
-        
+
         Ok(())
     }
 
@@ -1482,7 +1551,7 @@ impl DhcpV4Server {
     ) -> DnsmasqResult<()> {
         let state = self.daemon_state.read().unwrap();
         let lease_db = state.get_lease_database();
-        
+
         // Find existing lease
         if let Some(lease) = lease_db.find_by_mac(client_mac) {
             // Update expiration (seconds since Unix epoch)
@@ -1491,35 +1560,31 @@ impl DhcpV4Server {
                 .unwrap()
                 .as_secs();
             let new_expires = now + context.lease_time.as_secs();
-            
+
             if let Lease::V4(mut v4_lease) = lease {
                 v4_lease.expires = new_expires;
                 v4_lease.state = crate::dhcp::lease::LeaseState::Changed;
-                
+
                 // Update in database (remove old, add updated)
                 lease_db.remove_lease(IpAddr::V4(v4_lease.addr));
                 lease_db.add_lease(Lease::V4(v4_lease))?;
             }
         }
-        
+
         Ok(())
     }
 
     /// Send DHCP packet to destination
-    async fn send_packet(
-        &self,
-        packet: &DhcpPacket,
-        dest_addr: SocketAddr,
-    ) -> DnsmasqResult<()> {
+    async fn send_packet(&self, packet: &DhcpPacket, dest_addr: SocketAddr) -> DnsmasqResult<()> {
         let serialized = packet.serialize().map_err(|e| {
             DnsmasqError::Dhcp(DhcpError::InvalidPacket {
                 message: format!("Failed to serialize DHCP packet: {e}"),
             })
         })?;
-        
+
         // Determine actual destination based on flags and addresses
         let actual_dest = self.determine_destination(packet, dest_addr);
-        
+
         // Get socket reference
         let socket = self.socket.as_ref().ok_or_else(|| {
             DnsmasqError::Dhcp(DhcpError::DatabaseError {
@@ -1527,14 +1592,18 @@ impl DhcpV4Server {
                 source: None,
             })
         })?;
-        
+
         // Send packet
-        socket.send_to(&serialized, actual_dest).await
-            .map_err(|e| DnsmasqError::Network(NetworkError::SendFailed {
-                destination: actual_dest.to_string(),
-                source: e,
-            }))?;
-        
+        socket
+            .send_to(&serialized, actual_dest)
+            .await
+            .map_err(|e| {
+                DnsmasqError::Network(NetworkError::SendFailed {
+                    destination: actual_dest.to_string(),
+                    source: e,
+                })
+            })?;
+
         debug!("Sent {} bytes to {}", serialized.len(), actual_dest);
         Ok(())
     }
@@ -1552,36 +1621,24 @@ impl DhcpV4Server {
         let flags = packet.get_flags();
         let ciaddr = packet.get_ciaddr();
         let giaddr = packet.get_giaddr();
-        
+
         // Check broadcast flag
         if flags & 0x8000 != 0 {
-            return SocketAddr::new(
-                std::net::IpAddr::V4(Ipv4Addr::BROADCAST),
-                DHCP_CLIENT_PORT,
-            );
+            return SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::BROADCAST), DHCP_CLIENT_PORT);
         }
-        
+
         // Send via relay if present
         if !giaddr.is_unspecified() {
-            return SocketAddr::new(
-                std::net::IpAddr::V4(giaddr),
-                DHCP_SERVER_PORT,
-            );
+            return SocketAddr::new(std::net::IpAddr::V4(giaddr), DHCP_SERVER_PORT);
         }
-        
+
         // Unicast to ciaddr if present
         if !ciaddr.is_unspecified() {
-            return SocketAddr::new(
-                std::net::IpAddr::V4(ciaddr),
-                DHCP_CLIENT_PORT,
-            );
+            return SocketAddr::new(std::net::IpAddr::V4(ciaddr), DHCP_CLIENT_PORT);
         }
-        
+
         // Otherwise broadcast
-        SocketAddr::new(
-            std::net::IpAddr::V4(Ipv4Addr::BROADCAST),
-            DHCP_CLIENT_PORT,
-        )
+        SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::BROADCAST), DHCP_CLIENT_PORT)
     }
 
     /// Get configuration reference
@@ -1595,8 +1652,10 @@ impl DhcpV4Server {
         if mac.len() < 6 {
             return format!("{mac:?}");
         }
-        format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
+        format!(
+            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+        )
     }
 
     /// Find appropriate DHCP context for packet
@@ -1605,10 +1664,10 @@ impl DhcpV4Server {
     /// which address pool should serve this request.
     fn find_context_for_packet(&self, packet: &DhcpPacket) -> Option<DhcpContext> {
         let giaddr = packet.get_giaddr();
-        
+
         let state = self.daemon_state.read().unwrap();
         let contexts = state.get_dhcp_contexts();
-        
+
         // If relayed, match by relay agent's subnet
         if giaddr.is_unspecified() {
             // Direct request - use first configured context
@@ -1623,16 +1682,16 @@ impl DhcpV4Server {
                     IpAddr::V4(addr) => addr,
                     IpAddr::V6(_) => continue, // Skip non-IPv4 contexts
                 };
-                
+
                 let network = self.apply_netmask(start_v4, context.netmask);
                 let giaddr_network = self.apply_netmask(giaddr, context.netmask);
-                
+
                 if network == giaddr_network {
                     return Some(context.clone());
                 }
             }
         }
-        
+
         None
     }
 
@@ -1652,12 +1711,12 @@ impl DhcpV4Server {
     /// Err if no suitable context exists
     #[allow(clippy::unused_async)]
     async fn determine_context(&self, packet: &DhcpPacket) -> DnsmasqResult<DhcpContext> {
-        self.find_context_for_packet(packet)
-            .ok_or_else(|| {
-                DhcpError::InvalidPacket {
-                    message: "No matching DHCP context found for packet".to_string(),
-                }.into()
-            })
+        self.find_context_for_packet(packet).ok_or_else(|| {
+            DhcpError::InvalidPacket {
+                message: "No matching DHCP context found for packet".to_string(),
+            }
+            .into()
+        })
     }
 
     /// Prune expired leases from the database
@@ -1673,24 +1732,20 @@ impl DhcpV4Server {
     ///
     /// Number of leases pruned
     #[allow(clippy::unused_async)]
-    async fn prune_expired_leases(
-        daemon_state: &Arc<RwLock<DaemonState>>,
-    ) -> DnsmasqResult<usize> {
-        let state = daemon_state.read().map_err(|e| {
-            DhcpError::DatabaseError {
-                message: format!("Failed to acquire read lock: {e}"),
-                source: None,
-            }
+    async fn prune_expired_leases(daemon_state: &Arc<RwLock<DaemonState>>) -> DnsmasqResult<usize> {
+        let state = daemon_state.read().map_err(|e| DhcpError::DatabaseError {
+            message: format!("Failed to acquire read lock: {e}"),
+            source: None,
         })?;
-        
+
         let lease_db = state.get_lease_database();
-        
+
         // Prune expired leases from database using the lease_prune function
         // TODO: Pass DNS cache reference if available for cache updates
         let count = crate::dhcp::lease::lease_prune(lease_db, None);
-        
+
         tracing::debug!("Pruned {} expired leases", count);
-        
+
         Ok(count)
     }
 }
@@ -1700,24 +1755,21 @@ impl DhcpV4Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, RwLock};
-    use crate::types::daemon_state::DaemonState;
     use crate::config::Config;
+    use crate::types::daemon_state::DaemonState;
+    use std::sync::{Arc, RwLock};
 
     fn create_test_server() -> DhcpV4Server {
         let config = Config::default();
         let daemon_state = Arc::new(RwLock::new(DaemonState::new(config)));
-        
+
         DhcpV4Server::new(daemon_state)
     }
 
     #[test]
     fn test_format_mac() {
         let mac = vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
-        assert_eq!(
-            DhcpV4Server::format_mac(&mac),
-            "aa:bb:cc:dd:ee:ff"
-        );
+        assert_eq!(DhcpV4Server::format_mac(&mac), "aa:bb:cc:dd:ee:ff");
     }
 
     #[test]
@@ -1742,7 +1794,7 @@ mod tests {
             #[cfg(feature = "dhcp-v6")]
             prefix_len: None,
         };
-        
+
         assert!(server.is_address_in_context(Ipv4Addr::new(192, 168, 1, 100), &context));
         assert!(server.is_address_in_context(Ipv4Addr::new(192, 168, 1, 150), &context));
         assert!(server.is_address_in_context(Ipv4Addr::new(192, 168, 1, 200), &context));
@@ -1755,7 +1807,7 @@ mod tests {
         let server = create_test_server();
         let addr = Ipv4Addr::new(192, 168, 1, 150);
         let netmask = Some(Ipv4Addr::new(255, 255, 255, 0));
-        
+
         let network = server.apply_netmask(addr, netmask);
         assert_eq!(network, Ipv4Addr::new(192, 168, 1, 0));
     }
@@ -1763,13 +1815,13 @@ mod tests {
     #[tokio::test]
     async fn test_bind_socket() {
         let server = create_test_server();
-        
+
         // Note: This test requires appropriate permissions to bind to port 67
         // In CI environments, it should be skipped or use an alternate port
         if std::env::var("CI").is_ok() {
             return; // Skip in CI
         }
-        
+
         // Test would attempt to bind and verify socket options
     }
 }

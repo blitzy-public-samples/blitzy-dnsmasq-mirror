@@ -314,7 +314,7 @@ extern "C" {
     ) -> c_int;
     fn ubus_handle_event(ctx: *mut ubus_context);
     fn ubus_strerror(error: c_int) -> *const c_char;
-    
+
     // blob_buf operations
     fn blob_buf_init(buf: *mut blob_buf, id: c_int) -> c_int;
     fn blob_buf_free(buf: *mut blob_buf);
@@ -360,16 +360,16 @@ extern "C" {
 pub struct UbusContext {
     /// Raw ubus context pointer (C FFI)
     ctx: *mut ubus_context,
-    
+
     /// ubus object name (e.g., "dnsmasq")
     object_name: String,
-    
+
     /// Unix domain socket file descriptor for Tokio integration
     socket_fd: i32,
-    
+
     /// Whether subscribers are attached (optimization for event broadcasts)
     has_subscribers: bool,
-    
+
     /// Error logging suppression flag (avoid log spam)
     error_logged: bool,
 }
@@ -492,7 +492,8 @@ impl UbusContext {
             if let Some(mac_addr) = mac {
                 let c_name = CString::new("mac").unwrap();
                 let c_value = CString::new(mac_addr).unwrap();
-                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
+                let ret =
+                    blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
                     blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
@@ -504,7 +505,8 @@ impl UbusContext {
             if let Some(ip_addr) = ip {
                 let c_name = CString::new("ip").unwrap();
                 let c_value = CString::new(ip_addr).unwrap();
-                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
+                let ret =
+                    blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
                     blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
@@ -516,7 +518,8 @@ impl UbusContext {
             if let Some(name) = hostname {
                 let c_name = CString::new("name").unwrap();
                 let c_value = CString::new(name).unwrap();
-                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
+                let ret =
+                    blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
                     blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
@@ -528,7 +531,8 @@ impl UbusContext {
             if let Some(iface) = interface {
                 let c_name = CString::new("interface").unwrap();
                 let c_value = CString::new(iface).unwrap();
-                let ret = blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
+                let ret =
+                    blobmsg_add_string(ptr::addr_of_mut!(buf), c_name.as_ptr(), c_value.as_ptr());
                 if ret != 0 {
                     blob_buf_free(ptr::addr_of_mut!(buf));
                     return Err(UbusError::SerializationError(
@@ -590,11 +594,11 @@ impl UbusContext {
     pub fn get_metrics(&self, state: &DaemonState) -> UbusMetrics {
         // Access metrics from DaemonState using the public getter
         let metrics = state.get_metrics();
-        
+
         // Get DNS cache statistics for cache size and insertions
         let dns_cache = state.get_dns_cache();
         let cache_stats = dns_cache.get_statistics();
-        
+
         UbusMetrics {
             cache_size: cache_stats.current_size as u64,
             cache_inserted: cache_stats.inserts,
@@ -813,7 +817,7 @@ mod tests {
         assert_eq!(metrics.cache_size, 1000);
         assert_eq!(metrics.cache_inserted, 5000);
         assert_eq!(metrics.cache_misses, 200);
-        
+
         #[cfg(feature = "dhcp")]
         assert_eq!(metrics.lease_count, 42);
     }
@@ -823,16 +827,16 @@ mod tests {
     fn test_connmark_validation() {
         // Create mock context for testing (would need actual connection in practice)
         // This test validates the logic without FFI calls
-        
+
         // Test invalid mark (zero)
         let mark = 0u32;
         assert!(mark == 0);
-        
+
         // Test invalid mask
         let mark = 100u32;
         let netmask = 50u32;
         assert!((mark & !netmask) != 0);
-        
+
         // Test valid combination
         let mark = 100u32;
         let netmask = 0xFF;

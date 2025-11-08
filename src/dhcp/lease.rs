@@ -61,9 +61,11 @@ use std::sync::{Arc, RwLock};
 
 use tracing::{debug, error, info, warn};
 
-use crate::dhcp::common::find_config;
-use crate::dhcp::lease_store::{DuidEntry, LeaseDatabase as StoredLeaseDatabase, LeaseEntry, LeaseStore};
 use crate::config::types::DhcpConfig;
+use crate::dhcp::common::find_config;
+use crate::dhcp::lease_store::{
+    DuidEntry, LeaseDatabase as StoredLeaseDatabase, LeaseEntry, LeaseStore,
+};
 use crate::dns::cache::DnsCache;
 use crate::types::addresses::AllAddr;
 use crate::types::daemon_state::DaemonState;
@@ -835,10 +837,7 @@ pub fn lease4_allocate(
 
     database.add_lease(lease.clone())?;
 
-    debug!(
-        "Allocated DHCPv4 lease: addr={}, expires={}",
-        addr, expires
-    );
+    debug!("Allocated DHCPv4 lease: addr={}, expires={}", addr, expires);
 
     Ok(lease)
 }
@@ -1136,10 +1135,7 @@ pub fn lease6_find(
 /// }
 /// ```
 #[must_use]
-pub fn lease_prune(
-    database: &LeaseDatabase,
-    mut dns_cache: Option<&mut DnsCache>,
-) -> usize {
+pub fn lease_prune(database: &LeaseDatabase, mut dns_cache: Option<&mut DnsCache>) -> usize {
     let now = monotonic_time();
     let mut count = 0;
 
@@ -1251,9 +1247,11 @@ pub fn lease_update_from_configs(
             // Find matching static host config
             let config = find_config(
                 daemon,
-                lease.client_id.as_deref().map(|cid| {
-                    crate::dhcp::common::ClientId::new(cid.to_vec())
-                }).as_ref(),
+                lease
+                    .client_id
+                    .as_deref()
+                    .map(|cid| crate::dhcp::common::ClientId::new(cid.to_vec()))
+                    .as_ref(),
                 Some(&lease.hwaddr),
                 lease.hostname.as_deref(),
             );
@@ -1541,7 +1539,14 @@ mod tests {
         let duid = vec![0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78];
         let iaid = 12345;
 
-        lease6_allocate(&db, addr, duid.clone(), iaid, LeaseType::NonTemporaryAddress).unwrap();
+        lease6_allocate(
+            &db,
+            addr,
+            duid.clone(),
+            iaid,
+            LeaseType::NonTemporaryAddress,
+        )
+        .unwrap();
 
         let found = lease6_find(&db, &duid, LeaseType::NonTemporaryAddress, iaid, addr);
         assert!(found.is_some());
@@ -1631,4 +1636,3 @@ mod tests {
         assert_eq!(lease.state(), LeaseState::Changed);
     }
 }
-

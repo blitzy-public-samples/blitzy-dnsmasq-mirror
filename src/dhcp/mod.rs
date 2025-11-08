@@ -177,7 +177,7 @@ pub use v6::server::DhcpV6Server;
 
 // IPv6 Router Advertisement re-exports (conditional on ipv6 feature)
 #[cfg(feature = "ipv6")]
-pub use ipv6::radv::{RadVError, RaPacket, PrefixOpt};
+pub use ipv6::radv::{PrefixOpt, RaPacket, RadVError};
 
 // =============================================================================
 // Module Tests
