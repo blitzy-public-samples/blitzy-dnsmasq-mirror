@@ -361,7 +361,7 @@ pub mod state_machine;
 
 // Re-export key types for external use when DHCPv6 is enabled
 #[cfg(feature = "dhcp-v6")]
-pub use server::{Dhcpv6Server, Dhcpv6ServerConfig};
+pub use server::Dhcpv6Server;
 
 #[cfg(feature = "dhcp-v6")]
 pub use protocol::{Dhcp6Message, Dhcpv6MessageType};

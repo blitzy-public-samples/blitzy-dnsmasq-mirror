@@ -280,16 +280,16 @@ pub struct DhcpState {
 #[derive(Debug, Clone)]
 pub struct DhcpContext {
     /// Start of address range
-    range_start: IpAddr,
+    pub range_start: IpAddr,
 
     /// End of address range
-    range_end: IpAddr,
+    pub range_end: IpAddr,
 
     /// Network interface this context applies to
-    interface: Option<String>,
+    pub interface: Option<String>,
 
     /// Default lease time in seconds
-    lease_time: u32,
+    pub lease_time: u32,
 }
 
 /// Static DHCP host configuration
@@ -300,13 +300,13 @@ pub struct DhcpContext {
 #[derive(Debug, Clone)]
 pub struct StaticHost {
     /// MAC address (hardware address)
-    mac_address: [u8; 6],
+    pub mac_address: [u8; 6],
 
     /// Fixed IP address to assign
-    ip_address: IpAddr,
+    pub ip_address: IpAddr,
 
     /// Optional hostname to assign
-    hostname: Option<String>,
+    pub hostname: Option<String>,
 }
 
 /// DHCP lease database
@@ -317,10 +317,10 @@ pub struct StaticHost {
 #[derive(Debug)]
 pub struct DhcpLeaseDatabase {
     /// Active leases (MAC → lease info)
-    active_leases: HashMap<[u8; 6], DhcpLease>,
+    pub active_leases: HashMap<[u8; 6], DhcpLease>,
 
     /// Path to lease file for persistence
-    lease_file_path: Option<std::path::PathBuf>,
+    pub lease_file_path: Option<std::path::PathBuf>,
 }
 
 /// Individual DHCP lease record
@@ -328,18 +328,18 @@ pub struct DhcpLeaseDatabase {
 /// Tracks a single DHCP lease with expiration time and client information.
 #[cfg(feature = "dhcp")]
 #[derive(Debug, Clone)]
-struct DhcpLease {
+pub struct DhcpLease {
     /// Assigned IP address
-    ip_address: IpAddr,
+    pub ip_address: IpAddr,
 
     /// Lease expiration time
-    expires_at: Instant,
+    pub expires_at: Instant,
 
     /// Client hostname (if provided)
-    hostname: Option<String>,
+    pub hostname: Option<String>,
 
     /// Client identifier (if provided)
-    client_id: Option<Vec<u8>>,
+    pub client_id: Option<Vec<u8>>,
 }
 
 /// Network interface and socket state
