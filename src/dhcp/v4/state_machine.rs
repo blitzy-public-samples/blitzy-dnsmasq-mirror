@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn test_new_transaction() {
-        let xid = 0x12345678;
+        let xid = 0x1234_5678;
         let transaction = DhcpTransaction::new(xid);
         assert_eq!(transaction.get_state(), DhcpState::Init);
         assert_eq!(transaction.get_xid(), xid);
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn test_handle_discover_from_init() {
-        let mut transaction = DhcpTransaction::new(0x11111111);
+        let mut transaction = DhcpTransaction::new(0x1111_1111);
         let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
         let client_id = Some(vec![0x01, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         let requested = Some(Ipv4Addr::new(192, 168, 1, 100));
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_handle_discover_invalid_state() {
-        let mut transaction = DhcpTransaction::new(0x22222222);
+        let mut transaction = DhcpTransaction::new(0x2222_2222);
         transaction.state = DhcpState::Bound;
         
         let mac = vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_from_selecting() {
-        let mut transaction = DhcpTransaction::new(0x33333333);
+        let mut transaction = DhcpTransaction::new(0x3333_3333);
         transaction.state = DhcpState::Selecting;
         
         let requested = Ipv4Addr::new(192, 168, 1, 100);
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_selecting_without_server_id() {
-        let mut transaction = DhcpTransaction::new(0x44444444);
+        let mut transaction = DhcpTransaction::new(0x4444_4444);
         transaction.state = DhcpState::Selecting;
         
         let requested = Ipv4Addr::new(192, 168, 1, 100);
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn test_handle_release_from_bound() {
-        let mut transaction = DhcpTransaction::new(0x55555555);
+        let mut transaction = DhcpTransaction::new(0x5555_5555);
         transaction.state = DhcpState::Bound;
         transaction.offered_ip = Some(Ipv4Addr::new(192, 168, 1, 100));
         
@@ -811,7 +811,7 @@ mod tests {
 
     #[test]
     fn test_handle_release_invalid_state() {
-        let mut transaction = DhcpTransaction::new(0x66666666);
+        let mut transaction = DhcpTransaction::new(0x6666_6666);
         transaction.state = DhcpState::Init;
         
         let result = transaction.handle_release();
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn test_handle_decline() {
-        let mut transaction = DhcpTransaction::new(0x77777777);
+        let mut transaction = DhcpTransaction::new(0x7777_7777);
         transaction.state = DhcpState::Selecting;
         transaction.offered_ip = Some(Ipv4Addr::new(192, 168, 1, 100));
         
@@ -862,7 +862,7 @@ mod tests {
 
     #[test]
     fn test_validate_server_id_match() {
-        let mut transaction = DhcpTransaction::new(0x88888888);
+        let mut transaction = DhcpTransaction::new(0x8888_8888);
         let server_addr = Ipv4Addr::new(192, 168, 1, 1);
         transaction.server_id = Some(server_addr);
         
@@ -872,7 +872,7 @@ mod tests {
 
     #[test]
     fn test_validate_server_id_mismatch() {
-        let mut transaction = DhcpTransaction::new(0x99999999);
+        let mut transaction = DhcpTransaction::new(0x9999_9999);
         transaction.server_id = Some(Ipv4Addr::new(192, 168, 1, 2));
         
         let result = transaction.validate_server_id(Ipv4Addr::new(192, 168, 1, 1));
@@ -888,7 +888,7 @@ mod tests {
 
     #[test]
     fn test_validate_xid_match() {
-        let xid = 0xAAAAAAAA;
+        let xid = 0xAAAA_AAAA;
         let transaction = DhcpTransaction::new(xid);
         
         let result = transaction.validate_xid(xid);
@@ -897,14 +897,14 @@ mod tests {
 
     #[test]
     fn test_validate_xid_mismatch() {
-        let transaction = DhcpTransaction::new(0xBBBBBBBB);
+        let transaction = DhcpTransaction::new(0xBBBB_BBBB);
         
-        let result = transaction.validate_xid(0xCCCCCCCC);
+        let result = transaction.validate_xid(0xCCCC_CCCC);
         assert!(result.is_err());
         match result.unwrap_err() {
             StateTransitionError::MismatchedTransactionId { expected, actual } => {
-                assert_eq!(expected, 0xBBBBBBBB);
-                assert_eq!(actual, 0xCCCCCCCC);
+                assert_eq!(expected, 0xBBBB_BBBB);
+                assert_eq!(actual, 0xCCCC_CCCC);
             }
             _ => panic!("Wrong error type"),
         }
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn test_state_transitions() {
-        let mut transaction = DhcpTransaction::new(0xDDDDDDDD);
+        let mut transaction = DhcpTransaction::new(0xDDDD_DDDD);
         
         // INIT → SELECTING
         assert_eq!(transaction.get_state(), DhcpState::Init);

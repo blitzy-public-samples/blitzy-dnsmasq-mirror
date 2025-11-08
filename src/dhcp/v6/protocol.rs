@@ -1896,7 +1896,7 @@ mod tests {
 
     #[test]
     fn test_client_message_parsing() {
-        // SOLICIT message: type=1, xid=0x123456
+        // SOLICIT message: type=1, xid=0x0012_3456
         let packet = vec![
             0x01, // Message type: SOLICIT
             0x12, 0x34, 0x56, // Transaction ID
@@ -1905,7 +1905,7 @@ mod tests {
 
         let msg = Dhcp6Message::parse(&packet).unwrap();
         assert_eq!(msg.get_message_type(), Dhcpv6MessageType::Solicit);
-        assert_eq!(msg.get_transaction_id(), 0x123456);
+        assert_eq!(msg.get_transaction_id(), 0x0012_3456);
         assert_eq!(msg.hop_count, None);
     }
 
@@ -2093,7 +2093,10 @@ mod tests {
 
         // Verify IA_NA option structure
         assert_eq!(packet[0], 0x00); // Option code high byte
-        assert_eq!(packet[1], OPTION6_IA_NA as u8); // Option code low byte
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            assert_eq!(packet[1], OPTION6_IA_NA as u8); // Option code low byte
+        }
     }
 
     #[test]
@@ -2141,7 +2144,7 @@ mod tests {
     fn test_parse_u32_option() {
         let data = vec![0x12, 0x34, 0x56, 0x78];
         let value = parse_u32_option(&data).unwrap();
-        assert_eq!(value, 0x12345678);
+        assert_eq!(value, 0x0012_345678);
     }
 
     #[test]
