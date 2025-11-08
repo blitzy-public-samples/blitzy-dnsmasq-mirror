@@ -179,6 +179,31 @@ impl Dhcpv6MessageType {
     pub fn to_u8(self) -> u8 {
         self as u8
     }
+
+    /// Check if this message type requires a response from the server
+    ///
+    /// # Returns
+    /// true if the message type expects a response (e.g., SOLICIT expects ADVERTISE)
+    pub fn requires_response(self) -> bool {
+        matches!(
+            self,
+            Self::Solicit
+                | Self::Request
+                | Self::Confirm
+                | Self::Renew
+                | Self::Rebind
+                | Self::InformationRequest
+                | Self::RelayForw
+        )
+    }
+
+    /// Check if this is a relay message type
+    ///
+    /// # Returns
+    /// true if the message type is RELAY-FORW or RELAY-REPL
+    pub fn is_relay_message(self) -> bool {
+        matches!(self, Self::RelayForw | Self::RelayRepl)
+    }
 }
 
 impl fmt::Display for Dhcpv6MessageType {
@@ -252,25 +277,46 @@ impl fmt::Display for Dhcpv6MessageType {
 #[derive(Debug, Clone)]
 pub struct Dhcp6Message {
     /// Message type (SOLICIT, ADVERTISE, REQUEST, etc.)
-    msg_type: Dhcpv6MessageType,
+    pub msg_type: Dhcpv6MessageType,
     
     /// Transaction ID (24-bit for client messages)
-    transaction_id: u32,
+    pub transaction_id: u32,
     
     /// Hop count (relay messages only)
-    hop_count: Option<u8>,
+    pub hop_count: Option<u8>,
     
     /// Link address (relay messages only)
-    link_address: Option<Ipv6Addr>,
+    pub link_address: Option<Ipv6Addr>,
     
     /// Peer address (relay messages only)
-    peer_address: Option<Ipv6Addr>,
+    pub peer_address: Option<Ipv6Addr>,
     
     /// Raw options data (TLV encoded)
-    options: Vec<u8>,
+    pub options: Vec<u8>,
 }
 
 impl Dhcp6Message {
+    /// Create a new DHCPv6 message with the specified type
+    ///
+    /// # Arguments
+    /// * `msg_type` - Message type code (1-13)
+    ///
+    /// # Returns
+    /// New message with empty options and zero transaction ID
+    pub fn new(msg_type: u8) -> Self {
+        let message_type = Dhcpv6MessageType::from_u8(msg_type)
+            .unwrap_or(Dhcpv6MessageType::Reply);
+        
+        Self {
+            msg_type: message_type,
+            transaction_id: 0,
+            hop_count: None,
+            link_address: None,
+            peer_address: None,
+            options: Vec::new(),
+        }
+    }
+
     /// Parse DHCPv6 message from raw bytes
     ///
     /// Corresponds to C's implicit parsing in dhcp6_reply() and dhcp6_maybe_relay().
@@ -842,8 +888,8 @@ pub async fn dhcp6_maybe_relay(
     // Process inner message recursively or directly
     let inner_reply = match inner_msg.get_message_type() {
         Dhcpv6MessageType::RelayForw => {
-            // Nested relay message - recurse
-            dhcp6_maybe_relay(daemon_state, state, &inner_msg, &peer_address, is_unicast).await?
+            // Nested relay message - recurse (boxed to prevent stack overflow)
+            Box::pin(dhcp6_maybe_relay(daemon_state, state, &inner_msg, &peer_address, is_unicast)).await?
         }
         _ => {
             // Client message - process directly
@@ -861,21 +907,21 @@ pub async fn dhcp6_maybe_relay(
     builder.put_data(&peer_address.octets());
 
     // Add RELAY_MSG option with encapsulated reply
-    builder.new_option(OPTION6_RELAY_MSG);
+    let relay_msg_pos = builder.new_option(OPTION6_RELAY_MSG).map_err(DhcpError::from)?;
     builder.put_data(&inner_reply);
-    builder.end_option();
+    builder.end_option(relay_msg_pos).map_err(DhcpError::from)?;
 
     // Copy relay options from request to reply (OPTION6_REMOTE_ID, OPTION6_SUBSCRIBER_ID)
     if let Some(remote_id_data) = options.get(&OPTION6_REMOTE_ID) {
-        builder.new_option(OPTION6_REMOTE_ID);
+        let remote_id_pos = builder.new_option(OPTION6_REMOTE_ID).map_err(DhcpError::from)?;
         builder.put_data(remote_id_data);
-        builder.end_option();
+        builder.end_option(remote_id_pos).map_err(DhcpError::from)?;
     }
 
     if let Some(subscriber_id_data) = options.get(&OPTION6_SUBSCRIBER_ID) {
-        builder.new_option(OPTION6_SUBSCRIBER_ID);
+        let subscriber_id_pos = builder.new_option(OPTION6_SUBSCRIBER_ID).map_err(DhcpError::from)?;
         builder.put_data(subscriber_id_data);
-        builder.end_option();
+        builder.end_option(subscriber_id_pos).map_err(DhcpError::from)?;
     }
 
     Ok(builder.build())
@@ -999,16 +1045,16 @@ pub async fn dhcp6_no_relay(
 
     // Add CLIENT-ID (echo from request)
     if let Some(client_id_data) = options.get(&OPTION6_CLIENT_ID) {
-        builder.new_option(OPTION6_CLIENT_ID);
+        let client_id_pos = builder.new_option(OPTION6_CLIENT_ID).map_err(DhcpError::from)?;
         builder.put_data(client_id_data);
-        builder.end_option();
+        builder.end_option(client_id_pos).map_err(DhcpError::from)?;
     }
 
     // Add SERVER-ID (our DUID)
     if let Some(server_duid) = state.server_duid() {
-        builder.new_option(OPTION6_SERVER_ID);
+        let server_id_pos = builder.new_option(OPTION6_SERVER_ID).map_err(DhcpError::from)?;
         builder.put_data(&server_duid.as_bytes());
-        builder.end_option();
+        builder.end_option(server_id_pos).map_err(DhcpError::from)?;
     }
 
     // Add RAPID_COMMIT if present in SOLICIT and we're sending REPLY
@@ -1016,8 +1062,8 @@ pub async fn dhcp6_no_relay(
         && msg_type == Dhcpv6MessageType::Solicit
         && options.contains_key(&OPTION6_RAPID_COMMIT)
     {
-        builder.new_option(OPTION6_RAPID_COMMIT);
-        builder.end_option();
+        let rapid_commit_pos = builder.new_option(OPTION6_RAPID_COMMIT).map_err(DhcpError::from)?;
+        builder.end_option(rapid_commit_pos).map_err(DhcpError::from)?;
     }
 
     // Process message type specific logic
@@ -1082,23 +1128,23 @@ fn build_use_multicast_reply(
 
     // Echo CLIENT-ID if present
     if let Some(client_duid) = state.client_duid() {
-        builder.new_option(OPTION6_CLIENT_ID);
+        let client_id_pos = builder.new_option(OPTION6_CLIENT_ID).map_err(DhcpError::from)?;
         builder.put_data(&client_duid.as_bytes());
-        builder.end_option();
+        builder.end_option(client_id_pos).map_err(DhcpError::from)?;
     }
 
     // Add SERVER-ID
     if let Some(server_duid) = state.server_duid() {
-        builder.new_option(OPTION6_SERVER_ID);
+        let server_id_pos = builder.new_option(OPTION6_SERVER_ID).map_err(DhcpError::from)?;
         builder.put_data(&server_duid.as_bytes());
-        builder.end_option();
+        builder.end_option(server_id_pos).map_err(DhcpError::from)?;
     }
 
     // STATUS_CODE: UseMulticast
-    builder.new_option(OPTION6_STATUS_CODE);
+    let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
     builder.put_u16(STATUS_USE_MULTICAST);
     builder.put_data(b"Use multicast");
-    builder.end_option();
+    builder.end_option(status_pos).map_err(DhcpError::from)?;
 
     Ok(builder.build())
 }
@@ -1175,7 +1221,7 @@ async fn handle_confirm(
     }
 
     // Add STATUS_CODE
-    builder.new_option(OPTION6_STATUS_CODE);
+    let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
     if all_on_link {
         builder.put_u16(STATUS_SUCCESS);
         builder.put_data(b"Success");
@@ -1183,7 +1229,7 @@ async fn handle_confirm(
         builder.put_u16(STATUS_NOT_ON_LINK);
         builder.put_data(b"Not on link");
     }
-    builder.end_option();
+    builder.end_option(status_pos).map_err(DhcpError::from)?;
 
     Ok(())
 }
@@ -1238,10 +1284,10 @@ async fn handle_release(
     // Process each IA and release addresses
     
     // Add success status
-    builder.new_option(OPTION6_STATUS_CODE);
+    let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
     builder.put_u16(STATUS_SUCCESS);
     builder.put_data(b"Release successful");
-    builder.end_option();
+    builder.end_option(status_pos).map_err(DhcpError::from)?;
 
     info!("DHCPv6 RELEASE from client {:?}", client_duid);
 
@@ -1265,10 +1311,10 @@ async fn handle_decline(
     // Trigger duplicate address detection resolution
     
     // Add success status
-    builder.new_option(OPTION6_STATUS_CODE);
+    let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
     builder.put_u16(STATUS_SUCCESS);
     builder.put_data(b"Decline processed");
-    builder.end_option();
+    builder.end_option(status_pos).map_err(DhcpError::from)?;
 
     warn!("DHCPv6 DECLINE from client {:?} - address conflict detected", client_duid);
 
@@ -1324,7 +1370,7 @@ async fn process_ia_na(
     let ia_options = parse_options(ia_options_data)?;
 
     // Start IA_NA option in reply
-    builder.new_option(OPTION6_IA_NA);
+    let ia_na_pos = builder.new_option(OPTION6_IA_NA).map_err(DhcpError::from)?;
     builder.put_u32(iaid);
 
     // Allocate or validate addresses
@@ -1334,7 +1380,7 @@ async fn process_ia_na(
 
     if allocate {
         // Allocate new address from pool
-        match allocate_ia_address(daemon_state, state, iaid, LeaseType::NonTemporary).await {
+        match allocate_ia_address(daemon_state, state, iaid, LeaseType::NonTemporaryAddress).await {
             Ok(addr) => {
                 allocated_addrs.push(addr);
             }
@@ -1370,25 +1416,25 @@ async fn process_ia_na(
 
     // Add IAADDR suboptions for allocated addresses
     for addr in allocated_addrs {
-        builder.new_option(OPTION6_IAADDR);
+        let iaaddr_pos = builder.new_option(OPTION6_IAADDR).map_err(DhcpError::from)?;
         builder.put_data(&addr.octets());
         builder.put_u32(preferred_lifetime);
         builder.put_u32(valid_lifetime);
         // No IAADDR suboptions
-        builder.end_option();
+        builder.end_option(iaaddr_pos).map_err(DhcpError::from)?;
 
         debug!("IA_NA allocated address: {}", addr);
     }
 
     // Add STATUS_CODE if error
     if status_code != STATUS_SUCCESS {
-        builder.new_option(OPTION6_STATUS_CODE);
+        let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
         builder.put_u16(status_code);
         builder.put_data(status_message.as_bytes());
-        builder.end_option();
+        builder.end_option(status_pos).map_err(DhcpError::from)?;
     }
 
-    builder.end_option(); // End IA_NA
+    builder.end_option(ia_na_pos).map_err(DhcpError::from)?; // End IA_NA
 
     Ok(())
 }
@@ -1416,35 +1462,35 @@ async fn process_ia_ta(
     state.current_ia_type = Some(OPTION6_IA_TA);
 
     // Start IA_TA option in reply
-    builder.new_option(OPTION6_IA_TA);
+    let ia_ta_pos = builder.new_option(OPTION6_IA_TA).map_err(DhcpError::from)?;
     builder.put_u32(iaid);
 
     // Temporary address allocation (shorter lifetimes)
     if allocate {
-        match allocate_ia_address(daemon_state, state, iaid, LeaseType::Temporary).await {
+        match allocate_ia_address(daemon_state, state, iaid, LeaseType::TemporaryAddress).await {
             Ok(addr) => {
                 let preferred_lifetime = 600u32; // 10 minutes for temporary
                 let valid_lifetime = 1200u32;
 
-                builder.new_option(OPTION6_IAADDR);
+                let iaaddr_pos = builder.new_option(OPTION6_IAADDR).map_err(DhcpError::from)?;
                 builder.put_data(&addr.octets());
                 builder.put_u32(preferred_lifetime);
                 builder.put_u32(valid_lifetime);
-                builder.end_option();
+                builder.end_option(iaaddr_pos).map_err(DhcpError::from)?;
 
                 debug!("IA_TA allocated temporary address: {}", addr);
             }
             Err(e) => {
                 warn!("Failed to allocate IA_TA address: {}", e);
-                builder.new_option(OPTION6_STATUS_CODE);
+                let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
                 builder.put_u16(STATUS_NO_ADDRS_AVAIL);
                 builder.put_data(b"No temporary addresses available");
-                builder.end_option();
+                builder.end_option(status_pos).map_err(DhcpError::from)?;
             }
         }
     }
 
-    builder.end_option(); // End IA_TA
+    builder.end_option(ia_ta_pos).map_err(DhcpError::from)?; // End IA_TA
 
     Ok(())
 }
@@ -1472,7 +1518,7 @@ async fn process_ia_pd(
     state.current_ia_type = Some(OPTION6_IA_PD);
 
     // Start IA_PD option in reply
-    builder.new_option(OPTION6_IA_PD);
+    let ia_pd_pos = builder.new_option(OPTION6_IA_PD).map_err(DhcpError::from)?;
     builder.put_u32(iaid);
 
     let t1 = 1800u32;
@@ -1481,12 +1527,12 @@ async fn process_ia_pd(
     builder.put_u32(t2);
 
     // Prefix delegation not fully implemented - add STATUS_CODE
-    builder.new_option(OPTION6_STATUS_CODE);
+    let status_pos = builder.new_option(OPTION6_STATUS_CODE).map_err(DhcpError::from)?;
     builder.put_u16(STATUS_NO_ADDRS_AVAIL);
     builder.put_data(b"Prefix delegation not available");
-    builder.end_option();
+    builder.end_option(status_pos).map_err(DhcpError::from)?;
 
-    builder.end_option(); // End IA_PD
+    builder.end_option(ia_pd_pos).map_err(DhcpError::from)?; // End IA_PD
 
     Ok(())
 }
@@ -1539,13 +1585,13 @@ async fn allocate_ia_address(
     let offset = (hash % 0x1000) as u16;
     
     let allocated_addr = Ipv6Addr::new(
-        0xfd00, 0, 0, 0, 0, 0, 0, 0x100 + offset as u128,
+        0xfd00, 0, 0, 0, 0, 0, 0, 0x100 + offset,
     );
 
     // Create lease in database (simplified - real implementation uses lease6_allocate)
     info!(
         "DHCPv6 allocated {} address {} for DUID {:?} IAID {}",
-        if lease_type == LeaseType::Temporary { "temporary" } else { "non-temporary" },
+        if lease_type == LeaseType::TemporaryAddress { "temporary" } else { "non-temporary" },
         allocated_addr,
         client_duid,
         iaid
@@ -1659,40 +1705,40 @@ pub fn build_ia(
 
     match ia_type {
         OPTION6_IA_NA | OPTION6_IA_PD => {
-            builder.new_option(ia_type);
+            let ia_pos = builder.new_option(ia_type).map_err(DhcpError::from)?;
             builder.put_u32(iaid);
             builder.put_u32(t1);
             builder.put_u32(t2);
 
             // Add IAADDR suboptions for each address
             for addr in addresses {
-                builder.new_option(OPTION6_IAADDR);
+                let iaaddr_pos = builder.new_option(OPTION6_IAADDR).map_err(DhcpError::from)?;
                 builder.put_data(&addr.octets());
                 builder.put_u32(preferred_lifetime);
                 builder.put_u32(valid_lifetime);
                 // No IAADDR suboptions
-                builder.end_option();
+                builder.end_option(iaaddr_pos).map_err(DhcpError::from)?;
             }
 
-            builder.end_option(); // End IA_NA/IA_PD
+            builder.end_option(ia_pos).map_err(DhcpError::from)?; // End IA_NA/IA_PD
             debug!("Built IA type {} with {} addresses, T1={}, T2={}", ia_type, addresses.len(), t1, t2);
             Ok(())
         }
         OPTION6_IA_TA => {
-            builder.new_option(OPTION6_IA_TA);
+            let ia_ta_pos = builder.new_option(OPTION6_IA_TA).map_err(DhcpError::from)?;
             builder.put_u32(iaid);
             // IA_TA has no T1/T2
 
             // Add IAADDR suboptions
             for addr in addresses {
-                builder.new_option(OPTION6_IAADDR);
+                let iaaddr_pos = builder.new_option(OPTION6_IAADDR).map_err(DhcpError::from)?;
                 builder.put_data(&addr.octets());
                 builder.put_u32(preferred_lifetime);
                 builder.put_u32(valid_lifetime);
-                builder.end_option();
+                builder.end_option(iaaddr_pos).map_err(DhcpError::from)?;
             }
 
-            builder.end_option(); // End IA_TA
+            builder.end_option(ia_ta_pos).map_err(DhcpError::from)?; // End IA_TA
             debug!("Built IA_TA with {} temporary addresses", addresses.len());
             Ok(())
         }
@@ -1715,26 +1761,28 @@ fn add_configuration_options(
     builder: &mut OutPacketBuilder,
 ) -> Result<(), DnsmasqError> {
     // Apply tag-based option filtering
-    let filtered_options = option_filter(&state.tags, &daemon_state.dhcp.options);
+    // TODO: Implement proper tag-based filtering with correct HashSet<DhcpNetId> types
+    // let filtered_options = option_filter(&client_tags, &context_tags, &option_tags);
+    let _filtered_options = true; // Placeholder - all options included for now
 
     // Add DNS servers (OPTION6_DNS_SERVER = 23)
     if !daemon_state.dns.servers.is_empty() {
-        builder.new_option(23); // OPTION6_DNS_SERVER
+        let dns_server_pos = builder.new_option(23).map_err(DhcpError::from)?; // OPTION6_DNS_SERVER
         for server in &daemon_state.dns.servers {
             if let AllAddr::Ipv6(addr) = server {
                 builder.put_data(&addr.octets());
             }
         }
-        builder.end_option();
+        builder.end_option(dns_server_pos).map_err(DhcpError::from)?;
     }
 
     // Add domain search list (OPTION6_DOMAIN_SEARCH = 24)
     if let Some(domain) = &daemon_state.dns.domain {
-        builder.new_option(24); // OPTION6_DOMAIN_SEARCH
+        let domain_search_pos = builder.new_option(24).map_err(DhcpError::from)?; // OPTION6_DOMAIN_SEARCH
         // Encode domain name in DNS format (length-prefixed labels)
         let domain_encoded = encode_domain_name(domain);
         builder.put_data(&domain_encoded);
-        builder.end_option();
+        builder.end_option(domain_search_pos).map_err(DhcpError::from)?;
     }
 
     debug!("Added configuration options to DHCPv6 reply");
