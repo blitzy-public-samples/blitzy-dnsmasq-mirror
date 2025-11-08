@@ -364,7 +364,7 @@ pub mod state_machine;
 pub use server::{Dhcpv6Server, Dhcpv6ServerConfig};
 
 #[cfg(feature = "dhcp-v6")]
-pub use protocol::{Dhcpv6Message, Dhcpv6MessageType};
+pub use protocol::{Dhcp6Message, Dhcpv6MessageType};
 
 #[cfg(feature = "dhcp-v6")]
 pub use state_machine::{Dhcpv6State, Dhcpv6StateMachine};
