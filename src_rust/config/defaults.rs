@@ -67,7 +67,7 @@
 //! # Usage
 //!
 //! ```
-//! use dnsmasq::config::defaults::default_config;
+//! use dnsmasq::config::defaults::{default_config, default_dns_config, default_dhcp_config};
 //!
 //! // Get complete default configuration
 //! let config = default_config();
