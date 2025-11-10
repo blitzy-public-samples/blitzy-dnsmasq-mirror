@@ -81,7 +81,7 @@ use crate::dhcp::common::find_mac;
 use crate::dhcp::lease::lease_find_by_addr;
 
 #[cfg(feature = "script")]
-use crate::process::helper::queue_tftp;
+use crate::process::helper::{queue_tftp, HelperHandle};
 
 #[cfg(feature = "dump")]
 use crate::utils::dump::PacketDumper;
@@ -416,6 +416,10 @@ pub struct TftpServer {
     /// Logger for operational messages
     logger: Arc<Logger>,
 
+    /// Helper handle for script execution (optional, requires script feature)
+    #[cfg(feature = "script")]
+    helper: Option<Arc<HelperHandle>>,
+
     /// UDP socket for receiving requests (port 69)
     listener: Arc<UdpSocket>,
 
@@ -441,6 +445,7 @@ impl TftpServer {
     /// * `config` - TFTP configuration including root directory and options
     /// * `daemon` - Reference to main daemon for DHCP integration
     /// * `logger` - Logger for operational messages
+    /// * `helper` - Optional helper handle for script execution (requires script feature)
     ///
     /// # Returns
     ///
@@ -456,6 +461,7 @@ impl TftpServer {
         config: TftpConfig,
         daemon: Arc<Daemon>,
         logger: Arc<Logger>,
+        #[cfg(feature = "script")] helper: Option<Arc<HelperHandle>>,
     ) -> Result<Self, TftpError> {
         // Validate TFTP root directory
         if let Some(ref root) = config.tftp_root {
@@ -478,7 +484,7 @@ impl TftpServer {
         }
 
         // Bind TFTP listener socket on port 69
-        let bind_addr = if config.single_port {
+        let bind_addr: SocketAddr = if config.single_port {
             "0.0.0.0:69".parse().unwrap()
         } else {
             // For multi-port mode, still listen on 69 for initial RRQ
@@ -499,6 +505,8 @@ impl TftpServer {
             config,
             daemon,
             logger,
+            #[cfg(feature = "script")]
+            helper,
             listener: Arc::new(listener),
             transfers: Arc::new(RwLock::new(HashMap::new())),
             file_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -571,6 +579,8 @@ impl TftpServer {
             config: self.config.clone(),
             daemon: Arc::clone(&self.daemon),
             logger: Arc::clone(&self.logger),
+            #[cfg(feature = "script")]
+            helper: self.helper.as_ref().map(Arc::clone),
             listener: Arc::clone(&self.listener),
             transfers: Arc::clone(&self.transfers),
             file_cache: Arc::clone(&self.file_cache),
@@ -644,8 +654,8 @@ impl TftpServer {
 
     /// Handle RRQ (Read Request) packet
     async fn handle_rrq(&self, peer: SocketAddr, packet: &[u8]) -> Result<(), TftpError> {
-        let client_str = prettyprint_addr(&peer);
-        info!("RRQ from {}", client_str);
+        let (client_addr, client_port) = prettyprint_addr(&peer);
+        info!("RRQ from {}:{}", client_addr, client_port);
 
         // Parse RRQ packet: opcode | filename | 0 | mode | 0 | [options]
         let mut parts = Vec::new();
@@ -701,7 +711,7 @@ impl TftpServer {
 
         // Sanitize filename - prevent path traversal
         if filename.contains("/../") || filename.starts_with("../") || filename.contains("\\") {
-            warn!("Path traversal attempt from {}: {}", client_str, filename);
+            warn!("Path traversal attempt from {}:{}: {}", client_addr, client_port, filename);
             let err_packet = self.build_error_packet(ERR_PERM, "Access violation")?;
             self.listener.send_to(&err_packet, &peer).await?;
             return Err(TftpError::AccessViolation(filename));
@@ -785,11 +795,31 @@ impl TftpServer {
         // Check if transfer is complete
         if transfer.offset >= transfer.file.size {
             info!("TFTP transfer to {} complete: {} bytes", peer, transfer.file.size);
+            
+            // Save data needed after removal
+            #[cfg(feature = "script")]
+            let transfer_info = if self.helper.is_some() {
+                Some((
+                    transfer.file.filename.clone(),
+                    transfer.file.size,
+                    peer.ip()
+                ))
+            } else {
+                None
+            };
+            
             transfers.remove(&peer);
             
             #[cfg(feature = "script")]
-            if let Err(e) = queue_tftp(&transfer.file.filename, transfer.file.size, peer).await {
-                warn!("Failed to queue TFTP script: {}", e);
+            if let Some(ref helper) = self.helper {
+                if let Some((filename, size, client_ip)) = transfer_info {
+                    let filename_str = filename.to_string_lossy();
+                    
+                    // Queue TFTP script with helper (interface_index 0 = no specific interface)
+                    if let Err(e) = queue_tftp(helper, &filename_str, size, client_ip, 0).await {
+                        warn!("Failed to queue TFTP script: {}", e);
+                    }
+                }
             }
             
             return Ok(());
