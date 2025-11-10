@@ -75,10 +75,11 @@ use crate::core::daemon::Daemon;
 use crate::logging::logger::Logger;
 use crate::utils::general::prettyprint_addr;
 
-#[cfg(feature = "dhcp")]
-use crate::dhcp::common::find_mac;
-#[cfg(feature = "dhcp")]
-use crate::dhcp::lease::lease_find_by_addr;
+// DHCP integration reserved for future TFTP-DHCP coordination features
+// #[cfg(feature = "dhcp")]
+// use crate::dhcp::common::find_mac;
+// #[cfg(feature = "dhcp")]
+// use crate::dhcp::lease::lease_find_by_addr;
 
 #[cfg(feature = "script")]
 use crate::process::helper::{queue_tftp, HelperHandle};
@@ -97,12 +98,12 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{sleep, timeout, Instant};
+use tokio::time::{sleep, Instant};
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
-use nix::sys::stat::{fstat, stat, Mode};
-use nix::unistd::{access, geteuid, getuid, AccessFlags};
+use nix::sys::stat::{stat, Mode};
+use nix::unistd::{access, geteuid, AccessFlags};
 
 /// TFTP protocol opcode constants (RFC 1350 Section 5)
 const OP_RRQ: u16 = 1; // Read Request
@@ -116,10 +117,14 @@ const OP_OACK: u16 = 6; // Option Acknowledgment (RFC 2347)
 const ERR_NOTDEF: u16 = 0; // Not defined
 const ERR_FNF: u16 = 1; // File not found
 const ERR_PERM: u16 = 2; // Access violation
+#[allow(dead_code)]
 const ERR_FULL: u16 = 3; // Disk full
 const ERR_ILL: u16 = 4; // Illegal TFTP operation
+#[allow(dead_code)]
 const ERR_TID: u16 = 5; // Unknown transfer ID
+#[allow(dead_code)]
 const ERR_EXISTS: u16 = 6; // File already exists
+#[allow(dead_code)]
 const ERR_NOUSER: u16 = 7; // No such user
 
 /// Default TFTP block size (RFC 1350)
@@ -198,6 +203,7 @@ impl From<IoError> for TftpError {
 
 impl TftpError {
     /// Convert error to TFTP error code
+    #[allow(dead_code)]
     fn to_error_code(&self) -> u16 {
         match self {
             TftpError::FileNotFound(_) => ERR_FNF,
@@ -295,12 +301,15 @@ impl TftpFile {
 #[derive(Debug)]
 struct TftpTransfer {
     /// Client socket address (peer)
+    #[allow(dead_code)]
     peer: SocketAddr,
 
     /// Server interface address
+    #[allow(dead_code)]
     source: IpAddr,
 
     /// Interface index for multi-homed servers
+    #[allow(dead_code)]
     if_index: Option<u32>,
 
     /// Current block number (starts at 1)
@@ -325,6 +334,7 @@ struct TftpTransfer {
     opt_blocksize: Option<usize>,
 
     /// Client requested transfer size option
+    #[allow(dead_code)]
     opt_transize: bool,
 
     /// Netascii mode (CR-LF translation)
