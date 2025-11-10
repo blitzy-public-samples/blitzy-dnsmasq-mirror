@@ -912,9 +912,12 @@ impl IntegrationManagerBuilder {
     }
 
     /// No-op when ubus or prometheus-metrics feature is disabled
+    ///
+    /// This variant accepts a generic parameter to avoid referencing types that
+    /// don't exist when prometheus-metrics feature is disabled.
     #[cfg(not(all(feature = "ubus", feature = "prometheus-metrics")))]
     #[must_use]
-    pub fn with_metrics(self, _metrics: Arc<crate::monitoring::metrics::MetricsCollector>) -> Self {
+    pub fn with_metrics<T>(self, _metrics: Arc<T>) -> Self {
         self
     }
 
