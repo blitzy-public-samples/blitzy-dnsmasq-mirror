@@ -80,9 +80,9 @@
 //! enabling safe concurrent access without violating Rust's borrowing rules:
 //!
 //! - `get_config()` - Immutable configuration (read-only)
-//! - `get_cache()` - DNS cache with RwLock for concurrent reads
+//! - `get_cache()` - DNS cache with `RwLock` for concurrent reads
 //! - `get_lease_manager()` - DHCP lease database with Mutex for exclusive writes
-//! - `get_servers()` - Upstream server list (Vec of Arc<RwLock<Server>>)
+//! - `get_servers()` - Upstream server list (Vec of Arc<`RwLock`<Server>>)
 //! - `get_udp_listeners()` - UDP listener sockets
 //! - `get_tcp_listeners()` - TCP listener sockets
 //!
@@ -90,12 +90,12 @@
 //!
 //! Optional subsystems are compiled conditionally via cfg attributes matching C's HAVE_* macros:
 //!
-//! - `#[cfg(feature = "dhcp")]` - DHCPv4 support (struct dhcp_context, etc.)
-//! - `#[cfg(feature = "dhcp6")]` - DHCPv6 support (struct ra_interface, etc.)
-//! - `#[cfg(feature = "dnssec")]` - DNSSEC validation (timestamp_file, ds_config)
-//! - `#[cfg(feature = "tftp")]` - TFTP server (tftp_trans, tftp_prefix)
+//! - `#[cfg(feature = "dhcp")]` - `DHCPv4` support (struct `dhcp_context`, etc.)
+//! - `#[cfg(feature = "dhcp6")]` - `DHCPv6` support (struct `ra_interface`, etc.)
+//! - `#[cfg(feature = "dnssec")]` - DNSSEC validation (`timestamp_file`, `ds_config`)
+//! - `#[cfg(feature = "tftp")]` - TFTP server (`tftp_trans`, `tftp_prefix`)
 //! - `#[cfg(feature = "dbus")]` - D-Bus control interface
-//! - `#[cfg(feature = "ubus")]` - OpenWrt ubus integration
+//! - `#[cfg(feature = "ubus")]` - `OpenWrt` ubus integration
 //!
 //! # Original C Mapping
 //!
@@ -135,7 +135,7 @@ use crate::dhcp::lease::LeaseManager;
 ///
 /// - **Config**: `Arc<Config>` - Immutable after initialization, no lock needed
 /// - **Cache**: `Arc<Mutex<Cache>>` - Mutable DNS cache with exclusive access
-/// - **LeaseManager**: `Arc<Mutex<LeaseManager>>` - Mutable DHCP lease database
+/// - **`LeaseManager`**: `Arc<Mutex<LeaseManager>>` - Mutable DHCP lease database
 /// - **Servers**: `Vec<Arc<RwLock<Server>>>` - Server list with concurrent health updates
 /// - **Listeners**: `Vec<Arc<UdpSocket>>` - Immutable socket list (opened at startup)
 /// - **TCP Listeners**: `Vec<Arc<TcpListener>>` - Immutable TCP listeners
@@ -199,11 +199,11 @@ pub struct Daemon {
     ///
     /// Original C fields:
     /// - `daemon->servers` (struct server *servers)
-    /// - `daemon->servers_tail` (struct server *servers_tail)
-    /// - `daemon->local_domains` (struct server *local_domains)
+    /// - `daemon->servers_tail` (struct server *`servers_tail`)
+    /// - `daemon->local_domains` (struct server *`local_domains`)
     /// - `daemon->serverarray` (struct server **serverarray)
     ///
-    /// Synchronization: Vec with Arc<RwLock<Server>> allows concurrent reads
+    /// Synchronization: Vec with Arc<`RwLock`<Server>> allows concurrent reads
     /// Access: `get_servers()` returns cloned Vec for iteration
     servers: Vec<Arc<RwLock<UpstreamServer>>>,
 
@@ -214,10 +214,10 @@ pub struct Daemon {
     /// DHCP lease manager with persistence
     ///
     /// Original C fields:
-    /// - `daemon->dhcp_conf` (struct dhcp_config *dhcp_conf)
-    /// - `daemon->lease_file` (char *lease_file)
-    /// - `daemon->lease_stream` (FILE *lease_stream)
-    /// - `daemon->lease_change_command` (char *lease_change_command)
+    /// - `daemon->dhcp_conf` (struct `dhcp_config` *`dhcp_conf`)
+    /// - `daemon->lease_file` (char *`lease_file`)
+    /// - `daemon->lease_stream` (FILE *`lease_stream`)
+    /// - `daemon->lease_change_command` (char *`lease_change_command`)
     /// - Implicit lease linked list managed in lease.c
     ///
     /// Synchronization: Mutex for exclusive access during lease allocations
@@ -233,7 +233,7 @@ pub struct Daemon {
     ///
     /// Original C fields:
     /// - `daemon->interfaces` (struct irec *interfaces)
-    /// - `daemon->interface_addrs` (struct addrlist *interface_addrs)
+    /// - `daemon->interface_addrs` (struct addrlist *`interface_addrs`)
     ///
     /// Synchronization: Immutable after initialization (interfaces don't change at runtime)
     /// Access: Direct read access via `get_interfaces()`
@@ -266,7 +266,7 @@ pub struct Daemon {
     ///
     /// Original C fields:
     /// - `daemon->packet` (char *packet)
-    /// - `daemon->packet_buff_sz` (int packet_buff_sz)
+    /// - `daemon->packet_buff_sz` (int `packet_buff_sz`)
     ///
     /// Rust: Vec<u8> with automatic growth, no buffer overflow possible
     /// Synchronization: Per-task buffers avoid shared mutable state
@@ -276,8 +276,8 @@ pub struct Daemon {
     /// Transaction logging state
     ///
     /// Original C fields:
-    /// - `daemon->log_id` (int log_id)
-    /// - `daemon->log_display_id` (int log_display_id)
+    /// - `daemon->log_id` (int `log_id`)
+    /// - `daemon->log_display_id` (int `log_display_id`)
     ///
     /// Synchronization: Atomic increments in logging module
     #[allow(dead_code)]
@@ -340,11 +340,11 @@ pub struct Interface {
     pub mtu: u32,
 
     /// Interface is up/active
-    /// Original C field: flags check (IFF_UP)
+    /// Original C field: flags check (`IFF_UP`)
     pub is_up: bool,
 
     /// Interface is multicast-capable
-    /// Original C field: flags check (IFF_MULTICAST)
+    /// Original C field: flags check (`IFF_MULTICAST`)
     pub is_multicast: bool,
 }
 
@@ -384,6 +384,7 @@ impl Daemon {
     /// );
     /// ```
     #[allow(clippy::too_many_arguments)]
+    #[must_use] 
     pub fn new(
         config: Config,
         cache: Cache,
@@ -411,7 +412,7 @@ impl Daemon {
         }
     }
 
-    /// Create a new DaemonBuilder for gradual construction
+    /// Create a new `DaemonBuilder` for gradual construction
     ///
     /// # Examples
     ///
@@ -483,12 +484,12 @@ impl Daemon {
     #[cfg(feature = "dhcp")]
     #[must_use]
     pub fn get_lease_manager(&self) -> Option<Arc<Mutex<LeaseManager>>> {
-        self.lease_manager.as_ref().map(|lm| Arc::clone(lm))
+        self.lease_manager.as_ref().map(Arc::clone)
     }
 
     /// Get upstream DNS server list
     ///
-    /// Returns a cloned Vec of Arc<RwLock<Server>> for safe concurrent iteration.
+    /// Returns a cloned Vec of Arc<`RwLock`<Server>> for safe concurrent iteration.
     /// Each server can be independently locked for health updates.
     ///
     /// # Examples
@@ -606,7 +607,7 @@ pub struct DaemonBuilder {
 }
 
 impl DaemonBuilder {
-    /// Create a new DaemonBuilder with all fields unset
+    /// Create a new `DaemonBuilder` with all fields unset
     ///
     /// # Examples
     ///

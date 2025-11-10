@@ -221,11 +221,11 @@ pub fn indextoname(index: u32) -> IoResult<String> {
     if_indextoname(index)
         .map_err(|e| {
             warn!("Failed to convert interface index {} to name: {}", index, e);
-            IoError::new(ErrorKind::NotFound, format!("Interface index {} not found", index))
+            IoError::new(ErrorKind::NotFound, format!("Interface index {index} not found"))
         })
         .and_then(|cstring| {
             cstring.into_string().map_err(|e| {
-                IoError::new(ErrorKind::InvalidData, format!("Interface name contains invalid UTF-8: {:?}", e))
+                IoError::new(ErrorKind::InvalidData, format!("Interface name contains invalid UTF-8: {e:?}"))
             })
         })
 }
@@ -392,7 +392,7 @@ async fn create_socket_internal(
                     fd,
                     libc::IPPROTO_TCP,
                     TCP_FASTOPEN,
-                    &FASTOPEN_QLEN as *const _ as *const libc::c_void,
+                    std::ptr::from_ref(&FASTOPEN_QLEN).cast::<libc::c_void>(),
                     std::mem::size_of::<i32>() as libc::socklen_t,
                 );
                 
@@ -425,12 +425,12 @@ async fn create_socket_internal(
 /// # Platform Implementation
 ///
 /// **Linux**:
-/// - IPv4: `IP_PKTINFO` - Provides in_pktinfo with destination address and ifindex
-/// - IPv6: `IPV6_RECVPKTINFO` or `IPV6_PKTINFO` - Provides in6_pktinfo
+/// - IPv4: `IP_PKTINFO` - Provides `in_pktinfo` with destination address and ifindex
+/// - IPv6: `IPV6_RECVPKTINFO` or `IPV6_PKTINFO` - Provides `in6_pktinfo`
 ///
 /// **BSD (FreeBSD, OpenBSD, NetBSD, macOS)**:
 /// - IPv4: `IP_RECVDSTADDR` + `IP_RECVIF` - Separate options for address and interface
-/// - IPv6: `IPV6_PKTINFO` or `IPV6_RECVPKTINFO` - Provides in6_pktinfo
+/// - IPv6: `IPV6_PKTINFO` or `IPV6_RECVPKTINFO` - Provides `in6_pktinfo`
 ///
 /// **Solaris**:
 /// - Similar to BSD with platform-specific option constants
@@ -478,7 +478,7 @@ fn configure_packet_info(socket: &Socket, addr: &SocketAddr) -> IoResult<()> {
                         fd,
                         libc::IPPROTO_IP,
                         libc::IP_PKTINFO,
-                        &opt_value as *const _ as *const libc::c_void,
+                        (&raw const opt_value).cast::<libc::c_void>(),
                         std::mem::size_of::<i32>() as libc::socklen_t,
                     )
                 };
@@ -549,7 +549,7 @@ fn configure_packet_info(socket: &Socket, addr: &SocketAddr) -> IoResult<()> {
                         fd,
                         libc::IPPROTO_IPV6,
                         libc::IPV6_RECVPKTINFO,
-                        &opt_value as *const _ as *const libc::c_void,
+                        (&raw const opt_value).cast::<libc::c_void>(),
                         std::mem::size_of::<i32>() as libc::socklen_t,
                     )
                 };
@@ -561,7 +561,7 @@ fn configure_packet_info(socket: &Socket, addr: &SocketAddr) -> IoResult<()> {
                             fd,
                             libc::IPPROTO_IPV6,
                             libc::IPV6_PKTINFO,
-                            &opt_value as *const _ as *const libc::c_void,
+                            (&raw const opt_value).cast::<libc::c_void>(),
                             std::mem::size_of::<i32>() as libc::socklen_t,
                         )
                     };
@@ -615,7 +615,7 @@ fn configure_packet_info(socket: &Socket, addr: &SocketAddr) -> IoResult<()> {
 /// Create a UDP socket bound to the specified address
 ///
 /// Public wrapper around `create_socket_internal` for UDP socket creation.
-/// Converts socket2::Socket to tokio::net::UdpSocket for async I/O operations.
+/// Converts `socket2::Socket` to `tokio::net::UdpSocket` for async I/O operations.
 ///
 /// # Arguments
 ///
@@ -663,7 +663,7 @@ pub async fn create_socket(addr: SocketAddr, is_tcp: bool) -> IoResult<Arc<UdpSo
 /// Create a TCP listener bound to the specified address
 ///
 /// Public function for TCP listener creation with full option configuration.
-/// Converts socket2::Socket to tokio::net::TcpListener for async accept operations.
+/// Converts `socket2::Socket` to `tokio::net::TcpListener` for async accept operations.
 ///
 /// # Arguments
 ///
@@ -710,8 +710,8 @@ async fn create_tcp_socket(addr: SocketAddr) -> IoResult<Arc<TcpListener>> {
 ///
 /// # Arguments
 ///
-/// * `family` - Address family (AF_INET for IPv4, AF_INET6 for IPv6)
-/// * `port_range` - Optional (min_port, max_port) tuple for port range restriction
+/// * `family` - Address family (`AF_INET` for IPv4, `AF_INET6` for IPv6)
+/// * `port_range` - Optional (`min_port`, `max_port`) tuple for port range restriction
 ///
 /// # Returns
 ///
@@ -816,7 +816,7 @@ pub async fn random_sock(
 ///
 /// **`bind_interfaces` (false - default)**:
 /// - Creates wildcard listeners on 0.0.0.0:port and [::]:port
-/// - Uses IP_PKTINFO to determine receiving interface
+/// - Uses `IP_PKTINFO` to determine receiving interface
 /// - Most flexible, works with dynamic interfaces
 ///
 /// **`bind_interfaces` (true)**:

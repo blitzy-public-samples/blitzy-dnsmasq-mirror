@@ -147,16 +147,16 @@ impl fmt::Display for RRFilterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RRFilterError::InvalidLength { expected, actual } => {
-                write!(f, "Invalid packet length: expected {}, got {}", expected, actual)
+                write!(f, "Invalid packet length: expected {expected}, got {actual}")
             }
             RRFilterError::InvalidCompressionPointer { offset } => {
-                write!(f, "Invalid compression pointer at offset {}", offset)
+                write!(f, "Invalid compression pointer at offset {offset}")
             }
             RRFilterError::PointerIntoRemovedSection { offset } => {
-                write!(f, "Compression pointer at {} points into removed section", offset)
+                write!(f, "Compression pointer at {offset} points into removed section")
             }
             RRFilterError::InvalidLabelType { label_type } => {
-                write!(f, "Invalid label type: 0x{:02X}", label_type)
+                write!(f, "Invalid label type: 0x{label_type:02X}")
             }
             RRFilterError::WorkspaceLimit => {
                 write!(f, "Workspace expansion limit exceeded")
@@ -405,7 +405,7 @@ fn check_rrs(
                 let desc = rrfilter_desc(rr_type);
                 let mut rdata_pos = pos;
                 
-                for &desc_val in desc.iter() {
+                for &desc_val in desc {
                     if desc_val == DESC_END {
                         break;
                     }
@@ -453,7 +453,7 @@ fn check_rrs(
 ///
 /// # Arguments
 ///
-/// * `rr_type` - DNS RR type (T_NS, T_CNAME, T_MX, T_SOA, etc.)
+/// * `rr_type` - DNS RR type (`T_NS`, `T_CNAME`, `T_MX`, `T_SOA`, etc.)
 ///
 /// # Returns
 ///
@@ -475,6 +475,7 @@ fn check_rrs(
 /// - RFC 2535 Section 4.1 (SIG record)
 /// - RFC 2782 (SRV record)
 /// - RFC 2672 (DNAME record)
+#[must_use] 
 pub fn rrfilter_desc(rr_type: u16) -> &'static [u16] {
     // Descriptor array: type identifier followed by RDATA structure descriptor
     // 0 = domain name, N>0 = skip N bytes, 0xFFFF = end
@@ -521,7 +522,7 @@ pub fn rrfilter_desc(rr_type: u16) -> &'static [u16] {
 /// # Arguments
 ///
 /// * `packet` - Mutable DNS packet bytes (modified in-place on success)
-/// * `mode` - Filter mode (RRFILTER_EDNS0, RRFILTER_DNSSEC, RRFILTER_A, RRFILTER_AAAA)
+/// * `mode` - Filter mode (`RRFILTER_EDNS0`, `RRFILTER_DNSSEC`, `RRFILTER_A`, `RRFILTER_AAAA`)
 ///
 /// # Returns
 ///
@@ -536,7 +537,7 @@ pub fn rrfilter_desc(rr_type: u16) -> &'static [u16] {
 ///
 /// # Filter Modes
 ///
-/// - `RRFILTER_EDNS0`: Remove T_OPT from additional section only
+/// - `RRFILTER_EDNS0`: Remove `T_OPT` from additional section only
 /// - `RRFILTER_DNSSEC`: Remove RRSIG/NSEC/NSEC3 (except when explicitly queried)
 /// - `RRFILTER_A`: Remove A records from answer section
 /// - `RRFILTER_AAAA`: Remove AAAA records from answer section
@@ -737,16 +738,14 @@ pub fn rrfilter(packet: &mut [u8], mode: i32) -> Result<usize, RRFilterError> {
     pos = 12;
     
     // Validate question name
-    pos = check_name(packet, pos, false, &rrs).map_err(|e| {
+    pos = check_name(packet, pos, false, &rrs).inspect_err(|e| {
         debug!("Validation failed in question name, returning original packet");
-        e
     })?;
     pos += 4; // Skip qtype, qclass
     
     // Validate RRs
-    check_rrs(packet, pos, total_rrs, false, &rrs).map_err(|e| {
+    check_rrs(packet, pos, total_rrs, false, &rrs).inspect_err(|e| {
         debug!("Validation failed in RRs, returning original packet");
-        e
     })?;
     
     debug!("Pass 2 complete: All compression pointers valid");

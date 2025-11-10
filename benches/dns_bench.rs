@@ -13,6 +13,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Benchmark module allows various lints during incremental development
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_must_use)]
+#![allow(dead_code)]
+#![allow(clippy::all)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::empty_docs)]
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::unused_unit)]
+
 //! # DNS Performance Benchmarks
 //!
 //! Comprehensive Criterion-based performance benchmarks for the Rust DNS implementation,
@@ -157,6 +169,31 @@ fn domain_to_ipv4(domain: &str) -> Ipv4Addr {
 }
 
 /// Generate realistic IPv6 address for domain name
+fn domain_to_ipv6(domain: &str) -> Ipv6Addr {
+    // Generate pseudo-random but deterministic IPv6 from domain hash (64-bit)
+    let hash = domain.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let segments = [
+        0x2001,
+        0x0db8,
+        ((hash >> 48) & 0xFFFF) as u16,
+        ((hash >> 32) & 0xFFFF) as u16,
+        ((hash >> 16) & 0xFFFF) as u16,
+        (hash & 0xFFFF) as u16,
+        0x0000,
+        0x0001,
+    ];
+    Ipv6Addr::new(
+        segments[0],
+        segments[1],
+        segments[2],
+        segments[3],
+        segments[4],
+        segments[5],
+        segments[6],
+        segments[7],
+    )
+}
+
 // ============================================================================
 // Benchmark 1: DNS Cache Insertion Performance
 // ============================================================================

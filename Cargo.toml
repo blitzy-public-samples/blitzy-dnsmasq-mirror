@@ -398,6 +398,17 @@ dhcp = []
 # dhcp6: DHCPv6 server implementation (from HAVE_DHCP6, implies HAVE_DHCP)
 dhcp6 = ["dhcp"]
 
+# pxe: PXE (Pre-boot Execution Environment) boot support
+# - Provides PXE-specific DHCP option handling
+# - Architecture detection and boot file selection
+# - Proxy DHCP mode for network booting
+pxe = ["dhcp"]
+
+# rapid-commit: RFC 4039 rapid commit support for DHCPv4
+# - Enables 2-message DHCP exchange (DISCOVER -> ACK)
+# - Reduces lease allocation time
+rapid-commit = ["dhcp"]
+
 # tftp: TFTP server implementation (from HAVE_TFTP)
 tftp = []
 

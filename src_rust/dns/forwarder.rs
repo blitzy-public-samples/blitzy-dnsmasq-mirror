@@ -91,52 +91,32 @@
 //! ```
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use bytes::BytesMut;
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::select;
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
 
 // Internal module imports - ALL from depends_on_files
-use crate::config::types::{Config, DaemonOptions, DnsConfig, NetworkConfig};
+use crate::config::types::Config;
 use crate::dns::cache::Cache;
-use crate::dns::cache_types::CacheRecord;
 // Note: dns::domain imports removed as they are not used in this file
-use crate::dns::edns0::{
-    add_do_bit, add_edns0_config, add_pseudoheader, check_source, find_pseudoheader,
-};
-use crate::dns::protocol::EDNS0_OPTION_CLIENT_SUBNET;
 use crate::dns::hash::{hash_questions, SHA256_DIGEST_SIZE};
-use crate::dns::parser::{extract_addresses, extract_name, extract_request, skip_name, skip_questions, skip_section, ParseError};
-use crate::dns::pattern::{
-    add_update_server, build_server_array, cleanup_servers, dnssec_server, filter_servers,
-    is_local_answer, lookup_domain, make_local_answer, mark_servers, server_samegroup,
-};
-use crate::dns::protocol::{
-    C_IN, FORMERR, HB3_AA, HB3_QR, HB3_TC, HB4_AD, HB4_CD, HB4_RA, MAXDNAME, NAMESERVER_PORT,
-    NOERROR, NXDOMAIN, PACKETSZ, REFUSED, SERVFAIL, T_A, T_AAAA, T_ANY, T_CNAME, T_MX, T_NS,
-    T_OPT, T_PTR, T_SOA, T_SRV, T_TXT,
-};
-use crate::dns::rrfilter::{rrfilter, RRFILTER_EDNS0};
+use crate::dns::parser::{extract_request, ParseError};
 use crate::dns::serializer::{
-    add_resource_record, read_u16, setup_reply, write_u16, write_u32, DnsPacketBuilder,
+    read_u16,
     SerializationError,
 };
 use crate::dns::upstream::{
-    check_servers, DomainPattern, ServerFlags, ServerHealth, UpstreamPool, UpstreamServer,
-    FORWARD_TEST, FORWARD_TIME, SERV_FROM_DBUS,
+    UpstreamPool, UpstreamServer, ServerFlags,
 };
-use crate::logging::logger::{log_query, LogLevel, Logger};
-use crate::network::sockets::{
-    create_bound_listeners, create_socket, indextoname, random_sock, TcpListener,
-};
-use crate::utils::rand::{rand16, rand32, rand64};
+use crate::logging::logger::Logger;
+use crate::network::sockets::create_socket;
+use crate::utils::rand::rand16;
 
 // ============================================================================
 // Constants
@@ -170,9 +150,23 @@ const MAX_RANDOM_PORT: u16 = 65535;
 
 /// Unique transaction identifier combining query ID and socket info
 ///
-/// Used as HashMap key for O(1) forward record lookup, replacing C's
+/// Used as `HashMap` key for O(1) forward record lookup, replacing C's
 /// manual hash table traversal.
 pub type TransactionId = u64;
+
+/// Query deduplication key
+///
+/// Identifies identical queries by domain name, query type, and query class.
+/// Used to coalesce concurrent identical queries to prevent duplicate upstream requests.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct QueryKey {
+    /// Domain name being queried (normalized to lowercase)
+    domain: String,
+    /// Query type (A, AAAA, MX, etc.)
+    qtype: u16,
+    /// Query class (typically IN=1)
+    qclass: u16,
+}
 
 // ============================================================================
 // Forward Flags
@@ -221,7 +215,7 @@ bitflags::bitflags! {
 ///
 /// # Memory Safety
 ///
-/// - No raw pointers: uses SocketAddr instead of union mysockaddr
+/// - No raw pointers: uses `SocketAddr` instead of union mysockaddr
 /// - Automatic cleanup: Drop trait ensures no resource leaks
 /// - Type safety: enums replace C's flag-based discrimination
 #[derive(Debug, Clone)]
@@ -262,16 +256,19 @@ pub struct ForwardRecord {
 
 impl ForwardRecord {
     /// Check if this is a DNSSEC validation query
+    #[must_use] 
     pub fn is_dnssec(&self) -> bool {
         self.flags.contains(ForwardFlags::DNSSEC_QUERY)
     }
 
     /// Check if this query is using TCP transport
+    #[must_use] 
     pub fn is_tcp(&self) -> bool {
         self.tcp_stream.is_some()
     }
 
     /// Check if this query has expired based on timeout
+    #[must_use] 
     pub fn is_expired(&self, timeout: Duration) -> bool {
         self.sent_time.elapsed() > timeout
     }
@@ -320,10 +317,10 @@ impl std::fmt::Display for ForwardError {
             ForwardError::ServerUnavailable => write!(f, "No upstream servers available"),
             ForwardError::PacketTooLarge => write!(f, "Packet too large"),
             ForwardError::InvalidResponse => write!(f, "Invalid response from upstream"),
-            ForwardError::NetworkError(msg) => write!(f, "Network error: {}", msg),
-            ForwardError::CacheError(msg) => write!(f, "Cache error: {}", msg),
-            ForwardError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            ForwardError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            ForwardError::NetworkError(msg) => write!(f, "Network error: {msg}"),
+            ForwardError::CacheError(msg) => write!(f, "Cache error: {msg}"),
+            ForwardError::ParseError(msg) => write!(f, "Parse error: {msg}"),
+            ForwardError::SerializationError(msg) => write!(f, "Serialization error: {msg}"),
         }
     }
 }
@@ -338,13 +335,13 @@ impl From<std::io::Error> for ForwardError {
 
 impl From<ParseError> for ForwardError {
     fn from(err: ParseError) -> Self {
-        ForwardError::ParseError(format!("{:?}", err))
+        ForwardError::ParseError(format!("{err:?}"))
     }
 }
 
 impl From<SerializationError> for ForwardError {
     fn from(err: SerializationError) -> Self {
-        ForwardError::SerializationError(format!("{:?}", err))
+        ForwardError::SerializationError(format!("{err:?}"))
     }
 }
 
@@ -360,7 +357,7 @@ impl From<SerializationError> for ForwardError {
 ///
 /// # Architecture
 ///
-/// - **Transaction Tracking**: HashMap for O(1) forward record lookup
+/// - **Transaction Tracking**: `HashMap` for O(1) forward record lookup
 /// - **Async I/O**: tokio sockets for non-blocking network operations
 /// - **Concurrent Queries**: Multiple queries in flight via tokio tasks
 /// - **Cache Integration**: Check cache before forwarding, insert on response
@@ -388,6 +385,44 @@ pub struct Forwarder {
 
     /// Default UDP socket for sending queries
     default_udp_socket: Arc<UdpSocket>,
+
+    /// Statistics tracking
+    stats: Arc<Mutex<ForwarderStats>>,
+
+    /// In-flight query deduplication map
+    /// 
+    /// Maps query keys (domain, qtype, qclass) to broadcast channels that will
+    /// send the response to all waiting clients. This prevents duplicate upstream
+    /// queries when multiple clients request the same record simultaneously.
+    inflight_queries: Arc<Mutex<HashMap<QueryKey, broadcast::Sender<Result<Vec<u8>, ForwardError>>>>>,
+
+    /// Response routing map
+    /// 
+    /// Maps transaction IDs to oneshot channels that deliver responses to waiting queries.
+    /// This prevents the "thundering herd" problem where multiple concurrent queries
+    /// all try to receive from the same socket and responses get consumed by the wrong task.
+    response_channels: Arc<Mutex<HashMap<TransactionId, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
+}
+
+/// Statistics for forwarder operations
+#[derive(Debug, Clone, Default)]
+struct ForwarderStats {
+    /// Total queries received
+    total_queries: u64,
+    /// Total queries sent to upstream servers
+    upstream_queries: u64,
+    /// Total retries attempted
+    retries: u64,
+    /// Total timeouts
+    timeouts: u64,
+    /// Total cache hits
+    cache_hits: u64,
+    /// Total cache misses
+    cache_misses: u64,
+    /// Total successful forwards
+    successful_forwards: u64,
+    /// Total failed forwards
+    failed_forwards: u64,
 }
 
 impl Forwarder {
@@ -411,19 +446,94 @@ impl Forwarder {
     ) -> Result<Self, ForwardError> {
         // Create default UDP socket for queries (bind to any interface, ephemeral port)
         let bind_addr: SocketAddr = "0.0.0.0:0".parse()
-            .map_err(|e| ForwardError::NetworkError(format!("Invalid bind address: {}", e)))?;
+            .map_err(|e| ForwardError::NetworkError(format!("Invalid bind address: {e}")))?;
         let default_udp_socket = create_socket(bind_addr, false)
             .await
-            .map_err(|e| ForwardError::NetworkError(format!("Failed to create UDP socket: {}", e)))?;
+            .map_err(|e| ForwardError::NetworkError(format!("Failed to create UDP socket: {e}")))?;
 
-        Ok(Self {
+        let forwarder = Self {
             cache,
             upstream_manager,
             forward_records: Arc::new(Mutex::new(HashMap::new())),
             config,
             logger,
-            default_udp_socket,
-        })
+            default_udp_socket: Arc::clone(&default_udp_socket),
+            stats: Arc::new(Mutex::new(ForwarderStats::default())),
+            inflight_queries: Arc::new(Mutex::new(HashMap::new())),
+            response_channels: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        // Spawn background task to receive and dispatch responses
+        forwarder.spawn_response_dispatcher();
+
+        Ok(forwarder)
+    }
+
+    /// Spawn a background task to continuously receive DNS responses and route them
+    /// to the correct waiting query.
+    ///
+    /// This solves the "thundering herd" problem where multiple concurrent queries
+    /// would all call recv_from() on the same socket, causing responses to be
+    /// consumed by the wrong task.
+    fn spawn_response_dispatcher(&self) {
+        let socket = Arc::clone(&self.default_udp_socket);
+        let response_channels = Arc::clone(&self.response_channels);
+        let forward_records = Arc::clone(&self.forward_records);
+
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 4096];
+
+            loop {
+                // Receive a response from any upstream server
+                let result = socket.recv_from(&mut buf).await;
+                
+                let (len, _src_addr) = match result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!("Error receiving DNS response: {}", e);
+                        continue;
+                    }
+                };
+
+                let response_packet = &buf[..len];
+
+                // Extract response query ID
+                if response_packet.len() < 12 {
+                    warn!("Received packet too short for DNS header");
+                    continue;
+                }
+
+                let response_id = match read_u16(response_packet) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        warn!("Failed to read response ID: {:?}", e);
+                        continue;
+                    }
+                };
+
+                // Look up which forward record this response is for
+                let transaction_id_opt = {
+                    let records = forward_records.lock().await;
+                    records.iter()
+                        .find(|(_, frec)| frec.new_query_id == response_id)
+                        .map(|(tid, _)| *tid)
+                };
+
+                if let Some(transaction_id) = transaction_id_opt {
+                    // Find the channel for this transaction and send the response
+                    let mut channels = response_channels.lock().await;
+                    if let Some(tx) = channels.remove(&transaction_id) {
+                        // Send response to the waiting task
+                        let _ = tx.send(response_packet.to_vec());
+                    } else {
+                        trace!(response_id = response_id, transaction_id = %transaction_id, 
+                               "Received response but no waiting channel found");
+                    }
+                } else {
+                    trace!(response_id = response_id, "Received response for unknown query");
+                }
+            }
+        });
     }
 
     /// Main entry point for DNS query reception from network layer
@@ -455,7 +565,7 @@ impl Forwarder {
     ) -> Result<Vec<u8>, ForwardError> {
         // Parse query to extract name, type, and class
         let (query_name, query_type, query_class) =
-            extract_request(packet).map_err(|e| ForwardError::ParseError(format!("Failed to parse query: {:?}", e)))?;
+            extract_request(packet).map_err(|e| ForwardError::ParseError(format!("Failed to parse query: {e:?}")))?;
 
         debug!(
             query_name = %query_name,
@@ -467,13 +577,25 @@ impl Forwarder {
 
         // Check cache first
         if self.config.dns.cache_size > 0 {
-            let cache_guard = self.cache.read().map_err(|_| ForwardError::CacheError("Failed to acquire cache read lock".to_string()))?;
+            let mut cache_guard = self.cache.write().map_err(|_| ForwardError::CacheError("Failed to acquire cache write lock".to_string()))?;
             
-            // TODO: Implement cache lookup
-            // if let Some(cached_response) = cache_guard.lookup(&query_name, query_type) {
-            //     debug!(query_name = %query_name, "Cache hit");
-            //     return self.build_response_from_cache(packet, cached_response);
-            // }
+            if let Some(_cached_record) = cache_guard.lookup(&query_name, query_type, query_class) {
+                debug!(query_name = %query_name, "Cache hit");
+                
+                // Update cache hit statistics
+                {
+                    let mut stats = self.stats.lock().await;
+                    stats.cache_hits += 1;
+                }
+                
+                // For now, we don't build responses from cache - just fall through to forward
+                // This maintains current behavior while tracking the stat
+                // A full implementation would call build_response_from_cache here
+            } else {
+                // Update cache miss statistics
+                let mut stats = self.stats.lock().await;
+                stats.cache_misses += 1;
+            }
         }
 
         debug!(query_name = %query_name, "Cache miss, forwarding to upstream");
@@ -502,94 +624,224 @@ impl Forwarder {
         source_addr: SocketAddr,
         dest_addr: SocketAddr,
     ) -> Result<Vec<u8>, ForwardError> {
+        // Update total queries stat
+        {
+            let mut stats = self.stats.lock().await;
+            stats.total_queries += 1;
+        }
+
         // Extract original query ID
         if packet.len() < 12 {
             return Err(ForwardError::ParseError("Packet too short for DNS header".to_string()));
         }
         let orig_query_id = read_u16(packet)?;
 
-        // Parse query for server selection
-        let (query_name, query_type, _query_class) =
+        // Parse query for server selection and deduplication
+        let (query_name, query_type, query_class) =
             extract_request(packet)?;
 
-        // Select upstream server
-        let upstream_manager = self.upstream_manager.read()
-            .map_err(|_| ForwardError::ServerUnavailable)?;
-        
-        let server = upstream_manager.select_server(Some(&query_name))
-            .ok_or(ForwardError::ServerUnavailable)?;
-
-        // Generate random query ID (RFC 5452)
-        let new_query_id = self.get_id();
-
-        // Compute query hash for response validation
-        let query_hash = self.compute_query_hash(packet)?;
-
-        // Create forward record
-        let frec = ForwardRecord {
-            new_query_id,
-            orig_query_id,
-            source_addr,
-            dest_addr,
-            upstream_server: Some(Arc::clone(&server)),
-            sent_time: Instant::now(),
-            query_hash,
-            flags: ForwardFlags::NEW_QUERY,
-            retry_count: 0,
-            udp_fd: Some(Arc::clone(&self.default_udp_socket)),
-            tcp_stream: None,
+        // Create deduplication key
+        let query_key = QueryKey {
+            domain: query_name.to_lowercase(),
+            qtype: query_type,
+            qclass: query_class,
         };
 
-        // Generate transaction ID for tracking
-        let transaction_id = self.generate_transaction_id(new_query_id, source_addr);
-
-        // Store forward record
+        // Check if an identical query is already in-flight
+        let mut rx_opt = None;
         {
-            let mut records = self.forward_records.lock().await;
+            let mut inflight = self.inflight_queries.lock().await;
             
-            // Check pool capacity
-            if records.len() >= MAX_FORWARD_RECORDS {
-                return Err(ForwardError::PoolExhausted);
+            if let Some(tx) = inflight.get(&query_key) {
+                // Query is already in-flight, subscribe to the broadcast
+                rx_opt = Some(tx.subscribe());
+                debug!(
+                    query_name = %query_name,
+                    query_type = query_type,
+                    "Deduplicating query - waiting for in-flight request"
+                );
+            } else {
+                // This is the first query for this key, create a broadcast channel
+                let (tx, _rx) = broadcast::channel(16);  // Buffer up to 16 subscribers
+                inflight.insert(query_key.clone(), tx);
             }
-
-            records.insert(transaction_id, frec.clone());
         }
 
-        // Modify packet with new query ID
-        let mut modified_packet = BytesMut::from(packet);
-        // Directly modify the query ID bytes (first 2 bytes of DNS header)
-        let query_id_bytes = new_query_id.to_be_bytes();
-        modified_packet[0] = query_id_bytes[0];
-        modified_packet[1] = query_id_bytes[1];
+        // If we're waiting for an in-flight query, subscribe and wait
+        if let Some(mut rx) = rx_opt {
+            match rx.recv().await {
+                Ok(result) => return result,
+                Err(_) => {
+                    // Channel closed without sending - the original query must have failed
+                    // Fall through to send our own query
+                    debug!(
+                        query_name = %query_name,
+                        "In-flight query failed, sending our own"
+                    );
+                }
+            }
+        }
 
-        // Send query to upstream
-        let upstream_addr = server.addr();
+        // Helper macro to cleanup and return a result
+        // This ensures we always broadcast the result and remove from inflight_queries
+        macro_rules! cleanup_and_return {
+            ($result:expr) => {{
+                let result = $result;
+                let mut inflight = self.inflight_queries.lock().await;
+                if let Some(tx) = inflight.remove(&query_key) {
+                    let _ = tx.send(result.clone());
+                }
+                drop(inflight); // Release lock before returning
+                return result;
+            }};
+        }
 
-        info!(
-            query_name = %query_name,
-            query_id = new_query_id,
-            upstream = %upstream_addr,
-            "Forwarding query to upstream"
-        );
+        // Retry loop with exponential backoff
+        let mut retry_count = 0u32;
+        let mut last_error = None;
 
-        self.default_udp_socket
-            .send_to(&modified_packet, upstream_addr)
-            .await?;
+        while retry_count <= MAX_RETRIES {
+            // Select upstream server (may rotate on retry)
+            let upstream_manager = self.upstream_manager.read()
+                .map_err(|_| ForwardError::ServerUnavailable)?;
+            
+            let server = upstream_manager.select_server(Some(&query_name))
+                .ok_or(ForwardError::ServerUnavailable)?;
 
-        // Wait for response with timeout
-        let timeout_duration = Duration::from_secs(self.config.dns.query_timeout.unwrap_or(DEFAULT_QUERY_TIMEOUT_SECS));
+            // Generate random query ID (RFC 5452)
+            let new_query_id = self.get_id();
+
+            // Compute query hash for response validation
+            let query_hash = self.compute_query_hash(packet)?;
+
+            // Create forward record
+            let frec = ForwardRecord {
+                new_query_id,
+                orig_query_id,
+                source_addr,
+                dest_addr,
+                upstream_server: Some(Arc::clone(&server)),
+                sent_time: Instant::now(),
+                query_hash,
+                flags: ForwardFlags::NEW_QUERY,
+                retry_count,
+                udp_fd: Some(Arc::clone(&self.default_udp_socket)),
+                tcp_stream: None,
+            };
+
+            // Generate transaction ID for tracking
+            let transaction_id = self.generate_transaction_id(new_query_id, source_addr);
+
+            // Store forward record
+            {
+                let mut records = self.forward_records.lock().await;
+                
+                // Check pool capacity
+                if records.len() >= MAX_FORWARD_RECORDS {
+                    drop(records); // Release lock before cleanup
+                    cleanup_and_return!(Err(ForwardError::PoolExhausted));
+                }
+
+                records.insert(transaction_id, frec.clone());
+            }
+
+            // Modify packet with new query ID
+            let mut modified_packet = BytesMut::from(packet);
+            // Directly modify the query ID bytes (first 2 bytes of DNS header)
+            let query_id_bytes = new_query_id.to_be_bytes();
+            modified_packet[0] = query_id_bytes[0];
+            modified_packet[1] = query_id_bytes[1];
+
+            // Send query to upstream
+            let upstream_addr = server.addr();
+
+            if retry_count == 0 {
+                info!(
+                    query_name = %query_name,
+                    query_id = new_query_id,
+                    upstream = %upstream_addr,
+                    "Forwarding query to upstream"
+                );
+            } else {
+                info!(
+                    query_name = %query_name,
+                    query_id = new_query_id,
+                    upstream = %upstream_addr,
+                    retry_count = retry_count,
+                    "Retrying query to upstream"
+                );
+                
+                // Update retry statistics
+                let mut stats = self.stats.lock().await;
+                stats.retries += 1;
+            }
+
+            self.default_udp_socket
+                .send_to(&modified_packet, upstream_addr)
+                .await?;
+
+            // Track upstream query
+            {
+                let mut stats = self.stats.lock().await;
+                stats.upstream_queries += 1;
+            }
+
+            // Wait for response with timeout (exponential backoff)
+            let retry_timeout_ms = std::cmp::min(
+                INITIAL_RETRY_TIMEOUT_MS * 2u64.pow(retry_count),
+                MAX_RETRY_TIMEOUT_MS
+            );
+            let timeout_duration = Duration::from_millis(retry_timeout_ms);
+            
+            match timeout(timeout_duration, self.wait_for_response(transaction_id)).await {
+                Ok(Ok(response)) => {
+                    // Success!
+                    let mut stats = self.stats.lock().await;
+                    stats.successful_forwards += 1;
+                    drop(stats); // Release lock
+                    
+                    cleanup_and_return!(Ok(response));
+                }
+                Ok(Err(e)) => {
+                    // Error from wait_for_response
+                    self.free_frec(transaction_id).await;
+                    last_error = Some(e.clone());
+                    
+                    // Don't retry on certain errors
+                    match e {
+                        ForwardError::InvalidResponse | ForwardError::ParseError(_) => {
+                            let mut stats = self.stats.lock().await;
+                            stats.failed_forwards += 1;
+                            drop(stats); // Release lock
+                            
+                            cleanup_and_return!(Err(e));
+                        }
+                        _ => {
+                            // Continue to retry
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Timeout
+                    self.free_frec(transaction_id).await;
+                    last_error = Some(ForwardError::Timeout);
+                    
+                    // Update timeout statistics
+                    let mut stats = self.stats.lock().await;
+                    stats.timeouts += 1;
+                }
+            }
+
+            retry_count += 1;
+        }
+
+        // All retries exhausted
+        let mut stats = self.stats.lock().await;
+        stats.failed_forwards += 1;
+        drop(stats); // Release lock
         
-        match timeout(timeout_duration, self.wait_for_response(transaction_id)).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(e)) => {
-                self.free_frec(transaction_id).await;
-                Err(e)
-            }
-            Err(_) => {
-                self.free_frec(transaction_id).await;
-                Err(ForwardError::Timeout)
-            }
-        }
+        let err = last_error.unwrap_or(ForwardError::Timeout);
+        cleanup_and_return!(Err(err))
     }
 
     /// Wait for DNS response from upstream server
@@ -597,37 +849,35 @@ impl Forwarder {
     /// Polls for incoming UDP packets matching the transaction ID.
     /// This is called after sending a query to wait for the response.
     async fn wait_for_response(&self, transaction_id: TransactionId) -> Result<Vec<u8>, ForwardError> {
-        // Create a buffer for receiving response
-        let mut buf = vec![0u8; 4096];
+        // Create a oneshot channel for receiving this specific response
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
-        loop {
-            let (len, _src_addr) = self.default_udp_socket
-                .recv_from(&mut buf)
-                .await?;
+        // Register the channel so the dispatcher can send us the response
+        {
+            let mut channels = self.response_channels.lock().await;
+            channels.insert(transaction_id, tx);
+        }
 
-            let response_packet = &buf[..len];
+        // Wait for the response to be delivered by the dispatcher
+        match rx.await {
+            Ok(response_packet) => {
+                // Look up the forward record to process the response
+                let frec = {
+                    let records = self.forward_records.lock().await;
+                    records.get(&transaction_id).cloned()
+                };
 
-            // Extract response query ID
-            if response_packet.len() < 12 {
-                warn!("Received packet too short for DNS header");
-                continue;
-            }
-
-            let response_id = read_u16(response_packet)?;
-
-            // Look up forward record by response ID
-            if let Some(frec) = self.lookup_frec_by_query_id(response_id).await {
-                // Validate this is our transaction
-                let frec_transaction_id = self.generate_transaction_id(frec.new_query_id, frec.source_addr);
-                
-                if frec_transaction_id == transaction_id {
+                if let Some(frec) = frec {
                     // Process the response
-                    return self.reply_query(response_packet, frec).await;
+                    self.reply_query(&response_packet, frec).await
+                } else {
+                    Err(ForwardError::InvalidResponse)
                 }
             }
-
-            // Not our response, continue waiting
-            trace!(response_id = response_id, "Received response for different query");
+            Err(_) => {
+                // Channel closed without receiving a response (timeout or error)
+                Err(ForwardError::Timeout)
+            }
         }
     }
 
@@ -673,8 +923,27 @@ impl Forwarder {
             return Err(ForwardError::InvalidResponse);
         }
 
-        // TODO: Update cache with response
-        // TODO: Update upstream server health statistics
+        // Update cache with response if caching is enabled
+        if self.config.dns.cache_size > 0 {
+            // Note: Full cache insertion would require parsing the response packet
+            // and extracting all RRs. For now, we just log that we would cache it.
+            // A complete implementation would call cache.insert() here.
+            trace!("Would insert response into cache");
+        }
+
+        // Update upstream server health statistics
+        if let Some(server) = &frec.upstream_server {
+            // Mark the server as healthy since it responded successfully
+            let latency = frec.sent_time.elapsed();
+            debug!(
+                server_addr = %server.addr(),
+                latency_ms = latency.as_millis(),
+                "Upstream server responded successfully"
+            );
+            
+            // Note: Full implementation would update UpstreamPool's server health stats
+            // For now, we just log the successful response
+        }
 
         // Clean up forward record
         let transaction_id = self.generate_transaction_id(frec.new_query_id, frec.source_addr);
@@ -685,12 +954,12 @@ impl Forwarder {
 
     /// Allocate a new forward record from the pool
     ///
-    /// Replaces C's get_new_frec() which managed a manual freelist. Now uses
-    /// HashMap insertion which automatically manages memory.
+    /// Replaces C's `get_new_frec()` which managed a manual freelist. Now uses
+    /// `HashMap` insertion which automatically manages memory.
     ///
     /// # Returns
     ///
-    /// Returns transaction ID for the allocated record, or PoolExhausted error
+    /// Returns transaction ID for the allocated record, or `PoolExhausted` error
     pub async fn get_new_frec(
         &self,
         source_addr: SocketAddr,
@@ -726,8 +995,8 @@ impl Forwarder {
 
     /// Free a forward record and return it to the pool
     ///
-    /// Replaces C's free_frec() which managed manual freelist. Now simply
-    /// removes from HashMap, with automatic memory cleanup via Drop.
+    /// Replaces C's `free_frec()` which managed manual freelist. Now simply
+    /// removes from `HashMap`, with automatic memory cleanup via Drop.
     pub async fn free_frec(&self, transaction_id: TransactionId) {
         let mut records = self.forward_records.lock().await;
         if records.remove(&transaction_id).is_some() {
@@ -786,6 +1055,7 @@ impl Forwarder {
     ///
     /// Uses cryptographically secure random number generator (Rust's rand crate)
     /// to replace C's SURF RNG implementation. Critical for DNS security (RFC 5452).
+    #[must_use] 
     pub fn get_id(&self) -> u16 {
         rand16()
     }
@@ -826,7 +1096,7 @@ impl Forwarder {
     /// Handle TCP-based DNS query with async TCP stream
     ///
     /// Implements TCP fallback for responses exceeding UDP limits (truncation).
-    /// Uses tokio async TCP streams to replace C's blocking TCP with fork().
+    /// Uses tokio async TCP streams to replace C's blocking TCP with `fork()`.
     ///
     /// # Arguments
     ///
@@ -877,7 +1147,7 @@ impl Forwarder {
     /// fail or timeout. Automatically rotates to next healthy server.
     async fn retry_send(
         &self,
-        packet: &[u8],
+        _packet: &[u8],
         frec: &mut ForwardRecord,
     ) -> Result<(), ForwardError> {
         if frec.retry_count >= MAX_RETRIES {
@@ -899,8 +1169,9 @@ impl Forwarder {
         frec.retry_count += 1;
         frec.sent_time = Instant::now();
 
-        // TODO: Rotate to next server
-        // TODO: Resend query
+        // Server rotation is handled by select_server() which can use round-robin or health-based selection
+        // Query resending is handled by the retry loop in forward_query()
+        // This function is currently not used but kept for potential future use
 
         Ok(())
     }
@@ -939,12 +1210,15 @@ impl Forwarder {
     /// # Returns
     ///
     /// Returns the selected upstream server address or None
+    #[must_use] 
     pub fn select_upstream(&self, domain: Option<&str>) -> Option<SocketAddr> {
         let pool = self.upstream_manager.read().ok()?;
         
-        // Simple stub: return first available server
-        // In real implementation, would apply domain routing and health checks
-        pool.get_all_servers().first().map(|s| s.addr())
+        // Use the upstream pool's server selection logic which handles:
+        // - Domain-specific routing
+        // - Health checks
+        // - Load balancing
+        pool.select_server(domain).map(|server| server.addr())
     }
 
     /// Get forwarder statistics
@@ -954,47 +1228,78 @@ impl Forwarder {
     ///
     /// # Returns
     ///
-    /// Returns a HashMap of statistic names to values
+    /// Returns a `HashMap` of statistic names to values
+    #[must_use] 
     pub fn get_stats(&self) -> HashMap<String, u64> {
-        let mut stats = HashMap::new();
+        let mut result = HashMap::new();
         
-        // Stub implementation - return basic stats using try_lock for synchronous access
+        // Get pending queries count
         if let Ok(records) = self.forward_records.try_lock() {
-            stats.insert("pending_queries".to_string(), records.len() as u64);
+            result.insert("pending_queries".to_string(), records.len() as u64);
         } else {
-            stats.insert("pending_queries".to_string(), 0);
+            result.insert("pending_queries".to_string(), 0);
         }
-        stats.insert("total_queries".to_string(), 0);
-        stats.insert("cache_hits".to_string(), 0);
         
-        stats
+        // Get all other stats
+        if let Ok(stats) = self.stats.try_lock() {
+            result.insert("total_queries".to_string(), stats.total_queries);
+            result.insert("upstream_queries".to_string(), stats.upstream_queries);
+            result.insert("retries".to_string(), stats.retries);
+            result.insert("timeouts".to_string(), stats.timeouts);
+            result.insert("cache_hits".to_string(), stats.cache_hits);
+            result.insert("cache_misses".to_string(), stats.cache_misses);
+            result.insert("successful_forwards".to_string(), stats.successful_forwards);
+            result.insert("failed_forwards".to_string(), stats.failed_forwards);
+        }
+        
+        result
     }
 
     /// Mark an upstream server as failed
     ///
     /// Records a failure for the given upstream server, potentially triggering
-    /// health check mechanisms or server rotation. This is a test stub.
+    /// health check mechanisms or server rotation.
     ///
     /// # Arguments
     ///
     /// * `server_addr` - Address of the failed server
     pub fn mark_upstream_failed(&self, server_addr: SocketAddr) {
-        // Stub implementation
-        warn!("Upstream server {} marked as failed", server_addr);
+        if let Ok(pool) = self.upstream_manager.read() {
+            // Find the server with matching address
+            if let Some(server) = pool.get_all_servers().iter().find(|s| s.addr() == server_addr) {
+                pool.mark_failure(server.uid());
+                warn!("Upstream server {} (uid={}) marked as failed", server_addr, server.uid());
+            } else {
+                warn!("Attempted to mark unknown server {} as failed", server_addr);
+            }
+        }
     }
 
     /// Add domain-specific routing rule
     ///
     /// Configures the forwarder to route queries for specific domains to
-    /// designated upstream servers. This is a test stub implementation.
+    /// designated upstream servers.
     ///
     /// # Arguments
     ///
     /// * `domain` - Domain pattern (e.g., "example.com")
     /// * `server` - Upstream server address for this domain
     pub fn add_domain_routing(&mut self, domain: String, server: SocketAddr) {
-        // Stub implementation
-        info!("Added domain routing: {} -> {}", domain, server);
+        if let Ok(mut pool) = self.upstream_manager.write() {
+            // Add a new server with domain-specific routing
+            let uid = pool.add_server(
+                ServerFlags::empty(),
+                Some(domain.clone()),
+                server,
+                None, // no specific source address
+                String::new(), // no specific interface
+                0, // no specific interface index
+                4096, // default EDNS packet size
+            );
+            info!("Added domain routing: {} -> {} (uid={})", domain, server, uid);
+        } else {
+            warn!("Failed to add domain routing: {} -> {}", domain, server);
+        }
     }
 
     /// Get count of pending queries
@@ -1004,6 +1309,7 @@ impl Forwarder {
     /// # Returns
     ///
     /// Returns the count of pending forward records
+    #[must_use] 
     pub fn get_pending_queries(&self) -> usize {
         self.forward_records.try_lock().map(|r| r.len()).unwrap_or(0)
     }
@@ -1015,6 +1321,7 @@ impl Forwarder {
     /// # Returns
     ///
     /// Returns a random u16 query ID
+    #[must_use] 
     pub fn generate_random_id() -> u16 {
         use rand::Rng;
         let mut rng = rand::thread_rng();
@@ -1035,8 +1342,7 @@ pub async fn clear_cache_and_reload(cache: Arc<RwLock<Cache>>) -> Result<(), For
     let mut cache_guard = cache.write()
         .map_err(|_| ForwardError::CacheError("Failed to acquire cache write lock".to_string()))?;
     
-    // TODO: Implement cache clear
-    // cache_guard.clear();
+    cache_guard.clear();
     
     info!("Cache cleared and reloaded");
     Ok(())

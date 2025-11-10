@@ -158,7 +158,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
-use zbus::{dbus_interface, Connection, ConnectionBuilder, SignalContext};
+use zbus::{interface, Connection, ConnectionBuilder, SignalContext};
 
 use crate::core::config::VERSION;
 use crate::core::daemon::Daemon;
@@ -447,7 +447,7 @@ impl DbusInterface {
 /// This struct defines the D-Bus interface using zbus macros. Methods are
 /// automatically exposed via D-Bus and their signatures are derived from
 /// Rust type annotations. Signals are defined as associated functions.
-#[dbus_interface(interface = "uk.org.thekelleys.dnsmasq")]
+#[interface(name = "uk.org.thekelleys.dnsmasq")]
 impl DbusInterface {
     /// GetVersion D-Bus method
     ///
@@ -796,7 +796,7 @@ impl DbusInterface {
     /// * `ipaddr` - IP address as string
     /// * `hwaddr` - Hardware address (MAC) as string (format: "00:11:22:33:44:55")
     /// * `hostname` - Client hostname
-    #[dbus_interface(signal)]
+    #[zbus(signal)]
     async fn dhcp_lease_added(
         signal_ctx: &SignalContext<'_>,
         ipaddr: &str,
@@ -819,7 +819,7 @@ impl DbusInterface {
     /// * `ipaddr` - IP address as string
     /// * `hwaddr` - Hardware address (MAC) as string
     /// * `hostname` - Client hostname
-    #[dbus_interface(signal)]
+    #[zbus(signal)]
     async fn dhcp_lease_deleted(
         signal_ctx: &SignalContext<'_>,
         ipaddr: &str,
@@ -842,7 +842,7 @@ impl DbusInterface {
     /// * `ipaddr` - IP address as string
     /// * `hwaddr` - Hardware address (MAC) as string
     /// * `hostname` - Client hostname
-    #[dbus_interface(signal)]
+    #[zbus(signal)]
     async fn dhcp_lease_updated(
         signal_ctx: &SignalContext<'_>,
         ipaddr: &str,
@@ -859,7 +859,7 @@ impl DbusInterface {
     /// ```text
     /// Up()
     /// ```
-    #[dbus_interface(signal)]
+    #[zbus(signal)]
     async fn up(signal_ctx: &SignalContext<'_>) -> zbus::Result<()>;
 }
 

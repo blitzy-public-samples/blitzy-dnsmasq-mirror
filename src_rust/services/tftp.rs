@@ -145,25 +145,25 @@ const MAX_BACKOFF: u8 = 7;
 /// errno-based error handling with type-safe Result propagation.
 #[derive(Debug, Clone)]
 pub enum TftpError {
-    /// File not found (ERR_FNF)
+    /// File not found (`ERR_FNF`)
     FileNotFound(String),
 
-    /// Access violation - permission denied or path traversal attempt (ERR_PERM)
+    /// Access violation - permission denied or path traversal attempt (`ERR_PERM`)
     AccessViolation(String),
 
-    /// Disk full or quota exceeded (ERR_FULL)
+    /// Disk full or quota exceeded (`ERR_FULL`)
     DiskFull(String),
 
-    /// Illegal TFTP operation (ERR_ILL)
+    /// Illegal TFTP operation (`ERR_ILL`)
     IllegalOperation(String),
 
-    /// Unknown transfer ID - packet from wrong source (ERR_TID)
+    /// Unknown transfer ID - packet from wrong source (`ERR_TID`)
     UnknownTransferId(SocketAddr),
 
-    /// File already exists - for write operations (ERR_EXISTS)
+    /// File already exists - for write operations (`ERR_EXISTS`)
     FileExists(String),
 
-    /// No such user (ERR_NOUSER)
+    /// No such user (`ERR_NOUSER`)
     NoSuchUser(String),
 
     /// I/O error during file operations
@@ -179,16 +179,16 @@ pub enum TftpError {
 impl std::fmt::Display for TftpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TftpError::FileNotFound(msg) => write!(f, "File not found: {}", msg),
-            TftpError::AccessViolation(msg) => write!(f, "Access violation: {}", msg),
-            TftpError::DiskFull(msg) => write!(f, "Disk full: {}", msg),
-            TftpError::IllegalOperation(msg) => write!(f, "Illegal operation: {}", msg),
-            TftpError::UnknownTransferId(addr) => write!(f, "Unknown transfer ID from: {}", addr),
-            TftpError::FileExists(msg) => write!(f, "File exists: {}", msg),
-            TftpError::NoSuchUser(msg) => write!(f, "No such user: {}", msg),
-            TftpError::IoError(msg) => write!(f, "I/O error: {}", msg),
-            TftpError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            TftpError::Timeout(msg) => write!(f, "Timeout: {}", msg),
+            TftpError::FileNotFound(msg) => write!(f, "File not found: {msg}"),
+            TftpError::AccessViolation(msg) => write!(f, "Access violation: {msg}"),
+            TftpError::DiskFull(msg) => write!(f, "Disk full: {msg}"),
+            TftpError::IllegalOperation(msg) => write!(f, "Illegal operation: {msg}"),
+            TftpError::UnknownTransferId(addr) => write!(f, "Unknown transfer ID from: {addr}"),
+            TftpError::FileExists(msg) => write!(f, "File exists: {msg}"),
+            TftpError::NoSuchUser(msg) => write!(f, "No such user: {msg}"),
+            TftpError::IoError(msg) => write!(f, "I/O error: {msg}"),
+            TftpError::ParseError(msg) => write!(f, "Parse error: {msg}"),
+            TftpError::Timeout(msg) => write!(f, "Timeout: {msg}"),
         }
     }
 }
@@ -479,15 +479,13 @@ impl TftpServer {
             if !root.exists() {
                 error!("TFTP root directory does not exist: {:?}", root);
                 return Err(TftpError::AccessViolation(format!(
-                    "TFTP root directory not found: {:?}",
-                    root
+                    "TFTP root directory not found: {root:?}"
                 )));
             }
             if !root.is_dir() {
                 error!("TFTP root path is not a directory: {:?}", root);
                 return Err(TftpError::AccessViolation(format!(
-                    "TFTP root is not a directory: {:?}",
-                    root
+                    "TFTP root is not a directory: {root:?}"
                 )));
             }
         } else {
@@ -504,7 +502,7 @@ impl TftpServer {
 
         let listener = UdpSocket::bind(bind_addr).await.map_err(|e| {
             error!("Failed to bind TFTP socket on {}: {}", bind_addr, e);
-            TftpError::IoError(format!("Failed to bind TFTP socket: {}", e))
+            TftpError::IoError(format!("Failed to bind TFTP socket: {e}"))
         })?;
 
         info!("TFTP server listening on {}", bind_addr);
@@ -531,7 +529,7 @@ impl TftpServer {
     ///
     /// Listens for incoming RRQ packets and manages active file transfers.
     /// Handles timeout retransmission with exponential backoff per RFC 1350.
-    /// Runs until shutdown() is called.
+    /// Runs until `shutdown()` is called.
     pub async fn run(&self) -> Result<(), TftpError> {
         info!("TFTP server started");
         let mut buffer = vec![0u8; 65536];
@@ -560,7 +558,7 @@ impl TftpServer {
                         Err(e) => error!("Error receiving TFTP packet: {}", e),
                     }
                 }
-                _ = &mut timeout_check => {
+                () = &mut timeout_check => {
                     self.check_timeouts().await;
                 }
             }
@@ -658,7 +656,7 @@ impl TftpServer {
                 warn!("Invalid opcode {} from {}", opcode, peer);
                 let err_packet = self.build_error_packet(ERR_ILL, "Invalid opcode")?;
                 self.listener.send_to(&err_packet, &peer).await?;
-                Err(TftpError::IllegalOperation(format!("Invalid opcode: {}", opcode)))
+                Err(TftpError::IllegalOperation(format!("Invalid opcode: {opcode}")))
             }
         }
     }
@@ -701,7 +699,7 @@ impl TftpServer {
             match opt_name.as_str() {
                 "blksize" => {
                     if let Ok(size) = opt_value.parse::<usize>() {
-                        if size >= 8 && size <= MAX_BLOCK_SIZE {
+                        if (8..=MAX_BLOCK_SIZE).contains(&size) {
                             let mtu_limit = self.config.tftp_mtu.unwrap_or(1500) as usize - 28;
                             opt_blocksize = Some(size.min(mtu_limit));
                         }
@@ -721,7 +719,7 @@ impl TftpServer {
         }
 
         // Sanitize filename - prevent path traversal
-        if filename.contains("/../") || filename.starts_with("../") || filename.contains("\\") {
+        if filename.contains("/../") || filename.starts_with("../") || filename.contains('\\') {
             warn!("Path traversal attempt from {}:{}: {}", client_addr, client_port, filename);
             let err_packet = self.build_error_packet(ERR_PERM, "Access violation")?;
             self.listener.send_to(&err_packet, &peer).await?;
@@ -741,7 +739,7 @@ impl TftpServer {
             Err(e) => {
                 let err_packet = match &e {
                     TftpError::FileNotFound(_) => {
-                        self.build_error_packet(ERR_FNF, &format!("File not found: {}", filename))?
+                        self.build_error_packet(ERR_FNF, &format!("File not found: {filename}"))?
                     }
                     TftpError::AccessViolation(_) => {
                         self.build_error_packet(ERR_PERM, "Access denied")?
@@ -793,7 +791,7 @@ impl TftpServer {
         let block = u16::from_be_bytes([packet[2], packet[3]]);
 
         let mut transfers = self.transfers.write().await;
-        let transfer = transfers.get_mut(&peer).ok_or_else(|| {
+        let transfer = transfers.get_mut(&peer).ok_or({
             TftpError::UnknownTransferId(peer)
         })?;
 
@@ -879,7 +877,7 @@ impl TftpServer {
 
         // Check file permissions using nix stat
         let stat_result = stat(path).map_err(|e| {
-            TftpError::AccessViolation(format!("Cannot stat file: {}", e))
+            TftpError::AccessViolation(format!("Cannot stat file: {e}"))
         })?;
 
         let mode = stat_result.st_mode;
@@ -897,17 +895,16 @@ impl TftpServer {
             }
         }
         // Secure mode - must be owned by daemon user
-        else if self.config.secure_mode {
-            if stat_result.st_uid != euid.as_raw() {
+        else if self.config.secure_mode
+            && stat_result.st_uid != euid.as_raw() {
                 return Err(TftpError::AccessViolation(
                     "File not owned by daemon user (secure mode)".to_string()
                 ));
             }
-        }
 
         // Check read access
         if let Err(e) = access(path, AccessFlags::R_OK) {
-            return Err(TftpError::AccessViolation(format!("Cannot read file: {}", e)));
+            return Err(TftpError::AccessViolation(format!("Cannot read file: {e}")));
         }
 
         // Check for shared file in cache
@@ -1002,7 +999,7 @@ impl TftpServer {
         Ok(packet)
     }
 
-    /// Build ERROR packet (opcode | error_code | error_msg | 0)
+    /// Build ERROR packet (opcode | `error_code` | `error_msg` | 0)
     fn build_error_packet(&self, error_code: u16, message: &str) -> Result<Vec<u8>, TftpError> {
         let mut packet = Vec::new();
         

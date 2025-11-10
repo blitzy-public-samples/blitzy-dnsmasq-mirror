@@ -83,7 +83,7 @@
 //! ```rust
 //! use dnsmasq::dns::cache::{Cache, CacheConfig};
 //! use dnsmasq::dns::cache_types::{CacheRecord, CacheRecordData, CacheFlags, UID_NONE};
-//! use dnsmasq::dns::protocol::T_A;
+//! use dnsmasq::dns::protocol::{T_A, C_IN};
 //! use std::net::{Ipv4Addr, IpAddr};
 //! use std::time::{Instant, Duration};
 //!
@@ -110,8 +110,8 @@
 //!
 //! cache.insert(record)?;
 //!
-//! // Lookup
-//! if let Some(found) = cache.lookup("example.com", T_A) {
+//! // Lookup (name, qtype, qclass)
+//! if let Some(found) = cache.lookup("example.com", T_A, C_IN) {
 //!     println!("Found cached record for example.com");
 //! }
 //!
@@ -162,12 +162,12 @@ pub struct CacheConfig {
     /// Enable negative caching per RFC 2308 (--no-negcache disables, default true)
     ///
     /// When true, cache NXDOMAIN and NODATA responses to reduce upstream queries.
-    /// Original C: checked via option_bool(OPT_NO_NEG)
+    /// Original C: checked via `option_bool(OPT_NO_NEG)`
     pub negative_caching: bool,
 
     /// TTL for /etc/hosts entries in seconds (--local-ttl, default 0 = eternal)
     ///
-    /// Value 0 means hosts file entries never expire (F_IMMORTAL flag).
+    /// Value 0 means hosts file entries never expire (`F_IMMORTAL` flag).
     /// Original C: daemon->local_ttl from option.c
     pub local_ttl: u64,
 
@@ -191,7 +191,7 @@ impl Default for CacheConfig {
 
 /// Cache statistics for monitoring and debugging
 ///
-/// Replaces C's cache_make_stat() output structure.
+/// Replaces C's `cache_make_stat()` output structure.
 /// Provides visibility into cache performance and behavior.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheStats {
@@ -222,7 +222,7 @@ pub struct CacheStats {
 
 /// Main DNS cache structure
 ///
-/// Replaces C's global cache state (cache_head, cache_tail, hash_table, dhcp_spare, big_free).
+/// Replaces C's global cache state (`cache_head`, `cache_tail`, `hash_table`, `dhcp_spare`, `big_free`).
 /// Uses safe Rust data structures with automatic memory management via RAII.
 ///
 /// # Architecture
@@ -247,9 +247,9 @@ pub struct CacheStats {
 ///
 /// # Memory Safety
 ///
-/// - **No use-after-free**: CacheRecordId indices remain valid even after deletions
+/// - **No use-after-free**: `CacheRecordId` indices remain valid even after deletions
 /// - **No double-free**: Drop trait ensures single cleanup per record
-/// - **No buffer overflow**: HashMap and VecDeque have bounds-checked access
+/// - **No buffer overflow**: `HashMap` and `VecDeque` have bounds-checked access
 /// - **No memory leaks**: RAII guarantees cleanup on panic or early return
 ///
 /// # Thread Safety
@@ -270,9 +270,9 @@ pub struct Cache {
 
     /// Hash table mapping domain names to record IDs
     ///
-    /// Key: DomainKey (name + type)
-    /// Value: Vec of CacheRecordId indices into `records`
-    /// Replaces C's `struct crec **hash_table` with safe HashMap
+    /// Key: `DomainKey` (name + type)
+    /// Value: Vec of `CacheRecordId` indices into `records`
+    /// Replaces C's `struct crec **hash_table` with safe `HashMap`
     hash_table: HashMap<DomainKey, Vec<CacheRecordId>>,
 
     /// LRU list for eviction policy (front = MRU, back = LRU)
@@ -296,6 +296,12 @@ pub struct Cache {
     next_uid: u32,
 }
 
+impl Default for Cache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Cache {
     /// Create a new DNS cache with default configuration
     ///
@@ -307,6 +313,7 @@ impl Cache {
     /// let mut cache = Cache::new();
     /// assert_eq!(cache.get_stats().capacity, 150);
     /// ```
+    #[must_use] 
     pub fn new() -> Self {
         Self::with_config(CacheConfig::default())
     }
@@ -325,6 +332,7 @@ impl Cache {
     /// let cache = Cache::with_size(1000);
     /// assert_eq!(cache.get_stats().capacity, 1000);
     /// ```
+    #[must_use] 
     pub fn with_size(size: usize) -> Self {
         let mut config = CacheConfig::default();
         config.max_entries = size;
@@ -352,6 +360,7 @@ impl Cache {
     /// let mut cache = Cache::with_config(config);
     /// assert_eq!(cache.get_stats().capacity, 1000);
     /// ```
+    #[must_use] 
     pub fn with_config(config: CacheConfig) -> Self {
         let capacity = config.max_entries;
         
@@ -372,7 +381,7 @@ impl Cache {
     /// Clear all cache entries
     ///
     /// Removes all cached records and resets statistics (except capacity).
-    /// Replaces C's cache_init() re-initialization logic.
+    /// Replaces C's `cache_init()` re-initialization logic.
     ///
     /// # Examples
     ///
@@ -403,7 +412,7 @@ impl Cache {
     /// Get current cache statistics
     ///
     /// Returns a snapshot of cache performance metrics.
-    /// Replaces C's cache_make_stat() function.
+    /// Replaces C's `cache_make_stat()` function.
     ///
     /// # Returns
     ///
@@ -418,6 +427,7 @@ impl Cache {
     /// let stats = cache.get_stats();
     /// println!("Cache has {} entries, capacity {}", stats.entries, stats.capacity);
     /// ```
+    #[must_use] 
     pub fn get_stats(&self) -> CacheStats {
         let mut stats = self.stats;
         stats.entries = self.records.iter().filter(|r| r.is_some()).count();
@@ -431,9 +441,9 @@ impl Cache {
     /// 2. Remove expired entries in the same hash bucket
     /// 3. Allocate a record slot (reuse from freelist or grow storage)
     /// 4. Add to hash table and LRU list
-    /// 5. Apply TTL constraints (min_cache_ttl, DNSSEC_MIN_TTL)
+    /// 5. Apply TTL constraints (`min_cache_ttl`, `DNSSEC_MIN_TTL`)
     ///
-    /// Replaces C's cache_insert() and really_insert() functions.
+    /// Replaces C's `cache_insert()` and `really_insert()` functions.
     ///
     /// # Arguments
     ///
@@ -446,8 +456,8 @@ impl Cache {
     ///
     /// # Behavior
     ///
-    /// - **Immortal entries** (F_HOSTS, F_DHCP, F_CONFIG): Never evicted, conflict with any existing entry
-    /// - **DNSSEC entries**: Minimum TTL of DNSSEC_MIN_TTL seconds enforced
+    /// - **Immortal entries** (`F_HOSTS`, `F_DHCP`, `F_CONFIG)`: Never evicted, conflict with any existing entry
+    /// - **DNSSEC entries**: Minimum TTL of `DNSSEC_MIN_TTL` seconds enforced
     /// - **Cache full**: Evicts LRU entry if no freelist slots available
     /// - **Conflicts**: Removes conflicting entries before insertion
     ///
@@ -499,7 +509,7 @@ impl Cache {
         // Insert into hash table
         self.hash_table
             .entry(key)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(record_id);
         
         // Add to LRU list (front = most recently used)
@@ -521,15 +531,15 @@ impl Cache {
     /// Look up a cache record by name and type
     ///
     /// Searches the cache for a matching DNS record, following CNAME chains up to
-    /// MAX_CNAME_CHAIN hops to prevent infinite loops. Moves hit entries to the front
+    /// `MAX_CNAME_CHAIN` hops to prevent infinite loops. Moves hit entries to the front
     /// of the LRU list.
     ///
-    /// Replaces C's cache_find_by_name() with CNAME traversal logic.
+    /// Replaces C's `cache_find_by_name()` with CNAME traversal logic.
     ///
     /// # Arguments
     ///
     /// * `name` - Domain name to look up
-    /// * `qtype` - Query type (T_A, T_AAAA, T_CNAME, etc.)
+    /// * `qtype` - Query type (`T_A`, `T_AAAA`, `T_CNAME`, etc.)
     /// * `now` - Current time for expiry checking
     ///
     /// # Returns
@@ -540,7 +550,7 @@ impl Cache {
     /// # Behavior
     ///
     /// - **CNAME following**: Automatically resolves CNAME chains (max 10 hops)
-    /// - **Loop detection**: Stops following CNAMEs after MAX_CNAME_CHAIN hops
+    /// - **Loop detection**: Stops following CNAMEs after `MAX_CNAME_CHAIN` hops
     /// - **Expiry checking**: Skips expired records without removing them (lazy cleanup)
     /// - **LRU update**: Moves hit record to front of LRU list
     ///
@@ -676,7 +686,7 @@ impl Cache {
     /// Returns an iterator over all cache records matching the given domain name,
     /// regardless of type. Used for conflict detection and duplicate checking.
     ///
-    /// Replaces C's cache_find_by_name() iterator pattern.
+    /// Replaces C's `cache_find_by_name()` iterator pattern.
     ///
     /// # Arguments
     ///
@@ -701,11 +711,9 @@ impl Cache {
         let mut results = Vec::new();
         
         // Scan all records (no type filter)
-        for record_opt in &self.records {
-            if let Some(record) = record_opt {
-                if hostname_isequal(record.name(), name) && !Self::is_expired(record) {
-                    results.push(record);
-                }
+        for record in self.records.iter().flatten() {
+            if hostname_isequal(record.name(), name) && !Self::is_expired(record) {
+                results.push(record);
             }
         }
         
@@ -718,7 +726,7 @@ impl Cache {
     /// Searches for PTR records matching the given IP address. Used for reverse
     /// DNS lookups and DHCP hostname resolution.
     ///
-    /// Replaces C's cache_find_by_addr() function.
+    /// Replaces C's `cache_find_by_addr()` function.
     ///
     /// # Arguments
     ///
@@ -785,39 +793,31 @@ impl Cache {
     /// - **Conflicts**: Removes entries conflicting with a new insertion
     /// - **Outdated CNAMEs**: Removes CNAME entries pointing to deleted targets
     ///
-    /// Replaces C's cache_scan_free() function.
+    /// Replaces C's `cache_scan_free()` function.
     ///
     /// # Arguments
     ///
     /// * `name` - Optional domain name to check for conflicts (None = scan entire cache)
     /// * `addr` - Optional IP address to check for reverse conflicts
     /// * `now` - Current time for expiry checking
-    /// * `flags` - Flags indicating what to scan (F_FORWARD, F_REVERSE, or 0 for all)
+    /// * `flags` - Flags indicating what to scan (`F_FORWARD`, `F_REVERSE`, or 0 for all)
     ///
     /// # Behavior
     ///
-    /// - **F_FORWARD set**: Scans only the hash bucket for `name`, removes forward conflicts
-    /// - **F_REVERSE set**: Scans entire cache, removes reverse entries matching `addr`
+    /// - **`F_FORWARD` set**: Scans only the hash bucket for `name`, removes forward conflicts
+    /// - **`F_REVERSE` set**: Scans entire cache, removes reverse entries matching `addr`
     /// - **flags == 0**: Scans entire cache, removes only expired entries
-    /// - **Immortal entries** (F_HOSTS, F_DHCP, F_CONFIG): Never removed, returned as conflict indicator
+    /// - **Immortal entries** (`F_HOSTS`, `F_DHCP`, `F_CONFIG)`: Never removed, returned as conflict indicator
     ///
     /// # Examples
     ///
     /// ```rust
     /// use dnsmasq::dns::cache::Cache;
-    /// use dnsmasq::dns::cache_types::CacheFlags;
     ///
     /// let mut cache = Cache::new();
     ///
     /// // Scan entire cache for expired entries
-    /// cache.scan_free(None, None, CacheFlags::empty());
-    ///
-    /// // Check for conflicts before inserting "example.com"
-    /// cache.scan_free(
-    ///     Some("example.com"),
-    ///     None,
-    ///     CacheFlags::FORWARD | CacheFlags::IPV4
-    /// );
+    /// cache.scan_free();
     /// ```
     pub fn scan_free(&mut self) {
         // Full cache scan - remove all expired entries
@@ -830,7 +830,7 @@ impl Cache {
     
     /// Scan cache and free expired entries with optional filtering
     ///
-    /// This is the full version of scan_free with explicit parameters for filtering.
+    /// This is the full version of `scan_free` with explicit parameters for filtering.
     pub fn scan_free_filtered(
         &mut self,
         name: Option<&str>,
@@ -859,7 +859,7 @@ impl Cache {
     /// Generate cache statistics string for monitoring
     ///
     /// Creates a human-readable statistics summary for logging and monitoring.
-    /// Replaces C's cache_make_stat() function.
+    /// Replaces C's `cache_make_stat()` function.
     ///
     /// # Returns
     ///
@@ -874,6 +874,7 @@ impl Cache {
     /// println!("{}", cache.make_stat());
     /// // Output: "cache size 150, 0/0 cache insertions re-used unexpired cache entries."
     /// ```
+    #[must_use] 
     pub fn make_stat(&self) -> String {
         let stats = self.get_stats();
         format!(
@@ -889,7 +890,7 @@ impl Cache {
     /// Returns an iterator over all non-deleted cache records. Used for cache dumps
     /// and statistics collection.
     ///
-    /// Replaces C's cache_enumerate() function.
+    /// Replaces C's `cache_enumerate()` function.
     ///
     /// # Returns
     ///
@@ -905,6 +906,7 @@ impl Cache {
     ///     println!("Cached: {} -> {:?}", record.name(), record.data());
     /// }
     /// ```
+    #[must_use] 
     pub fn enumerate(&self) -> Vec<&CacheRecord> {
         self.records
             .iter()
@@ -915,10 +917,10 @@ impl Cache {
     /// Add a DHCP lease entry to the cache
     ///
     /// Inserts a dynamic hostname-to-IP mapping from a DHCP lease assignment.
-    /// These entries are marked with F_DHCP flag and are never expired by TTL
+    /// These entries are marked with `F_DHCP` flag and are never expired by TTL
     /// (they persist until the DHCP lease is released or expires).
     ///
-    /// Replaces C's cache_add_dhcp_entry() function.
+    /// Replaces C's `cache_add_dhcp_entry()` function.
     ///
     /// # Arguments
     ///
@@ -987,9 +989,9 @@ impl Cache {
     /// Remove DHCP lease entry from cache
     ///
     /// Removes a dynamic hostname entry when the DHCP lease is released or expires.
-    /// Searches for entries with F_DHCP flag matching the hostname.
+    /// Searches for entries with `F_DHCP` flag matching the hostname.
     ///
-    /// Replaces C's unhash_dhcp() function.
+    /// Replaces C's `unhash_dhcp()` function.
     ///
     /// # Arguments
     ///
@@ -1046,11 +1048,12 @@ impl Cache {
     /// # Arguments
     ///
     /// * `name` - Domain name to lookup
-    /// * `qtype` - Query type (e.g., T_A, T_AAAA)
+    /// * `qtype` - Query type (e.g., `T_A`, `T_AAAA`)
     ///
     /// # Returns
     ///
     /// Returns a vector of cache records following the CNAME chain, or an empty vector
+    #[must_use] 
     pub fn lookup_with_cname_following(&self, name: &str, qtype: u16) -> Vec<CacheRecord> {
         let mut results = Vec::new();
         let mut current_name = name.to_string();
@@ -1119,10 +1122,10 @@ impl Cache {
     // PRIVATE HELPER METHODS
     // ===========================================================================================
 
-    /// Internal helper for scan_free implementation
+    /// Internal helper for `scan_free` implementation
     ///
     /// Scans a specific hash bucket and removes expired/conflicting entries.
-    /// This is the core garbage collection logic extracted from C's cache_scan_free().
+    /// This is the core garbage collection logic extracted from C's `cache_scan_free()`.
     fn scan_free_internal(
         &mut self,
         name: &str,
@@ -1316,7 +1319,7 @@ impl Cache {
         hash
     }
 
-    /// Extract query type from CacheRecordData
+    /// Extract query type from `CacheRecordData`
     ///
     /// Maps cache record data variants to DNS query type constants.
     ///
@@ -1326,7 +1329,7 @@ impl Cache {
     ///
     /// # Returns
     ///
-    /// DNS query type constant (T_A, T_AAAA, T_CNAME, T_PTR, etc.)
+    /// DNS query type constant (`T_A`, `T_AAAA`, `T_CNAME`, `T_PTR`, etc.)
     fn extract_query_type(data: &CacheRecordData) -> u16 {
         match data {
             CacheRecordData::Address(IpAddr::V4(_)) => T_A,
@@ -1348,7 +1351,7 @@ impl Cache {
     ///
     /// # Returns
     ///
-    /// CacheRecordId for the allocated slot
+    /// `CacheRecordId` for the allocated slot
     fn allocate_slot(&mut self) -> CacheRecordId {
         // First try the freelist
         if let Some(id) = self.freelist.pop() {
@@ -1436,7 +1439,7 @@ impl Cache {
 /// configuration settings. Local domains are not forwarded to upstream servers
 /// and are answered authoritatively or from /etc/hosts.
 ///
-/// Replaces C's check_for_local_domain() function.
+/// Replaces C's `check_for_local_domain()` function.
 ///
 /// # Arguments
 ///
@@ -1458,6 +1461,7 @@ impl Cache {
 /// assert!(check_for_local_domain("server.lan", &local_domains));
 /// assert!(!check_for_local_domain("example.com", &local_domains));
 /// ```
+#[must_use] 
 pub fn check_for_local_domain(name: &str, local_domains: &[String]) -> bool {
     // Check for reserved local domains (RFC 6761 and RFC 6762)
     const RESERVED_LOCAL: &[&str] = &[
@@ -1473,7 +1477,7 @@ pub fn check_for_local_domain(name: &str, local_domains: &[String]) -> bool {
     
     // Check reserved local domains
     for &reserved in RESERVED_LOCAL {
-        if name_lower == reserved || name_lower.ends_with(&format!(".{}", reserved)) {
+        if name_lower == reserved || name_lower.ends_with(&format!(".{reserved}")) {
             return true;
         }
     }

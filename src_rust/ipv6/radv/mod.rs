@@ -15,7 +15,7 @@
 
 //! IPv6 Router Advertisement Subsystem
 //!
-//! This module implements ICMPv6 Router Advertisement (RA) functionality per RFC 4861
+//! This module implements `ICMPv6` Router Advertisement (RA) functionality per RFC 4861
 //! (Neighbor Discovery for IPv6) and RFC 4862 (IPv6 Stateless Address Autoconfiguration).
 //! It provides the Router Advertisement server, protocol constants, and option builders
 //! required for IPv6 prefix announcement and SLAAC support.
@@ -30,24 +30,24 @@
 //!   router presence and network configuration parameters to all IPv6 nodes on the link.
 //!
 //! - **Solicited RA Response**: Immediate Router Advertisement responses to Router
-//!   Solicitation (ICMPv6 Type 133) messages from hosts joining the network, enabling
+//!   Solicitation (`ICMPv6` Type 133) messages from hosts joining the network, enabling
 //!   fast network bootstrap without waiting for periodic RAs.
 //!
 //! - **SLAAC Support**: Prefix Information options (Type 3) with A-bit (Autonomous
 //!   Address-Configuration flag) set, enabling hosts to generate IPv6 addresses using
-//!   Modified EUI-64 or privacy extensions per RFC 4862 without requiring DHCPv6
+//!   Modified EUI-64 or privacy extensions per RFC 4862 without requiring `DHCPv6`
 //!   stateful address assignment.
 //!
-//! - **DHCPv6 Coordination**: M-bit (Managed Address Configuration) and O-bit (Other
-//!   Configuration) flags in Router Advertisements coordinate with the DHCPv6 server
+//! - **`DHCPv6` Coordination**: M-bit (Managed Address Configuration) and O-bit (Other
+//!   Configuration) flags in Router Advertisements coordinate with the `DHCPv6` server
 //!   to signal whether clients should use:
-//!   - M=0, O=0: Pure SLAAC (no DHCPv6)
-//!   - M=0, O=1: SLAAC for addresses + stateless DHCPv6 for DNS/NTP
-//!   - M=1, O=1: Stateful DHCPv6 for addresses and configuration
+//!   - M=0, O=0: Pure SLAAC (no `DHCPv6`)
+//!   - M=0, O=1: SLAAC for addresses + stateless `DHCPv6` for DNS/NTP
+//!   - M=1, O=1: Stateful `DHCPv6` for addresses and configuration
 //!
 //! - **DNS Configuration**: RDNSS (Recursive DNS Server, Type 25) and DNSSL (DNS Search
 //!   List, Type 31) options per RFC 8106 enable stateless DNS configuration without
-//!   DHCPv6, allowing hosts to autoconfigure DNS resolvers and search domains directly
+//!   `DHCPv6`, allowing hosts to autoconfigure DNS resolvers and search domains directly
 //!   from Router Advertisements.
 //!
 //! - **MTU Advertisement**: Link MTU option (Type 5) per RFC 4861 Section 4.6.4 enables
@@ -59,17 +59,17 @@
 //! This module is organized into three sub-modules following Rust best practices for
 //! protocol implementation separation:
 //!
-//! - **`protocol`**: ICMPv6 packet structures and wire-format constants
+//! - **`protocol`**: `ICMPv6` packet structures and wire-format constants
 //!   - Defines `RaPacket`, `PingPacket`, `NeighPacket` structs for type-safe packet representation
 //!   - Provides protocol constants (`ALL_NODES`, `ALL_ROUTERS`, `ICMP6_OPT_*`)
 //!   - Handles serialization/deserialization with safe bounds checking
 //!
 //! - **`server`**: Router Advertisement server implementation and state management
-//!   - `RadVServer` struct manages ICMPv6 socket, DHCPv6 coordination, and interface tracking
+//!   - `RadVServer` struct manages `ICMPv6` socket, `DHCPv6` coordination, and interface tracking
 //!   - Async task spawning for periodic RAs and Router Solicitation processing
 //!   - Packet construction with all required options
 //!
-//! - **`options`**: ICMPv6 RA option builders with type-safe construction
+//! - **`options`**: `ICMPv6` RA option builders with type-safe construction
 //!   - `PrefixOption`: Prefix Information for SLAAC (A-flag, L-flag control)
 //!   - `RdnssOption`: Recursive DNS Server addresses with lifetimes
 //!   - `DnsslOption`: DNS Search List domains
@@ -80,24 +80,24 @@
 //!
 //! The Router Advertisement subsystem integrates tightly with other dnsmasq components:
 //!
-//! - **`dhcp::v6`**: DHCPv6 server coordination via shared `DhcpContext` structures
+//! - **`dhcp::v6`**: `DHCPv6` server coordination via shared `DhcpContext` structures
 //!   - M-bit flag synchronization for managed address configuration mode
-//!   - O-bit flag coordination for DHCPv6 information-request handling
+//!   - O-bit flag coordination for `DHCPv6` information-request handling
 //!   - Prefix pool sharing to prevent SLAAC/DHCPv6 address conflicts
 //!   - Lease database coordination for duplicate address detection
 //!
 //! - **`ipv6::slaac`**: SLAAC address generation and Duplicate Address Detection (DAD)
 //!   - Prefix lifetime management for address deprecation
-//!   - DAD coordination using ICMPv6 Neighbor Solicitation
+//!   - DAD coordination using `ICMPv6` Neighbor Solicitation
 //!   - Privacy extension support per RFC 4941
 //!
-//! - **`network::sockets`**: ICMPv6 raw socket management for multicast transmission
-//!   - Socket creation with IPV6_RECVPKTINFO for interface identification
-//!   - Multicast group join/leave (ff02::1 for all-nodes, ff02::2 for all-routers)
+//! - **`network::sockets`**: `ICMPv6` raw socket management for multicast transmission
+//!   - Socket creation with `IPV6_RECVPKTINFO` for interface identification
+//!   - Multicast group join/leave (`ff02::1` for all-nodes, `ff02::2` for all-routers)
 //!   - Hop limit control (255 for on-link verification)
 //!
 //! - **`network::interfaces`**: Network interface enumeration and state tracking
-//!   - Interface index to name mapping via indextoname()
+//!   - Interface index to name mapping via `indextoname()`
 //!   - Link-local address discovery for source address selection
 //!   - Interface state change detection (up/down events)
 //!
@@ -117,14 +117,14 @@
 //! - **RFC 4861**: Neighbor Discovery for IPv6
 //!   - Section 4.2: Router Advertisement Message Format
 //!   - Section 4.6: Router Advertisement Options
-//!   - Section 6.2: Router Configuration Variables (MinRtrAdvInterval, MaxRtrAdvInterval)
+//!   - Section 6.2: Router Configuration Variables (`MinRtrAdvInterval`, `MaxRtrAdvInterval`)
 //!
 //! - **RFC 4862**: IPv6 Stateless Address Autoconfiguration (SLAAC)
 //!   - Section 5.5.3: Router Advertisement Processing
 //!   - Section 5.5.4: Address Lifetime Expiration
 //!
-//! - **RFC 4443**: Internet Control Message Protocol (ICMPv6) for IPv6
-//!   - ICMPv6 message types and checksum calculation
+//! - **RFC 4443**: Internet Control Message Protocol (`ICMPv6`) for IPv6
+//!   - `ICMPv6` message types and checksum calculation
 //!
 //! - **RFC 8106**: IPv6 Router Advertisement Options for DNS Configuration
 //!   - RDNSS option (Type 25) format and processing
@@ -196,7 +196,7 @@
 //! - **CPU Usage**: Minimal overhead from periodic RA transmission (every 200-600s)
 //! - **Memory Footprint**: ~4-8 KB per active interface (RA state + packet buffers)
 //! - **Network Load**: Typical RA size 64-256 bytes, sent every 5-10 minutes
-//! - **Async Task Count**: 2 tasks per RadVServer (periodic RA sender + packet receiver)
+//! - **Async Task Count**: 2 tasks per `RadVServer` (periodic RA sender + packet receiver)
 //!
 //! # Security Considerations
 //!

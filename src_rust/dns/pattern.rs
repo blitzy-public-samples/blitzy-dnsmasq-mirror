@@ -89,8 +89,8 @@ use tracing::{debug, info, warn, error, trace};
 // Constants
 // ============================================================================
 
-/// Server type bitmask for local servers (SERV_USE_RESOLV | SERV_LITERAL_ADDRESS)
-/// Servers with these flags live on the local_domains chain rather than general servers
+/// Server type bitmask for local servers (`SERV_USE_RESOLV` | `SERV_LITERAL_ADDRESS`)
+/// Servers with these flags live on the `local_domains` chain rather than general servers
 pub const SERV_IS_LOCAL: ServerFlags = ServerFlags::from_bits_truncate(
     SERV_USE_RESOLV.bits() | SERV_LITERAL_ADDRESS.bits()
 );
@@ -103,9 +103,9 @@ pub const SERV_IS_LOCAL: ServerFlags = ServerFlags::from_bits_truncate(
 ///
 /// Constructs a sorted server array by:
 /// 1. Collecting servers from general and local domain chains
-/// 2. Excluding servers with SERV_MARK flag (marked for deletion)
-/// 3. Sorting by domain specificity using hostname_order comparison
-/// 4. Enabling O(log n) binary search in lookup_domain
+/// 2. Excluding servers with `SERV_MARK` flag (marked for deletion)
+/// 3. Sorting by domain specificity using `hostname_order` comparison
+/// 4. Enabling O(log n) binary search in `lookup_domain`
 ///
 /// # Arguments
 ///
@@ -188,9 +188,9 @@ pub fn build_server_array(
 ///
 /// # Arguments
 ///
-/// * `server_array` - Sorted server array from build_server_array()
+/// * `server_array` - Sorted server array from `build_server_array()`
 /// * `qdomain` - Query domain name (e.g., "www.example.com")
-/// * `qtype` - DNS query type (T_A, T_AAAA, etc.)
+/// * `qtype` - DNS query type (`T_A`, `T_AAAA`, etc.)
 ///
 /// # Returns
 ///
@@ -246,7 +246,7 @@ pub fn lookup_domain(
         let mut last = server_array.len();
 
         while last > first {
-            let mid = (first + last) / 2;
+            let mid = usize::midpoint(first, last);
             let server = &server_array[mid];
 
             let cmp_result = if let Some(sdomain) = server.domain() {
@@ -365,7 +365,7 @@ pub fn lookup_domain(
 /// # Arguments
 ///
 /// * `servers` - Input server list to filter
-/// * `flags` - Required server flags (SERV_4ADDR, SERV_6ADDR, SERV_DO_DNSSEC, etc.)
+/// * `flags` - Required server flags (`SERV_4ADDR`, `SERV_6ADDR`, `SERV_DO_DNSSEC`, etc.)
 ///
 /// # Returns
 ///
@@ -425,7 +425,7 @@ pub fn filter_servers(
 ///
 /// Servers are equivalent if they have:
 /// - Same domain pattern
-/// - Same server type flags (USE_RESOLV, LITERAL_ADDRESS, etc.)
+/// - Same server type flags (`USE_RESOLV`, `LITERAL_ADDRESS`, etc.)
 /// - Different addresses (for round-robin load balancing)
 ///
 /// # Arguments
@@ -484,27 +484,27 @@ pub fn server_samegroup(s1: &UpstreamServer, s2: &UpstreamServer) -> bool {
 /// Determine if query has local answer available
 ///
 /// Checks if a DNS query can be answered from local data sources:
-/// - Literal address servers (SERV_4ADDR, SERV_6ADDR, SERV_ALL_ZEROS)
+/// - Literal address servers (`SERV_4ADDR`, `SERV_6ADDR`, `SERV_ALL_ZEROS`)
 /// - Hosts file entries
 /// - DHCP lease hostnames
 ///
 /// # Arguments
 ///
 /// * `flags` - Server flags for matched server
-/// * `qtype` - Query type (T_A, T_AAAA, etc.)
+/// * `qtype` - Query type (`T_A`, `T_AAAA`, etc.)
 /// * `qdomain` - Query domain name
 /// * `local_domains` - Local domain names from hosts/DHCP
 ///
 /// # Returns
 ///
-/// * `true` if local answer exists (generate response with make_local_answer)
+/// * `true` if local answer exists (generate response with `make_local_answer`)
 /// * `false` if query should be forwarded to upstream
 ///
 /// # Response Codes
 ///
-/// - F_NOERR: Domain exists in local data, but wrong RR type
-/// - F_NXDOMAIN: Domain doesn't exist in local data
-/// - F_IPV4/F_IPV6: Direct IP address response
+/// - `F_NOERR`: Domain exists in local data, but wrong RR type
+/// - `F_NXDOMAIN`: Domain doesn't exist in local data
+/// - `F_IPV4/F_IPV6`: Direct IP address response
 ///
 /// # Example
 ///
@@ -514,6 +514,7 @@ pub fn server_samegroup(s1: &UpstreamServer, s2: &UpstreamServer) -> bool {
 ///     let response = make_local_answer(...);
 /// }
 /// ```
+#[must_use] 
 pub fn is_local_answer(
     flags: ServerFlags,
     qtype: u16,
@@ -549,13 +550,13 @@ pub fn is_local_answer(
 /// Generate DNS response from local data sources
 ///
 /// Constructs a complete DNS response packet for queries that can be answered locally:
-/// - Literal IPv4 addresses (SERV_4ADDR): Return A record
-/// - Literal IPv6 addresses (SERV_6ADDR): Return AAAA record
-/// - ALL_ZEROS flag: Return NXDOMAIN or NOERR depending on hosts file
+/// - Literal IPv4 addresses (`SERV_4ADDR)`: Return A record
+/// - Literal IPv6 addresses (`SERV_6ADDR)`: Return AAAA record
+/// - `ALL_ZEROS` flag: Return NXDOMAIN or NOERR depending on hosts file
 ///
 /// # Arguments
 ///
-/// * `server` - Server with SERV_LITERAL_ADDRESS flag
+/// * `server` - Server with `SERV_LITERAL_ADDRESS` flag
 /// * `packet` - Original DNS query packet
 /// * `qtype` - Query type from packet
 /// * `qdomain` - Query domain name
@@ -780,7 +781,7 @@ pub fn make_local_answer(
 ///
 /// # Arguments
 ///
-/// * `server_array` - Sorted server array from build_server_array()
+/// * `server_array` - Sorted server array from `build_server_array()`
 /// * `qdomain` - Query domain name
 /// * `qtype` - Query type
 ///
@@ -817,19 +818,19 @@ pub fn dnssec_server(
 
 /// Mark servers with flag for configuration reload
 ///
-/// Sets SERV_MARK flag on servers matching criteria. Marked servers will be
-/// removed by cleanup_servers() if not updated during config reload.
+/// Sets `SERV_MARK` flag on servers matching criteria. Marked servers will be
+/// removed by `cleanup_servers()` if not updated during config reload.
 ///
 /// # Arguments
 ///
 /// * `servers` - Mutable slice of servers to mark
-/// * `mark_flag` - Additional flag criteria for marking (typically SERV_FROM_DBUS)
+/// * `mark_flag` - Additional flag criteria for marking (typically `SERV_FROM_DBUS`)
 ///
 /// # Configuration Reload Protocol
 ///
-/// 1. mark_servers() - Mark all existing servers
-/// 2. Config reload - Updates existing servers (clears SERV_MARK) or adds new ones
-/// 3. cleanup_servers() - Removes servers still marked (no longer in config)
+/// 1. `mark_servers()` - Mark all existing servers
+/// 2. Config reload - Updates existing servers (clears `SERV_MARK`) or adds new ones
+/// 3. `cleanup_servers()` - Removes servers still marked (no longer in config)
 ///
 /// # Example
 ///
@@ -862,8 +863,8 @@ pub fn mark_servers(servers: &mut [Arc<UpstreamServer>], mark_flag: ServerFlags)
 
 /// Remove marked servers from configuration
 ///
-/// Removes servers with SERV_MARK flag that were not updated during config reload.
-/// This completes the configuration reload protocol started by mark_servers().
+/// Removes servers with `SERV_MARK` flag that were not updated during config reload.
+/// This completes the configuration reload protocol started by `mark_servers()`.
 ///
 /// # Arguments
 ///
@@ -876,7 +877,7 @@ pub fn mark_servers(servers: &mut [Arc<UpstreamServer>], mark_flag: ServerFlags)
 /// # Side Effects
 ///
 /// Modifies the input vector by removing marked servers. After cleanup, server
-/// array should be rebuilt with build_server_array().
+/// array should be rebuilt with `build_server_array()`.
 ///
 /// # Example
 ///
@@ -921,7 +922,7 @@ pub fn cleanup_servers(servers: &mut Vec<Arc<UpstreamServer>>) -> usize {
 ///
 /// - Checks for duplicate servers (same domain, flags, address)
 /// - Groups equivalent servers for round-robin selection
-/// - Clears SERV_MARK flag on updated servers
+/// - Clears `SERV_MARK` flag on updated servers
 /// - Allocates new server if no equivalent found
 ///
 /// # Example
@@ -961,7 +962,7 @@ pub fn add_update_server(
     }
 
     // No equivalent found - add new server
-    let domain = new_server.domain().map(|s| s.to_string());
+    let domain = new_server.domain().map(std::string::ToString::to_string);
     let addr = new_server.addr();
     
     servers.push(new_server);
@@ -995,7 +996,7 @@ pub fn add_update_server(
 ///
 /// # Returns
 ///
-/// * Ordering for Vec::sort_by
+/// * Ordering for `Vec::sort_by`
 fn order_servers(s1: &UpstreamServer, s2: &UpstreamServer) -> Ordering {
     match (s1.domain(), s2.domain()) {
         (Some(d1), Some(d2)) => {
@@ -1022,8 +1023,8 @@ fn order_servers(s1: &UpstreamServer, s2: &UpstreamServer) -> Ordering {
 
 /// Compare query domain to server domain for binary search
 ///
-/// Implements the ordering required for binary search in lookup_domain.
-/// Must match the sorting order from order_servers().
+/// Implements the ordering required for binary search in `lookup_domain`.
+/// Must match the sorting order from `order_servers()`.
 ///
 /// # Arguments
 ///

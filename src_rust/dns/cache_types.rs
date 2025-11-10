@@ -103,20 +103,20 @@ use std::time::Instant;
 
 /// Safe newtype wrapper for cache record indices
 ///
-/// Replaces raw pointers (next, prev, hash_next) from C implementation with
+/// Replaces raw pointers (next, prev, `hash_next`) from C implementation with
 /// safe indices into Vec<CacheRecord> storage. This prevents use-after-free,
 /// dangling pointers, and null pointer dereferences that were possible in C.
 ///
 /// # Safety Invariants
 ///
-/// - CacheRecordId values must be valid indices into the cache storage Vec
+/// - `CacheRecordId` values must be valid indices into the cache storage Vec
 /// - The cache implementation must validate indices before dereferencing
 /// - Invalid indices should be represented as Option<CacheRecordId>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CacheRecordId(usize);
 
 impl CacheRecordId {
-    /// Create a new CacheRecordId from a raw index
+    /// Create a new `CacheRecordId` from a raw index
     ///
     /// # Arguments
     ///
@@ -400,7 +400,7 @@ pub const F_RCODE: CacheFlags = CacheFlags::RCODE;
 /// - Target: Domain name of server providing the service
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SrvData {
-    /// Target hostname providing the service (stored in BlockData for efficiency)
+    /// Target hostname providing the service (stored in `BlockData` for efficiency)
     target: BlockData,
     /// Target hostname length in bytes
     targetlen: u16,
@@ -424,7 +424,7 @@ impl SrvData {
     ///
     /// # Returns
     ///
-    /// SrvData instance with target stored in BlockData
+    /// `SrvData` instance with target stored in `BlockData`
     #[must_use]
     pub fn new(target: &[u8], port: u16, priority: u16, weight: u16) -> Self {
         let targetlen = target.len().min(u16::MAX as usize) as u16;
@@ -481,7 +481,7 @@ impl SrvData {
 /// DNSSEC DNSKEY record data per RFC 4034
 ///
 /// Contains public key data, algorithm identifier, flags, and computed key tag
-/// for DNSSEC signature verification. The key data is stored in BlockData for
+/// for DNSSEC signature verification. The key data is stored in `BlockData` for
 /// memory efficiency with variable-length keys.
 ///
 /// # RFC 4034 Requirements
@@ -492,7 +492,7 @@ impl SrvData {
 /// - Public Key: Variable-length cryptographic key material
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsKeyData {
-    /// Public key data (stored in BlockData for variable-length efficiency)
+    /// Public key data (stored in `BlockData` for variable-length efficiency)
     keydata: BlockData,
     /// Key data length in bytes
     keylen: u16,
@@ -516,7 +516,7 @@ impl DnsKeyData {
     ///
     /// # Returns
     ///
-    /// DnsKeyData instance with key stored in BlockData
+    /// `DnsKeyData` instance with key stored in `BlockData`
     #[must_use]
     pub fn new(keydata: &[u8], flags: u16, keytag: u16, algorithm: u8) -> Self {
         let keylen = keydata.len().min(u16::MAX as usize) as u16;
@@ -584,7 +584,7 @@ impl DnsKeyData {
 /// - Digest: Hash of the DNSKEY record
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DsData {
-    /// Digest (hash) of the DNSKEY record (stored in BlockData)
+    /// Digest (hash) of the DNSKEY record (stored in `BlockData`)
     keydata: BlockData,
     /// Digest length in bytes
     keylen: u16,
@@ -608,7 +608,7 @@ impl DsData {
     ///
     /// # Returns
     ///
-    /// DsData instance with digest stored in BlockData
+    /// `DsData` instance with digest stored in `BlockData`
     #[must_use]
     pub fn new(keydata: &[u8], keytag: u16, algorithm: u8, digest_type: u8) -> Self {
         let keylen = keydata.len().min(u16::MAX as usize) as u16;
@@ -680,7 +680,7 @@ impl DsData {
 /// checked only by runtime flags. Rust's enum:
 /// - Prevents accessing invalid variants at compile time
 /// - Uses pattern matching to safely extract data
-/// - Automatically manages memory for String and BlockData
+/// - Automatically manages memory for String and `BlockData`
 ///
 /// # Variants
 ///
@@ -693,13 +693,13 @@ impl DsData {
 pub enum CacheRecordData {
     /// IPv4 or IPv6 address (A/AAAA records)
     ///
-    /// Replaces C's union all_addr.addr4 (struct in_addr) and addr6 (struct in6_addr).
-    /// Rust's IpAddr enum unifies both address families with type safety.
+    /// Replaces C's union `all_addr.addr4` (struct `in_addr`) and addr6 (struct `in6_addr`).
+    /// Rust's `IpAddr` enum unifies both address families with type safety.
     Address(IpAddr),
 
     /// Canonical name target (CNAME records)
     ///
-    /// Replaces C's union all_addr.cname.target.name (char*). Rust String provides
+    /// Replaces C's union `all_addr.cname.target.name` (char*). Rust String provides
     /// automatic memory management and UTF-8 validation.
     Cname(String),
     
@@ -708,20 +708,20 @@ pub enum CacheRecordData {
 
     /// Service location data (SRV records)
     ///
-    /// Replaces C's union all_addr.srv with structured SrvData. Contains target
-    /// hostname (in BlockData), port, priority, and weight per RFC 2782.
+    /// Replaces C's union `all_addr.srv` with structured `SrvData`. Contains target
+    /// hostname (in `BlockData`), port, priority, and weight per RFC 2782.
     Srv(SrvData),
 
     /// DNSSEC public key (DNSKEY records)
     ///
-    /// Replaces C's union all_addr.key with structured DnsKeyData. Contains key
-    /// material (in BlockData), flags, key tag, and algorithm per RFC 4034.
+    /// Replaces C's union `all_addr.key` with structured `DnsKeyData`. Contains key
+    /// material (in `BlockData`), flags, key tag, and algorithm per RFC 4034.
     DnsKey(DnsKeyData),
 
     /// DNSSEC delegation signer (DS records)
     ///
-    /// Replaces C's union all_addr.ds with structured DsData. Contains digest
-    /// (in BlockData), key tag, algorithm, and digest type per RFC 4034.
+    /// Replaces C's union `all_addr.ds` with structured `DsData`. Contains digest
+    /// (in `BlockData`), key tag, algorithm, and digest type per RFC 4034.
     Ds(DsData),
     
     /// Negative cache entry (generic negative response)
@@ -740,7 +740,7 @@ pub enum CacheRecordData {
 
 /// Hash key for cache lookup by (name, qtype)
 ///
-/// Used as the key type for HashMap<DomainKey, Vec<CacheRecordId>> in the
+/// Used as the key type for `HashMap`<`DomainKey`, Vec<CacheRecordId>> in the
 /// cache implementation. Combines domain name and query type to uniquely
 /// identify cache entries while allowing multiple records for the same
 /// (name, type) pair (e.g., multiple A records for load balancing).
@@ -761,7 +761,7 @@ pub enum CacheRecordData {
 pub struct DomainKey {
     /// Domain name (case-insensitive for comparison)
     name: String,
-    /// DNS query type (T_A, T_AAAA, T_CNAME, etc.)
+    /// DNS query type (`T_A`, `T_AAAA`, `T_CNAME`, etc.)
     qtype: u16,
 }
 
@@ -771,11 +771,11 @@ impl DomainKey {
     /// # Arguments
     ///
     /// * `name` - Domain name (will be converted to lowercase for consistency)
-    /// * `qtype` - DNS query type constant (T_A, T_AAAA, etc.)
+    /// * `qtype` - DNS query type constant (`T_A`, `T_AAAA`, etc.)
     ///
     /// # Returns
     ///
-    /// DomainKey instance for use as HashMap key
+    /// `DomainKey` instance for use as `HashMap` key
     ///
     /// # Examples
     ///
@@ -808,7 +808,7 @@ impl DomainKey {
     ///
     /// # Returns
     ///
-    /// DNS query type constant (T_A, T_AAAA, etc.)
+    /// DNS query type constant (`T_A`, `T_AAAA`, etc.)
     #[must_use]
     pub fn qtype(&self) -> u16 {
         self.qtype
@@ -829,16 +829,16 @@ impl DomainKey {
 ///
 /// The C `struct crec` had several unsafe patterns:
 ///
-/// 1. **Raw pointers for list management**: next, prev, hash_next pointers
-///    → Eliminated: Cache implementation uses Vec<CacheRecord> with CacheRecordId indices
+/// 1. **Raw pointers for list management**: next, prev, `hash_next` pointers
+///    → Eliminated: Cache implementation uses Vec<CacheRecord> with `CacheRecordId` indices
 ///
-/// 2. **Discriminated union**: union all_addr with manual flag checking
-///    → Replaced: CacheRecordData enum with type-safe variants
+/// 2. **Discriminated union**: union `all_addr` with manual flag checking
+///    → Replaced: `CacheRecordData` enum with type-safe variants
 ///
 /// 3. **Manual name memory management**: Union of sname[50], bname*, namep*
 ///    → Replaced: String with automatic memory management
 ///
-/// 4. **time_t overflow**: Signed integer seconds since epoch
+/// 4. **`time_t` overflow**: Signed integer seconds since epoch
 ///    → Replaced: Instant (monotonic) + Duration (overflow-resistant)
 ///
 /// 5. **Manual flag manipulation**: Bitwise OR/AND on unsigned int
@@ -847,10 +847,10 @@ impl DomainKey {
 /// # Fields
 ///
 /// - `name`: Domain name (String with automatic memory management)
-/// - `data`: Record data (type-safe enum: Address, Cname, Srv, DnsKey, Ds)
+/// - `data`: Record data (type-safe enum: Address, Cname, Srv, `DnsKey`, Ds)
 /// - `ttd`: Time-to-die (Instant, monotonic and overflow-resistant)
 /// - `uid`: Source tracking or DNSSEC class (u32)
-/// - `flags`: Cache entry properties (CacheFlags bitflags)
+/// - `flags`: Cache entry properties (`CacheFlags` bitflags)
 ///
 /// # Usage
 ///
@@ -875,9 +875,9 @@ impl DomainKey {
 pub struct CacheRecord {
     /// Domain name (replaces C's union of sname[SMALLDNAME], bname*, namep*)
     pub name: String,
-    /// Record data (replaces C's union all_addr)
+    /// Record data (replaces C's union `all_addr`)
     pub data: CacheRecordData,
-    /// Time-to-die (expiry time, replaces C's time_t ttd)
+    /// Time-to-die (expiry time, replaces C's `time_t` ttd)
     pub ttd: Instant,
     /// Source tracking or DNSSEC class (replaces C's unsigned int uid)
     pub uid: u32,
@@ -885,7 +885,7 @@ pub struct CacheRecord {
     pub flags: CacheFlags,
     /// Record type for tests (derived from data/flags, but can be explicitly set for testing)
     pub rr_type: u16,
-    /// DNS class (almost always C_IN, but can be set for testing)
+    /// DNS class (almost always `C_IN`, but can be set for testing)
     pub class: u16,
     /// TTL in seconds (derived from ttd, but can be explicitly set for testing)
     pub ttl: u32,
@@ -899,14 +899,14 @@ impl CacheRecord {
     /// # Arguments
     ///
     /// * `name` - Domain name
-    /// * `data` - Record data (Address, Cname, Srv, DnsKey, Ds)
+    /// * `data` - Record data (Address, Cname, Srv, `DnsKey`, Ds)
     /// * `ttd` - Time-to-die (expiry time)
     /// * `uid` - Source tracking or DNSSEC class
     /// * `flags` - Cache entry flags
     ///
     /// # Returns
     ///
-    /// CacheRecord instance ready for insertion into cache
+    /// `CacheRecord` instance ready for insertion into cache
     ///
     /// # Examples
     ///
@@ -951,7 +951,7 @@ impl CacheRecord {
     
     /// Derive record type from data and flags
     fn derive_rr_type(data: &CacheRecordData, flags: CacheFlags) -> u16 {
-        use crate::dns::protocol::*;
+        use crate::dns::protocol::{T_A, T_AAAA, T_CNAME, T_SRV, T_DNSKEY, T_DS, T_ANY};
         match data {
             CacheRecordData::Address(addr) => {
                 if addr.is_ipv4() {
@@ -989,7 +989,7 @@ impl CacheRecord {
     ///
     /// # Returns
     ///
-    /// Reference to the CacheRecordData enum
+    /// Reference to the `CacheRecordData` enum
     #[must_use]
     pub fn data(&self) -> &CacheRecordData {
         &self.data
@@ -1009,7 +1009,7 @@ impl CacheRecord {
     ///
     /// # Returns
     ///
-    /// uid value (UID_NONE, SRC_CONFIG, SRC_HOSTS, SRC_AH, or DNSSEC class)
+    /// uid value (`UID_NONE`, `SRC_CONFIG`, `SRC_HOSTS`, `SRC_AH`, or DNSSEC class)
     #[must_use]
     pub fn uid(&self) -> u32 {
         self.uid
@@ -1019,7 +1019,7 @@ impl CacheRecord {
     ///
     /// # Returns
     ///
-    /// CacheFlags bitflags
+    /// `CacheFlags` bitflags
     #[must_use]
     pub fn flags(&self) -> CacheFlags {
         self.flags
@@ -1052,7 +1052,7 @@ impl CacheRecord {
         Instant::now() >= self.ttd
     }
 
-    /// Create a CacheRecord from a DNS response packet
+    /// Create a `CacheRecord` from a DNS response packet
     ///
     /// Parses a DNS response and extracts resource records to create cache entries.
     /// This is a stub implementation for testing.
@@ -1065,8 +1065,9 @@ impl CacheRecord {
     ///
     /// # Returns
     ///
-    /// Returns a CacheRecord parsed from the response, or None on error
-    pub fn from_response(response: &[u8], query_name: &str, query_type: u16) -> Option<Self> {
+    /// Returns a `CacheRecord` parsed from the response, or None on error
+    #[must_use] 
+    pub fn from_response(_response: &[u8], query_name: &str, query_type: u16) -> Option<Self> {
         use crate::dns::protocol::{T_A, T_AAAA};
         use std::net::{Ipv4Addr, Ipv6Addr};
         
@@ -1077,7 +1078,7 @@ impl CacheRecord {
         let data = match query_type {
             T_A => {
                 // Create dummy A record
-                CacheRecordData::Address(std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+                CacheRecordData::Address(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST))
             }
             T_AAAA => {
                 // Create dummy AAAA record

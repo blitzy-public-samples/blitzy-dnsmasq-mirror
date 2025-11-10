@@ -15,9 +15,9 @@
 
 //! IPv6 Router Advertisement Server Implementation
 //!
-//! This module implements ICMPv6 Router Advertisement functionality per RFC 4861,
+//! This module implements `ICMPv6` Router Advertisement functionality per RFC 4861,
 //! handling periodic unsolicited RA transmission and solicited RA responses to
-//! Router Solicitation messages. Coordinates with DHCPv6 via M-bit/O-bit flags.
+//! Router Solicitation messages. Coordinates with `DHCPv6` via M-bit/O-bit flags.
 //!
 //! # Purpose
 //!
@@ -29,9 +29,9 @@
 //!
 //! - Periodic unsolicited RAs with RFC 4861 timing (200-600s default interval)
 //! - Fast initial RAs (5-20s intervals for first 60 seconds after startup)
-//! - Solicited RA responses to Router Solicitation (ICMPv6 type 133)
+//! - Solicited RA responses to Router Solicitation (`ICMPv6` type 133)
 //! - Multiple prefix advertisement with valid/preferred lifetimes
-//! - DHCPv6 coordination (M-bit for managed addresses, O-bit for other config)
+//! - `DHCPv6` coordination (M-bit for managed addresses, O-bit for other config)
 //! - RDNSS (Recursive DNS Server) option per RFC 8106
 //! - DNSSL (DNS Search List) option per RFC 8106
 //! - MTU option for path MTU discovery per RFC 4861 Section 4.6.4
@@ -97,28 +97,28 @@ use crate::logging::logger::Logger;
 /// All IPv6 nodes multicast address for unsolicited RA transmission
 const ALL_NODES_MULTICAST: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1);
 
-/// Router Solicitation ICMPv6 type constant
+/// Router Solicitation `ICMPv6` type constant
 const ND_ROUTER_SOLICIT: u8 = 133;
 
-/// Echo Reply ICMPv6 type constant (for SLAAC address verification)
+/// Echo Reply `ICMPv6` type constant (for SLAAC address verification)
 const ICMP6_ECHO_REPLY: u8 = 129;
 
-/// Router Advertisement ICMPv6 type constant
+/// Router Advertisement `ICMPv6` type constant
 const ND_ROUTER_ADVERT: u8 = 134;
 
-/// Default hop limit for ICMPv6 Router Advertisements (RFC 4861 requires 255)
+/// Default hop limit for `ICMPv6` Router Advertisements (RFC 4861 requires 255)
 const DEFAULT_HOP_LIMIT: u8 = 255;
 
-/// Default MaxRtrAdvInterval in seconds (RFC 4861 default)
+/// Default `MaxRtrAdvInterval` in seconds (RFC 4861 default)
 const DEFAULT_MAX_RTR_ADV_INTERVAL: u32 = 600;
 
-/// Minimum MaxRtrAdvInterval in seconds (slightly stricter than RFC 4861's 3s)
+/// Minimum `MaxRtrAdvInterval` in seconds (slightly stricter than RFC 4861's 3s)
 const MIN_RTR_ADV_INTERVAL: u32 = 4;
 
-/// Maximum MaxRtrAdvInterval in seconds (RFC 4861 Section 6.2.1)
+/// Maximum `MaxRtrAdvInterval` in seconds (RFC 4861 Section 6.2.1)
 const MAX_RTR_ADV_INTERVAL: u32 = 1800;
 
-/// Default router lifetime multiplier (3 * MaxRtrAdvInterval per RFC recommendation)
+/// Default router lifetime multiplier (3 * `MaxRtrAdvInterval` per RFC recommendation)
 const DEFAULT_LIFETIME_MULTIPLIER: u32 = 3;
 
 /// Maximum router lifetime in seconds
@@ -142,24 +142,24 @@ const RA_FLAG_OTHER: u8 = 0x40;
 
 /// IPv6 Router Advertisement Server
 ///
-/// Manages ICMPv6 socket for Router Advertisement transmission and Router
+/// Manages `ICMPv6` socket for Router Advertisement transmission and Router
 /// Solicitation reception. Implements RFC 4861 timing for periodic unsolicited
 /// RAs and immediate solicited responses.
 ///
 /// # Thread Safety
 ///
 /// `RadVServer` is Send + Sync. Socket operations use Arc for shared ownership
-/// across async tasks. DHCPv6 contexts are protected by Arc<RwLock<>> for
+/// across async tasks. `DHCPv6` contexts are protected by Arc<`RwLock`<>> for
 /// concurrent access from RA task and main daemon.
 pub struct RadVServer {
-    /// ICMPv6 raw socket for RA transmission and RS reception
+    /// `ICMPv6` raw socket for RA transmission and RS reception
     socket: Arc<UdpSocket>,
     
     /// Logger for async-safe structured logging
     logger: Arc<Logger>,
     
-    /// DHCPv6 contexts containing RA timing and prefix information
-    /// Shared with DHCPv6 server for M-bit/O-bit coordination
+    /// `DHCPv6` contexts containing RA timing and prefix information
+    /// Shared with `DHCPv6` server for M-bit/O-bit coordination
     dhcp_contexts: Arc<RwLock<Vec<DhcpContext>>>,
     
     /// Network interfaces for prefix enumeration
@@ -184,7 +184,7 @@ pub struct RadVServer {
 /// via --ra-param command-line option.
 #[derive(Debug, Clone)]
 pub struct RaInterfaceParams {
-    /// MaxRtrAdvInterval in seconds (default 600, range 4-1800)
+    /// `MaxRtrAdvInterval` in seconds (default 600, range 4-1800)
     pub interval: u32,
     
     /// Router lifetime in seconds (default 3*interval, max 9000)
@@ -221,11 +221,11 @@ pub enum RadVError {
 impl std::fmt::Display for RadVError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RadVError::SocketError(e) => write!(f, "ICMPv6 socket error: {}", e),
-            RadVError::PacketBuildError(msg) => write!(f, "RA packet construction failed: {}", msg),
-            RadVError::IoError(e) => write!(f, "Network I/O error: {}", e),
-            RadVError::InterfaceError(msg) => write!(f, "Interface error: {}", msg),
-            RadVError::ConfigError(msg) => write!(f, "Configuration error: {}", msg),
+            RadVError::SocketError(e) => write!(f, "ICMPv6 socket error: {e}"),
+            RadVError::PacketBuildError(msg) => write!(f, "RA packet construction failed: {msg}"),
+            RadVError::IoError(e) => write!(f, "Network I/O error: {e}"),
+            RadVError::InterfaceError(msg) => write!(f, "Interface error: {msg}"),
+            RadVError::ConfigError(msg) => write!(f, "Configuration error: {msg}"),
         }
     }
 }
@@ -241,14 +241,14 @@ impl From<IoError> for RadVError {
 impl RadVServer {
     /// Create new Router Advertisement server instance
     ///
-    /// Initializes ICMPv6 raw socket with proper packet filters for Router
+    /// Initializes `ICMPv6` raw socket with proper packet filters for Router
     /// Solicitation (type 133) and Echo Reply (type 129). Sets socket options
     /// for hop limit (255 per RFC 4861), multicast hops, and packet info retrieval.
     ///
     /// # Arguments
     ///
     /// * `logger` - Async-safe logger for operational visibility
-    /// * `dhcp_contexts` - Shared DHCPv6 contexts for prefix information and timing
+    /// * `dhcp_contexts` - Shared `DHCPv6` contexts for prefix information and timing
     /// * `interfaces` - Network interfaces for enumeration and filtering
     ///
     /// # Returns
@@ -258,9 +258,9 @@ impl RadVServer {
     /// # Errors
     ///
     /// Returns `RadVError::SocketError` if:
-    /// - ICMPv6 socket creation fails (requires CAP_NET_RAW capability)
-    /// - Socket option setting fails (IPV6_UNICAST_HOPS, IPV6_MULTICAST_HOPS, etc.)
-    /// - ICMP6_FILTER setting fails
+    /// - `ICMPv6` socket creation fails (requires `CAP_NET_RAW` capability)
+    /// - Socket option setting fails (`IPV6_UNICAST_HOPS`, `IPV6_MULTICAST_HOPS`, etc.)
+    /// - `ICMP6_FILTER` setting fails
     ///
     /// # Example
     ///
@@ -286,7 +286,7 @@ impl RadVServer {
     ///
     /// # Safety
     ///
-    /// Requires root privileges or CAP_NET_RAW capability for raw ICMP socket creation.
+    /// Requires root privileges or `CAP_NET_RAW` capability for raw ICMP socket creation.
     /// Uses nix crate for safe FFI to libc socket operations.
     pub async fn new(
         logger: Arc<Logger>,
@@ -311,10 +311,10 @@ impl RadVServer {
         })
     }
     
-    /// Create and configure ICMPv6 raw socket
+    /// Create and configure `ICMPv6` raw socket
     ///
-    /// Creates IPPROTO_ICMPV6 raw socket, sets hop limits (255 for unicast and multicast),
-    /// enables packet info retrieval (IPV6_PKTINFO), and configures ICMP6_FILTER to pass
+    /// Creates `IPPROTO_ICMPV6` raw socket, sets hop limits (255 for unicast and multicast),
+    /// enables packet info retrieval (`IPV6_PKTINFO`), and configures `ICMP6_FILTER` to pass
     /// only Router Solicitation (type 133) and Echo Reply (type 129) packets.
     ///
     /// # Returns
@@ -339,7 +339,7 @@ impl RadVServer {
         ).map_err(|e| RadVError::SocketError(IoError::from_raw_os_error(e as i32)))?;
         
         // Set hop limit to 255 for unicast (RFC 4861 requirement)
-        let hop_limit: i32 = DEFAULT_HOP_LIMIT as i32;
+        let hop_limit: i32 = i32::from(DEFAULT_HOP_LIMIT);
         setsockopt(&sock_fd, Ipv6Ttl, &hop_limit)
             .map_err(|e| RadVError::SocketError(IoError::from_raw_os_error(e as i32)))?;
         
@@ -360,10 +360,10 @@ impl RadVServer {
         let raw_fd = sock_fd.into_raw_fd();
         let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(raw_fd) };
         std_socket.set_nonblocking(true)
-            .map_err(|e| RadVError::SocketError(e))?;
+            .map_err(RadVError::SocketError)?;
         
         let tokio_socket = UdpSocket::from_std(std_socket)
-            .map_err(|e| RadVError::SocketError(e))?;
+            .map_err(RadVError::SocketError)?;
         
         // Note: Raw ICMPv6 sockets don't require explicit bind like UDP sockets
         // The socket will receive packets on all interfaces
@@ -441,7 +441,7 @@ impl RadVServer {
     
     /// Schedule unsolicited Router Advertisement transmission
     ///
-    /// Initializes or resets RA transmission timers for DHCPv6 contexts. When called
+    /// Initializes or resets RA transmission timers for `DHCPv6` contexts. When called
     /// with a specific context, schedules RA for that context only (used after address
     /// changes). When called with None, schedules RAs for all active contexts with
     /// randomized initial delays (0-5 seconds) to prevent thundering herd.
@@ -479,10 +479,10 @@ impl RadVServer {
                 }
                 
                 // Random delay 0-5 seconds using simple PRNG
-                let random_delay_secs = (std::time::SystemTime::now()
+                let random_delay_secs = u64::from(std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .subsec_nanos() as u64 % 6);
+                    .subsec_nanos()) % 6;
                 
                 context.ra_time = Some(now + Duration::from_secs(random_delay_secs));
                 context.ra_short_period_start = Some(now);
@@ -494,7 +494,7 @@ impl RadVServer {
     
     /// Packet reception loop for Router Solicitation processing
     ///
-    /// Continuously receives ICMPv6 packets on the socket, filters for Router Solicitation
+    /// Continuously receives `ICMPv6` packets on the socket, filters for Router Solicitation
     /// (type 133) and Echo Reply (type 129) messages, extracts source address and interface
     /// index from ancillary data, and processes packets asynchronously.
     ///
@@ -502,7 +502,7 @@ impl RadVServer {
     ///
     /// # Arguments
     ///
-    /// * `socket` - Shared ICMPv6 socket for receiving
+    /// * `socket` - Shared `ICMPv6` socket for receiving
     /// * `logger` - Logger for packet reception events
     /// * `dhcp_contexts` - Contexts for determining RA configuration
     /// * `interfaces` - Interface list for name lookup
@@ -578,7 +578,7 @@ impl RadVServer {
     ///
     /// # Arguments
     ///
-    /// * `socket` - ICMPv6 socket for RA transmission
+    /// * `socket` - `ICMPv6` socket for RA transmission
     /// * `logger` - Logger for RS reception events
     /// * `dhcp_contexts` - Contexts for RA configuration
     /// * `interfaces` - Interface list for validation
@@ -631,12 +631,9 @@ impl RadVServer {
         let if_index = 0;  // Would be extracted from recvmsg() ancillary data
         
         // Get interface name
-        let if_name = match indextoname(if_index) {
-            Ok(name) => name,
-            Err(_) => {
-                warn!("Failed to resolve interface index {} to name", if_index);
-                return Ok(());
-            }
+        let if_name = if let Ok(name) = indextoname(if_index) { name } else {
+            warn!("Failed to resolve interface index {} to name", if_index);
+            return Ok(());
         };
         
         info!("RTR-SOLICIT({}) {}", if_name, source_mac);
@@ -673,17 +670,17 @@ impl RadVServer {
     /// Periodic RA transmission loop
     ///
     /// Main loop for unsolicited Router Advertisement transmission. Continuously
-    /// scans DHCPv6 contexts for expired ra_time timers, finds associated interfaces,
+    /// scans `DHCPv6` contexts for expired `ra_time` timers, finds associated interfaces,
     /// sends RAs, and reschedules next transmission. Calculates next event time for
     /// efficient sleep intervals.
     ///
     /// Implements RFC 4861 Section 6.2.4 timing:
     /// - Short period: 5-20 second intervals for first 60 seconds
-    /// - Normal period: 3/4 to full MaxRtrAdvInterval after short period
+    /// - Normal period: 3/4 to full `MaxRtrAdvInterval` after short period
     ///
     /// # Arguments
     ///
-    /// * `socket` - ICMPv6 socket for RA transmission
+    /// * `socket` - `ICMPv6` socket for RA transmission
     /// * `logger` - Logger for RA events
     /// * `dhcp_contexts` - Contexts with RA timing
     /// * `interfaces` - Network interfaces
@@ -736,17 +733,14 @@ impl RadVServer {
                 };
                 
                 // Resolve interface name from index
-                let resolved_name = match indextoname(if_index) {
-                    Ok(name) => name,
-                    Err(_) => {
-                        // Interface not found, zero ra_time to prevent retries
-                        let mut contexts = dhcp_contexts.write().unwrap();
-                        if let Some(context) = contexts.get_mut(ctx_idx) {
-                            context.ra_time = None;
-                        }
-                        warn!("Interface index {} not found, disabling RA", if_index);
-                        continue;
+                let resolved_name = if let Ok(name) = indextoname(if_index) { name } else {
+                    // Interface not found, zero ra_time to prevent retries
+                    let mut contexts = dhcp_contexts.write().unwrap();
+                    if let Some(context) = contexts.get_mut(ctx_idx) {
+                        context.ra_time = None;
                     }
+                    warn!("Interface index {} not found, disabling RA", if_index);
+                    continue;
                 };
                 
                 // Send RA on this interface
@@ -780,13 +774,11 @@ impl RadVServer {
                 if let Ok(duration) = next.duration_since(now) {
                     trace!("Sleeping for {:?} until next RA event", duration);
                     sleep(duration).await;
-                } else {
-                    // Next event is in the past, process immediately
-                    continue;
                 }
+                // If next event is in the past, process immediately
             } else {
                 // No pending events, sleep for default interval
-                sleep(TokioDuration::from_secs(DEFAULT_MAX_RTR_ADV_INTERVAL as u64)).await;
+                sleep(TokioDuration::from_secs(u64::from(DEFAULT_MAX_RTR_ADV_INTERVAL))).await;
             }
         }
     }
@@ -794,13 +786,13 @@ impl RadVServer {
     /// Send Router Advertisement on specific interface
     ///
     /// Constructs complete RA packet with prefix information options, MTU option,
-    /// RDNSS/DNSSL DNS options, sets M-bit/O-bit flags based on DHCPv6 contexts,
+    /// RDNSS/DNSSL DNS options, sets M-bit/O-bit flags based on `DHCPv6` contexts,
     /// and transmits to specified destination (unicast for solicited, multicast
     /// for unsolicited).
     ///
     /// # Arguments
     ///
-    /// * `socket` - ICMPv6 socket for transmission
+    /// * `socket` - `ICMPv6` socket for transmission
     /// * `logger` - Logger for RA transmission events
     /// * `dhcp_contexts` - Contexts providing prefix information and flags
     /// * `interfaces` - Interfaces for address enumeration
@@ -837,7 +829,7 @@ impl RadVServer {
         
         // Send packet
         socket.send_to(&packet, sock_addr).await
-            .map_err(|e| RadVError::IoError(e))?;
+            .map_err(RadVError::IoError)?;
         
         if dest.is_some() {
             info!("RTR-ADVERT({}) sent solicited RA to {:?}", if_name, dest_addr);
@@ -878,7 +870,7 @@ impl RadVServer {
     /// Send Router Advertisement (public interface)
     ///
     /// Public method for sending RAs from external callers.
-    /// Used by DHCPv6 subsystem when address changes occur.
+    /// Used by `DHCPv6` subsystem when address changes occur.
     ///
     /// # Arguments
     ///
@@ -907,7 +899,7 @@ impl RadVServer {
         ).await
     }
     
-    /// Process incoming ICMPv6 packet (public interface)
+    /// Process incoming `ICMPv6` packet (public interface)
     ///
     /// Public method for processing packets from external callers.
     /// Delegates to internal packet reception logic.
@@ -938,7 +930,7 @@ impl RadVServer {
     /// Periodic RA transmission (public interface)
     ///
     /// Public method for triggering RA transmission cycle.
-    /// Normally called internally by periodic_ra_loop task.
+    /// Normally called internally by `periodic_ra_loop` task.
     pub async fn periodic_ra(&self) {
         // This method is primarily for testing and external triggering
         // The main periodic logic runs in the spawned task
@@ -956,7 +948,7 @@ impl RadVServer {
     
     /// Build Router Advertisement packet with all options (internal)
     ///
-    /// Constructs complete ICMPv6 RA packet including:
+    /// Constructs complete `ICMPv6` RA packet including:
     /// - RA header (type, code, checksum, hop limit, flags, router lifetime)
     /// - Prefix Information options for each configured prefix
     /// - MTU option if configured
@@ -964,8 +956,8 @@ impl RadVServer {
     /// - DNSSL option for DNS search domains
     /// - Source link-layer address option
     ///
-    /// Sets M-bit (0x80) if DHCPv6 managed address configuration enabled,
-    /// O-bit (0x40) if DHCPv6 other configuration enabled.
+    /// Sets M-bit (0x80) if `DHCPv6` managed address configuration enabled,
+    /// O-bit (0x40) if `DHCPv6` other configuration enabled.
     ///
     /// # Arguments
     ///
@@ -989,13 +981,13 @@ impl RadVServer {
         
         // RA header (20 bytes total: 8 bytes base + 12 bytes for times)
         packet.write_u8(ND_ROUTER_ADVERT)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write type: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write type: {e}")))?;
         packet.write_u8(0)  // Code (must be 0)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write code: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write code: {e}")))?;
         packet.write_u16::<BigEndian>(0)  // Checksum (kernel fills this for raw sockets)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write checksum: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write checksum: {e}")))?;
         packet.write_u8(hop_limit)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write hop limit: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write hop limit: {e}")))?;
         
         // Flags byte (M-bit, O-bit, router priority)
         let mut flags: u8 = 0;
@@ -1018,20 +1010,20 @@ impl RadVServer {
         }
         
         packet.write_u8(flags)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write flags: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write flags: {e}")))?;
         
         // Router lifetime (3 * interval by default, or configured value)
         let lifetime = 1800u16;  // Default 30 minutes
         packet.write_u16::<BigEndian>(lifetime)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write lifetime: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write lifetime: {e}")))?;
         
         // Reachable time (0 = unspecified)
         packet.write_u32::<BigEndian>(0)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write reachable time: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write reachable time: {e}")))?;
         
         // Retrans timer (0 = unspecified)
         packet.write_u32::<BigEndian>(0)
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write retrans time: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to write retrans time: {e}")))?;
         
         // Add prefix information options
         // In full implementation, would enumerate interface addresses and add prefix options
@@ -1042,28 +1034,28 @@ impl RadVServer {
                 if context.if_index == if_index {
                     // Prefix Information option (type 3, length 4 = 32 bytes)
                     packet.write_u8(3)  // Type: Prefix Information
-                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix option type: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix option type: {e}")))?;
                     packet.write_u8(4)  // Length: 4 * 8 = 32 bytes
-                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix option length: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix option length: {e}")))?;
                     packet.write_u8(64)  // Prefix length (default /64)
-                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix length: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix length: {e}")))?;
                     
                     // Flags: L-bit (0x80) for on-link, A-bit (0x40) for autonomous address config
                     let prefix_flags = 0xC0;  // L-bit | A-bit
                     packet.write_u8(prefix_flags)
-                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix flags: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Prefix flags: {e}")))?;
                     
                     // Valid lifetime (7200 seconds = 2 hours default)
                     packet.write_u32::<BigEndian>(7200)
-                        .map_err(|e| RadVError::PacketBuildError(format!("Valid lifetime: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Valid lifetime: {e}")))?;
                     
                     // Preferred lifetime (1800 seconds = 30 minutes default)
                     packet.write_u32::<BigEndian>(1800)
-                        .map_err(|e| RadVError::PacketBuildError(format!("Preferred lifetime: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Preferred lifetime: {e}")))?;
                     
                     // Reserved
                     packet.write_u32::<BigEndian>(0)
-                        .map_err(|e| RadVError::PacketBuildError(format!("Reserved: {}", e)))?;
+                        .map_err(|e| RadVError::PacketBuildError(format!("Reserved: {e}")))?;
                     
                     // Prefix (16 bytes)
                     let prefix_bytes = context.start6.octets();
@@ -1078,7 +1070,7 @@ impl RadVServer {
         // Add MTU option if configured
         let mtu_option = MtuOption::new();
         let mtu_bytes = mtu_option.mtu(1500).build()
-            .map_err(|e| RadVError::PacketBuildError(format!("Failed to build MTU option: {}", e)))?;
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to build MTU option: {e}")))?;
         packet.extend_from_slice(&mtu_bytes);
         
         trace!("Built RA packet: {} bytes", packet.len());
@@ -1089,19 +1081,19 @@ impl RadVServer {
     ///
     /// Implements RFC 4861 timing algorithm:
     /// - Short period (first 60 seconds): 5-20 second random intervals
-    /// - Normal period: 3/4 to full MaxRtrAdvInterval with randomization
+    /// - Normal period: 3/4 to full `MaxRtrAdvInterval` with randomization
     ///
     /// # Arguments
     ///
-    /// * `context` - DHCPv6 context to update with new ra_time
-    /// * `interval` - MaxRtrAdvInterval in seconds
+    /// * `context` - `DHCPv6` context to update with new `ra_time`
+    /// * `interval` - `MaxRtrAdvInterval` in seconds
     /// * `now` - Current timestamp
     fn new_timeout(context: &mut DhcpContext, interval: u32, now: SystemTime) {
         if let Some(short_start) = context.ra_short_period_start {
             if let Ok(elapsed) = now.duration_since(short_start) {
                 if elapsed.as_secs() < SHORT_PERIOD_DURATION_SECS {
                     // Still in short period, use 5-20 second interval
-                    let random_component = (elapsed.subsec_nanos() as u64) % 
+                    let random_component = u64::from(elapsed.subsec_nanos()) % 
                         (SHORT_PERIOD_MAX_INTERVAL_SECS - SHORT_PERIOD_MIN_INTERVAL_SECS + 1);
                     let interval_secs = SHORT_PERIOD_MIN_INTERVAL_SECS + random_component;
                     context.ra_time = Some(now + Duration::from_secs(interval_secs));
@@ -1115,15 +1107,15 @@ impl RadVServer {
         let random_range = interval - min_interval;
         
         // Simple randomization using current time
-        let random_component = (now.duration_since(SystemTime::UNIX_EPOCH)
+        let random_component = u64::from(now.duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            .subsec_nanos() as u64) % (random_range as u64 + 1);
+            .subsec_nanos()) % (u64::from(random_range) + 1);
         
-        let interval_secs = min_interval as u64 + random_component;
+        let interval_secs = u64::from(min_interval) + random_component;
         context.ra_time = Some(now + Duration::from_secs(interval_secs));
     }
     
-    /// Calculate MaxRtrAdvInterval from configuration
+    /// Calculate `MaxRtrAdvInterval` from configuration
     ///
     /// Returns configured interval or default (600 seconds), enforcing
     /// RFC 4861 constraints: minimum 4 seconds, maximum 1800 seconds.

@@ -150,7 +150,7 @@ use socket2::{Socket, Domain, Type, Protocol, SockAddr};
 use tokio::net::UdpSocket as TokioUdpSocket;
 use tokio::sync::{RwLock, mpsc};
 use tokio::select;
-use nix::sys::socket::{setsockopt, sockopt};
+use nix::sys::socket::setsockopt;
 use tracing::{error, warn, info, debug, trace};
 
 // Internal imports from depends_on_files
@@ -171,22 +171,22 @@ use crate::dhcp::v6::duid::Duid;
 // Configuration
 // ================================================================================================
 
-/// DHCPv6 server configuration
+/// `DHCPv6` server configuration
 ///
-/// Configures socket binding, buffer sizes, and operational timeouts for the DHCPv6 server.
+/// Configures socket binding, buffer sizes, and operational timeouts for the `DHCPv6` server.
 /// Replaces C's hardcoded constants and daemon options with explicit configuration struct.
 #[derive(Debug, Clone)]
 pub struct Dhcp6ServerConfig {
-    /// Socket bind address (default: INADDR_ANY)
+    /// Socket bind address (default: `INADDR_ANY`)
     ///
-    /// IPv6 address to bind the DHCPv6 server socket. Using `INADDR_ANY` (::) allows receiving
+    /// IPv6 address to bind the `DHCPv6` server socket. Using `INADDR_ANY` (::) allows receiving
     /// on all interfaces. For security-conscious deployments, can be restricted to specific
     /// interface addresses.
     pub bind_addr: SocketAddrV6,
 
     /// Maximum packet size for receive buffer (default: 65536)
     ///
-    /// DHCPv6 uses UDP with typical packet sizes 500-1500 bytes. Maximum is 65507 bytes
+    /// `DHCPv6` uses UDP with typical packet sizes 500-1500 bytes. Maximum is 65507 bytes
     /// (UDP max payload). Buffer must accommodate largest expected packet including all options.
     pub max_packet_size: usize,
 
@@ -198,7 +198,7 @@ pub struct Dhcp6ServerConfig {
 }
 
 impl Dhcp6ServerConfig {
-    /// Creates a new DHCPv6 server configuration
+    /// Creates a new `DHCPv6` server configuration
     ///
     /// # Arguments
     ///
@@ -220,7 +220,7 @@ impl Dhcp6ServerConfig {
 }
 
 impl Default for Dhcp6ServerConfig {
-    /// Creates default DHCPv6 server configuration
+    /// Creates default `DHCPv6` server configuration
     ///
     /// Binds to `[::]:547` (all interfaces), 64KB buffer, 1 second timeout
     fn default() -> Self {
@@ -241,7 +241,7 @@ impl Default for Dhcp6ServerConfig {
 // Server Implementation
 // ================================================================================================
 
-/// DHCPv6 server managing socket lifecycle and packet dispatch
+/// `DHCPv6` server managing socket lifecycle and packet dispatch
 ///
 /// Replaces C's `dhcp6_init()` socket creation and `dhcp6_packet()` reception loop with async
 /// Rust implementation. Eliminates global `daemon->dhcp6fd` with server-owned socket.
@@ -249,12 +249,12 @@ pub struct Dhcp6Server {
     /// Server configuration
     config: Dhcp6ServerConfig,
 
-    /// UDP socket for DHCPv6 communication
+    /// UDP socket for `DHCPv6` communication
     ///
     /// Wrapped in Arc for sharing across async tasks. Replaces C's `daemon->dhcp6fd` global.
     socket: Option<Arc<TokioUdpSocket>>,
 
-    /// Message handler for DHCPv6 protocol processing
+    /// Message handler for `DHCPv6` protocol processing
     handler: Dhcp6Handler,
 
     /// Lease manager for database operations
@@ -273,7 +273,7 @@ pub struct Dhcp6Server {
 }
 
 impl Dhcp6Server {
-    /// Creates a new DHCPv6 server instance
+    /// Creates a new `DHCPv6` server instance
     ///
     /// Initializes server with configuration, handler, and dependencies. Does not bind socket
     /// (call `bind()` separately).
@@ -281,13 +281,13 @@ impl Dhcp6Server {
     /// # Arguments
     ///
     /// * `config` - Server configuration (bind address, buffer size, timeout)
-    /// * `handler` - DHCPv6 message handler
+    /// * `handler` - `DHCPv6` message handler
     /// * `lease_manager` - Shared lease database manager
     /// * `daemon_config` - Daemon configuration for interface filters
     ///
     /// # Returns
     ///
-    /// Unbound DHCPv6 server instance
+    /// Unbound `DHCPv6` server instance
     pub fn new(
         config: Dhcp6ServerConfig,
         handler: Dhcp6Handler,
@@ -307,18 +307,18 @@ impl Dhcp6Server {
         })
     }
 
-    /// Binds DHCPv6 server socket to configured address
+    /// Binds `DHCPv6` server socket to configured address
     ///
     /// Replaces C's `dhcp6_init()` function from `dhcp6.c` lines 146-198. Creates UDP IPv6
-    /// socket, configures socket options (IPV6_V6ONLY, SO_REUSEADDR, IPV6_RECVPKTINFO, 
-    /// IPV6_TCLASS), and binds to port 547.
+    /// socket, configures socket options (`IPV6_V6ONLY`, `SO_REUSEADDR`, `IPV6_RECVPKTINFO`, 
+    /// `IPV6_TCLASS`), and binds to port 547.
     ///
     /// # Socket Options
     ///
     /// - `IPV6_V6ONLY`: Prevent IPv4-mapped IPv6 addresses
     /// - `SO_REUSEADDR`: Allow multiple instances with bind-interfaces
     /// - `IPV6_RECVPKTINFO`: Receive destination address and interface index in ancillary data
-    /// - `IPV6_TCLASS`: Set traffic class to CS6 (0xC0) for QoS marking
+    /// - `IPV6_TCLASS`: Set traffic class to CS6 (0xC0) for `QoS` marking
     ///
     /// # Returns
     ///
@@ -344,7 +344,7 @@ impl Dhcp6Server {
             // Linux uses SO_REUSEPORT for multiple instances
             use nix::sys::socket::sockopt::ReusePort;
             setsockopt(&socket, ReusePort, &true)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to set SO_REUSEPORT: {}", e)))?;
+                .map_err(|e| io::Error::other(format!("Failed to set SO_REUSEPORT: {e}")))?;
         }
 
         // Set IPV6_RECVPKTINFO to receive interface index and destination address
@@ -352,7 +352,7 @@ impl Dhcp6Server {
         {
             use nix::sys::socket::sockopt::Ipv6RecvPacketInfo;
             setsockopt(&socket, Ipv6RecvPacketInfo, &true)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to set IPV6_RECVPKTINFO: {}", e)))?;
+                .map_err(|e| io::Error::other(format!("Failed to set IPV6_RECVPKTINFO: {e}")))?;
         }
 
         #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "macos"))]
@@ -390,7 +390,7 @@ impl Dhcp6Server {
         Ok(())
     }
 
-    /// Main DHCPv6 server event loop
+    /// Main `DHCPv6` server event loop
     ///
     /// Replaces C's `dhcp6_packet()` blocking reception loop (lines 257-438) with async event
     /// loop using `tokio::select!` to multiplex socket operations with shutdown signal.
@@ -399,7 +399,7 @@ impl Dhcp6Server {
     ///
     /// 1. Select between socket receive and shutdown signal
     /// 2. Receive packet with ancillary data (interface index, destination address)
-    /// 3. Extract interface index from IPV6_PKTINFO control message
+    /// 3. Extract interface index from `IPV6_PKTINFO` control message
     /// 4. Convert interface index to name using `if_indextoname()`
     /// 5. Check for relay messages (RELAY-FORW/RELAY-REPL)
     /// 6. Filter excluded interfaces (--if-except, --dhcp-except)
@@ -421,7 +421,7 @@ impl Dhcp6Server {
             .clone();
 
         let mut shutdown_rx = self.shutdown_rx.take()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Shutdown receiver already taken"))?;
+            .ok_or_else(|| io::Error::other("Shutdown receiver already taken"))?;
 
         info!("Starting DHCPv6 server event loop");
 
@@ -470,7 +470,7 @@ impl Dhcp6Server {
     /// Receives packet with ancillary data
     ///
     /// Replaces C's manual msghdr/cmsghdr parsing (lines 278-305) with safe socket2 API.
-    /// Extracts interface index and destination address from IPV6_PKTINFO control message.
+    /// Extracts interface index and destination address from `IPV6_PKTINFO` control message.
     ///
     /// # Arguments
     ///
@@ -480,7 +480,7 @@ impl Dhcp6Server {
     ///
     /// # Returns
     ///
-    /// Tuple of (packet_size, source_address, interface_index, destination_address)
+    /// Tuple of (`packet_size`, `source_address`, `interface_index`, `destination_address`)
     ///
     /// # Errors
     ///
@@ -530,7 +530,7 @@ impl Dhcp6Server {
     ///
     /// # Arguments
     ///
-    /// * `packet` - Received DHCPv6 packet bytes
+    /// * `packet` - Received `DHCPv6` packet bytes
     /// * `src_addr` - Source IPv6 address
     /// * `if_index` - Receiving interface index
     /// * `dst_addr` - Destination IPv6 address from ancillary data
@@ -566,9 +566,8 @@ impl Dhcp6Server {
 
         // Convert interface index to name
         let if_name = indextoname(if_index)
-            .map_err(|e| io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to get interface name for index {}: {}", if_index, e)
+            .map_err(|e| io::Error::other(
+                format!("Failed to get interface name for index {if_index}: {e}")
             ))?;
 
         // Check interface filters (--if-except, --dhcp-except)
@@ -590,7 +589,7 @@ impl Dhcp6Server {
             Ok(mut response) => {
                 // Build response packet
                 let response_bytes = response.to_bytes().map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("Failed to build response: {}", e))
+                    io::Error::other(format!("Failed to build response: {e}"))
                 })?;
 
                 // Determine response port based on message type
@@ -609,7 +608,7 @@ impl Dhcp6Server {
                 {
                     let lease_mgr = self.lease_manager.read().await;
                     lease_mgr.update_file().await.map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("Lease update failed: {}", e))
+                        io::Error::other(format!("Lease update failed: {e}"))
                     })?;
                 }
 
@@ -623,7 +622,7 @@ impl Dhcp6Server {
         }
     }
 
-    /// Sends DHCPv6 response packet
+    /// Sends `DHCPv6` response packet
     ///
     /// Replaces C's `sendto()` with retry wrapper (lines 317-319, 429-430) with async transmission.
     /// Automatically retries on temporary failures (EAGAIN, EWOULDBLOCK).
@@ -648,15 +647,15 @@ impl Dhcp6Server {
         loop {
             match socket.send_to(packet, SocketAddr::V6(dest)).await {
                 Ok(sent) => {
-                    if sent != packet.len() {
+                    if sent == packet.len() {
+                        trace!("Sent {} bytes to {}", sent, dest);
+                    } else {
                         warn!(
                             "Partial send: {} of {} bytes to {}",
                             sent,
                             packet.len(),
                             dest
                         );
-                    } else {
-                        trace!("Sent {} bytes to {}", sent, dest);
                     }
                     return Ok(());
                 }
@@ -693,7 +692,7 @@ impl Dhcp6Server {
     /// Returns `io::Error` for relay processing failures
     async fn handle_relay(
         &self,
-        packet: &[u8],
+        _packet: &[u8],
         src_addr: SocketAddrV6,
         if_index: u32,
     ) -> io::Result<()> {
@@ -712,7 +711,7 @@ impl Dhcp6Server {
         Ok(())
     }
 
-    /// Checks if interface is excluded from DHCPv6 processing
+    /// Checks if interface is excluded from `DHCPv6` processing
     ///
     /// Replaces C's inline interface filter checking (lines 325-331, 396-405) with method.
     /// Checks against `--if-except` interface exclude list.
@@ -745,7 +744,7 @@ impl Dhcp6Server {
     pub async fn stop(&self) -> io::Result<()> {
         if let Some(ref tx) = self.shutdown_tx {
             tx.send(()).await.map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("Failed to send shutdown signal: {}", e))
+                io::Error::other(format!("Failed to send shutdown signal: {e}"))
             })?;
             info!("Shutdown signal sent to DHCPv6 server");
         }
@@ -819,14 +818,6 @@ fn wildcard_match_impl(pattern: &[char], text: &[char], p_idx: usize, t_idx: usi
 // Platform-Specific Imports
 // ================================================================================================
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "macos"
-))]
-use std::os::unix::io::AsRawFd;
 
 // ================================================================================================
 // Tests

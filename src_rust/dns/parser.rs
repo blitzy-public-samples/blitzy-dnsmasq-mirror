@@ -722,7 +722,7 @@ pub fn extract_addresses<'a>(
 /// and determine the query type. Validates that packet contains exactly one question,
 /// is a standard query (OPCODE=QUERY), and is properly formed.
 ///
-/// Returns tuple of (query_name, query_type, query_class). Typically used by query
+/// Returns tuple of (`query_name`, `query_type`, `query_class`). Typically used by query
 /// processing logic to determine routing and caching strategy.
 ///
 /// # Arguments
@@ -947,7 +947,7 @@ fn parse_ipv6_arpa(components: &[&str]) -> Result<IpAddr, ParseError> {
     let mut addr_bytes = [0u8; 16];
     
     // Process nibbles in reverse order
-    for (_i, &nibble_str) in components.iter().enumerate() {
+    for &nibble_str in components {
         // Each component should be exactly 1 hex digit
         if nibble_str.len() != 1 {
             return Err(ParseError::InvalidArpaName {

@@ -52,16 +52,14 @@
 //! - Platform-specific parsing → unified Platform trait
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use std::vec::Vec;
 
 use tokio::sync::RwLock;
-use tokio::task::spawn_blocking;
-use tokio::time::{interval, sleep};
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 // Internal imports (ONLY from depends_on_files)
 use crate::config::types::{Config, DaemonOptions};
@@ -80,10 +78,10 @@ use crate::process::helper::{queue_arp, HelperHandle};
 /// Original C: `#define INTERVAL 90` (line 88 in src/arp.c)
 const INTERVAL: Duration = Duration::from_secs(90);
 
-/// Address family constant for IPv4 (matches libc AF_INET)
+/// Address family constant for IPv4 (matches libc `AF_INET`)
 const AF_INET: i32 = 2;
 
-/// Address family constant for IPv6 (matches libc AF_INET6)  
+/// Address family constant for IPv6 (matches libc `AF_INET6`)  
 const AF_INET6: i32 = 10;
 
 /// Maximum hardware address length for DHCP (16 bytes per RFC 2131)
@@ -91,23 +89,23 @@ const AF_INET6: i32 = 10;
 /// Most commonly 6 bytes for Ethernet MAC addresses, but RFC 2131 allows
 /// up to 16 bytes for other hardware types.
 ///
-/// Original C: DHCP_CHADDR_MAX from dnsmasq.h
+/// Original C: `DHCP_CHADDR_MAX` from dnsmasq.h
 const DHCP_CHADDR_MAX: usize = 16;
 
 // ========== Type Definitions ==========
 
 /// ARP record status enumeration
 ///
-/// Replaces C's integer status codes (ARP_MARK, ARP_FOUND, ARP_NEW, ARP_EMPTY)
+/// Replaces C's integer status codes (`ARP_MARK`, `ARP_FOUND`, `ARP_NEW`, `ARP_EMPTY`)
 /// with type-safe enum for compiler-enforced correctness.
 ///
-/// Original C: #define ARP_MARK 0, ARP_FOUND 1, ARP_NEW 2, ARP_EMPTY 3
+/// Original C: #define `ARP_MARK` 0, `ARP_FOUND` 1, `ARP_NEW` 2, `ARP_EMPTY` 3
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArpStatus {
     /// Temporary marker status during cache refresh sweep
     ///
     /// Entries are marked with this at the start of a kernel query, then confirmed
-    /// as ArpStatus::Found if still present, or moved to old list if not reconfirmed.
+    /// as `ArpStatus::Found` if still present, or moved to old list if not reconfirmed.
     Mark,
 
     /// Status indicating ARP entry confirmed present in kernel cache
@@ -119,7 +117,7 @@ pub enum ArpStatus {
     /// Status indicating newly discovered ARP entry
     ///
     /// Entry was just added to cache during current refresh cycle. Used to trigger
-    /// script notifications (ACTION_ARP event) for new IP→MAC mappings.
+    /// script notifications (`ACTION_ARP` event) for new IP→MAC mappings.
     New,
 
     /// Status indicating negative cache entry (no MAC address)
@@ -132,7 +130,7 @@ pub enum ArpStatus {
 
 /// Cached ARP table entry recording IP→MAC address mapping
 ///
-/// Each ArpRecord represents one entry from the system ARP cache, storing the IP address,
+/// Each `ArpRecord` represents one entry from the system ARP cache, storing the IP address,
 /// corresponding hardware (MAC) address, address family (IPv4 or IPv6), and current status.
 ///
 /// # Memory Layout
@@ -160,13 +158,13 @@ pub struct ArpRecord {
     /// Entry status: Mark, Found, New, or Empty
     pub status: ArpStatus,
 
-    /// Address family: AF_INET for IPv4, AF_INET6 for IPv6
+    /// Address family: `AF_INET` for IPv4, `AF_INET6` for IPv6
     pub family: i32,
 
-    /// Hardware (MAC) address, up to DHCP_CHADDR_MAX (16) bytes
+    /// Hardware (MAC) address, up to `DHCP_CHADDR_MAX` (16) bytes
     pub hwaddr: [u8; DHCP_CHADDR_MAX],
 
-    /// IP address (type-safe IpAddr replaces C's union all_addr)
+    /// IP address (type-safe `IpAddr` replaces C's union `all_addr`)
     pub addr: IpAddr,
 
     /// Timestamp when this entry was last confirmed
@@ -188,7 +186,7 @@ impl ArpRecord {
     ///
     /// # Returns
     ///
-    /// New ArpRecord with family automatically determined from address type
+    /// New `ArpRecord` with family automatically determined from address type
     fn new(addr: IpAddr, hwaddr: &[u8], hwlen: usize, status: ArpStatus) -> Self {
         let family = match addr {
             IpAddr::V4(_) => AF_INET,
@@ -251,7 +249,7 @@ impl ArpRecord {
 /// ARP cache manager
 ///
 /// Maintains an in-memory cache of ARP entries with periodic refresh from kernel.
-/// Provides thread-safe access via Arc<RwLock<>> for async operations.
+/// Provides thread-safe access via Arc<`RwLock`<>> for async operations.
 ///
 /// # Original C Implementation
 ///
@@ -263,7 +261,7 @@ impl ArpRecord {
 pub struct ArpCache {
     /// Active ARP cache entries (IP address → record mapping)
     ///
-    /// Replaces C's linked list `arps` with O(1) HashMap lookups
+    /// Replaces C's linked list `arps` with O(1) `HashMap` lookups
     entries: HashMap<IpAddr, ArpRecord>,
 
     /// Expired entries awaiting script notification
@@ -276,7 +274,7 @@ pub struct ArpCache {
     /// Used to enforce INTERVAL (90 seconds) minimum between refreshes
     last_refresh: Instant,
 
-    /// Configuration (for checking OPT_SCRIPT_ARP flag)
+    /// Configuration (for checking `OPT_SCRIPT_ARP` flag)
     config: Arc<Config>,
 }
 
@@ -285,16 +283,17 @@ impl ArpCache {
     ///
     /// # Arguments
     ///
-    /// * `config` - Daemon configuration (for OPT_SCRIPT_ARP check)
+    /// * `config` - Daemon configuration (for `OPT_SCRIPT_ARP` check)
     ///
     /// # Returns
     ///
-    /// New ArpCache with empty entries
+    /// New `ArpCache` with empty entries
+    #[must_use] 
     pub fn new(config: Arc<Config>) -> Self {
         Self {
             entries: HashMap::new(),
             old_entries: Vec::new(),
-            last_refresh: Instant::now() - INTERVAL, // Allow immediate first refresh
+            last_refresh: Instant::now().checked_sub(INTERVAL).unwrap(), // Allow immediate first refresh
             config,
         }
     }
@@ -403,7 +402,7 @@ impl ArpCache {
     /// 1. Mark all existing non-empty entries
     /// 2. Enumerate kernel ARP table via Platform trait
     /// 3. Confirm or create entries based on kernel data
-    /// 4. Move unconfirmed entries to old_entries list
+    /// 4. Move unconfirmed entries to `old_entries` list
     ///
     /// # Arguments
     ///
@@ -415,7 +414,7 @@ impl ArpCache {
     ///
     /// # Original C Function
     ///
-    /// Replaces the refresh logic in find_mac() (lines 441-463 in src/arp.c)
+    /// Replaces the refresh logic in `find_mac()` (lines 441-463 in src/arp.c)
     pub async fn refresh(&mut self, platform: &dyn Platform) -> Result<(), std::io::Error> {
         debug!("Refreshing ARP cache from kernel");
 
@@ -428,7 +427,7 @@ impl ArpCache {
         let arp_entries = platform
             .enumerate_arp()
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         debug!("Kernel returned {} ARP entries", arp_entries.len());
 
@@ -465,7 +464,7 @@ impl ArpCache {
 
     /// Process a single kernel ARP entry during refresh
     ///
-    /// Implements the filter_mac() callback logic from C (lines 225-291 in src/arp.c)
+    /// Implements the `filter_mac()` callback logic from C (lines 225-291 in src/arp.c)
     ///
     /// # Arguments
     ///
@@ -582,9 +581,8 @@ impl ArpCache {
                 )
                 .await
                 .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to queue ARP delete event: {}", e),
+                    std::io::Error::other(
+                        format!("Failed to queue ARP delete event: {e}"),
                     )
                 })?;
             }
@@ -613,9 +611,8 @@ impl ArpCache {
                     )
                     .await
                     .map_err(|e| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("Failed to queue ARP add event: {}", e),
+                        std::io::Error::other(
+                            format!("Failed to queue ARP add event: {e}"),
                         )
                     })?;
                 }
@@ -658,11 +655,13 @@ impl ArpCache {
     /// Get the number of active ARP cache entries
     ///
     /// Useful for monitoring and debugging
+    #[must_use] 
     pub fn entry_count(&self) -> usize {
         self.entries.len()
     }
 
     /// Get the number of expired entries awaiting script notification
+    #[must_use] 
     pub fn old_entry_count(&self) -> usize {
         self.old_entries.len()
     }
@@ -670,13 +669,13 @@ impl ArpCache {
 
 // ========== Standalone Functions for API Compatibility ==========
 
-/// Standalone find_mac function for API compatibility
+/// Standalone `find_mac` function for API compatibility
 ///
-/// Provides a simpler interface when you have a shared ArpCache instance
+/// Provides a simpler interface when you have a shared `ArpCache` instance
 ///
 /// # Arguments
 ///
-/// * `cache` - Shared ARP cache wrapped in Arc<RwLock<>>
+/// * `cache` - Shared ARP cache wrapped in Arc<`RwLock`<>>
 /// * `addr` - IP address to look up
 /// * `lazy` - If true, accept negative cache entries
 /// * `platform` - Platform implementation for kernel queries
@@ -700,7 +699,7 @@ pub async fn find_mac(
 ///
 /// # Arguments
 ///
-/// * `cache` - Shared ARP cache wrapped in Arc<RwLock<>>
+/// * `cache` - Shared ARP cache wrapped in Arc<`RwLock`<>>
 /// * `platform` - Platform implementation for kernel queries
 pub async fn refresh_cache(
     cache: Arc<RwLock<ArpCache>>,
@@ -716,7 +715,7 @@ pub async fn refresh_cache(
 ///
 /// # Arguments
 ///
-/// * `cache` - Shared ARP cache wrapped in Arc<RwLock<>>
+/// * `cache` - Shared ARP cache wrapped in Arc<`RwLock`<>>
 /// * `helper` - Helper task handle
 ///
 /// # Returns

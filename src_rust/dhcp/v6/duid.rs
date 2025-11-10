@@ -214,7 +214,7 @@ pub enum DuidType {
 
     /// DUID-LL: Link-Layer address only (Type 3)
     ///
-    /// Used on systems with broken RTC (HAVE_BROKEN_RTC) or no persistent lease
+    /// Used on systems with broken RTC (`HAVE_BROKEN_RTC`) or no persistent lease
     /// storage. Less unique than DUID-LLT but doesn't require stable clock.
     Ll,
 }
@@ -341,12 +341,12 @@ pub enum DuidError {
 
     /// System time error during DUID-LLT timestamp calculation
     ///
-    /// Occurs when SystemTime::now() < UNIX_EPOCH or duration arithmetic overflows.
+    /// Occurs when `SystemTime::now()` < `UNIX_EPOCH` or duration arithmetic overflows.
     TimestampError(String),
 
     /// I/O error during interface enumeration
     ///
-    /// Wraps nix::ifaddrs::getifaddrs() errors.
+    /// Wraps `nix::ifaddrs::getifaddrs()` errors.
     IoError(io::Error),
 }
 
@@ -391,7 +391,7 @@ impl From<io::Error> for DuidError {
 
 /// DHCP Unique Identifier (DUID)
 ///
-/// Represents a DHCPv6 server or client DUID with type-safe access to its components.
+/// Represents a `DHCPv6` server or client DUID with type-safe access to its components.
 /// Replaces C's raw `unsigned char *duid` with structured representation.
 ///
 /// # C Representation
@@ -489,7 +489,7 @@ impl Duid {
     /// ```
     pub fn new(duid_type: DuidType, data: Vec<u8>) -> Result<Self, DuidError> {
         let total_len = 2 + data.len(); // 2 bytes for type field + payload
-        if total_len < 4 || total_len > 130 {
+        if !(4..=130).contains(&total_len) {
             return Err(DuidError::InvalidLength { length: total_len });
         }
 
@@ -915,8 +915,7 @@ fn calculate_duid_timestamp() -> Result<u32, DuidError> {
         .checked_sub(DUID_EPOCH_OFFSET)
         .ok_or_else(|| {
             DuidError::TimestampError(format!(
-                "System time {} is before DUID epoch 2000-01-01",
-                unix_seconds
+                "System time {unix_seconds} is before DUID epoch 2000-01-01"
             ))
         })?;
 
@@ -928,7 +927,7 @@ fn calculate_duid_timestamp() -> Result<u32, DuidError> {
 
 /// Get hardware address from first suitable network interface
 ///
-/// Enumerates network interfaces using nix::ifaddrs::getifaddrs() and returns the
+/// Enumerates network interfaces using `nix::ifaddrs::getifaddrs()` and returns the
 /// hardware address of the first interface matching selection criteria.
 ///
 /// # Selection Criteria (matching C implementation)
@@ -964,8 +963,7 @@ async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
     // Use spawn_blocking for potentially blocking getifaddrs() call
     let result = tokio::task::spawn_blocking(|| {
         let ifaddrs = getifaddrs().map_err(|e| {
-            DuidError::IoError(io::Error::new(
-                io::ErrorKind::Other,
+            DuidError::IoError(io::Error::other(
                 format!("Failed to enumerate interfaces: {e}"),
             ))
         })?;
@@ -1002,13 +1000,12 @@ async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
                                         mac_bytes.len()
                                     );
                                     return Ok((hw_type, mac_bytes.to_vec()));
-                                } else {
-                                    trace!(
-                                        "Skipping interface {} with hw_type={} >= 256",
-                                        iface_name,
-                                        hw_type
-                                    );
                                 }
+                                trace!(
+                                    "Skipping interface {} with hw_type={} >= 256",
+                                    iface_name,
+                                    hw_type
+                                );
                             }
                         }
                     }
@@ -1048,8 +1045,7 @@ async fn get_interface_hwaddr() -> Result<(u16, Vec<u8>), DuidError> {
     })
     .await
     .map_err(|e| {
-        DuidError::IoError(io::Error::new(
-            io::ErrorKind::Other,
+        DuidError::IoError(io::Error::other(
             format!("Interface enumeration task failed: {e}"),
         ))
     })?;

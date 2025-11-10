@@ -177,27 +177,27 @@ use std::time::Duration;
 /// Each type has different wire format requirements and renewal semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IdentityAssociation {
-    /// IA_NA (Option 3): Non-temporary address assignment
+    /// `IA_NA` (Option 3): Non-temporary address assignment
     ///
     /// Standard address allocation with T1/T2 renewal timers. Format: `[IAID][T1][T2][IAADDR...]`
     /// Minimum length: 12 bytes (4-byte IAID + 4-byte T1 + 4-byte T2)
     IaNa,
 
-    /// IA_TA (Option 4): Temporary address assignment per RFC 4941
+    /// `IA_TA` (Option 4): Temporary address assignment per RFC 4941
     ///
     /// Privacy extensions addresses without T1/T2 timers. Format: `[IAID][IAADDR...]`
     /// Minimum length: 4 bytes (4-byte IAID only)
     IaTa,
 
-    /// IA_PD (Option 25): Prefix delegation per RFC 3633
+    /// `IA_PD` (Option 25): Prefix delegation per RFC 3633
     ///
     /// Router prefix assignment with T1/T2 timers. Format: `[IAID][T1][T2][IAPREFIX...]`
-    /// Minimum length: 12 bytes (same as IA_NA)
+    /// Minimum length: 12 bytes (same as `IA_NA`)
     IaPd,
 }
 
 impl IdentityAssociation {
-    /// Returns the DHCPv6 option code for this IA type
+    /// Returns the `DHCPv6` option code for this IA type
     #[must_use]
     pub const fn option_code(&self) -> OptionCode {
         match self {
@@ -237,7 +237,7 @@ impl fmt::Display for IdentityAssociation {
 // IA Address (IAADDR Option)
 // ================================================================================================
 
-/// IA Address sub-option (Option 5) within IA_NA or IA_TA
+/// IA Address sub-option (Option 5) within `IA_NA` or `IA_TA`
 ///
 /// Represents a single IPv6 address within an Identity Association with its lifecycle timers.
 /// Wire format: `[IPv6 address:16][preferred lifetime:4][valid lifetime:4]` = 24 bytes total
@@ -246,7 +246,7 @@ impl fmt::Display for IdentityAssociation {
 ///
 /// - **Preferred Lifetime**: Duration address can be used for new connections (DAD complete)
 /// - **Valid Lifetime**: Duration address remains assigned (may be deprecated but still valid)
-/// - **Invariant**: preferred_lifetime ≤ valid_lifetime
+/// - **Invariant**: `preferred_lifetime` ≤ `valid_lifetime`
 /// - **Special Value**: 0xFFFFFFFF = infinite lifetime
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IaAddr {
@@ -412,7 +412,7 @@ impl IaAddr {
 // IA Prefix (IAPREFIX Option)
 // ================================================================================================
 
-/// IA Prefix sub-option (Option 26) within IA_PD for prefix delegation
+/// IA Prefix sub-option (Option 26) within `IA_PD` for prefix delegation
 ///
 /// Represents a delegated IPv6 prefix with its lifecycle timers per RFC 3633.
 /// Wire format: `[preferred:4][valid:4][prefix_len:1][prefix:16]` = 25 bytes total
@@ -452,7 +452,7 @@ impl IaPrefix {
     ///
     /// # Errors
     ///
-    /// Returns `IaError::InvalidPrefix` if prefix_length > 128
+    /// Returns `IaError::InvalidPrefix` if `prefix_length` > 128
     pub fn new(
         prefix: Ipv6Addr,
         prefix_length: u8,
@@ -504,7 +504,7 @@ impl IaPrefix {
     ///
     /// # Errors
     ///
-    /// Returns `IaError` if data is too short, parse fails, or prefix_length > 128
+    /// Returns `IaError` if data is too short, parse fails, or `prefix_length` > 128
     pub fn from_bytes(data: &[u8]) -> Result<Self, IaError> {
         if data.len() < 25 {
             return Err(IaError::TooShort {
@@ -640,7 +640,7 @@ impl IaPrefix {
 ///
 /// 1. Create builder with IA type and IAID
 /// 2. Add addresses or prefixes
-/// 3. Calculate/set T1/T2 (IA_NA and IA_PD only)
+/// 3. Calculate/set T1/T2 (`IA_NA` and `IA_PD` only)
 /// 4. Build to get final option bytes
 ///
 /// ## Example
@@ -659,13 +659,13 @@ pub struct IaBuilder {
     iaid: u32,
     /// Option builder for TLV encoding
     builder: Dhcp6OptionBuilder,
-    /// Saved position for T1/T2 backfill (IA_NA and IA_PD only)
+    /// Saved position for T1/T2 backfill (`IA_NA` and `IA_PD` only)
     t1_t2_position: Option<usize>,
     /// Minimum lifetime across all addresses for T1/T2 calculation
     min_lifetime: Option<Duration>,
     /// Whether IA option header has been started
     started: bool,
-    /// Position where IA option started (for finish_option call)
+    /// Position where IA option started (for `finish_option` call)
     ia_start_position: Option<usize>,
 }
 
@@ -700,7 +700,7 @@ impl IaBuilder {
     /// Starts the IA option, writing IAID and T1/T2 placeholders
     ///
     /// Internal method called by first `add_address()` or `add_prefix()`.
-    /// Writes: `[option code:2][length:2][IAID:4]` plus `[T1:4][T2:4]` for IA_NA/IA_PD.
+    /// Writes: `[option code:2][length:2][IAID:4]` plus `[T1:4][T2:4]` for `IA_NA/IA_PD`.
     ///
     /// # Errors
     ///
@@ -845,7 +845,7 @@ impl IaBuilder {
 
     /// Adds a prefix to the IA
     ///
-    /// Creates IAPREFIX sub-option within IA_PD per RFC 3633.
+    /// Creates IAPREFIX sub-option within `IA_PD` per RFC 3633.
     ///
     /// # Arguments
     ///
@@ -856,7 +856,7 @@ impl IaBuilder {
     ///
     /// # Errors
     ///
-    /// Returns `IaError` if write fails, IA type is not PD, or prefix_length > 128
+    /// Returns `IaError` if write fails, IA type is not PD, or `prefix_length` > 128
     ///
     /// # Example
     ///
@@ -956,7 +956,7 @@ impl IaBuilder {
 
     /// Sets T1 and T2 renewal timers explicitly
     ///
-    /// For IA_NA and IA_PD only. Backfills T1/T2 values at saved position.
+    /// For `IA_NA` and `IA_PD` only. Backfills T1/T2 values at saved position.
     ///
     /// # Arguments
     ///
@@ -1029,7 +1029,7 @@ impl IaBuilder {
     ///
     /// Fuzz prevents renewal storms by randomizing timer values:
     /// - Generate random value
-    /// - Halve repeatedly until fuzz ≤ min_lifetime / 16
+    /// - Halve repeatedly until fuzz ≤ `min_lifetime` / 16
     /// - Subtract from T1 and T2
     ///
     /// # Arguments
@@ -1091,7 +1091,7 @@ impl IaBuilder {
 
     /// Consumes the builder and returns the complete IA option bytes
     ///
-    /// Finalizes the IA option and returns wire-format bytes ready for inclusion in DHCPv6 packet.
+    /// Finalizes the IA option and returns wire-format bytes ready for inclusion in `DHCPv6` packet.
     ///
     /// # Errors
     ///
@@ -1130,7 +1130,7 @@ impl IaBuilder {
 // IA Parser
 // ================================================================================================
 
-/// Parser for extracting Identity Association data from DHCPv6 packets
+/// Parser for extracting Identity Association data from `DHCPv6` packets
 ///
 /// Replaces C's `check_ia()` from line 2112 with safe parsing that prevents buffer over-reads.
 ///
@@ -1222,11 +1222,11 @@ impl<'a> IaParser<'a> {
         Ok((ia_type, iaid))
     }
 
-    /// Parses IA_NA header with explicit type checking
+    /// Parses `IA_NA` header with explicit type checking
     ///
     /// # Errors
     ///
-    /// Returns `IaError` if data is too short or not IA_NA format
+    /// Returns `IaError` if data is too short or not `IA_NA` format
     pub fn parse_ia_na(&mut self) -> Result<(u32, u32, u32), IaError> {
         if self.data.len() < IdentityAssociation::IaNa.min_length() {
             return Err(IaError::TooShort {
@@ -1256,7 +1256,7 @@ impl<'a> IaParser<'a> {
         Ok((iaid, t1, t2))
     }
 
-    /// Parses IA_TA header
+    /// Parses `IA_TA` header
     ///
     /// # Errors
     ///
@@ -1280,7 +1280,7 @@ impl<'a> IaParser<'a> {
         Ok(iaid)
     }
 
-    /// Parses IA_PD header
+    /// Parses `IA_PD` header
     ///
     /// # Errors
     ///
@@ -1310,7 +1310,7 @@ impl<'a> IaParser<'a> {
 
     /// Returns an iterator over IAPREFIX options within the IA
     ///
-    /// For IA_PD prefix delegation.
+    /// For `IA_PD` prefix delegation.
     pub fn find_prefixes(&self) -> impl Iterator<Item = Result<IaPrefix, IaError>> + '_ {
         // This is a simplified version - in practice, would need to parse nested TLV options
         // For now, return empty iterator as placeholder

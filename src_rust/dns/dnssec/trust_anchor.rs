@@ -186,7 +186,7 @@ mod base64 {
             }
             if !ch.is_ascii() || (ch as usize) >= 128 {
                 return Err(DecodeError {
-                    message: format!("Invalid character: {}", ch),
+                    message: format!("Invalid character: {ch}"),
                 });
             }
             cleaned.push(ch as u8);
@@ -321,22 +321,22 @@ impl std::fmt::Display for TrustAnchorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TrustAnchorError::IoError { path, message } => {
-                write!(f, "I/O error for {}: {}", path, message)
+                write!(f, "I/O error for {path}: {message}")
             }
             TrustAnchorError::ValidationFailed { domain, reason } => {
-                write!(f, "Trust anchor validation failed for {}: {}", domain, reason)
+                write!(f, "Trust anchor validation failed for {domain}: {reason}")
             }
             TrustAnchorError::ParseError { path, line, reason } => {
-                write!(f, "Parse error in {} line {}: {}", path, line, reason)
+                write!(f, "Parse error in {path} line {line}: {reason}")
             }
             TrustAnchorError::InvalidConfig { reason } => {
-                write!(f, "Invalid trust anchor configuration: {}", reason)
+                write!(f, "Invalid trust anchor configuration: {reason}")
             }
             TrustAnchorError::CryptoError { reason } => {
-                write!(f, "Cryptographic error: {}", reason)
+                write!(f, "Cryptographic error: {reason}")
             }
             TrustAnchorError::InvalidDomain { domain } => {
-                write!(f, "Invalid domain name: {}", domain)
+                write!(f, "Invalid domain name: {domain}")
             }
         }
     }
@@ -385,7 +385,7 @@ pub struct TimestampValidator {
     /// Cached timestamp from file mtime, thread-safe shared state
     timestamp_time: Arc<RwLock<Option<SystemTime>>>,
     
-    /// System time is now considered valid (0→1 transition triggers EVENT_RELOAD)
+    /// System time is now considered valid (0→1 transition triggers `EVENT_RELOAD`)
     back_to_the_future: Arc<RwLock<bool>>,
     
     /// Disable DNSSEC timestamp checking entirely
@@ -403,6 +403,7 @@ impl TimestampValidator {
     /// # Returns
     ///
     /// New `TimestampValidator` instance
+    #[must_use] 
     pub fn new(timestamp_file: Option<PathBuf>, dnssec_no_time_check: bool) -> Self {
         TimestampValidator {
             timestamp_file,
@@ -422,15 +423,15 @@ impl TimestampValidator {
     /// # Behavior
     ///
     /// ## If timestamp file doesn't exist (first boot):
-    /// 1. Create timestamp file atomically with O_EXCL equivalent
-    /// 2. Set mtime to DEFAULT_TIMESTAMP_EPOCH (2015-01-01)
+    /// 1. Create timestamp file atomically with `O_EXCL` equivalent
+    /// 2. Set mtime to `DEFAULT_TIMESTAMP_EPOCH` (2015-01-01)
     /// 3. Check if current time > timestamp
-    /// 4. If yes: system time is already valid, set back_to_the_future=1, return 0
+    /// 4. If yes: system time is already valid, set `back_to_the_future=1`, return 0
     /// 5. If no: system time is invalid, return 1 (defer validation)
     ///
     /// ## If timestamp file exists (subsequent boots):
-    /// 1. Read file mtime into timestamp_time
-    /// 2. Compare current time to timestamp_time
+    /// 1. Read file mtime into `timestamp_time`
+    /// 2. Compare current time to `timestamp_time`
     /// 3. If current time > timestamp: system time is valid, update mtime, return 0
     /// 4. If current time <= timestamp: system time is invalid, return 1
     ///
@@ -489,7 +490,7 @@ impl TimestampValidator {
                 // File exists, read mtime
                 let mtime = metadata.modified().map_err(|e| TrustAnchorError::IoError {
                     path: timestamp_path.display().to_string(),
-                    message: format!("Failed to read mtime: {}", e),
+                    message: format!("Failed to read mtime: {e}"),
                 })?;
 
                 // Store timestamp_time
@@ -504,7 +505,7 @@ impl TimestampValidator {
                 );
 
                 // Check if current time is already beyond timestamp (goto check_and_exit in C)
-                return self.check_and_exit_timestamp();
+                self.check_and_exit_timestamp()
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 // File doesn't exist, create it atomically
@@ -529,7 +530,7 @@ impl TimestampValidator {
                             );
                             return Err(TrustAnchorError::IoError {
                                 path: timestamp_path.display().to_string(),
-                                message: format!("Failed to set mtime: {}", e),
+                                message: format!("Failed to set mtime: {e}"),
                             });
                         }
 
@@ -546,33 +547,33 @@ impl TimestampValidator {
                         );
 
                         // Check if current time is already beyond timestamp
-                        return self.check_and_exit_timestamp();
+                        self.check_and_exit_timestamp()
                     }
                     Err(e) => {
                         // File creation failed
                         error!("Failed to create timestamp file {}: {}", timestamp_path.display(), e);
-                        return Err(TrustAnchorError::IoError {
+                        Err(TrustAnchorError::IoError {
                             path: timestamp_path.display().to_string(),
-                            message: format!("Failed to create file: {}", e),
-                        });
+                            message: format!("Failed to create file: {e}"),
+                        })
                     }
                 }
             }
             Err(e) => {
                 // Other error reading metadata
                 error!("Failed to stat timestamp file {}: {}", timestamp_path.display(), e);
-                return Err(TrustAnchorError::IoError {
+                Err(TrustAnchorError::IoError {
                     path: timestamp_path.display().to_string(),
-                    message: format!("Failed to stat file: {}", e),
-                });
+                    message: format!("Failed to stat file: {e}"),
+                })
             }
         }
     }
 
     /// Check if current time exceeds timestamp and handle transition
     ///
-    /// This is the "check_and_exit" label logic from C dnssec.c lines 424-433.
-    /// Called from setup_timestamp() after reading or creating timestamp file.
+    /// This is the "`check_and_exit`" label logic from C dnssec.c lines 424-433.
+    /// Called from `setup_timestamp()` after reading or creating timestamp file.
     ///
     /// # Returns
     ///
@@ -594,35 +595,32 @@ impl TimestampValidator {
         let now = SystemTime::now();
         
         // Compare: if current time > timestamp, time is valid
-        match now.duration_since(timestamp_time) {
-            Ok(_duration) => {
-                // Current time is after timestamp - time is valid!
-                debug!("System time is beyond timestamp, time considered valid");
-                
-                // Update timestamp file mtime to current time (equivalent to utimes(file, NULL))
-                let now_filetime = FileTime::from_system_time(now);
-                if let Err(e) = set_file_mtime(timestamp_path, now_filetime) {
-                    error!(
-                        "Failed to update mtime on {}: {}",
-                        timestamp_path.display(),
-                        e
-                    );
-                    // Log error but don't fail - C implementation continues
-                }
-
-                // Set back_to_the_future flag
-                {
-                    let mut btf = self.back_to_the_future.write().unwrap();
-                    *btf = true;
-                }
-
-                Ok(0) // Time is valid
+        if let Ok(_duration) = now.duration_since(timestamp_time) {
+            // Current time is after timestamp - time is valid!
+            debug!("System time is beyond timestamp, time considered valid");
+            
+            // Update timestamp file mtime to current time (equivalent to utimes(file, NULL))
+            let now_filetime = FileTime::from_system_time(now);
+            if let Err(e) = set_file_mtime(timestamp_path, now_filetime) {
+                error!(
+                    "Failed to update mtime on {}: {}",
+                    timestamp_path.display(),
+                    e
+                );
+                // Log error but don't fail - C implementation continues
             }
-            Err(_) => {
-                // Current time is before timestamp - time is NOT valid yet
-                debug!("System time is before timestamp, deferring validation");
-                Ok(1) // Time not yet valid
+
+            // Set back_to_the_future flag
+            {
+                let mut btf = self.back_to_the_future.write().unwrap();
+                *btf = true;
             }
+
+            Ok(0) // Time is valid
+        } else {
+            // Current time is before timestamp - time is NOT valid yet
+            debug!("System time is before timestamp, deferring validation");
+            Ok(1) // Time not yet valid
         }
     }
 
@@ -634,18 +632,18 @@ impl TimestampValidator {
     ///
     /// # Behavior
     ///
-    /// ## If timestamp_file is configured:
-    /// - Check if back_to_the_future is already 1 (time already valid): return true
-    /// - If back_to_the_future is 0 and current time > timestamp:
+    /// ## If `timestamp_file` is configured:
+    /// - Check if `back_to_the_future` is already 1 (time already valid): return true
+    /// - If `back_to_the_future` is 0 and current time > timestamp:
     ///   1. Update timestamp file mtime
     ///   2. Log "system time considered valid" message
-    ///   3. Set back_to_the_future = 1
-    ///   4. Set dnssec_no_time_check = 0
-    ///   5. Return true (and caller should trigger EVENT_RELOAD cache purge)
+    ///   3. Set `back_to_the_future` = 1
+    ///   4. Set `dnssec_no_time_check` = 0
+    ///   5. Return true (and caller should trigger `EVENT_RELOAD` cache purge)
     /// - Otherwise: return false (time not yet valid)
     ///
-    /// ## If timestamp_file is NOT configured:
-    /// - Return !dnssec_no_time_check (normal systems with RTC)
+    /// ## If `timestamp_file` is NOT configured:
+    /// - Return !`dnssec_no_time_check` (normal systems with RTC)
     ///
     /// # Arguments
     ///
@@ -661,9 +659,9 @@ impl TimestampValidator {
     /// On first transition from invalid to valid time:
     /// - Updates timestamp file mtime
     /// - Logs informational message to syslog
-    /// - Sets back_to_the_future = 1
-    /// - Sets dnssec_no_time_check = 0
-    /// - **IMPORTANT**: Caller must trigger EVENT_RELOAD to purge cache
+    /// - Sets `back_to_the_future` = 1
+    /// - Sets `dnssec_no_time_check` = 0
+    /// - **IMPORTANT**: Caller must trigger `EVENT_RELOAD` to purge cache
     ///
     /// # C Implementation Mapping
     ///
@@ -705,7 +703,7 @@ impl TimestampValidator {
                 };
 
                 // Convert curtime (u32 seconds) to SystemTime
-                let current_time = UNIX_EPOCH + Duration::from_secs(curtime as u64);
+                let current_time = UNIX_EPOCH + Duration::from_secs(u64::from(curtime));
 
                 // Check if current time > timestamp (equivalent to difftime(timestamp_time, curtime) <= 0)
                 if current_time >= timestamp_time {
@@ -770,7 +768,7 @@ impl TimestampValidator {
             
             set_file_mtime(timestamp_path, filetime).map_err(|e| TrustAnchorError::IoError {
                 path: timestamp_path.display().to_string(),
-                message: format!("Failed to update mtime: {}", e),
+                message: format!("Failed to update mtime: {e}"),
             })?;
             
             debug!("Updated timestamp file mtime: {}", timestamp_path.display());
@@ -780,11 +778,12 @@ impl TimestampValidator {
         }
     }
 
-    /// Get current value of back_to_the_future flag
+    /// Get current value of `back_to_the_future` flag
     ///
     /// # Returns
     ///
-    /// Current value of back_to_the_future flag (true = time is valid)
+    /// Current value of `back_to_the_future` flag (true = time is valid)
+    #[must_use] 
     pub fn get_back_to_the_future_flag(&self) -> bool {
         let btf = self.back_to_the_future.read().unwrap();
         *btf
@@ -800,18 +799,18 @@ impl TimestampValidator {
 /// Manages DNSKEY trust anchors loaded from configuration files. Trust anchors
 /// are the root of the DNSSEC chain of trust, typically configured for the DNS
 /// root zone (".") or specific zones. This structure provides O(1) lookup by
-/// domain name using HashMap, replacing C's linked list with O(n) traversal.
+/// domain name using `HashMap`, replacing C's linked list with O(n) traversal.
 ///
 /// # Fields
 ///
-/// - `anchors`: HashMap mapping domain names to lists of DNSKEY records
+/// - `anchors`: `HashMap` mapping domain names to lists of DNSKEY records
 ///
 /// # C Implementation Mapping
 ///
 /// Replaces C's daemon->trust_anchors linked list from dnsmasq.h with
-/// HashMap<String, Vec<DnsKey>> for efficient lookup and memory safety.
+/// `HashMap`<String, Vec<DnsKey>> for efficient lookup and memory safety.
 pub struct TrustAnchorStore {
-    /// Trust anchors indexed by domain name (case-insensitive via normalize_domain)
+    /// Trust anchors indexed by domain name (case-insensitive via `normalize_domain`)
     anchors: HashMap<String, Vec<DnsKey>>,
 }
 
@@ -821,6 +820,7 @@ impl TrustAnchorStore {
     /// # Returns
     ///
     /// New `TrustAnchorStore` instance with no trust anchors loaded
+    #[must_use] 
     pub fn new() -> Self {
         TrustAnchorStore {
             anchors: HashMap::new(),
@@ -862,7 +862,7 @@ impl TrustAnchorStore {
 
         let file = TokioFile::open(path).await.map_err(|e| TrustAnchorError::IoError {
             path: path.display().to_string(),
-            message: format!("Failed to open file: {}", e),
+            message: format!("Failed to open file: {e}"),
         })?;
 
         let reader = BufReader::new(file);
@@ -871,7 +871,7 @@ impl TrustAnchorStore {
 
         while let Some(line_result) = lines.next_line().await.map_err(|e| TrustAnchorError::IoError {
             path: path.display().to_string(),
-            message: format!("Failed to read line: {}", e),
+            message: format!("Failed to read line: {e}"),
         })? {
             line_number += 1;
             let line = line_result.trim();
@@ -969,25 +969,25 @@ impl TrustAnchorStore {
         let flags = parts[3].parse::<u16>().map_err(|e| TrustAnchorError::ParseError {
             path: String::from("<input>"),
             line: line_number,
-            reason: format!("Invalid flags: {}", e),
+            reason: format!("Invalid flags: {e}"),
         })?;
 
         let protocol = parts[4].parse::<u8>().map_err(|e| TrustAnchorError::ParseError {
             path: String::from("<input>"),
             line: line_number,
-            reason: format!("Invalid protocol: {}", e),
+            reason: format!("Invalid protocol: {e}"),
         })?;
 
         let algo_num = parts[5].parse::<u8>().map_err(|e| TrustAnchorError::ParseError {
             path: String::from("<input>"),
             line: line_number,
-            reason: format!("Invalid algorithm: {}", e),
+            reason: format!("Invalid algorithm: {e}"),
         })?;
 
         let algorithm = DnssecAlgorithm::from_u8(algo_num).ok_or_else(|| TrustAnchorError::ParseError {
             path: String::from("<input>"),
             line: line_number,
-            reason: format!("Unsupported algorithm: {}", algo_num),
+            reason: format!("Unsupported algorithm: {algo_num}"),
         })?;
 
         // Parse public key (base64 encoded, may span multiple parts)
@@ -995,7 +995,7 @@ impl TrustAnchorStore {
         let public_key = base64::decode(&key_b64).map_err(|e| TrustAnchorError::ParseError {
             path: String::from("<input>"),
             line: line_number,
-            reason: format!("Invalid base64 key data: {}", e),
+            reason: format!("Invalid base64 key data: {e}"),
         })?;
 
         // Create DNSKEY record
@@ -1007,7 +1007,7 @@ impl TrustAnchorStore {
     /// Normalize domain name for case-insensitive storage
     ///
     /// DNS domain names are case-insensitive per RFC 1035 Section 2.3.3.
-    /// This function converts domain names to lowercase for HashMap keys.
+    /// This function converts domain names to lowercase for `HashMap` keys.
     ///
     /// # Arguments
     ///
@@ -1030,6 +1030,7 @@ impl TrustAnchorStore {
     ///
     /// * `Some(&Vec<DnsKey>)` - List of trust anchor DNSKEYs for domain
     /// * `None` - No trust anchors configured for domain
+    #[must_use] 
     pub fn get_trust_anchor(&self, domain: &str) -> Option<&Vec<DnsKey>> {
         let normalized = self.normalize_domain(domain);
         self.anchors.get(&normalized)
@@ -1109,7 +1110,7 @@ impl TrustAnchorStore {
         
         self.anchors
             .entry(normalized)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(dnskey);
     }
 
@@ -1122,6 +1123,7 @@ impl TrustAnchorStore {
     /// # Returns
     ///
     /// `true` if trust anchor configured for domain, `false` otherwise
+    #[must_use] 
     pub fn has_trust_anchor(&self, domain: &str) -> bool {
         let normalized = self.normalize_domain(domain);
         self.anchors.contains_key(&normalized)
@@ -1176,6 +1178,7 @@ pub fn setup_timestamp(
 ///
 /// * `true` - System time is valid, check timestamps
 /// * `false` - System time not valid, skip timestamp checks
+#[must_use] 
 pub fn is_check_date(
     timestamp_file: Option<PathBuf>,
     dnssec_no_time_check: bool,

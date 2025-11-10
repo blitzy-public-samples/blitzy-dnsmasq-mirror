@@ -114,23 +114,18 @@
 //! - `struct state` (lines 118-145) → `Dhcp6State` struct
 //! - Manual outpacket buffer → `Dhcp6Response` builder
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
 
-use tokio::spawn;
 use tokio::sync::RwLock;
-use tokio::time::sleep;
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::config::types::DaemonOptions;
-use crate::dhcp::common::match_netid;
 use crate::dhcp::lease::LeaseManager;
 use crate::dhcp::v6::duid::Duid;
-use crate::dhcp::v6::ia::IaBuilder;
 use crate::dhcp::v6::options::Dhcp6OptionBuilder;
 use crate::dhcp::v6::protocol::{MessageType, OptionCode, StatusCode};
 
@@ -138,11 +133,11 @@ use crate::dhcp::v6::protocol::{MessageType, OptionCode, StatusCode};
 // Local Type Definitions
 // ================================================================================================
 
-/// DHCPv6 context for address pool configuration
+/// `DHCPv6` context for address pool configuration
 ///
-/// Represents a configured dhcp-range for DHCPv6, containing address pool boundaries,
+/// Represents a configured dhcp-range for `DHCPv6`, containing address pool boundaries,
 /// lifetime configuration, and network matching criteria. Defined locally since not
-/// available in depends_on_files. Corresponds to C's `struct dhcp_context` from dnsmasq.h.
+/// available in `depends_on_files`. Corresponds to C's `struct dhcp_context` from dnsmasq.h.
 ///
 /// This is a minimal definition for the handler's needs. Full implementation would be in
 /// config module.
@@ -188,10 +183,10 @@ impl DhcpContext {
 // Error Types
 // ================================================================================================
 
-/// Comprehensive error types for DHCPv6 message processing
+/// Comprehensive error types for `DHCPv6` message processing
 ///
 /// Replaces C's implicit error handling (return 0, errno) with explicit Result-based errors.
-/// Each variant corresponds to a specific failure mode in the DHCPv6 protocol.
+/// Each variant corresponds to a specific failure mode in the `DHCPv6` protocol.
 #[derive(Debug)]
 pub enum Dhcp6HandlerError {
     /// Packet is malformed or truncated
@@ -205,7 +200,7 @@ pub enum Dhcp6HandlerError {
 
     /// Packet size is below minimum required
     ///
-    /// DHCPv6 messages must be at least 4 bytes (1-byte msg type + 3-byte transaction ID).
+    /// `DHCPv6` messages must be at least 4 bytes (1-byte msg type + 3-byte transaction ID).
     /// Returned when packet doesn't meet this requirement.
     PacketTooSmall {
         /// Actual packet size received
@@ -214,16 +209,16 @@ pub enum Dhcp6HandlerError {
         required: usize,
     },
 
-    /// CLIENT_ID option is missing from request
+    /// `CLIENT_ID` option is missing from request
     ///
-    /// RFC 3315 requires CLIENT_ID in all messages except INFORMATION-REQUEST. Corresponds
-    /// to C code lines 661-662 returning 0 when CLIENT_ID not found.
+    /// RFC 3315 requires `CLIENT_ID` in all messages except INFORMATION-REQUEST. Corresponds
+    /// to C code lines 661-662 returning 0 when `CLIENT_ID` not found.
     ClientIdMissing,
 
-    /// SERVER_ID option doesn't match our server DUID
+    /// `SERVER_ID` option doesn't match our server DUID
     ///
-    /// RFC 3315 requires SERVER_ID to match in REQUEST/RENEW/RELEASE/DECLINE messages.
-    /// Corresponds to C code lines 665-669 comparing opt6_ptr with daemon->duid.
+    /// RFC 3315 requires `SERVER_ID` to match in REQUEST/RENEW/RELEASE/DECLINE messages.
+    /// Corresponds to C code lines 665-669 comparing `opt6_ptr` with daemon->duid.
     ServerIdMismatch {
         /// Expected server DUID
         expected: Vec<u8>,
@@ -279,10 +274,10 @@ pub enum Dhcp6HandlerError {
         iaid: u32,
     },
 
-    /// Error parsing DHCPv6 options
+    /// Error parsing `DHCPv6` options
     ///
     /// Returned when TLV option encoding is malformed (length exceeds packet boundary,
-    /// required suboptions missing, etc.). Wraps lower-level OptionError from parser.
+    /// required suboptions missing, etc.). Wraps lower-level `OptionError` from parser.
     OptionParseError {
         /// Description of parsing failure
         details: String,
@@ -290,8 +285,8 @@ pub enum Dhcp6HandlerError {
 
     /// Lease manager operation failed
     ///
-    /// Returned when lease database operations fail (commit_lease, find_lease, etc.).
-    /// Wraps errors from LeaseManager async methods.
+    /// Returned when lease database operations fail (`commit_lease`, `find_lease`, etc.).
+    /// Wraps errors from `LeaseManager` async methods.
     LeaseError {
         /// Underlying lease operation error
         details: String,
@@ -363,10 +358,10 @@ impl std::error::Error for Dhcp6HandlerError {
 // Dhcp6State - Per-Request State Tracking
 // ================================================================================================
 
-/// Per-request DHCPv6 transaction state
+/// Per-request `DHCPv6` transaction state
 ///
 /// Replaces C's stack-allocated `struct state` (lines 118-145 in rfc3315.c) with owned Rust
-/// struct containing all information needed to process a single DHCPv6 message and construct
+/// struct containing all information needed to process a single `DHCPv6` message and construct
 /// a response. Eliminates global mutable state by owning all data for request lifetime.
 ///
 /// ## Memory Safety Improvements
@@ -402,7 +397,7 @@ impl std::error::Error for Dhcp6HandlerError {
 /// ```
 #[derive(Debug, Clone)]
 pub struct Dhcp6State {
-    /// Client DUID (DHCPv6 Unique Identifier) from OPTION6_CLIENT_ID
+    /// Client DUID (`DHCPv6` Unique Identifier) from `OPTION6_CLIENT_ID`
     ///
     /// Replaces C's `unsigned char *clid` pointer with owned Vec. DUID uniquely identifies
     /// client across network moves. Format varies by DUID type (LLT, EN, LL).
@@ -410,25 +405,25 @@ pub struct Dhcp6State {
 
     /// Server DUID for validation in REQUEST/RENEW/RELEASE/DECLINE
     ///
-    /// Expected server DUID that should match OPTION6_SERVER_ID in client messages.
+    /// Expected server DUID that should match `OPTION6_SERVER_ID` in client messages.
     server_duid: Vec<u8>,
 
     /// Transaction ID (24-bit) from message header
     ///
-    /// Extracted from bytes 1-3 of DHCPv6 message. Client uses same XID in retransmissions.
+    /// Extracted from bytes 1-3 of `DHCPv6` message. Client uses same XID in retransmissions.
     /// Server echoes XID in responses for client message matching.
     transaction_id: u32,
 
-    /// Identity Association Identifier from IA_NA/IA_TA/IA_PD option
+    /// Identity Association Identifier from `IA_NA/IA_TA/IA_PD` option
     ///
     /// 32-bit client-chosen identifier for grouping addresses/prefixes. Single client can
     /// have multiple IAIDs for different interfaces or purposes.
     iaid: u32,
 
-    /// Identity Association type: IA_NA (non-temporary), IA_TA (temporary), or IA_PD (prefix)
+    /// Identity Association type: `IA_NA` (non-temporary), `IA_TA` (temporary), or `IA_PD` (prefix)
     ///
-    /// Determines address allocation behavior: IA_NA uses stable addresses, IA_TA uses
-    /// privacy addresses, IA_PD allocates routing prefixes for downstream networks.
+    /// Determines address allocation behavior: `IA_NA` uses stable addresses, `IA_TA` uses
+    /// privacy addresses, `IA_PD` allocates routing prefixes for downstream networks.
     ia_type: OptionCode,
 
     /// Selected addresses for this IA
@@ -437,7 +432,7 @@ pub struct Dhcp6State {
     /// Replaces C's per-iteration address selection with accumulated list.
     addresses: Vec<Ipv6Addr>,
 
-    /// Client-supplied hostname from OPTION6_FQDN
+    /// Client-supplied hostname from `OPTION6_FQDN`
     ///
     /// Hostname client wants to use for DNS registration. May be FQDN or bare hostname.
     /// Corresponds to C's `char *client_hostname` (malloc'd).
@@ -452,7 +447,7 @@ pub struct Dhcp6State {
     /// Accumulated configuration tags for conditional option matching
     ///
     /// Tags accumulated from vendor class, user class, interface name, dhcpv6 tag, MAC
-    /// matching, client config. Used with match_netid() for conditional configuration.
+    /// matching, client config. Used with `match_netid()` for conditional configuration.
     /// Replaces C's circular linked list `struct dhcp_netid *tags`.
     tags: HashSet<String>,
 
@@ -461,13 +456,13 @@ pub struct Dhcp6State {
     /// Interface where packet arrived, used for logging and interface-based tag matching.
     interface: String,
 
-    /// Client MAC address from OPTION6_CLIENT_MAC (RFC 6939) or ND cache
+    /// Client MAC address from `OPTION6_CLIENT_MAC` (RFC 6939) or ND cache
     ///
     /// Hardware address for MAC-based configuration matching. Not always available in
-    /// DHCPv6 (unlike DHCPv4 where it's mandatory).
+    /// `DHCPv6` (unlike `DHCPv4` where it's mandatory).
     mac: Option<Vec<u8>>,
 
-    /// Hardware type from MAC option (ARPHRD_ETHER = 1, etc.)
+    /// Hardware type from MAC option (`ARPHRD_ETHER` = 1, etc.)
     ///
     /// RFC 826 hardware type. Typically 1 for Ethernet.
     mac_type: Option<u16>,
@@ -486,7 +481,7 @@ pub struct Dhcp6State {
 }
 
 impl Dhcp6State {
-    /// Creates a new empty DHCPv6 state
+    /// Creates a new empty `DHCPv6` state
     ///
     /// Initializes state with empty collections. Typically followed by parsing packet
     /// to populate fields.
@@ -510,14 +505,14 @@ impl Dhcp6State {
         }
     }
 
-    /// Parses DHCPv6 state from incoming packet
+    /// Parses `DHCPv6` state from incoming packet
     ///
-    /// Extracts CLIENT_ID, transaction ID, and initializes tag set with interface and
+    /// Extracts `CLIENT_ID`, transaction ID, and initializes tag set with interface and
     /// dhcpv6 tags. Replaces C's inline initialization in `dhcp6_no_relay()` lines 604-625.
     ///
     /// # Arguments
     ///
-    /// * `packet` - Raw DHCPv6 packet bytes (message type + xid + options)
+    /// * `packet` - Raw `DHCPv6` packet bytes (message type + xid + options)
     /// * `interface_name` - Receiving interface name for tag matching
     /// * `server_duid` - Expected server DUID for validation
     ///
@@ -528,7 +523,7 @@ impl Dhcp6State {
     /// # Errors
     ///
     /// - `Dhcp6HandlerError::PacketTooSmall` - Packet < 4 bytes
-    /// - `Dhcp6HandlerError::ClientIdMissing` - No CLIENT_ID option found
+    /// - `Dhcp6HandlerError::ClientIdMissing` - No `CLIENT_ID` option found
     /// - `Dhcp6HandlerError::OptionParseError` - Malformed options
     pub fn parse_from_packet(
         packet: &[u8],
@@ -661,11 +656,11 @@ impl Default for Dhcp6State {
 // Dhcp6Response - Response Builder
 // ================================================================================================
 
-/// DHCPv6 response message builder
+/// `DHCPv6` response message builder
 ///
 /// Constructs ADVERTISE or REPLY messages with proper option encoding. Replaces C's manual
 /// manipulation of daemon->outpacket buffer with safe builder pattern. Automatically handles
-/// message type, transaction ID echo, and CLIENT_ID/SERVER_ID option ordering.
+/// message type, transaction ID echo, and `CLIENT_ID/SERVER_ID` option ordering.
 ///
 /// ## Usage Pattern
 ///
@@ -723,14 +718,14 @@ impl Dhcp6Response {
         &self.options
     }
 
-    /// Builds the complete DHCPv6 response packet
+    /// Builds the complete `DHCPv6` response packet
     ///
     /// Constructs 4-byte header (message type + transaction ID) followed by all options.
     /// Corresponds to C's final daemon->outpacket.iov_len calculation.
     ///
     /// # Returns
     ///
-    /// Complete DHCPv6 packet ready for transmission
+    /// Complete `DHCPv6` packet ready for transmission
     ///
     /// # Errors
     ///
@@ -758,7 +753,7 @@ impl Dhcp6Response {
         Ok(packet)
     }
 
-    /// Convenience method equivalent to build()
+    /// Convenience method equivalent to `build()`
     ///
     /// Provided for API consistency with schema exports
     pub fn to_bytes(&mut self) -> Result<Vec<u8>, Dhcp6HandlerError> {
@@ -770,14 +765,14 @@ impl Dhcp6Response {
 // Option Parsing Helpers
 // ================================================================================================
 
-/// Helper function to find an option in DHCPv6 packet
+/// Helper function to find an option in `DHCPv6` packet
 ///
 /// Searches for option by code in the options portion of packet (after 4-byte header).
 /// Returns option value bytes (without code and length fields).
 ///
 /// # Arguments
 ///
-/// * `packet` - Full DHCPv6 packet including header
+/// * `packet` - Full `DHCPv6` packet including header
 /// * `option_code` - Option code to search for
 ///
 /// # Returns
@@ -812,31 +807,31 @@ fn find_option(packet: &[u8], option_code: OptionCode) -> Option<&[u8]> {
     None
 }
 
-/// Extracts client DUID from CLIENT_ID option
+/// Extracts client DUID from `CLIENT_ID` option
 ///
 /// # Arguments
 ///
-/// * `packet` - Full DHCPv6 packet
+/// * `packet` - Full `DHCPv6` packet
 ///
 /// # Returns
 ///
 /// Client DUID bytes if found
 fn extract_client_duid(packet: &[u8]) -> Result<Vec<u8>, Dhcp6HandlerError> {
     find_option(packet, OptionCode::ClientId)
-        .map(|bytes| bytes.to_vec())
+        .map(<[u8]>::to_vec)
         .ok_or(Dhcp6HandlerError::ClientIdMissing)
 }
 
-/// Validates server DUID in SERVER_ID option matches expected
+/// Validates server DUID in `SERVER_ID` option matches expected
 ///
 /// # Arguments
 ///
-/// * `packet` - Full DHCPv6 packet
+/// * `packet` - Full `DHCPv6` packet
 /// * `expected_duid` - Expected server DUID
 ///
 /// # Returns
 ///
-/// Ok if SERVER_ID matches or is not present, Err if mismatch
+/// Ok if `SERVER_ID` matches or is not present, Err if mismatch
 fn validate_server_duid(packet: &[u8], expected_duid: &[u8]) -> Result<(), Dhcp6HandlerError> {
     if let Some(received_duid) = find_option(packet, OptionCode::ServerId) {
         if received_duid != expected_duid {
@@ -849,15 +844,15 @@ fn validate_server_duid(packet: &[u8], expected_duid: &[u8]) -> Result<(), Dhcp6
     Ok(())
 }
 
-/// Checks if packet contains RAPID_COMMIT option
+/// Checks if packet contains `RAPID_COMMIT` option
 ///
 /// # Arguments
 ///
-/// * `packet` - Full DHCPv6 packet
+/// * `packet` - Full `DHCPv6` packet
 ///
 /// # Returns
 ///
-/// true if RAPID_COMMIT option present
+/// true if `RAPID_COMMIT` option present
 fn has_rapid_commit(packet: &[u8]) -> bool {
     find_option(packet, OptionCode::RapidCommit).is_some()
 }
@@ -866,9 +861,9 @@ fn has_rapid_commit(packet: &[u8]) -> bool {
 // Dhcp6Handler - Main Message Processor
 // ================================================================================================
 
-/// Main DHCPv6 message handler and dispatcher
+/// Main `DHCPv6` message handler and dispatcher
 ///
-/// Processes incoming DHCPv6 messages and routes to message-type-specific handlers. Replaces
+/// Processes incoming `DHCPv6` messages and routes to message-type-specific handlers. Replaces
 /// C's monolithic `dhcp6_no_relay()` function (lines 590-1700) with modular async methods.
 ///
 /// ## Architecture
@@ -907,12 +902,12 @@ pub struct Dhcp6Handler {
     /// Daemon configuration options
     options: Arc<RwLock<DaemonOptions>>,
 
-    /// Server DUID for SERVER_ID option
+    /// Server DUID for `SERVER_ID` option
     server_duid: Duid,
 }
 
 impl Dhcp6Handler {
-    /// Creates a new DHCPv6 message handler
+    /// Creates a new `DHCPv6` message handler
     ///
     /// # Arguments
     ///
@@ -940,13 +935,13 @@ impl Dhcp6Handler {
     ///
     /// # Arguments
     ///
-    /// * `packet` - Raw DHCPv6 packet bytes
+    /// * `packet` - Raw `DHCPv6` packet bytes
     /// * `interface_name` - Receiving interface name
     /// * `is_unicast` - Whether packet was sent unicast (affects multicast enforcement)
     ///
     /// # Returns
     ///
-    /// DHCPv6 response ready for transmission
+    /// `DHCPv6` response ready for transmission
     ///
     /// # Errors
     ///
@@ -1051,18 +1046,18 @@ impl Dhcp6Handler {
     /// Handles SOLICIT messages (first message in 4-message exchange)
     ///
     /// Responds with ADVERTISE containing available addresses but does NOT allocate leases.
-    /// If client includes RAPID_COMMIT option, responds with REPLY and allocates lease
+    /// If client includes `RAPID_COMMIT` option, responds with REPLY and allocates lease
     /// immediately (2-message exchange). Corresponds to C lines 944-1133.
     ///
     /// # Flow
     ///
-    /// 1. Check for RAPID_COMMIT option (if present, treat as REQUEST)
+    /// 1. Check for `RAPID_COMMIT` option (if present, treat as REQUEST)
     /// 2. Reset lease USED flags for allocation tracking
-    /// 3. For each IA_NA/IA_TA/IA_PD in request:
+    /// 3. For each `IA_NA/IA_TA/IA_PD` in request:
     ///    - Validate IA structure and extract IAID
     ///    - Allocate addresses from available pools
     ///    - Add IAADDR suboptions with lifetimes
-    /// 4. If no addresses allocated, return NoAddrsAvail status
+    /// 4. If no addresses allocated, return `NoAddrsAvail` status
     /// 5. Set PREFERENCE option based on --dhcp-authoritative
     /// 6. Return ADVERTISE (or REPLY if rapid commit)
     ///
@@ -1251,7 +1246,7 @@ impl Dhcp6Handler {
     ///
     /// # Returns
     ///
-    /// REPLY with Success status if addresses valid, NotOnLink status otherwise
+    /// REPLY with Success status if addresses valid, `NotOnLink` status otherwise
     pub async fn handle_confirm(
         &self,
         state: &Dhcp6State,
@@ -1322,7 +1317,7 @@ impl Dhcp6Handler {
     ///
     /// # Returns
     ///
-    /// REPLY with extended lifetimes, or NoBinding status if lease not found
+    /// REPLY with extended lifetimes, or `NoBinding` status if lease not found
     pub async fn handle_renew(
         &self,
         state: &Dhcp6State,
@@ -1581,7 +1576,7 @@ impl Dhcp6Handler {
     ///
     /// Client already has IPv6 address (from SLAAC or static config) and only needs
     /// additional configuration like DNS servers, domain search list. Does NOT include
-    /// IA_NA/IA_TA/IA_PD options. Corresponds to C lines 1432-1458.
+    /// `IA_NA/IA_TA/IA_PD` options. Corresponds to C lines 1432-1458.
     ///
     /// # Arguments
     ///

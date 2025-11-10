@@ -13,15 +13,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! DHCPv4 Server Module
+//! `DHCPv4` Server Module
 //!
-//! This module provides a complete, memory-safe implementation of DHCPv4 server
+//! This module provides a complete, memory-safe implementation of `DHCPv4` server
 //! functionality per RFC 2131 and RFC 2132, replacing the C implementation in
 //! `src/dhcp.c` and `src/rfc2131.c`.
 //!
 //! # Overview
 //!
-//! The DHCPv4 subsystem implements the Dynamic Host Configuration Protocol version 4,
+//! The `DHCPv4` subsystem implements the Dynamic Host Configuration Protocol version 4,
 //! enabling automatic IP address allocation, network configuration distribution, and
 //! lease management for IPv4 networks. This Rust implementation maintains exact
 //! behavioral parity with dnsmasq's proven C implementation while eliminating entire
@@ -50,7 +50,7 @@
 //! - **`server`**: Async server runtime coordinating socket management, packet reception,
 //!   protocol handling, and integration with lease database and DNS cache.
 //!
-//! # DHCPv4 Protocol Flow
+//! # `DHCPv4` Protocol Flow
 //!
 //! ## Standard 4-Message Exchange
 //!
@@ -211,20 +211,21 @@
 //!
 //! # Usage Example
 //!
-//! ```rust,no_run
-//! use dnsmasq::dhcp::v4::{DhcpServer, ServerConfig};
+//! ```rust,ignore
+//! use dnsmasq::dhcp::v4::DhcpServer;
+//! use dnsmasq::config::Config;
+//! use dnsmasq::core::daemon::Daemon;
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Initialize server configuration
-//!     let config = ServerConfig::builder()
-//!         .bind_address("0.0.0.0:67".parse()?)
-//!         .enable_pxe(true)
-//!         .lease_file("/var/lib/dnsmasq/dnsmasq.leases")
-//!         .build()?;
+//!     // Load configuration
+//!     let config = Arc::new(Config::load("/etc/dnsmasq.conf")?);
+//!     let daemon = Arc::new(RwLock::new(Daemon::new(config.clone())));
 //!
 //!     // Create and initialize DHCPv4 server
-//!     let server = DhcpServer::new(config).await?;
+//!     let server = DhcpServer::new(config, daemon).await;
 //!
 //!     // Run server event loop (blocks until shutdown signal)
 //!     server.run().await?;
@@ -432,13 +433,13 @@ pub const DHCP_TIMEOUT: Duration = Duration::from_secs(60);
 /// RFC 2131 recommends checking for address conflicts but doesn't specify timeout.
 pub const PING_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// Minimum DHCPv4 packet size (300 bytes).
+/// Minimum `DHCPv4` packet size (300 bytes).
 ///
 /// Packets shorter than this are padded with `OPTION_PAD` to work around
 /// Linux in-kernel DHCP client bug. Matches `MIN_PACKETSZ` from protocol module.
 pub const DHCP_MIN_PACKET_SIZE: usize = 300;
 
-/// Maximum DHCPv4 packet size (576 bytes).
+/// Maximum `DHCPv4` packet size (576 bytes).
 ///
 /// Maximum size of DHCP packet without fragmentation per RFC 2131 Section 2.
 /// Clients may request larger sizes via `OPTION_MAXMESSAGE` (57), but default
@@ -449,13 +450,13 @@ pub const DHCP_MAX_PACKET_SIZE: usize = 576;
 // Error Type
 // ============================================================================
 
-/// DHCPv4 module error type.
+/// `DHCPv4` module error type.
 ///
 /// Encompasses all error conditions that can occur during DHCP operations,
 /// from packet validation failures to lease allocation errors.
 #[derive(Debug)]
 pub enum DhcpError {
-    /// Received packet smaller than minimum DHCPv4 packet size.
+    /// Received packet smaller than minimum `DHCPv4` packet size.
     ///
     /// Valid DHCP packets must be at least 236 bytes (fixed header) and
     /// typically padded to 300 bytes minimum.
@@ -510,28 +511,28 @@ impl std::fmt::Display for DhcpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DhcpError::PacketTooSmall => {
-                write!(f, "DHCP packet too small (minimum {} bytes)", DHCP_MIN_PACKET_SIZE)
+                write!(f, "DHCP packet too small (minimum {DHCP_MIN_PACKET_SIZE} bytes)")
             }
             DhcpError::InvalidOption(opt) => {
-                write!(f, "Invalid DHCP option: {:?}", opt)
+                write!(f, "Invalid DHCP option: {opt:?}")
             }
             DhcpError::PingFailed(err) => {
-                write!(f, "Ping-before-offer failed: {}", err)
+                write!(f, "Ping-before-offer failed: {err}")
             }
             DhcpError::LeaseUnavailable => {
                 write!(f, "No IP address available for allocation")
             }
             DhcpError::InvalidCookie => {
-                write!(f, "Invalid DHCP magic cookie (expected 0x{:08X})", DHCP_COOKIE)
+                write!(f, "Invalid DHCP magic cookie (expected 0x{DHCP_COOKIE:08X})")
             }
             DhcpError::MissingRequiredOption(opt) => {
-                write!(f, "Missing required DHCP option: {:?}", opt)
+                write!(f, "Missing required DHCP option: {opt:?}")
             }
             DhcpError::Io(err) => {
-                write!(f, "I/O error: {}", err)
+                write!(f, "I/O error: {err}")
             }
             DhcpError::ConfigError(msg) => {
-                write!(f, "Configuration error: {}", msg)
+                write!(f, "Configuration error: {msg}")
             }
         }
     }
@@ -558,7 +559,7 @@ impl From<OptionError> for DhcpError {
             OptionError::InvalidOption { code, reason: _ } => DhcpError::InvalidOption(
                 OptionCode::from_u8(code).unwrap_or(OptionCode::OPTION_PAD)
             ),
-            _ => DhcpError::ConfigError(format!("Option error: {:?}", err)),
+            _ => DhcpError::ConfigError(format!("Option error: {err:?}")),
         }
     }
 }

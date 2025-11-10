@@ -26,9 +26,9 @@
 //! - libidn2: Internationalized Domain Names → enables 'idn' feature
 //! - nettle + hogweed: Cryptography for DNSSEC → enables 'dnssec' feature
 //! - libnftables (≥0.9): nftables integration
-//! - libnetfilter_conntrack: Connection tracking
+//! - `libnetfilter_conntrack`: Connection tracking
 //! - lua5.2: Lua scripting support → enables 'lua' feature
-//! - libubus + libubox: OpenWrt ubus integration (Linux only)
+//! - libubus + libubox: `OpenWrt` ubus integration (Linux only)
 //!
 //! ## Platform Detection
 //!
@@ -72,7 +72,7 @@ fn main() {
 /// Detects the target platform and emits appropriate rustc-cfg directives.
 ///
 /// This replicates platform detection from the C codebase which uses
-/// conditional compilation via HAVE_LINUX_NETWORK, HAVE_BSD_NETWORK, etc.
+/// conditional compilation via `HAVE_LINUX_NETWORK`, `HAVE_BSD_NETWORK`, etc.
 ///
 /// Emits:
 /// - `cargo:rustc-cfg=platform_linux` for Linux
@@ -257,7 +257,7 @@ fn detect_dnssec_libraries() {
     }
 }
 
-/// Detects OpenWrt ubus libraries (libubus + libubox).
+/// Detects `OpenWrt` ubus libraries (libubus + libubox).
 ///
 /// This matches Makefile line 56:
 /// ```make

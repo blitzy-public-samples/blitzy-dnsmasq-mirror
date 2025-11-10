@@ -296,7 +296,7 @@ pub mod platform;
 /// Re-export UDP socket type from sockets module
 ///
 /// Provides async UDP socket operations for DNS, DHCP, and TFTP services.
-/// Wraps tokio::net::UdpSocket with dnsmasq-specific configuration.
+/// Wraps `tokio::net::UdpSocket` with dnsmasq-specific configuration.
 ///
 /// # Example
 /// ```no_run
@@ -311,7 +311,7 @@ pub use sockets::UdpSocket;
 /// Re-export TCP listener type from sockets module
 ///
 /// Provides async TCP listener for DNS-over-TCP connections.
-/// Automatically handles accept() and spawns child tasks.
+/// Automatically handles `accept()` and spawns child tasks.
 ///
 /// # Example
 /// ```no_run
@@ -326,13 +326,13 @@ pub use sockets::TcpListener;
 /// Re-export socket creation function
 ///
 /// Primary API for creating configured sockets with platform-specific options.
-/// Handles SO_REUSEADDR, SO_BINDTODEVICE, IP_PKTINFO automatically.
+/// Handles `SO_REUSEADDR`, `SO_BINDTODEVICE`, `IP_PKTINFO` automatically.
 ///
 /// # Arguments
 /// * `addr` - Socket address to bind to
 ///
 /// # Returns
-/// Configured socket ready for use, or io::Error on failure
+/// Configured socket ready for use, or `io::Error` on failure
 pub use sockets::create_socket;
 
 /// Re-export randomized source port socket creation
@@ -364,7 +364,7 @@ pub use sockets::indextoname;
 /// - `addr`: IP address assigned to interface
 /// - `name`: Interface name (e.g., "eth0")
 /// - `index`: System interface index
-/// - `flags`: Interface flags (IFF_UP, IFF_BROADCAST, etc.)
+/// - `flags`: Interface flags (`IFF_UP`, `IFF_BROADCAST`, etc.)
 ///
 /// # Methods
 /// - `is_up()`: Check if interface is operational
@@ -378,11 +378,11 @@ pub use interfaces::Interface;
 /// Returns filtered list based on user configuration.
 ///
 /// # Returns
-/// Vector of Interface structs, or io::Error on enumeration failure
+/// Vector of Interface structs, or `io::Error` on enumeration failure
 ///
 /// # Platform Behavior
 /// - Linux: Uses netlink sockets
-/// - BSD: Uses getifaddrs() + routing sockets
+/// - BSD: Uses `getifaddrs()` + routing sockets
 /// - Solaris: Uses SIOCGLIFCONF ioctl
 pub use interfaces::enumerate_interfaces;
 
@@ -395,7 +395,7 @@ pub use interfaces::enumerate_interfaces;
 /// * `iface` - Interface to validate
 ///
 /// # Returns
-/// Ok(()) if interface is valid, Err(io::Error) with reason if not
+/// Ok(()) if interface is valid, `Err(io::Error)` with reason if not
 pub use interfaces::iface_check;
 
 // -------------------- ARP Cache Types and Functions --------------------
@@ -433,12 +433,12 @@ pub use arp::find_mac;
 /// * `cache` - ARP cache instance to refresh
 ///
 /// # Returns
-/// Ok(()) on success, Err(io::Error) on failure
+/// Ok(()) on success, `Err(io::Error)` on failure
 pub use arp::refresh_cache;
 
 // -------------------- Loop Detection Types and Functions --------------------
 
-/// Re-export loop detector type from loop_detect module
+/// Re-export loop detector type from `loop_detect` module
 ///
 /// Implements DNS forwarding loop detection using probe queries.
 /// Detects misconfigured upstream servers pointing back to dnsmasq.
@@ -455,10 +455,10 @@ pub use loop_detect::LoopDetector;
 /// Called periodically (every 30 seconds) to maintain loop detection.
 ///
 /// # Arguments
-/// * `detector` - LoopDetector instance
+/// * `detector` - `LoopDetector` instance
 ///
 /// # Returns
-/// Ok(()) on success, Err(io::Error) on send failure
+/// Ok(()) on success, `Err(io::Error)` on send failure
 pub use loop_detect::send_probes;
 
 /// Re-export loop detection check function
@@ -467,12 +467,12 @@ pub use loop_detect::send_probes;
 /// Marks upstream server as looping if probe is detected.
 ///
 /// # Arguments
-/// * `detector` - LoopDetector instance
+/// * `detector` - `LoopDetector` instance
 /// * `query_name` - DNS query name to check
 /// * `query_id` - DNS query ID
 ///
 /// # Returns
-/// Ok(true) if loop detected, Ok(false) if not a probe, Err(io::Error) on failure
+/// Ok(true) if loop detected, Ok(false) if not a probe, `Err(io::Error)` on failure
 pub use loop_detect::detect_loop;
 
 // -------------------- Platform Abstraction Types and Functions --------------------
@@ -480,7 +480,7 @@ pub use loop_detect::detect_loop;
 /// Re-export Platform trait from platform module
 ///
 /// Defines unified interface for platform-specific network operations.
-/// Implemented by LinuxPlatform, BsdPlatform, and SolarisPlatform.
+/// Implemented by `LinuxPlatform`, `BsdPlatform`, and `SolarisPlatform`.
 ///
 /// # Required Methods
 /// - `enumerate_interfaces()`: Discover all network interfaces
@@ -491,9 +491,9 @@ pub use platform::Platform;
 /// Re-export platform implementation type alias
 ///
 /// Points to the active platform implementation based on target OS.
-/// - Linux: LinuxPlatform (netlink)
-/// - BSD: BsdPlatform (routing sockets)
-/// - Solaris: SolarisPlatform (ioctl)
+/// - Linux: `LinuxPlatform` (netlink)
+/// - BSD: `BsdPlatform` (routing sockets)
+/// - Solaris: `SolarisPlatform` (ioctl)
 pub use platform::PlatformImpl;
 
 /// Re-export platform factory function
@@ -502,7 +502,7 @@ pub use platform::PlatformImpl;
 /// Dependency injection pattern for testability.
 ///
 /// # Returns
-/// Platform trait object for current OS, or io::Error on initialization failure
+/// Platform trait object for current OS, or `io::Error` on initialization failure
 pub use platform::create_platform;
 
 /// Re-export network change event type
@@ -528,28 +528,28 @@ pub use platform::NetworkChange;
 /// Used for both query reception and forwarding.
 pub const DNS_PORT: u16 = 53;
 
-/// Default DHCPv4 server port
+/// Default `DHCPv4` server port
 ///
 /// Standard DHCP server port per RFC 2131 Section 4.1.
-/// DHCPv4 servers listen on port 67.
+/// `DHCPv4` servers listen on port 67.
 pub const DHCP_SERVER_PORT: u16 = 67;
 
-/// Default DHCPv4 client port
+/// Default `DHCPv4` client port
 ///
 /// Standard DHCP client port per RFC 2131 Section 4.1.
-/// DHCPv4 clients listen on port 68.
+/// `DHCPv4` clients listen on port 68.
 pub const DHCP_CLIENT_PORT: u16 = 68;
 
-/// Default DHCPv6 server port
+/// Default `DHCPv6` server port
 ///
-/// Standard DHCPv6 server port per RFC 8415 Section 7.2.
-/// DHCPv6 servers listen on port 547.
+/// Standard `DHCPv6` server port per RFC 8415 Section 7.2.
+/// `DHCPv6` servers listen on port 547.
 pub const DHCP6_SERVER_PORT: u16 = 547;
 
-/// Default DHCPv6 client port
+/// Default `DHCPv6` client port
 ///
-/// Standard DHCPv6 client port per RFC 8415 Section 7.2.
-/// DHCPv6 clients listen on port 546.
+/// Standard `DHCPv6` client port per RFC 8415 Section 7.2.
+/// `DHCPv6` clients listen on port 546.
 pub const DHCP6_CLIENT_PORT: u16 = 546;
 
 /// Default TFTP port
@@ -575,7 +575,7 @@ pub const MAX_DNS_TCP_SIZE: usize = 65535;
 /// Kernel socket receive buffer size for UDP sockets.
 /// Large enough to prevent packet drops under load.
 ///
-/// Original C: DAEMON_SOCKOPT_RCVBUF in config.h
+/// Original C: `DAEMON_SOCKOPT_RCVBUF` in config.h
 pub const SOCKET_RCVBUF_SIZE: usize = 256 * 1024; // 256 KB
 
 /// Socket send buffer size
@@ -583,7 +583,7 @@ pub const SOCKET_RCVBUF_SIZE: usize = 256 * 1024; // 256 KB
 /// Kernel socket send buffer size for UDP sockets.
 /// Matches receive buffer for symmetric buffering.
 ///
-/// Original C: DAEMON_SOCKOPT_SNDBUF in config.h
+/// Original C: `DAEMON_SOCKOPT_SNDBUF` in config.h
 pub const SOCKET_SNDBUF_SIZE: usize = 256 * 1024; // 256 KB
 
 // ============================================================================

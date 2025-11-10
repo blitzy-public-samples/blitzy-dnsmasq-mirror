@@ -30,7 +30,7 @@
 //! - `strchr()` + pointer arithmetic → nom parser combinators with safe slicing
 //! - `memmove()` for quote removal → zero-copy parsing with owned String allocation only when needed
 //! - Manual escape sequence handling → nom parser with proper validation
-//! - `stat()` + linked list tracking → HashMap with inode keys for circular include detection
+//! - `stat()` + linked list tracking → `HashMap` with inode keys for circular include detection
 //!
 //! # Configuration Syntax
 //!
@@ -85,14 +85,14 @@ use tracing::{debug, info, trace};
 
 /// Parse error types for configuration file processing
 ///
-/// Replaces C's error reporting via my_syslog() and die() calls with typed error handling.
+/// Replaces C's error reporting via `my_syslog()` and `die()` calls with typed error handling.
 /// Each variant provides contextual information for helpful error messages matching the
 /// C implementation's error reporting pattern (file name, line number, error description).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
     /// I/O error reading configuration file
     ///
-    /// Corresponds to C's errno-based error handling in one_file() (line 6218)
+    /// Corresponds to C's errno-based error handling in `one_file()` (line 6218)
     IoError {
         /// File path that caused the error
         file: String,
@@ -138,7 +138,7 @@ pub enum ParseError {
 
     /// Invalid value for configuration option
     ///
-    /// Corresponds to C's one_opt() validation failures
+    /// Corresponds to C's `one_opt()` validation failures
     InvalidValue {
         /// File path where error occurred
         file: String,
@@ -164,7 +164,7 @@ pub enum ParseError {
 
     /// Circular include detected
     ///
-    /// Corresponds to C's duplicate file detection via stat() and inode tracking (lines 6197-6209)
+    /// Corresponds to C's duplicate file detection via `stat()` and inode tracking (lines 6197-6209)
     CircularInclude {
         /// File path that would create circular dependency
         file: String,
@@ -183,23 +183,22 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             ParseError::IoError { file, source } => {
-                write!(f, "cannot read {}: {}", file, source)
+                write!(f, "cannot read {file}: {source}")
             }
             ParseError::SyntaxError {
                 file,
                 line,
                 message,
             } => {
-                write!(f, "{} at line {} of {}", message, line, file)
+                write!(f, "{message} at line {line} of {file}")
             }
             ParseError::UnknownOption { file, line, option } => {
-                write!(f, "bad option '{}' at line {} of {}", option, line, file)
+                write!(f, "bad option '{option}' at line {line} of {file}")
             }
             ParseError::MissingValue { file, line, option } => {
                 write!(
                     f,
-                    "missing parameter for '{}' at line {} of {}",
-                    option, line, file
+                    "missing parameter for '{option}' at line {line} of {file}"
                 )
             }
             ParseError::InvalidValue {
@@ -211,18 +210,17 @@ impl Display for ParseError {
             } => {
                 write!(
                     f,
-                    "invalid value '{}' for option '{}' at line {} of {}: {}",
-                    value, option, line, file, reason
+                    "invalid value '{value}' for option '{option}' at line {line} of {file}: {reason}"
                 )
             }
             ParseError::MissingQuote { file, line } => {
-                write!(f, "missing closing quote at line {} of {}", line, file)
+                write!(f, "missing closing quote at line {line} of {file}")
             }
             ParseError::CircularInclude { file } => {
-                write!(f, "circular include detected: {}", file)
+                write!(f, "circular include detected: {file}")
             }
             ParseError::FileNotFound { file } => {
-                write!(f, "configuration file not found: {}", file)
+                write!(f, "configuration file not found: {file}")
             }
         }
     }
@@ -253,7 +251,7 @@ impl From<IoError> for ParseError {
 /// } *filesread = NULL;
 /// ```
 ///
-/// This Rust implementation uses a HashSet of (dev, ino) tuples for efficient duplicate detection.
+/// This Rust implementation uses a `HashSet` of (dev, ino) tuples for efficient duplicate detection.
 #[derive(Debug, Clone)]
 pub struct ParseContext {
     /// Set of (device, inode) pairs for loaded files
@@ -274,8 +272,8 @@ pub struct ParseContext {
 impl ParseContext {
     /// Creates a new parse context with default configuration
     ///
-    /// Initializes an empty set for tracking loaded files and a ConfigBuilder
-    /// with default values from Config::default().
+    /// Initializes an empty set for tracking loaded files and a `ConfigBuilder`
+    /// with default values from `Config::default()`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -287,7 +285,7 @@ impl ParseContext {
 
     /// Marks a file as loaded using its metadata
     ///
-    /// Extracts device and inode from file metadata and adds to the loaded_files set.
+    /// Extracts device and inode from file metadata and adds to the `loaded_files` set.
     /// Corresponds to C's addition of new fileread node (option.c lines 6205-6209).
     ///
     /// # Arguments
@@ -411,7 +409,7 @@ fn parse_escape_sequence(input: &str) -> IResult<&str, char> {
 /// Corresponds to C's quoted string parsing (option.c lines 6979-6008).
 /// Handles escape sequences and returns the unquoted content.
 ///
-/// In C, this was done with memmove() and in-place modification.
+/// In C, this was done with `memmove()` and in-place modification.
 /// This implementation builds a new String safely.
 fn parse_quoted_string(input: &str) -> IResult<&str, String> {
     let (input, _) = char('"')(input)?;
@@ -495,7 +493,7 @@ fn parse_key_value_pair(input: &str) -> IResult<&str, (String, String)> {
 
 /// Parses a configuration line
 ///
-/// Corresponds to C's line parsing in read_file() (option.c lines 5954-6086).
+/// Corresponds to C's line parsing in `read_file()` (option.c lines 5954-6086).
 /// Handles:
 /// - Empty lines and comments
 /// - Options without values
@@ -531,7 +529,7 @@ fn parse_config_line(input: &str) -> IResult<&str, ConfigLine> {
 /// Parses configuration file content into Config
 ///
 /// This is the main parsing function that processes the entire configuration content.
-/// Corresponds to C's read_file() function (option.c lines 5949-6090).
+/// Corresponds to C's `read_file()` function (option.c lines 5949-6090).
 ///
 /// # Arguments
 ///
@@ -560,7 +558,6 @@ pub fn parse_config_string(content: &str) -> Result<Config, ParseError> {
         match parse_config_line(line) {
             Ok((_, ConfigLine::Empty)) => {
                 // Skip empty lines and comments
-                continue;
             }
             Ok((_, ConfigLine::OptionOnly(option))) => {
                 trace!("Parsed option without value: {}", option);
@@ -612,8 +609,8 @@ pub fn parse_config_string(content: &str) -> Result<Config, ParseError> {
 
 /// Parses a configuration file
 ///
-/// Main entry point for configuration file parsing. Corresponds to C's one_file() function
-/// (option.c lines 6160-6251) combined with read_file() (lines 5949-6090).
+/// Main entry point for configuration file parsing. Corresponds to C's `one_file()` function
+/// (option.c lines 6160-6251) combined with `read_file()` (lines 5949-6090).
 ///
 /// This function:
 /// 1. Checks for circular includes using file inode tracking
@@ -716,7 +713,7 @@ async fn parse_config_file_recursive(
 
         match parse_config_line(line) {
             Ok((_, ConfigLine::Empty)) => {
-                continue;
+                // Skip empty lines
             }
             Ok((_, ConfigLine::OptionOnly(option))) => {
                 // Handle boolean options
@@ -770,7 +767,7 @@ async fn parse_config_file_recursive(
 
 /// Scans a directory for configuration files
 ///
-/// Corresponds to C's expand_filelist() function and file_filter() (option.c lines 6253-6377).
+/// Corresponds to C's `expand_filelist()` function and `file_filter()` (option.c lines 6253-6377).
 /// Filters files to exclude:
 /// - Hidden files (starting with '.')
 /// - Emacs backup files (ending with '~')

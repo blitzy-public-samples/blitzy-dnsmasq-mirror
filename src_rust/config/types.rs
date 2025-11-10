@@ -991,6 +991,7 @@ pub struct AddrList {
 
 impl AddrList {
     /// Create a new address list entry
+    #[must_use] 
     pub fn new(addr: IpAddr, prefixlen: u32) -> Self {
         Self {
             addr,
@@ -1001,6 +1002,7 @@ impl AddrList {
     }
     
     /// Create with flags
+    #[must_use] 
     pub fn with_flags(addr: IpAddr, prefixlen: u32, flags: u32) -> Self {
         Self {
             addr,

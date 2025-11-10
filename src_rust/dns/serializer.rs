@@ -129,16 +129,16 @@ impl fmt::Display for SerializationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SerializationError::BufferTooSmall { required, available } => {
-                write!(f, "Buffer too small: required {} bytes, available {} bytes", required, available)
+                write!(f, "Buffer too small: required {required} bytes, available {available} bytes")
             }
             SerializationError::InvalidFormat { reason } => {
-                write!(f, "Invalid DNS packet format: {}", reason)
+                write!(f, "Invalid DNS packet format: {reason}")
             }
             SerializationError::CompressionFailed { reason } => {
-                write!(f, "Name compression failed: {}", reason)
+                write!(f, "Name compression failed: {reason}")
             }
             SerializationError::NameTooLong { length, max_length } => {
-                write!(f, "Domain name too long: {} bytes exceeds maximum {}", length, max_length)
+                write!(f, "Domain name too long: {length} bytes exceeds maximum {max_length}")
             }
         }
     }
@@ -150,7 +150,7 @@ impl std::error::Error for SerializationError {}
 // Response Type Enum
 // ============================================================================
 
-/// DNS response types for setup_reply initialization
+/// DNS response types for `setup_reply` initialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResponseType {
     /// NOERROR response (empty domain or successful answer)
@@ -234,7 +234,7 @@ pub fn read_u16(buffer: &[u8]) -> Result<u16, SerializationError> {
 /// # Safety
 ///
 /// Replaces C macro `PUTSHORT(val, ptr)` which manually manipulated bytes and
-/// advanced pointer. This safe version checks capacity automatically via BytesMut.
+/// advanced pointer. This safe version checks capacity automatically via `BytesMut`.
 ///
 /// # Example
 ///
@@ -267,7 +267,7 @@ pub fn write_u16(buffer: &mut BytesMut, value: u16) -> Result<(), SerializationE
 /// # Safety
 ///
 /// Replaces C macro `PUTLONG(val, ptr)` with safe automatic capacity management.
-/// BytesMut automatically expands as needed, eliminating manual realloc calls.
+/// `BytesMut` automatically expands as needed, eliminating manual realloc calls.
 ///
 /// # Example
 ///
@@ -411,10 +411,10 @@ fn encode_domain_name(
 /// * `limit` - Maximum allowed packet size (typically 512 or EDNS0 size)
 /// * `truncated` - Mutable flag set to true if truncation occurs
 /// * `name_offset` - Compression pointer offset, or 0 to encode full name
-/// * `name` - Domain name for this RR (used if name_offset == 0)
+/// * `name` - Domain name for this RR (used if `name_offset` == 0)
 /// * `ttl` - Time-to-live in seconds
-/// * `rr_type` - Resource record type (T_A, T_AAAA, T_CNAME, etc.)
-/// * `rr_class` - Resource record class (typically C_IN)
+/// * `rr_type` - Resource record type (`T_A`, `T_AAAA`, `T_CNAME`, etc.)
+/// * `rr_class` - Resource record class (typically `C_IN`)
 /// * `rdata` - Resource record data (IPv4/IPv6 address, domain name, etc.)
 /// * `compression_ctx` - Optional compression context for encoding RDATA names
 ///
@@ -445,8 +445,8 @@ fn encode_domain_name(
 /// Replaces C's variadic `add_resource_record(header, limit, truncp, nameoffset, pp, ttl, ...)`:
 /// - No `va_list` format string parsing (unsafe)
 /// - No manual `pp` pointer advancement (eliminates pointer arithmetic bugs)
-/// - Automatic capacity checks via BytesMut (prevents buffer overflows)
-/// - Type-safe RDATA handling via RDataType enum (no format string ambiguity)
+/// - Automatic capacity checks via `BytesMut` (prevents buffer overflows)
+/// - Type-safe RDATA handling via `RDataType` enum (no format string ambiguity)
 ///
 /// # Example
 ///
@@ -600,7 +600,7 @@ pub fn add_resource_record(
     let rdata_len = buffer.len() - rdata_start;
     if rdata_len > 65535 {
         return Err(SerializationError::InvalidFormat {
-            reason: format!("RDATA too long: {} bytes", rdata_len),
+            reason: format!("RDATA too long: {rdata_len} bytes"),
         });
     }
     
@@ -680,7 +680,7 @@ pub enum RDataType {
 /// # Arguments
 ///
 /// * `header` - DNS header to initialize
-/// * `response_type` - Type of response (NoError, NxDomain, WithRecords, Refused)
+/// * `response_type` - Type of response (`NoError`, `NxDomain`, `WithRecords`, Refused)
 /// * `ede` - Extended DNS error code (for EDE option)
 ///
 /// # Flag Settings
@@ -887,7 +887,7 @@ pub fn resize_packet(
         
         if pos > buffer.len() {
             return Err(SerializationError::InvalidFormat {
-                reason: format!("Resource record with RDLENGTH {} extends beyond packet", rdlength),
+                reason: format!("Resource record with RDLENGTH {rdlength} extends beyond packet"),
             });
         }
     }
@@ -1075,7 +1075,7 @@ impl DnsPacketBuilder {
         self
     }
     
-    /// Helper method to apply 16-bit flags value to DnsHeader
+    /// Helper method to apply 16-bit flags value to `DnsHeader`
     /// Flags format: high byte = hb3 (QR, OPCODE, AA, TC, RD), low byte = hb4 (RA, Z, AD, CD, RCODE)
     fn apply_flags_to_header(header: &mut DnsHeader, flags: u16) {
         let hb3 = (flags >> 8) as u8;
@@ -1111,6 +1111,7 @@ impl DnsPacketBuilder {
     
     /// Add a question section entry (fluent builder API)
     /// Returns Result because it needs to encode the name
+    #[must_use] 
     pub fn add_question(mut self, name: &str, qtype: u16, qclass: u16) -> Self {
         // Initialize header if not already done
         if self.buffer.is_empty() {
@@ -1122,7 +1123,7 @@ impl DnsPacketBuilder {
         }
         
         // Encode question
-        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+        if let Ok(()) = encode_domain_name(&mut self.buffer, name, self.max_size) {
             // Write QTYPE and QCLASS
             let _ = write_u16(&mut self.buffer, qtype);
             let _ = write_u16(&mut self.buffer, qclass);
@@ -1133,7 +1134,8 @@ impl DnsPacketBuilder {
     }
     
     /// Add an answer record (fluent builder API for tests)
-    /// Accepts raw rdata bytes instead of RDataType enum
+    /// Accepts raw rdata bytes instead of `RDataType` enum
+    #[must_use] 
     pub fn with_answer(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: &[u8]) -> Self {
         // Ensure header is initialized
         if self.buffer.is_empty() {
@@ -1145,7 +1147,7 @@ impl DnsPacketBuilder {
         }
         
         // Encode name
-        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+        if let Ok(()) = encode_domain_name(&mut self.buffer, name, self.max_size) {
             // Write TYPE, CLASS, TTL
             let _ = write_u16(&mut self.buffer, rtype);
             let _ = write_u16(&mut self.buffer, rclass);
@@ -1164,7 +1166,8 @@ impl DnsPacketBuilder {
     }
     
     /// Add an authority record (fluent builder API for tests)
-    /// Accepts raw rdata bytes instead of RDataType enum
+    /// Accepts raw rdata bytes instead of `RDataType` enum
+    #[must_use] 
     pub fn with_authority(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: &[u8]) -> Self {
         // Ensure header is initialized
         if self.buffer.is_empty() {
@@ -1176,7 +1179,7 @@ impl DnsPacketBuilder {
         }
         
         // Encode name
-        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+        if let Ok(()) = encode_domain_name(&mut self.buffer, name, self.max_size) {
             // Write TYPE, CLASS, TTL
             let _ = write_u16(&mut self.buffer, rtype);
             let _ = write_u16(&mut self.buffer, rclass);
@@ -1195,7 +1198,8 @@ impl DnsPacketBuilder {
     }
     
     /// Add an additional record (fluent builder API for tests)
-    /// Accepts raw rdata bytes instead of RDataType enum
+    /// Accepts raw rdata bytes instead of `RDataType` enum
+    #[must_use] 
     pub fn with_additional(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: &[u8]) -> Self {
         // Ensure header is initialized
         if self.buffer.is_empty() {
@@ -1207,7 +1211,7 @@ impl DnsPacketBuilder {
         }
         
         // Encode name
-        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+        if let Ok(()) = encode_domain_name(&mut self.buffer, name, self.max_size) {
             // Write TYPE, CLASS, TTL
             let _ = write_u16(&mut self.buffer, rtype);
             let _ = write_u16(&mut self.buffer, rclass);

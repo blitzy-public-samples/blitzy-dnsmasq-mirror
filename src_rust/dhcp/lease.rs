@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! DHCP lease database persistence and management for both DHCPv4 and DHCPv6
+//! DHCP lease database persistence and management for both `DHCPv4` and `DHCPv6`
 //!
 //! This module provides atomic file updates, allocation tracking, and expiry management
 //! for DHCP leases. It replaces C's manual linked list management with safe Rust collections,
@@ -23,9 +23,9 @@
 //!
 //! Implements the complete DHCP lease database management system for dnsmasq, providing:
 //! - Persistent storage with atomic write-temp-rename strategy
-//! - Lease allocation, lookup, and expiry tracking for DHCPv4 and DHCPv6
+//! - Lease allocation, lookup, and expiry tracking for `DHCPv4` and `DHCPv6`
 //! - Integration with DNS cache for dynamic hostname resolution
-//! - Support for systems without real-time clocks (HAVE_BROKEN_RTC)
+//! - Support for systems without real-time clocks (`HAVE_BROKEN_RTC`)
 //! - Backward-compatible lease file format for external tools
 //!
 //! # Memory Safety Improvements
@@ -40,9 +40,9 @@
 //!
 //! - [`DhcpLease`]: Individual lease record with client ID, hardware address, IP, expiry
 //! - [`LeaseManager`]: Central lease database with allocation and persistence logic
-//! - [`LeaseFlags`]: Type-safe flags for lease state (static, has_name, changed, etc.)
+//! - [`LeaseFlags`]: Type-safe flags for lease state (static, `has_name`, changed, etc.)
 //! - [`ClientId`]: Client identifier type (Vec<u8>) for DHCPv4/v6
-//! - [`Iaid`]: Identity Association Identifier for DHCPv6
+//! - [`Iaid`]: Identity Association Identifier for `DHCPv6`
 //!
 //! # Functions
 //!
@@ -57,10 +57,10 @@
 //! # File Format
 //!
 //! Lease file format (one lease per line, space-separated fields):
-//! - DHCPv4: `<expiry> <mac> <ip> <hostname> <client-id>`
-//! - DHCPv6: `<expiry> <duid> <iaid> <ip6> <hostname> <type>`
+//! - `DHCPv4`: `<expiry> <mac> <ip> <hostname> <client-id>`
+//! - `DHCPv6`: `<expiry> <duid> <iaid> <ip6> <hostname> <type>`
 //!
-//! Expiry is Unix timestamp or duration (if HAVE_BROKEN_RTC). The format maintains
+//! Expiry is Unix timestamp or duration (if `HAVE_BROKEN_RTC`). The format maintains
 //! 100% backward compatibility with the C implementation for external lease monitoring tools.
 //!
 //! # Original C Mapping
@@ -91,10 +91,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::RwLock;
 use tracing::{debug, info, trace, warn};
 
-/// Type alias for client identifiers (DHCPv4 client-id or DHCPv6 DUID)
+/// Type alias for client identifiers (`DHCPv4` client-id or `DHCPv6` DUID)
 pub type ClientId = Vec<u8>;
 
-/// Type alias for DHCPv6 Identity Association Identifier
+/// Type alias for `DHCPv6` Identity Association Identifier
 pub type Iaid = u32;
 
 /// Lease database error types
@@ -117,12 +117,12 @@ pub enum LeaseError {
 impl fmt::Display for LeaseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LeaseError::IoError(msg) => write!(f, "I/O error: {}", msg),
-            LeaseError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            LeaseError::InvalidLease(msg) => write!(f, "Invalid lease: {}", msg),
+            LeaseError::IoError(msg) => write!(f, "I/O error: {msg}"),
+            LeaseError::ParseError(msg) => write!(f, "Parse error: {msg}"),
+            LeaseError::InvalidLease(msg) => write!(f, "Invalid lease: {msg}"),
             LeaseError::NoAvailableAddress => write!(f, "No available addresses"),
-            LeaseError::ConflictDetected(addr) => write!(f, "Address conflict: {}", addr),
-            LeaseError::FileCorrupted(msg) => write!(f, "File corrupted: {}", msg),
+            LeaseError::ConflictDetected(addr) => write!(f, "Address conflict: {addr}"),
+            LeaseError::FileCorrupted(msg) => write!(f, "File corrupted: {msg}"),
         }
     }
 }
@@ -162,21 +162,25 @@ pub enum LeaseFlags {
 
 impl LeaseFlags {
     /// Create flags bitset from u32
+    #[must_use] 
     pub fn from_bits(bits: u32) -> u32 {
         bits
     }
 
     /// Check if flag is set in bitset
+    #[must_use] 
     pub fn is_set(flags: u32, flag: LeaseFlags) -> bool {
         (flags & (flag as u32)) != 0
     }
 
     /// Set flag in bitset
+    #[must_use] 
     pub fn set(flags: u32, flag: LeaseFlags) -> u32 {
         flags | (flag as u32)
     }
 
     /// Clear flag in bitset
+    #[must_use] 
     pub fn clear(flags: u32, flag: LeaseFlags) -> u32 {
         flags & !(flag as u32)
     }
@@ -185,13 +189,13 @@ impl LeaseFlags {
 /// Individual DHCP lease record
 #[derive(Debug, Clone)]
 pub struct DhcpLease {
-    /// IPv4 address (DHCPv4)
+    /// IPv4 address (`DHCPv4`)
     addr: Option<Ipv4Addr>,
-    /// IPv6 address (DHCPv6)
+    /// IPv6 address (`DHCPv6`)
     addr6: Option<Ipv6Addr>,
     /// Hardware address (MAC)
     hwaddr: Vec<u8>,
-    /// Hardware address type (e.g., ARPHRD_ETHER)
+    /// Hardware address type (e.g., `ARPHRD_ETHER`)
     hwaddr_type: u16,
     /// Client identifier
     clid: ClientId,
@@ -201,7 +205,7 @@ pub struct DhcpLease {
     expires: SystemTime,
     /// Lease flags bitset
     flags: u32,
-    /// DHCPv6 IAID
+    /// `DHCPv6` IAID
     iaid: Option<Iaid>,
     /// Gateway/relay address
     giaddr: Option<IpAddr>,
@@ -210,7 +214,8 @@ pub struct DhcpLease {
 }
 
 impl DhcpLease {
-    /// Create a new DHCPv4 lease
+    /// Create a new `DHCPv4` lease
+    #[must_use] 
     pub fn new(
         addr: Ipv4Addr,
         hwaddr: Vec<u8>,
@@ -235,66 +240,79 @@ impl DhcpLease {
     }
 
     /// Get IPv4 address
+    #[must_use] 
     pub fn addr(&self) -> Option<Ipv4Addr> {
         self.addr
     }
 
     /// Get IPv6 address
+    #[must_use] 
     pub fn addr6(&self) -> Option<Ipv6Addr> {
         self.addr6
     }
 
     /// Get hardware address
+    #[must_use] 
     pub fn hwaddr(&self) -> &[u8] {
         &self.hwaddr
     }
 
     /// Get hardware address length
+    #[must_use] 
     pub fn hwaddr_len(&self) -> usize {
         self.hwaddr.len()
     }
 
     /// Get hardware address type
+    #[must_use] 
     pub fn hwaddr_type(&self) -> u16 {
         self.hwaddr_type
     }
 
     /// Get client identifier
+    #[must_use] 
     pub fn clid(&self) -> &[u8] {
         &self.clid
     }
 
     /// Get client identifier length
+    #[must_use] 
     pub fn clid_len(&self) -> usize {
         self.clid.len()
     }
 
     /// Get hostname
+    #[must_use] 
     pub fn hostname(&self) -> Option<&str> {
         self.hostname.as_deref()
     }
 
     /// Get expiration time
+    #[must_use] 
     pub fn expires(&self) -> SystemTime {
         self.expires
     }
 
     /// Get flags bitset
+    #[must_use] 
     pub fn flags(&self) -> u32 {
         self.flags
     }
 
-    /// Get DHCPv6 IAID
+    /// Get `DHCPv6` IAID
+    #[must_use] 
     pub fn iaid(&self) -> Option<Iaid> {
         self.iaid
     }
 
     /// Get gateway address
+    #[must_use] 
     pub fn giaddr(&self) -> Option<IpAddr> {
         self.giaddr
     }
 
     /// Check if lease is expired
+    #[must_use] 
     pub fn is_expired(&self) -> bool {
         SystemTime::now() > self.expires
     }
@@ -349,12 +367,13 @@ pub struct LeaseManager {
     dns_dirty: Arc<RwLock<bool>>,
     /// Lease file needs update flag
     file_dirty: Arc<RwLock<bool>>,
-    /// Start time for duration-based expiry (HAVE_BROKEN_RTC)
+    /// Start time for duration-based expiry (`HAVE_BROKEN_RTC`)
     start_time: Option<Instant>,
 }
 
 impl LeaseManager {
     /// Create a new lease manager
+    #[must_use] 
     pub fn new(
         lease_file: PathBuf,
         max_leases: usize,
@@ -434,12 +453,10 @@ impl LeaseManager {
                 }
                 Ok(None) => {
                     // Skip lease (expired or invalid)
-                    continue;
                 }
                 Err(e) => {
                     warn!("Failed to parse lease at line {}: {}", line_num + 1, e);
                     // Continue parsing other leases
-                    continue;
                 }
             }
         }
@@ -451,8 +468,8 @@ impl LeaseManager {
     /// Parse a single lease line from the lease file
     ///
     /// Parses lease file format:
-    /// - DHCPv4: `<expiry> <mac> <ip> <hostname> <client-id>`
-    /// - DHCPv6: `<expiry> <duid> <iaid> <ip6> <hostname> <type>`
+    /// - `DHCPv4`: `<expiry> <mac> <ip> <hostname> <client-id>`
+    /// - `DHCPv6`: `<expiry> <duid> <iaid> <ip6> <hostname> <type>`
     async fn parse_lease_line(
         &self,
         line: &str,
@@ -461,8 +478,7 @@ impl LeaseManager {
         let fields: Vec<&str> = line.split_whitespace().collect();
         if fields.len() < 3 {
             return Err(LeaseError::ParseError(format!(
-                "Line {}: insufficient fields",
-                line_num
+                "Line {line_num}: insufficient fields"
             )));
         }
 
@@ -486,7 +502,7 @@ impl LeaseManager {
         }
     }
 
-    /// Parse DHCPv4 lease line
+    /// Parse `DHCPv4` lease line
     async fn parse_dhcpv4_lease(
         &self,
         fields: &[&str],
@@ -495,19 +511,18 @@ impl LeaseManager {
     ) -> Result<Option<Arc<RwLock<DhcpLease>>>, LeaseError> {
         if fields.len() < 3 {
             return Err(LeaseError::ParseError(format!(
-                "Line {}: insufficient fields for DHCPv4 lease",
-                line_num
+                "Line {line_num}: insufficient fields for DHCPv4 lease"
             )));
         }
 
         // Parse MAC address
         let (hwaddr, _, _) = parse_hex(fields[1], Some(6)).map_err(|e| {
-            LeaseError::ParseError(format!("Line {}: invalid MAC address: {}", line_num, e))
+            LeaseError::ParseError(format!("Line {line_num}: invalid MAC address: {e}"))
         })?;
 
         // Parse IPv4 address
         let addr: Ipv4Addr = fields[2].parse().map_err(|e| {
-            LeaseError::ParseError(format!("Line {}: invalid IPv4 address: {}", line_num, e))
+            LeaseError::ParseError(format!("Line {line_num}: invalid IPv4 address: {e}"))
         })?;
 
         // Parse hostname (optional)
@@ -519,9 +534,7 @@ impl LeaseManager {
 
         // Parse client-id (optional)
         let clid = if fields.len() > 4 && fields[4] != "*" {
-            parse_hex(fields[4], None)
-                .map(|(bytes, _, _)| bytes)
-                .unwrap_or_else(|_| fields[4].as_bytes().to_vec())
+            parse_hex(fields[4], None).map_or_else(|_| fields[4].as_bytes().to_vec(), |(bytes, _, _)| bytes)
         } else {
             // Use MAC as client ID if no explicit client ID
             hwaddr.clone()
@@ -531,7 +544,7 @@ impl LeaseManager {
         Ok(Some(Arc::new(RwLock::new(lease))))
     }
 
-    /// Parse DHCPv6 lease line
+    /// Parse `DHCPv6` lease line
     async fn parse_dhcpv6_lease(
         &self,
         fields: &[&str],
@@ -540,14 +553,13 @@ impl LeaseManager {
     ) -> Result<Option<Arc<RwLock<DhcpLease>>>, LeaseError> {
         if fields.len() < 4 {
             return Err(LeaseError::ParseError(format!(
-                "Line {}: insufficient fields for DHCPv6 lease",
-                line_num
+                "Line {line_num}: insufficient fields for DHCPv6 lease"
             )));
         }
 
         // Parse DUID (client identifier)
         let (duid, _, _) = parse_hex(fields[1], None).map_err(|e| {
-            LeaseError::ParseError(format!("Line {}: invalid DUID: {}", line_num, e))
+            LeaseError::ParseError(format!("Line {line_num}: invalid DUID: {e}"))
         })?;
 
         // Parse IAID
@@ -557,12 +569,12 @@ impl LeaseManager {
             fields[2].parse()
         }
         .map_err(|e| {
-            LeaseError::ParseError(format!("Line {}: invalid IAID: {}", line_num, e))
+            LeaseError::ParseError(format!("Line {line_num}: invalid IAID: {e}"))
         })?;
 
         // Parse IPv6 address
         let addr6: Ipv6Addr = fields[3].parse().map_err(|e| {
-            LeaseError::ParseError(format!("Line {}: invalid IPv6 address: {}", line_num, e))
+            LeaseError::ParseError(format!("Line {line_num}: invalid IPv6 address: {e}"))
         })?;
 
         // Parse hostname (optional)
@@ -573,7 +585,7 @@ impl LeaseManager {
         };
 
         let mut lease = DhcpLease::new(
-            Ipv4Addr::new(0, 0, 0, 0), // Placeholder, will be replaced
+            Ipv4Addr::UNSPECIFIED, // Placeholder, will be replaced
             Vec::new(),
             0,
             duid,
@@ -590,7 +602,7 @@ impl LeaseManager {
     /// Parse expiry timestamp or duration
     fn parse_expiry(&self, expiry_str: &str) -> Result<SystemTime, LeaseError> {
         let timestamp: i64 = expiry_str.parse().map_err(|e| {
-            LeaseError::ParseError(format!("Invalid expiry timestamp: {}", e))
+            LeaseError::ParseError(format!("Invalid expiry timestamp: {e}"))
         })?;
 
         if let Some(start_time) = self.start_time {
@@ -623,14 +635,14 @@ impl LeaseManager {
 
 /// Initialize lease database from file at daemon startup
 ///
-/// This is a convenience function that creates a LeaseManager and calls init().
+/// This is a convenience function that creates a `LeaseManager` and calls `init()`.
 ///
 /// # Arguments
 ///
 /// * `lease_file` - Path to lease database file
 /// * `max_leases` - Maximum number of leases to track
 /// * `options` - Daemon configuration options
-/// * `use_duration` - Use duration-based expiry (HAVE_BROKEN_RTC)
+/// * `use_duration` - Use duration-based expiry (`HAVE_BROKEN_RTC`)
 ///
 /// # Errors
 ///
@@ -718,7 +730,7 @@ pub async fn lease_find_by_addr(
     None
 }
 
-/// Allocate a new DHCPv4 lease
+/// Allocate a new `DHCPv4` lease
 ///
 /// Creates a new lease entry in the database. If the maximum lease count is reached,
 /// returns an error.
@@ -728,7 +740,7 @@ pub async fn lease_find_by_addr(
 /// * `manager` - Lease manager instance
 /// * `addr` - IPv4 address to allocate
 /// * `hwaddr` - Client hardware address
-/// * `hwaddr_type` - Hardware address type (e.g., ARPHRD_ETHER)
+/// * `hwaddr_type` - Hardware address type (e.g., `ARPHRD_ETHER`)
 /// * `client_id` - Client identifier
 /// * `hostname` - Optional hostname
 /// * `lease_time` - Lease duration in seconds
@@ -752,7 +764,7 @@ pub async fn lease4_allocate(
         return Err(LeaseError::NoAvailableAddress);
     }
 
-    let expires = SystemTime::now() + Duration::from_secs(lease_time as u64);
+    let expires = SystemTime::now() + Duration::from_secs(u64::from(lease_time));
     let lease = DhcpLease::new(addr, hwaddr, hwaddr_type, client_id.clone(), hostname, expires);
     let lease_arc = Arc::new(RwLock::new(lease));
 
@@ -761,16 +773,16 @@ pub async fn lease4_allocate(
 
     let hwaddr_hex = lease_arc.read().await.hwaddr
         .iter()
-        .map(|b| format!("{:02x}", b))
+        .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(":");
     info!("Allocated DHCPv4 lease for {} to {}", addr, hwaddr_hex);
     Ok(lease_arc)
 }
 
-/// Allocate a new DHCPv6 lease
+/// Allocate a new `DHCPv6` lease
 ///
-/// Creates a new DHCPv6 lease entry in the database.
+/// Creates a new `DHCPv6` lease entry in the database.
 ///
 /// # Arguments
 ///
@@ -798,9 +810,9 @@ pub async fn lease6_allocate(
         return Err(LeaseError::NoAvailableAddress);
     }
 
-    let expires = SystemTime::now() + Duration::from_secs(lease_time as u64);
+    let expires = SystemTime::now() + Duration::from_secs(u64::from(lease_time));
     let mut lease = DhcpLease::new(
-        Ipv4Addr::new(0, 0, 0, 0),
+        Ipv4Addr::UNSPECIFIED,
         Vec::new(),
         0,
         duid.clone(),
@@ -841,7 +853,7 @@ pub async fn lease_prune(manager: &LeaseManager) -> usize {
             tokio::runtime::Handle::current().block_on(lease.read())
         });
         if now > lease_guard.expires {
-            let clid_hex = clid.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+            let clid_hex = clid.iter().map(|b| format!("{b:02x}")).collect::<String>();
             debug!("Pruning expired lease: {}", clid_hex);
             false
         } else {
@@ -894,7 +906,7 @@ pub async fn lease_update_dns(manager: &LeaseManager) {
 /// # Errors
 ///
 /// Returns `LeaseError::IoError` if file cannot be written. The function will
-/// schedule a retry after LEASE_RETRY duration.
+/// schedule a retry after `LEASE_RETRY` duration.
 pub async fn lease_update_file(manager: &LeaseManager) -> Result<(), LeaseError> {
     let file_dirty = manager.file_dirty.read().await;
     if !*file_dirty {
@@ -975,15 +987,15 @@ fn format_lease_line(lease: &DhcpLease, start_time: Option<Instant>) -> String {
     if let Some(addr6) = lease.addr6 {
         // DHCPv6 lease
         let duid = lease.clid.iter()
-            .map(|b| format!("{:02x}", b))
+            .map(|b| format!("{b:02x}"))
             .collect::<String>();
         let iaid = lease.iaid.unwrap_or(0);
         let hostname = lease.hostname.as_deref().unwrap_or("*");
-        format!("{} {} {:#x} {} {}", expiry_str, duid, iaid, addr6, hostname)
+        format!("{expiry_str} {duid} {iaid:#x} {addr6} {hostname}")
     } else if let Some(addr) = lease.addr {
         // DHCPv4 lease
         let mac = lease.hwaddr.iter()
-            .map(|b| format!("{:02X}", b))
+            .map(|b| format!("{b:02X}"))
             .collect::<Vec<_>>()
             .join(":");
         let hostname = lease.hostname.as_deref().unwrap_or("*");
@@ -991,10 +1003,10 @@ fn format_lease_line(lease: &DhcpLease, start_time: Option<Instant>) -> String {
             "*".to_string()
         } else {
             lease.clid.iter()
-                .map(|b| format!("{:02x}", b))
+                .map(|b| format!("{b:02x}"))
                 .collect::<String>()
         };
-        format!("{} {} {} {} {}", expiry_str, mac, addr, hostname, clid)
+        format!("{expiry_str} {mac} {addr} {hostname} {clid}")
     } else {
         // Invalid lease
         String::new()
@@ -1030,7 +1042,7 @@ impl LeaseManager {
         }
     }
 
-    /// Find DHCPv6 lease by IPv6 address
+    /// Find `DHCPv6` lease by IPv6 address
     pub async fn find_by_addr6(&self, addr: Ipv6Addr) -> Option<Arc<RwLock<DhcpLease>>> {
         let leases = self.leases.read().await;
         for lease in leases.values() {
@@ -1046,13 +1058,13 @@ impl LeaseManager {
     /// Set lease hostname with FQDN handling
     ///
     /// This is a higher-level method that applies FQDN logic based on daemon options
-    /// before calling the basic set_hostname method on the lease.
+    /// before calling the basic `set_hostname` method on the lease.
     ///
     /// # Arguments
     ///
     /// * `client_id` - Client identifier for the lease
     /// * `hostname` - Optional hostname to set
-    /// * `options` - Daemon options (for OPT_DHCP_FQDN check)
+    /// * `options` - Daemon options (for `OPT_DHCP_FQDN` check)
     /// * `ip_addr` - IP address for domain suffix lookup
     ///
     /// # Returns
@@ -1069,7 +1081,7 @@ impl LeaseManager {
         let leases = self.leases.write().await;
         let lease_arc = leases
             .get(client_id)
-            .ok_or_else(|| LeaseError::InvalidLease(format!("Lease not found for client ID")))?;
+            .ok_or_else(|| LeaseError::InvalidLease("Lease not found for client ID".to_string()))?;
         let mut lease = lease_arc.write().await;
 
         // TODO: Implement FQDN construction with proper domain configuration
@@ -1149,7 +1161,7 @@ impl LeaseManager {
         leases.get(client_id).map(Arc::clone)
     }
 
-    /// Find DHCPv4 lease by IP address
+    /// Find `DHCPv4` lease by IP address
     ///
     /// # Arguments
     ///
@@ -1170,13 +1182,13 @@ impl LeaseManager {
         None
     }
 
-    /// Allocate new DHCPv4 lease
+    /// Allocate new `DHCPv4` lease
     ///
     /// # Arguments
     ///
     /// * `addr` - IPv4 address to allocate
     /// * `hwaddr` - Hardware address (MAC)
-    /// * `hwaddr_type` - Hardware address type (e.g., ARPHRD_ETHER)
+    /// * `hwaddr_type` - Hardware address type (e.g., `ARPHRD_ETHER`)
     /// * `clid` - Client identifier
     /// * `hostname` - Optional hostname
     /// * `expires` - Lease expiration time
@@ -1220,7 +1232,7 @@ impl LeaseManager {
         Ok(lease_arc)
     }
 
-    /// Allocate new DHCPv6 lease
+    /// Allocate new `DHCPv6` lease
     ///
     /// # Arguments
     ///
@@ -1250,7 +1262,7 @@ impl LeaseManager {
         }
         
         let mut lease = DhcpLease::new(
-            Ipv4Addr::new(0, 0, 0, 0),
+            Ipv4Addr::UNSPECIFIED,
             Vec::new(),
             0,
             clid.clone(),

@@ -68,11 +68,11 @@ use crate::dns::domain::hostname_isequal;
 // ============================================================================
 
 /// Number of queries sent before checking server responsiveness
-/// From C forward.c: #define FORWARD_TEST 50
+/// From C forward.c: #define `FORWARD_TEST` 50
 pub const FORWARD_TEST: u32 = 50;
 
 /// Time interval (seconds) for server health checks
-/// From C forward.c: #define FORWARD_TIME 20
+/// From C forward.c: #define `FORWARD_TIME` 20
 pub const FORWARD_TIME: u64 = 20;
 
 // ============================================================================
@@ -175,7 +175,7 @@ impl fmt::Display for ServerFlags {
 // ============================================================================
 
 /// Server flag constants exported for use in pattern matching and filtering
-/// These are public aliases to ServerFlags constants for backward compatibility
+/// These are public aliases to `ServerFlags` constants for backward compatibility
 /// with C implementation's SERV_* macros.
 
 pub const SERV_LITERAL_ADDRESS: ServerFlags = ServerFlags::LITERAL_ADDRESS;
@@ -226,6 +226,7 @@ pub struct ServerHealth {
 
 impl ServerHealth {
     /// Create new health tracker with zero counters
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             query_count: 0,
@@ -236,16 +237,19 @@ impl ServerHealth {
     }
 
     /// Get total query count
+    #[must_use] 
     pub fn query_count(&self) -> u32 {
         self.query_count
     }
 
     /// Get failure count
+    #[must_use] 
     pub fn failure_count(&self) -> u32 {
         self.failure_count
     }
 
     /// Get last success timestamp
+    #[must_use] 
     pub fn last_success(&self) -> Option<SystemTime> {
         self.last_success
     }
@@ -253,8 +257,9 @@ impl ServerHealth {
     /// Check if server is healthy based on failure rate
     ///
     /// Server is considered unhealthy if:
-    /// - Failure rate exceeds 50% and query count >= FORWARD_TEST
-    /// - OR no successful responses in FORWARD_TIME seconds
+    /// - Failure rate exceeds 50% and query count >= `FORWARD_TEST`
+    /// - OR no successful responses in `FORWARD_TIME` seconds
+    #[must_use] 
     pub fn is_healthy(&self) -> bool {
         // Not enough data yet
         if self.query_count < FORWARD_TEST {
@@ -262,7 +267,7 @@ impl ServerHealth {
         }
 
         // Check failure rate
-        let failure_rate = (self.failure_count as f64) / (self.query_count as f64);
+        let failure_rate = f64::from(self.failure_count) / f64::from(self.query_count);
         if failure_rate > 0.5 {
             return false;
         }
@@ -343,6 +348,7 @@ impl DomainPattern {
     /// # Arguments
     ///
     /// * `domain` - Domain pattern string, may start with '*' for wildcard
+    #[must_use] 
     pub fn new(domain: String) -> Self {
         let is_wildcard = domain.starts_with('*');
         Self {
@@ -352,11 +358,13 @@ impl DomainPattern {
     }
 
     /// Get domain pattern string
+    #[must_use] 
     pub fn domain(&self) -> &str {
         &self.domain
     }
 
     /// Check if this is a wildcard pattern
+    #[must_use] 
     pub fn is_wildcard(&self) -> bool {
         self.is_wildcard
     }
@@ -373,7 +381,8 @@ impl DomainPattern {
     ///
     /// # Returns
     ///
-    /// * `true` if query_domain matches this pattern
+    /// * `true` if `query_domain` matches this pattern
+    #[must_use] 
     pub fn matches(&self, query_domain: &str) -> bool {
         if self.is_wildcard {
             // Wildcard match: *.example.com matches www.example.com and example.com
@@ -457,6 +466,7 @@ impl UpstreamServer {
     /// * `ifindex` - Interface index for IPv6
     /// * `edns_pktsz` - EDNS0 packet size limit
     #[allow(clippy::too_many_arguments)]
+    #[must_use] 
     pub fn new(
         uid: ServerId,
         flags: ServerFlags,
@@ -468,7 +478,7 @@ impl UpstreamServer {
         edns_pktsz: u16,
     ) -> Self {
         let domain_pattern = domain.as_ref().map(|d| DomainPattern::new(d.clone()));
-        let domain_len = domain.as_ref().map(|d| d.len()).unwrap_or(0);
+        let domain_len = domain.as_ref().map_or(0, std::string::String::len);
 
         Self {
             uid,
@@ -496,7 +506,7 @@ impl UpstreamServer {
 
     /// Get domain pattern (if domain-specific server)
     pub fn domain(&self) -> Option<&str> {
-        self.domain.as_ref().map(|d| d.domain())
+        self.domain.as_ref().map(DomainPattern::domain)
     }
 
     /// Get domain length
@@ -613,7 +623,7 @@ impl UpstreamServer {
 ///
 /// Provides server registration, domain-based routing, health tracking,
 /// and intelligent server selection based on health metrics. Replaces C's
-/// global server linked list with safe Vec and HashMap structures.
+/// global server linked list with safe Vec and `HashMap` structures.
 pub struct UpstreamPool {
     /// All configured upstream servers
     servers: Vec<Arc<UpstreamServer>>,
@@ -625,6 +635,7 @@ pub struct UpstreamPool {
 
 impl UpstreamPool {
     /// Create new upstream pool
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),
@@ -669,7 +680,7 @@ impl UpstreamPool {
             if d.starts_with('*') {
                 d.clone()
             } else {
-                format!("*.{}", d)
+                format!("*.{d}")
             }
         });
 
@@ -688,7 +699,7 @@ impl UpstreamPool {
         if let Some(ref domain_str) = domain {
             self.domain_map
                 .entry(domain_str.to_lowercase())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(uid);
         }
 
@@ -770,7 +781,21 @@ impl UpstreamPool {
             .cloned()
             .collect();
 
-        if !healthy.is_empty() {
+        if healthy.is_empty() {
+            // All servers unhealthy, select least-recently-failed
+            let selected = candidates
+                .iter()
+                .max_by_key(|s| s.last_success())
+                .cloned()?;
+
+            warn!(
+                uid = selected.uid(),
+                addr = %selected.addr(),
+                "All servers unhealthy, using least-recently-failed"
+            );
+
+            Some(selected)
+        } else {
             // Select healthy server with minimum queries (load balancing)
             let selected = healthy
                 .iter()
@@ -782,20 +807,6 @@ impl UpstreamPool {
                 addr = %selected.addr(),
                 queries = selected.queries(),
                 "Selected healthy upstream server"
-            );
-
-            Some(selected)
-        } else {
-            // All servers unhealthy, select least-recently-failed
-            let selected = candidates
-                .iter()
-                .max_by_key(|s| s.last_success())
-                .cloned()?;
-
-            warn!(
-                uid = selected.uid(),
-                addr = %selected.addr(),
-                "All servers unhealthy, using least-recently-failed"
             );
 
             Some(selected)
@@ -811,6 +822,7 @@ impl UpstreamPool {
     /// # Returns
     ///
     /// * Vec of matching servers (empty if no matches)
+    #[must_use] 
     pub fn get_server_by_domain(&self, query_domain: &str) -> Vec<Arc<UpstreamServer>> {
         let mut matches = Vec::new();
 
@@ -858,6 +870,7 @@ impl UpstreamPool {
     }
 
     /// Get all configured servers
+    #[must_use] 
     pub fn get_all_servers(&self) -> &[Arc<UpstreamServer>] {
         &self.servers
     }
@@ -867,6 +880,7 @@ impl UpstreamPool {
     /// # Returns
     ///
     /// * Vec of (uid, queries, failures, healthy) tuples
+    #[must_use] 
     pub fn get_health_stats(&self) -> Vec<(ServerId, u32, u32, bool)> {
         self.servers
             .iter()
@@ -889,7 +903,7 @@ impl Default for UpstreamPool {
 ///
 /// Examines all configured servers and resets health statistics for servers
 /// that have recovered (received successful response after failures). This
-/// implements the FORWARD_TEST/FORWARD_TIME health check algorithm from C.
+/// implements the `FORWARD_TEST/FORWARD_TIME` health check algorithm from C.
 ///
 /// # Arguments
 ///

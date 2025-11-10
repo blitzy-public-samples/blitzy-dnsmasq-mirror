@@ -269,7 +269,7 @@ pub use metrics::{
     get_metric_value, increment_metric, MetricsCollector, MetricsError, MetricsResult,
 };
 
-/// Stub MetricsCollector implementation when prometheus-metrics feature is disabled
+/// Stub `MetricsCollector` implementation when prometheus-metrics feature is disabled
 ///
 /// Provides a zero-cost stub that compiles to nothing, enabling code that uses
 /// `MetricsCollector` to compile without modification when metrics are disabled.
@@ -312,7 +312,7 @@ impl MetricsCollector {
         Ok(())
     }
 
-    /// No-op get_value (returns constant zero)
+    /// No-op `get_value` (returns constant zero)
     #[inline]
     #[must_use]
     pub fn get_value(&self, _metric: MetricId) -> Result<u64, ()> {
@@ -327,7 +327,7 @@ impl MetricsCollector {
     }
 }
 
-/// Stub increment_metric function when prometheus-metrics feature is disabled
+/// Stub `increment_metric` function when prometheus-metrics feature is disabled
 ///
 /// No-op function that compiles away to nothing. Allows calling code to remain
 /// unchanged whether metrics are enabled or not.
@@ -337,7 +337,7 @@ pub fn increment_metric(_collector: &MetricsCollector, _metric: MetricId) -> Res
     Ok(())
 }
 
-/// Stub get_metric_value function when prometheus-metrics feature is disabled
+/// Stub `get_metric_value` function when prometheus-metrics feature is disabled
 ///
 /// Always returns 0. Allows querying code to compile without metrics feature.
 #[cfg(not(feature = "prometheus-metrics"))]

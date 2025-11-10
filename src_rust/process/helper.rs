@@ -11,19 +11,19 @@
 //! # Architecture
 //!
 //! The helper task runs independently, communicating with the main daemon via async
-//! channels (tokio::sync::mpsc). It receives serialized event data, validates it, and
+//! channels (`tokio::sync::mpsc`). It receives serialized event data, validates it, and
 //! executes the configured script with appropriate environment variables using
-//! tokio::process::Command. This prevents a compromised main daemon from gaining root
+//! `tokio::process::Command`. This prevents a compromised main daemon from gaining root
 //! access while still allowing controlled script execution.
 //!
 //! # Key Differences from C Implementation (src/helper.c)
 //!
-//! - **Process Model**: Uses tokio::spawn async task instead of fork()
-//! - **IPC Mechanism**: Uses tokio::sync::mpsc channels instead of Unix pipes
-//! - **Script Execution**: Uses tokio::process::Command instead of fork+exec
-//! - **Serialization**: Uses serde for type-safe ScriptData instead of manual struct packing
+//! - **Process Model**: Uses `tokio::spawn` async task instead of `fork()`
+//! - **IPC Mechanism**: Uses `tokio::sync::mpsc` channels instead of Unix pipes
+//! - **Script Execution**: Uses `tokio::process::Command` instead of fork+exec
+//! - **Serialization**: Uses serde for type-safe `ScriptData` instead of manual struct packing
 //! - **Lua Integration**: Uses rlua crate instead of C Lua API (optional feature)
-//! - **Signal Handling**: Uses tokio::signal instead of sigaction
+//! - **Signal Handling**: Uses `tokio::signal` instead of sigaction
 //! - **Memory Safety**: Eliminates manual buffer management, no malloc/free
 //!
 //! # Security Model
@@ -35,11 +35,11 @@
 //!
 //! # Supported Event Types
 //!
-//! - DHCPv4 lease events: add, del, old, old-hostname
-//! - DHCPv6 lease events: add, del, old (with IA_NA, IA_TA, IA_PD)
+//! - `DHCPv4` lease events: add, del, old, old-hostname
+//! - `DHCPv6` lease events: add, del, old (with `IA_NA`, `IA_TA`, `IA_PD`)
 //! - TFTP transfer notifications
 //! - ARP detection events: arp-add, arp-del
-//! - DHCPv6 relay snooping events
+//! - `DHCPv6` relay snooping events
 //!
 //! # Usage Example
 //!
@@ -128,19 +128,19 @@ pub enum HelperError {
 impl std::fmt::Display for HelperError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HelperError::ForkFailed(e) => write!(f, "Failed to fork helper process: {}", e),
-            HelperError::PipeFailed(e) => write!(f, "Failed to create IPC pipe: {}", e),
-            HelperError::ExecFailed(e) => write!(f, "Failed to execute script: {}", e),
+            HelperError::ForkFailed(e) => write!(f, "Failed to fork helper process: {e}"),
+            HelperError::PipeFailed(e) => write!(f, "Failed to create IPC pipe: {e}"),
+            HelperError::ExecFailed(e) => write!(f, "Failed to execute script: {e}"),
             HelperError::ScriptFailed { exit_code, stderr } => {
-                write!(f, "Script failed with exit code {}: {}", exit_code, stderr)
+                write!(f, "Script failed with exit code {exit_code}: {stderr}")
             }
             #[cfg(feature = "lua")]
             HelperError::LuaError(e) => write!(f, "Lua error: {}", e),
-            HelperError::IoError(e) => write!(f, "I/O error: {}", e),
-            HelperError::SerializationError(e) => write!(f, "Serialization error: {}", e),
-            HelperError::InvalidScriptPath(e) => write!(f, "Invalid script path: {}", e),
-            HelperError::SendError(e) => write!(f, "Channel send error: {}", e),
-            HelperError::PrivilegeDropError(e) => write!(f, "Privilege drop error: {}", e),
+            HelperError::IoError(e) => write!(f, "I/O error: {e}"),
+            HelperError::SerializationError(e) => write!(f, "Serialization error: {e}"),
+            HelperError::InvalidScriptPath(e) => write!(f, "Invalid script path: {e}"),
+            HelperError::SendError(e) => write!(f, "Channel send error: {e}"),
+            HelperError::PrivilegeDropError(e) => write!(f, "Privilege drop error: {e}"),
         }
     }
 }
@@ -159,79 +159,80 @@ impl From<PrivilegeError> for HelperError {
     }
 }
 
-/// Script event data wire format (matches C struct script_data from helper.c lines 151-173)
+/// Script event data wire format (matches C struct `script_data` from helper.c lines 151-173)
 ///
 /// This structure is serialized and transmitted from the main daemon to the helper
 /// task for script execution. All fields match the C implementation exactly to maintain
 /// protocol compatibility during transition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ScriptData {
     /// Action type: "add", "del", "old", "tftp", "arp-add", "arp-del", "relay-snoop"
     /// Original C field: action (int)
     pub action: String,
     
-    /// Lease flags (LEASE_TA, LEASE_NA for DHCPv6)
+    /// Lease flags (`LEASE_TA`, `LEASE_NA` for `DHCPv6`)
     /// Original C field: flags (unsigned int)
     pub flags: u32,
     
     /// Hardware address length (typically 6 for Ethernet)
-    /// Original C field: hwaddr_len (size_t)
+    /// Original C field: `hwaddr_len` (`size_t`)
     pub hwaddr_len: usize,
     
-    /// Hardware address type (ARPHRD_ETHER = 1)
-    /// Original C field: hwaddr_type (int)
+    /// Hardware address type (`ARPHRD_ETHER` = 1)
+    /// Original C field: `hwaddr_type` (int)
     pub hwaddr_type: u32,
     
     /// Client ID length
-    /// Original C field: clid_len (size_t)
+    /// Original C field: `clid_len` (`size_t`)
     pub clid_len: usize,
     
     /// Hostname length
-    /// Original C field: hostname_len (size_t)
+    /// Original C field: `hostname_len` (`size_t`)
     pub hostname_len: usize,
     
     /// Extra data (DHCP options) length
-    /// Original C field: ed_len (size_t)
+    /// Original C field: `ed_len` (`size_t`)
     pub ed_len: usize,
     
-    /// IPv4 address (for DHCPv4 leases)
-    /// Original C field: addr (struct in_addr)
+    /// IPv4 address (for `DHCPv4` leases)
+    /// Original C field: addr (struct `in_addr`)
     pub addr: Option<Ipv4Addr>,
     
     /// Gateway/relay IPv4 address
-    /// Original C field: giaddr (struct in_addr)
+    /// Original C field: giaddr (struct `in_addr`)
     pub giaddr: Option<Ipv4Addr>,
     
-    /// Remaining lease time in seconds (for HAVE_BROKEN_RTC systems)
-    /// Original C field: length (time_t)
+    /// Remaining lease time in seconds (for `HAVE_BROKEN_RTC` systems)
+    /// Original C field: length (`time_t`)
     pub remaining_time: u64,
     
     /// Absolute expiry time (Unix timestamp)
-    /// Original C field: expires (time_t)
+    /// Original C field: expires (`time_t`)
     pub expires: u64,
     
     /// TFTP file size in bytes
-    /// Original C field: file_len (off_t)
+    /// Original C field: `file_len` (`off_t`)
     pub file_len: u64,
     
-    /// IPv6 address (for DHCPv6 leases)
-    /// Original C field: addr6 (struct in6_addr)
+    /// IPv6 address (for `DHCPv6` leases)
+    /// Original C field: addr6 (struct `in6_addr`)
     pub addr6: Option<Ipv6Addr>,
     
     /// Vendor class count
-    /// Original C field: vendorclass_count (unsigned int)
+    /// Original C field: `vendorclass_count` (unsigned int)
     pub vendorclass_count: u32,
     
-    /// DHCPv6 IAID (Identity Association Identifier)
+    /// `DHCPv6` IAID (Identity Association Identifier)
     /// Original C field: iaid (unsigned int)
     pub iaid: u32,
     
     /// Hardware address bytes
-    /// Original C field: hwaddr[DHCP_CHADDR_MAX]
+    /// Original C field: hwaddr[`DHCP_CHADDR_MAX`]
     pub hwaddr: Vec<u8>,
     
     /// Network interface name
-    /// Original C field: interface[IF_NAMESIZE]
+    /// Original C field: interface[`IF_NAMESIZE`]
     pub interface: String,
     
     /// Hostname (variable length)
@@ -251,33 +252,6 @@ pub struct ScriptData {
     pub vendorclass: Vec<String>,
 }
 
-impl Default for ScriptData {
-    fn default() -> Self {
-        Self {
-            action: String::new(),
-            flags: 0,
-            hwaddr_len: 0,
-            hwaddr_type: 0,
-            clid_len: 0,
-            hostname_len: 0,
-            ed_len: 0,
-            addr: None,
-            giaddr: None,
-            remaining_time: 0,
-            expires: 0,
-            file_len: 0,
-            addr6: None,
-            vendorclass_count: 0,
-            iaid: 0,
-            hwaddr: Vec::new(),
-            interface: String::new(),
-            hostname: String::new(),
-            clid: Vec::new(),
-            extradata: Vec::new(),
-            vendorclass: Vec::new(),
-        }
-    }
-}
 
 /// Internal event type sent to helper task
 #[derive(Debug, Clone)]
@@ -325,7 +299,7 @@ impl HelperHandle {
         self.tx
             .send(HelperEvent::ScriptEvent(data))
             .await
-            .map_err(|e| HelperError::SendError(format!("Failed to send event: {}", e)))
+            .map_err(|e| HelperError::SendError(format!("Failed to send event: {e}")))
     }
 
     /// Shutdown the helper task gracefully
@@ -343,9 +317,8 @@ impl HelperHandle {
         // Wait for task to complete
         match self.task_handle.await {
             Ok(result) => result,
-            Err(e) => Err(HelperError::IoError(IoError::new(
-                ErrorKind::Other,
-                format!("Helper task panicked: {}", e),
+            Err(e) => Err(HelperError::IoError(IoError::other(
+                format!("Helper task panicked: {e}"),
             ))),
         }
     }
@@ -574,7 +547,7 @@ async fn helper_main_loop(
 
 /// Execute external shell script with environment variables (replaces C lines 657-868)
 ///
-/// Spawns the configured script as a child process using tokio::process::Command,
+/// Spawns the configured script as a child process using `tokio::process::Command`,
 /// sets up DNSMASQ_* environment variables containing lease information, and
 /// captures stdout/stderr for logging.
 ///
@@ -603,7 +576,7 @@ async fn execute_external_script(
         .stderr(Stdio::piped());
 
     // Set environment variables
-    for (key, value) in env_vars.iter() {
+    for (key, value) in &env_vars {
         cmd.env(key, value);
     }
 
@@ -617,7 +590,7 @@ async fn execute_external_script(
 
     // Spawn and wait for completion
     let output = cmd.output().await
-        .map_err(|e| HelperError::ExecFailed(e))?;
+        .map_err(HelperError::ExecFailed)?;
 
     // Log output
     if !output.stdout.is_empty() {
@@ -640,32 +613,32 @@ async fn execute_external_script(
     Ok(())
 }
 
-/// Build environment variables for script execution (replaces C my_setenv and grab_extradata)
+/// Build environment variables for script execution (replaces C `my_setenv` and `grab_extradata`)
 ///
-/// Constructs a HashMap of DNSMASQ_* environment variables based on the script event
+/// Constructs a `HashMap` of DNSMASQ_* environment variables based on the script event
 /// data. These variables provide the script with all information about the lease or
 /// event.
 ///
 /// # Environment Variables Set
 ///
-/// - DNSMASQ_DOMAIN - Local domain name
-/// - DNSMASQ_INTERFACE - Network interface name
-/// - DNSMASQ_LEASE_EXPIRES - Lease expiry timestamp
-/// - DNSMASQ_LEASE_LENGTH - Remaining lease time
-/// - DNSMASQ_SUPPLIED_HOSTNAME - Client-provided hostname
-/// - DNSMASQ_CLIENT_ID - DHCP client identifier
-/// - DNSMASQ_MAC - Hardware address (MAC)
-/// - DNSMASQ_IP - IPv4 address
-/// - DNSMASQ_RELAY_ADDRESS - DHCPv4 relay/gateway address
-/// - DNSMASQ_IP6 - IPv6 address
-/// - DNSMASQ_IAID - DHCPv6 IAID
-/// - DNSMASQ_TAGS - Space-separated lease tags
-/// - DNSMASQ_REQUESTED_OPTIONS - List of requested DHCP options
-/// - DNSMASQ_VENDOR_CLASS - Vendor class identifier
-/// - DNSMASQ_TFTP_FILE - TFTP filename
-/// - DNSMASQ_TFTP_SIZE - TFTP file size
-/// - DNSMASQ_ARP_MAC - ARP hardware address
-/// - DNSMASQ_ARP_IP - ARP IP address
+/// - `DNSMASQ_DOMAIN` - Local domain name
+/// - `DNSMASQ_INTERFACE` - Network interface name
+/// - `DNSMASQ_LEASE_EXPIRES` - Lease expiry timestamp
+/// - `DNSMASQ_LEASE_LENGTH` - Remaining lease time
+/// - `DNSMASQ_SUPPLIED_HOSTNAME` - Client-provided hostname
+/// - `DNSMASQ_CLIENT_ID` - DHCP client identifier
+/// - `DNSMASQ_MAC` - Hardware address (MAC)
+/// - `DNSMASQ_IP` - IPv4 address
+/// - `DNSMASQ_RELAY_ADDRESS` - `DHCPv4` relay/gateway address
+/// - `DNSMASQ_IP6` - IPv6 address
+/// - `DNSMASQ_IAID` - `DHCPv6` IAID
+/// - `DNSMASQ_TAGS` - Space-separated lease tags
+/// - `DNSMASQ_REQUESTED_OPTIONS` - List of requested DHCP options
+/// - `DNSMASQ_VENDOR_CLASS` - Vendor class identifier
+/// - `DNSMASQ_TFTP_FILE` - TFTP filename
+/// - `DNSMASQ_TFTP_SIZE` - TFTP file size
+/// - `DNSMASQ_ARP_MAC` - ARP hardware address
+/// - `DNSMASQ_ARP_IP` - ARP IP address
 pub(crate) fn build_script_environment(data: &ScriptData) -> Result<HashMap<String, String>, HelperError> {
     let mut env = HashMap::new();
 
@@ -682,7 +655,7 @@ pub(crate) fn build_script_environment(data: &ScriptData) -> Result<HashMap<Stri
     // Client ID (hex encoded)
     if !data.clid.is_empty() {
         let clid_hex = data.clid.iter()
-            .map(|b| format!("{:02x}", b))
+            .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
             .join(":");
         env.insert("DNSMASQ_CLIENT_ID".to_string(), clid_hex);
@@ -692,7 +665,7 @@ pub(crate) fn build_script_environment(data: &ScriptData) -> Result<HashMap<Stri
     if data.hwaddr_len > 0 && !data.hwaddr.is_empty() {
         let mac = data.hwaddr.iter()
             .take(data.hwaddr_len)
-            .map(|b| format!("{:02x}", b))
+            .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
             .join(":");
         env.insert("DNSMASQ_MAC".to_string(), mac);
@@ -752,7 +725,7 @@ pub(crate) fn build_script_environment(data: &ScriptData) -> Result<HashMap<Stri
             if data.hwaddr_len > 0 && !data.hwaddr.is_empty() {
                 let mac = data.hwaddr.iter()
                     .take(data.hwaddr_len)
-                    .map(|b| format!("{:02x}", b))
+                    .map(|b| format!("{b:02x}"))
                     .collect::<Vec<_>>()
                     .join(":");
                 env.insert("DNSMASQ_ARP_MAC".to_string(), mac);
@@ -775,7 +748,7 @@ pub(crate) fn build_script_environment(data: &ScriptData) -> Result<HashMap<Stri
 /// Parse extra DHCP option data into environment variables
 ///
 /// Extracts individual DHCP options from the extra data buffer and creates
-/// DNSMASQ_OPTION_<num> environment variables for each option.
+/// `DNSMASQ_OPTION`_<num> environment variables for each option.
 fn parse_extradata_into_env(extradata: &[u8], env: &mut HashMap<String, String>) {
     let mut offset = 0;
     
@@ -790,12 +763,12 @@ fn parse_extradata_into_env(extradata: &[u8], env: &mut HashMap<String, String>)
         
         let option_data = &extradata[offset..offset + option_len];
         let option_hex = option_data.iter()
-            .map(|b| format!("{:02x}", b))
+            .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
             .join(":");
         
         env.insert(
-            format!("DNSMASQ_OPTION_{}", option_num),
+            format!("DNSMASQ_OPTION_{option_num}"),
             option_hex,
         );
         
@@ -927,9 +900,9 @@ fn execute_lua_script_sync(lua: &Lua, data: ScriptData) -> Result<(), HelperErro
     })
 }
 
-/// Queue a DHCP lease script event (replaces C queue_script lines 1174-1243)
+/// Queue a DHCP lease script event (replaces C `queue_script` lines 1174-1243)
 ///
-/// Serializes a DHCP lease event into ScriptData format and sends it to the
+/// Serializes a DHCP lease event into `ScriptData` format and sends it to the
 /// helper task for script execution.
 ///
 /// # Arguments
@@ -957,7 +930,7 @@ pub async fn queue_script(
     // Set interface name
     if interface_index > 0 {
         data.interface = indextoname(interface_index)
-            .unwrap_or_else(|_| format!("if{}", interface_index));
+            .unwrap_or_else(|_| format!("if{interface_index}"));
     }
 
     // Set hardware address
@@ -965,7 +938,7 @@ pub async fn queue_script(
     if !hwaddr.is_empty() {
         data.hwaddr_len = hwaddr.len().min(DHCP_CHADDR_MAX);
         data.hwaddr = hwaddr.to_vec();
-        data.hwaddr_type = lease.hwaddr_type() as u32;
+        data.hwaddr_type = u32::from(lease.hwaddr_type());
     }
 
     // Set hostname
@@ -1009,7 +982,7 @@ pub async fn queue_script(
     helper.send_event(data).await
 }
 
-/// Queue a TFTP transfer notification (replaces C queue_tftp lines 1279-1320)
+/// Queue a TFTP transfer notification (replaces C `queue_tftp` lines 1279-1320)
 ///
 /// Serializes a TFTP transfer event and sends it to the helper task.
 ///
@@ -1039,7 +1012,7 @@ pub async fn queue_tftp(
     // Set interface name
     if interface_index > 0 {
         data.interface = indextoname(interface_index)
-            .unwrap_or_else(|_| format!("if{}", interface_index));
+            .unwrap_or_else(|_| format!("if{interface_index}"));
     }
 
     // Set client address
@@ -1056,7 +1029,7 @@ pub async fn queue_tftp(
     helper.send_event(data).await
 }
 
-/// Queue an ARP detection event (replaces C queue_arp lines 1346-1385)
+/// Queue an ARP detection event (replaces C `queue_arp` lines 1346-1385)
 ///
 /// Serializes an ARP detection event and sends it to the helper task.
 ///
@@ -1082,13 +1055,13 @@ pub async fn queue_arp(
     // Set interface name
     if interface_index > 0 {
         data.interface = indextoname(interface_index)
-            .unwrap_or_else(|_| format!("if{}", interface_index));
+            .unwrap_or_else(|_| format!("if{interface_index}"));
     }
 
     // Set hardware address
     data.hwaddr_len = mac_addr.len().min(DHCP_CHADDR_MAX);
     data.hwaddr = mac_addr.to_vec();
-    data.hwaddr_type = ARPHRD_ETHER as u32;
+    data.hwaddr_type = u32::from(ARPHRD_ETHER);
 
     // Set IP address
     data.addr = Some(ip_addr);
@@ -1097,14 +1070,14 @@ pub async fn queue_arp(
     helper.send_event(data).await
 }
 
-/// Queue a DHCPv6 relay snoop event (replaces C queue_relay_snoop lines 1419-1480)
+/// Queue a `DHCPv6` relay snoop event (replaces C `queue_relay_snoop` lines 1419-1480)
 ///
-/// Serializes a DHCPv6 relay snooping event and sends it to the helper task.
+/// Serializes a `DHCPv6` relay snooping event and sends it to the helper task.
 ///
 /// # Arguments
 ///
 /// * `helper` - Handle to the helper task
-/// * `lease` - DHCPv6 lease information
+/// * `lease` - `DHCPv6` lease information
 /// * `interface_index` - Network interface index
 pub async fn queue_relay_snoop(
     helper: &HelperHandle,
@@ -1119,7 +1092,7 @@ pub async fn queue_relay_snoop(
     // Set interface name
     if interface_index > 0 {
         data.interface = indextoname(interface_index)
-            .unwrap_or_else(|_| format!("if{}", interface_index));
+            .unwrap_or_else(|_| format!("if{interface_index}"));
     }
 
     // Set hardware address
@@ -1127,7 +1100,7 @@ pub async fn queue_relay_snoop(
     if !hwaddr.is_empty() {
         data.hwaddr_len = hwaddr.len().min(DHCP_CHADDR_MAX);
         data.hwaddr = hwaddr.to_vec();
-        data.hwaddr_type = lease.hwaddr_type() as u32;
+        data.hwaddr_type = u32::from(lease.hwaddr_type());
     }
 
     // Set client ID (DUID for DHCPv6)
@@ -1150,7 +1123,7 @@ pub async fn queue_relay_snoop(
     helper.send_event(data).await
 }
 
-/// Write queued script data to helper (replaces C helper_write lines 1512-1573)
+/// Write queued script data to helper (replaces C `helper_write` lines 1512-1573)
 ///
 /// This function is provided for compatibility with the C API but is not needed
 /// in the Rust implementation since async channels handle buffering automatically.
@@ -1169,7 +1142,7 @@ pub async fn helper_write(_helper: &HelperHandle) -> Result<(), HelperError> {
     Ok(())
 }
 
-/// Check if helper event buffer is empty (replaces C helper_buf_empty)
+/// Check if helper event buffer is empty (replaces C `helper_buf_empty`)
 ///
 /// This function is provided for compatibility with the C API but always returns
 /// true in the Rust implementation since async channels don't expose queue depth.
@@ -1181,6 +1154,7 @@ pub async fn helper_write(_helper: &HelperHandle) -> Result<(), HelperError> {
 /// # Returns
 ///
 /// * `true` - Always (buffer management is internal to async channels)
+#[must_use] 
 pub fn helper_buf_empty(_helper: &HelperHandle) -> bool {
     // In the Rust implementation, the channel's internal buffer is opaque.
     // This function is provided for API compatibility but always returns true.

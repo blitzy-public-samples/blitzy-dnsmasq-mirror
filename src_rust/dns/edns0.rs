@@ -68,7 +68,6 @@ use crate::dns::protocol::{
     EDNS0_OPTION_NOMDEVICEID, EDNS0_OPTION_UMBRELLA, PACKETSZ, T_OPT, T_TKEY, T_TSIG,
 };
 use crate::dns::rrfilter::rrfilter;
-use crate::dns::serializer::{read_u16, write_u16, write_u32};
 use crate::network::arp::{find_mac, ArpCache};
 use crate::network::platform::Platform;
 use crate::utils::general::print_mac;
@@ -128,16 +127,15 @@ impl fmt::Display for Edns0Error {
                 available,
             } => write!(
                 f,
-                "Buffer too small: required {} bytes, available {} bytes",
-                required, available
+                "Buffer too small: required {required} bytes, available {available} bytes"
             ),
-            Self::MalformedPacket { reason } => write!(f, "Malformed packet: {}", reason),
+            Self::MalformedPacket { reason } => write!(f, "Malformed packet: {reason}"),
             Self::InvalidOption {
                 option_code,
                 reason,
-            } => write!(f, "Invalid EDNS0 option {}: {}", option_code, reason),
-            Self::ParseError { details } => write!(f, "Parse error: {}", details),
-            Self::InternalError { message } => write!(f, "Internal error: {}", message),
+            } => write!(f, "Invalid EDNS0 option {option_code}: {reason}"),
+            Self::ParseError { details } => write!(f, "Parse error: {details}"),
+            Self::InternalError { message } => write!(f, "Internal error: {message}"),
         }
     }
 }
@@ -252,17 +250,18 @@ pub struct ClientSubnet {
     pub source_netmask: u8,
     /// Scope netmask bits (0 in queries, set by server in responses)
     pub scope_netmask: u8,
-    /// Address bytes (truncated to source_netmask bits)
+    /// Address bytes (truncated to `source_netmask` bits)
     pub addr: Vec<u8>,
 }
 
 impl ClientSubnet {
-    /// Create ClientSubnet from IP address and netmask
+    /// Create `ClientSubnet` from IP address and netmask
+    #[must_use] 
     pub fn from_addr(addr: &IpAddr, netmask: u8) -> Self {
         match addr {
             IpAddr::V4(ipv4) => {
                 let bytes = ipv4.octets();
-                let byte_count = ((netmask + 7) / 8) as usize;
+                let byte_count = netmask.div_ceil(8) as usize;
                 Self {
                     family: 1,
                     source_netmask: netmask.min(32),
@@ -272,7 +271,7 @@ impl ClientSubnet {
             }
             IpAddr::V6(ipv6) => {
                 let bytes = ipv6.octets();
-                let byte_count = ((netmask + 7) / 8) as usize;
+                let byte_count = netmask.div_ceil(8) as usize;
                 Self {
                     family: 2,
                     source_netmask: netmask.min(128),
@@ -284,6 +283,7 @@ impl ClientSubnet {
     }
 
     /// Convert to IP address with the source netmask
+    #[must_use] 
     pub fn to_addr(&self) -> Option<(IpAddr, u8)> {
         match self.family {
             1 => {
@@ -336,6 +336,7 @@ pub enum Edns0Option {
 
 impl Edns0Option {
     /// Get the option code
+    #[must_use] 
     pub fn code(&self) -> u16 {
         match self {
             Self::ClientSubnet(_) => EDNS0_OPTION_CLIENT_SUBNET,
@@ -352,6 +353,7 @@ impl Edns0Option {
     }
 
     /// Get the option data as bytes
+    #[must_use] 
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Self::ClientSubnet(cs) => {
@@ -396,7 +398,7 @@ struct SubnetOption {
     source_netmask: u8,
     /// Scope netmask bits (0 in queries, set by server in responses)
     scope_netmask: u8,
-    /// Address bytes (truncated to source_netmask bits)
+    /// Address bytes (truncated to `source_netmask` bits)
     addr: Vec<u8>,
 }
 
@@ -496,17 +498,17 @@ pub fn find_pseudoheader(
     // Skip question section unless is_sign is true
     if !is_sign {
         pos = skip_questions(packet, pos, qdcount).map_err(|e| Edns0Error::ParseError {
-            details: format!("Failed to skip questions: {}", e),
+            details: format!("Failed to skip questions: {e}"),
         })?;
 
         // Skip answer section
         pos = skip_section(packet, pos, ancount).map_err(|e| Edns0Error::ParseError {
-            details: format!("Failed to skip answer section: {}", e),
+            details: format!("Failed to skip answer section: {e}"),
         })?;
 
         // Skip authority section
         pos = skip_section(packet, pos, nscount).map_err(|e| Edns0Error::ParseError {
-            details: format!("Failed to skip authority section: {}", e),
+            details: format!("Failed to skip authority section: {e}"),
         })?;
     }
 
@@ -517,7 +519,7 @@ pub fn find_pseudoheader(
 
         // Skip NAME field
         let after_name = skip_name(packet, pos).map_err(|e| Edns0Error::ParseError {
-            details: format!("Failed to skip name in additional section: {}", e),
+            details: format!("Failed to skip name in additional section: {e}"),
         })?;
 
         // Need at least 10 bytes for TYPE(2) + CLASS(2) + TTL(4) + RDLENGTH(2)
@@ -553,8 +555,7 @@ pub fn find_pseudoheader(
             if after_name.len() < 10 + rdlength as usize {
                 return Err(Edns0Error::MalformedPacket {
                     reason: format!(
-                        "OPT record RDLENGTH {} exceeds packet boundary",
-                        rdlength
+                        "OPT record RDLENGTH {rdlength} exceeds packet boundary"
                     ),
                 });
             }
@@ -641,7 +642,7 @@ pub fn add_pseudoheader(
 
     let arcount = u16::from_be_bytes([packet[10], packet[11]]);
 
-    if let Some((opt_offset, old_udp_sz, rcode_ext, flags)) = opt_info {
+    if let Some((opt_offset, _udp_size, _extended_rcode, _flags)) = opt_info {
         // Existing OPT record found - check if it's in the correct position (last in additional section)
         // We need to verify if this OPT is the last RR in additional section
         let is_last = check_opt_is_last(packet, opt_offset, arcount)?;
@@ -656,7 +657,7 @@ pub fn add_pseudoheader(
             // Remove existing OPT using rrfilter
             let new_len = rrfilter(packet, crate::dns::rrfilter::RRFILTER_EDNS0)
                 .map_err(|e| Edns0Error::InternalError {
-                    message: format!("rrfilter failed: {}", e),
+                    message: format!("rrfilter failed: {e}"),
                 })?;
             packet.truncate(new_len);
 
@@ -700,7 +701,7 @@ pub fn add_pseudoheader(
         // Remove old OPT
         let new_len = rrfilter(packet, crate::dns::rrfilter::RRFILTER_EDNS0).map_err(|e| {
             Edns0Error::InternalError {
-                message: format!("rrfilter failed: {}", e),
+                message: format!("rrfilter failed: {e}"),
             }
         })?;
         packet.truncate(new_len);
@@ -744,7 +745,7 @@ pub fn add_do_bit(packet: &mut BytesMut, minsize: u16) -> Result<usize, Edns0Err
     };
 
     // Check if OPT already exists
-    if let Some((opt_offset, old_udp_sz, rcode_ext, flags)) = find_pseudoheader(&packet[..], false)? {
+    if let Some((opt_offset, _udp_size, _extended_rcode, flags)) = find_pseudoheader(&packet[..], false)? {
         // Check if DO bit already set
         if (flags & EDNS0_DO_BIT) != 0 {
             trace!("DO bit already set in OPT record");
@@ -800,6 +801,42 @@ pub fn add_do_bit(packet: &mut BytesMut, minsize: u16) -> Result<usize, Edns0Err
 /// # Original C Function
 ///
 /// Replaces `check_source()` from `src/edns0.c` lines 961-1073
+
+/// Add EDNS0 OPT record with custom extended RCODE and version
+///
+/// Adds or updates an EDNS0 OPT pseudo-header with specified parameters.
+/// This is primarily used for testing extended RCODE handling.
+///
+/// # Arguments
+///
+/// * `packet` - Mutable DNS packet buffer
+/// * `udp_sz` - UDP payload size to advertise
+/// * `ext_rcode` - Extended RCODE value
+/// * `edns_version` - EDNS version number
+///
+/// # Returns
+///
+/// * `Ok(new_length)` - New packet length after modification
+/// * `Err(Edns0Error)` - Processing error
+pub fn add_pseudoheader_with_params(
+    packet: &mut BytesMut,
+    udp_sz: u16,
+    ext_rcode: u8,
+    edns_version: u8,
+) -> Result<usize, Edns0Error> {
+    // Check if OPT already exists - if so, remove it first
+    if find_pseudoheader(&packet[..], false)?.is_some() {
+        let new_len = rrfilter(packet, crate::dns::rrfilter::RRFILTER_EDNS0)
+            .map_err(|e| Edns0Error::InternalError {
+                message: format!("rrfilter failed: {e}"),
+            })?;
+        packet.truncate(new_len);
+    }
+    
+    // Add new OPT record with specified parameters
+    add_opt_record_to_end_with_params(packet, udp_sz, &[], ext_rcode, edns_version)
+}
+
 pub fn check_source(
     packet: &[u8],
     query_source: &IpAddr,
@@ -971,13 +1008,13 @@ fn check_opt_is_last(packet: &[u8], opt_offset: usize, arcount: u16) -> Result<b
 
     // Skip to additional section
     pos = skip_questions(packet, pos, qdcount).map_err(|e| Edns0Error::ParseError {
-        details: format!("{}", e),
+        details: format!("{e}"),
     })?;
     pos = skip_section(packet, pos, ancount).map_err(|e| Edns0Error::ParseError {
-        details: format!("{}", e),
+        details: format!("{e}"),
     })?;
     pos = skip_section(packet, pos, nscount).map_err(|e| Edns0Error::ParseError {
-        details: format!("{}", e),
+        details: format!("{e}"),
     })?;
 
     // Now iterate through additional records
@@ -991,7 +1028,7 @@ fn check_opt_is_last(packet: &[u8], opt_offset: usize, arcount: u16) -> Result<b
 
         // Skip this RR
         pos = skip_name(packet, pos).map_err(|e| Edns0Error::ParseError {
-            details: format!("{}", e),
+            details: format!("{e}"),
         })?;
 
         if pos.len() < 10 {
@@ -1073,6 +1110,16 @@ fn add_opt_record_to_end(
     udp_sz: u16,
     options: &[(u16, Vec<u8>)],
 ) -> Result<usize, Edns0Error> {
+    add_opt_record_to_end_with_params(packet, udp_sz, options, 0, 0)
+}
+
+fn add_opt_record_to_end_with_params(
+    packet: &mut BytesMut,
+    udp_sz: u16,
+    options: &[(u16, Vec<u8>)],
+    ext_rcode: u8,
+    edns_version: u8,
+) -> Result<usize, Edns0Error> {
     let start_len = packet.len();
 
     // Calculate total RDLENGTH
@@ -1092,10 +1139,10 @@ fn add_opt_record_to_end(
     packet.extend_from_slice(&udp_sz.to_be_bytes());
 
     // Add TTL field (4 bytes):
-    // - Byte 0: Extended RCODE (0)
-    // - Byte 1: EDNS version (0)
+    // - Byte 0: Extended RCODE
+    // - Byte 1: EDNS version
     // - Bytes 2-3: Flags (0)
-    packet.extend_from_slice(&[0u8, 0u8, 0u8, 0u8]);
+    packet.extend_from_slice(&[ext_rcode, edns_version, 0u8, 0u8]);
 
     // Add RDLENGTH
     packet.extend_from_slice(&(rdlength as u16).to_be_bytes());
@@ -1126,7 +1173,7 @@ fn add_opt_record_to_end(
 
 /// Add OPT record with DO bit set
 fn add_opt_record_with_do(packet: &mut BytesMut, udp_sz: u16) -> Result<usize, Edns0Error> {
-    let start_len = packet.len();
+    let _original_len = packet.len();
 
     // Ensure we have space for OPT record (11 bytes: 1 + 2 + 2 + 4 + 2)
     packet.reserve(11);
@@ -1209,7 +1256,7 @@ fn calc_subnet_opt(source: &IpAddr, source_netmask: u8) -> Vec<u8> {
             data.push(0);
 
             // Calculate address bytes needed
-            let bytes_needed = ((source_netmask + 7) / 8) as usize;
+            let bytes_needed = source_netmask.div_ceil(8) as usize;
             let addr_bytes = ipv4.octets();
 
             // Add truncated address
@@ -1218,7 +1265,7 @@ fn calc_subnet_opt(source: &IpAddr, source_netmask: u8) -> Vec<u8> {
             }
 
             // Mask last byte if needed
-            if source_netmask % 8 != 0 && bytes_needed > 0 && bytes_needed <= 4 {
+            if !source_netmask.is_multiple_of(8) && bytes_needed > 0 && bytes_needed <= 4 {
                 let last_idx = data.len() - 1;
                 let bits_in_last_byte = source_netmask % 8;
                 let mask = 0xFFu8 << (8 - bits_in_last_byte);
@@ -1234,7 +1281,7 @@ fn calc_subnet_opt(source: &IpAddr, source_netmask: u8) -> Vec<u8> {
             data.push(0);
 
             // Calculate address bytes needed
-            let bytes_needed = ((source_netmask + 7) / 8) as usize;
+            let bytes_needed = source_netmask.div_ceil(8) as usize;
             let addr_bytes = ipv6.octets();
 
             // Add truncated address
@@ -1243,7 +1290,7 @@ fn calc_subnet_opt(source: &IpAddr, source_netmask: u8) -> Vec<u8> {
             }
 
             // Mask last byte if needed
-            if source_netmask % 8 != 0 && bytes_needed > 0 && bytes_needed <= 16 {
+            if !source_netmask.is_multiple_of(8) && bytes_needed > 0 && bytes_needed <= 16 {
                 let last_idx = data.len() - 1;
                 let bits_in_last_byte = source_netmask % 8;
                 let mask = 0xFFu8 << (8 - bits_in_last_byte);
@@ -1256,7 +1303,7 @@ fn calc_subnet_opt(source: &IpAddr, source_netmask: u8) -> Vec<u8> {
 }
 
 /// Create EDNS Client Subnet option data
-fn add_source_addr_option(source: &IpAddr, options: &DaemonOptions) -> Option<Vec<u8>> {
+fn add_source_addr_option(source: &IpAddr, _options: &DaemonOptions) -> Option<Vec<u8>> {
     // Determine source netmask based on configuration
     // For privacy, typically use /24 for IPv4, /56 for IPv6
     let source_netmask = match source {

@@ -71,43 +71,38 @@
 //!
 //! Refactored from `src/rfc2131.c` (dnsmasq 2.90)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::cmp::min;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::result::Result;
 use std::string::String;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 // Internal imports from depends_on_files
 use crate::config::types::DaemonOptions;
-use crate::core::config::DHCP_LEASE_DEFAULT;
 use crate::dhcp::common::DHCP_CHADDR_MAX;
 use crate::dhcp::lease::{
-    lease_find_by_addr, lease_find_by_client, lease4_allocate, DhcpLease, LeaseError,
+    lease_find_by_addr, lease_find_by_client, lease4_allocate, LeaseError,
     LeaseManager,
 };
-use crate::dhcp::v4::options::build_options;
 use crate::dhcp::v4::ping::icmp_ping;
-use crate::dhcp::v4::protocol::DHCP_COOKIE;
 use crate::dns::cache::Cache;
-use crate::dns::domain::get_domain;
 use crate::logging::logger::Logger;
 use crate::network::interfaces::Interface;
 // TODO: Re-enable when HelperHandle is added to function signatures
 // use crate::process::helper::queue_script;
-use crate::utils::general::hostname_isequal;
 
 // ============================================================================
 // Error Types
 // ============================================================================
 
-/// Errors that can occur during DHCPv4 protocol handling
+/// Errors that can occur during `DHCPv4` protocol handling
 #[derive(Debug, Clone)]
 pub enum DhcpError {
     /// Invalid packet format
@@ -129,13 +124,13 @@ pub enum DhcpError {
 impl fmt::Display for DhcpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DhcpError::InvalidPacket(msg) => write!(f, "Invalid packet: {}", msg),
-            DhcpError::InvalidOption(msg) => write!(f, "Invalid option: {}", msg),
-            DhcpError::LeaseError(msg) => write!(f, "Lease error: {}", msg),
-            DhcpError::AllocationFailed(msg) => write!(f, "Allocation failed: {}", msg),
+            DhcpError::InvalidPacket(msg) => write!(f, "Invalid packet: {msg}"),
+            DhcpError::InvalidOption(msg) => write!(f, "Invalid option: {msg}"),
+            DhcpError::LeaseError(msg) => write!(f, "Lease error: {msg}"),
+            DhcpError::AllocationFailed(msg) => write!(f, "Allocation failed: {msg}"),
             DhcpError::NoValidContext => write!(f, "No valid DHCP context found"),
-            DhcpError::RequestDenied(msg) => write!(f, "Request denied: {}", msg),
-            DhcpError::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            DhcpError::RequestDenied(msg) => write!(f, "Request denied: {msg}"),
+            DhcpError::InternalError(msg) => write!(f, "Internal error: {msg}"),
         }
     }
 }
@@ -152,7 +147,7 @@ impl From<LeaseError> for DhcpError {
 // Type Definitions
 // ============================================================================
 
-/// Client identifier type for DHCPv4 client identification
+/// Client identifier type for `DHCPv4` client identification
 ///
 /// Clients can be identified either by Option 61 (Client Identifier) or by
 /// their hardware (MAC) address from the `chaddr` field. Per RFC 2131, if a
@@ -178,8 +173,8 @@ impl ClientIdentifier {
     /// Extract client identifier from DHCP packet options and chaddr
     ///
     /// Follows RFC 2131 client identification precedence:
-    /// 1. If Option 61 present, use it as ClientId
-    /// 2. Otherwise, use chaddr as MacAddress
+    /// 1. If Option 61 present, use it as `ClientId`
+    /// 2. Otherwise, use chaddr as `MacAddress`
     ///
     /// # Arguments
     ///
@@ -190,6 +185,7 @@ impl ClientIdentifier {
     /// # Returns
     ///
     /// Client identifier with appropriate variant
+    #[must_use] 
     pub fn from_packet(
         options: &HashMap<u8, Vec<u8>>,
         chaddr: &[u8],
@@ -208,6 +204,7 @@ impl ClientIdentifier {
     }
 
     /// Convert to bytes for lease database key
+    #[must_use] 
     pub fn to_bytes(&self) -> &[u8] {
         match self {
             ClientIdentifier::ClientId(bytes) => bytes,
@@ -216,11 +213,12 @@ impl ClientIdentifier {
     }
 
     /// Format for logging
+    #[must_use] 
     pub fn to_hex_string(&self) -> String {
         let bytes = self.to_bytes();
         bytes
             .iter()
-            .map(|b| format!("{:02x}", b))
+            .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
             .join(":")
     }
@@ -274,6 +272,7 @@ pub struct DhcpContext {
 
 impl DhcpContext {
     /// Check if an IP address is within this context's range
+    #[must_use] 
     pub fn contains_addr(&self, addr: Ipv4Addr) -> bool {
         let start = u32::from(self.range_start);
         let end = u32::from(self.range_end);
@@ -290,6 +289,7 @@ impl DhcpContext {
     /// # Returns
     ///
     /// Minimum of configured lease time and client request
+    #[must_use] 
     pub fn calc_lease_time(&self, requested: Option<u32>) -> u32 {
         match requested {
             Some(req) => min(req, self.lease_time),
@@ -337,12 +337,13 @@ pub struct DhcpPacket {
 
 impl DhcpPacket {
     /// Create new packet for response
+    #[must_use] 
     pub fn new_reply(request: &DhcpPacket) -> Self {
         Self {
             xid: request.xid,
-            ciaddr: Ipv4Addr::new(0, 0, 0, 0),
-            yiaddr: Ipv4Addr::new(0, 0, 0, 0),
-            siaddr: Ipv4Addr::new(0, 0, 0, 0),
+            ciaddr: Ipv4Addr::UNSPECIFIED,
+            yiaddr: Ipv4Addr::UNSPECIFIED,
+            siaddr: Ipv4Addr::UNSPECIFIED,
             giaddr: request.giaddr,
             chaddr: request.chaddr,
             hlen: request.hlen,
@@ -353,11 +354,13 @@ impl DhcpPacket {
     }
 
     /// Get message type from options
+    #[must_use] 
     pub fn message_type(&self) -> Option<u8> {
         self.options.get(&53).and_then(|v| v.first()).copied()
     }
 
     /// Get requested IP address from options (Option 50)
+    #[must_use] 
     pub fn requested_ip(&self) -> Option<Ipv4Addr> {
         self.options.get(&50).and_then(|v| {
             if v.len() == 4 {
@@ -369,6 +372,7 @@ impl DhcpPacket {
     }
 
     /// Get server identifier from options (Option 54)
+    #[must_use] 
     pub fn server_identifier(&self) -> Option<Ipv4Addr> {
         self.options.get(&54).and_then(|v| {
             if v.len() == 4 {
@@ -380,6 +384,7 @@ impl DhcpPacket {
     }
 
     /// Get requested lease time from options (Option 51)
+    #[must_use] 
     pub fn requested_lease_time(&self) -> Option<u32> {
         self.options.get(&51).and_then(|v| {
             if v.len() == 4 {
@@ -391,6 +396,7 @@ impl DhcpPacket {
     }
 
     /// Get hostname from options (Option 12)
+    #[must_use] 
     pub fn hostname(&self) -> Option<String> {
         self.options.get(&12).and_then(|v| {
             std::str::from_utf8(v)
@@ -400,11 +406,13 @@ impl DhcpPacket {
     }
 
     /// Get parameter request list from options (Option 55)
+    #[must_use] 
     pub fn parameter_request_list(&self) -> Option<Vec<u8>> {
         self.options.get(&55).cloned()
     }
 
     /// Check if rapid commit is requested (Option 80)
+    #[must_use] 
     pub fn rapid_commit_requested(&self) -> bool {
         self.options.contains_key(&80)
     }
@@ -414,9 +422,9 @@ impl DhcpPacket {
 // Main Packet Handler
 // ============================================================================
 
-/// Main DHCPv4 packet handler and message type dispatcher
+/// Main `DHCPv4` packet handler and message type dispatcher
 ///
-/// This is the entry point for all DHCPv4 server operations. It receives parsed
+/// This is the entry point for all `DHCPv4` server operations. It receives parsed
 /// DHCP packets, validates packet structure and options, identifies clients,
 /// determines network context, and dispatches to message-type-specific handlers.
 ///
@@ -587,10 +595,10 @@ pub async fn handle_discover(
     context: &DhcpContext,
     interface: &Interface,
     lease_mgr: Arc<LeaseManager>,
-    cache: Arc<RwLock<Cache>>,
-    logger: Arc<Logger>,
+    _cache: Arc<RwLock<Cache>>,
+    _logger: Arc<Logger>,
     options: DaemonOptions,
-    now: SystemTime,
+    _now: SystemTime,
 ) -> Result<Option<DhcpPacket>, DhcpError> {
     info!(
         "DHCPDISCOVER from {} on {}",
@@ -644,7 +652,7 @@ pub async fn handle_discover(
     let lease_time = context.calc_lease_time(requested_time);
 
     // Extract hostname
-    let hostname = packet.hostname();
+    let _hostname = packet.hostname();
 
     // Build DHCPOFFER response
     let mut response = DhcpPacket::new_reply(packet);
@@ -675,7 +683,7 @@ pub async fn handle_discover(
         let dns_bytes: Vec<u8> = context
             .dns_servers
             .iter()
-            .flat_map(|ip| ip.octets())
+            .flat_map(std::net::Ipv4Addr::octets)
             .collect();
         response.options.insert(6, dns_bytes);
     }
@@ -744,7 +752,7 @@ pub async fn handle_request(
     interface: &Interface,
     lease_mgr: Arc<LeaseManager>,
     cache: Arc<RwLock<Cache>>,
-    logger: Arc<Logger>,
+    _logger: Arc<Logger>,
     options: DaemonOptions,
     now: SystemTime,
 ) -> Result<Option<DhcpPacket>, DhcpError> {
@@ -765,10 +773,10 @@ pub async fn handle_request(
             DhcpError::InvalidPacket("SELECTING request missing Requested IP".to_string())
         })?;
         ("SELECTING", target)
-    } else if !requested_ip_opt.is_none() {
+    } else if requested_ip_opt.is_some() {
         // INIT-REBOOT state: client verifying previous address
         ("INIT-REBOOT", requested_ip_opt.unwrap())
-    } else if ciaddr != Ipv4Addr::new(0, 0, 0, 0) {
+    } else if ciaddr != Ipv4Addr::UNSPECIFIED {
         // RENEWING or REBINDING: client extending current lease
         ("RENEWING/REBINDING", ciaddr)
     } else {
@@ -816,7 +824,7 @@ pub async fn handle_request(
     let hostname = packet.hostname();
 
     // Look for existing lease by client
-    let lease_arc = if let Some(existing) =
+    let _lease_arc = if let Some(existing) =
         lease_find_by_client(
             &lease_mgr,
             &client_id.to_bytes().to_vec(),
@@ -826,7 +834,7 @@ pub async fn handle_request(
     {
         // Update existing lease
         let mut lease = existing.write().await;
-        lease.set_expires(now + Duration::from_secs(lease_time as u64));
+        lease.set_expires(now + Duration::from_secs(u64::from(lease_time)));
         if let Some(ref hn) = hostname {
             lease.set_hostname(Some(hn.clone()));
         }
@@ -851,7 +859,7 @@ pub async fn handle_request(
         if !hn.is_empty() {
             let mut cache_guard = cache.write().await;
             // Calculate lease expiry as Instant for cache
-            let lease_expiry = std::time::Instant::now() + Duration::from_secs(lease_time as u64);
+            let lease_expiry = std::time::Instant::now() + Duration::from_secs(u64::from(lease_time));
             // add_dhcp_entry is synchronous, no await needed
             let _ = cache_guard.add_dhcp_entry(hn, target_ip.into(), lease_expiry);
             drop(cache_guard);
@@ -887,7 +895,7 @@ pub async fn handle_request(
         let dns_bytes: Vec<u8> = context
             .dns_servers
             .iter()
-            .flat_map(|ip| ip.octets())
+            .flat_map(std::net::Ipv4Addr::octets)
             .collect();
         response.options.insert(6, dns_bytes);
     }
@@ -937,7 +945,7 @@ pub async fn handle_release(
     _context: &DhcpContext,
     interface: &Interface,
     lease_mgr: Arc<LeaseManager>,
-    logger: Arc<Logger>,
+    _logger: Arc<Logger>,
     now: SystemTime,
 ) -> Result<Option<DhcpPacket>, DhcpError> {
     let release_ip = packet.ciaddr;
@@ -1011,7 +1019,7 @@ pub async fn handle_decline(
     _context: &DhcpContext,
     interface: &Interface,
     lease_mgr: Arc<LeaseManager>,
-    logger: Arc<Logger>,
+    _logger: Arc<Logger>,
     now: SystemTime,
 ) -> Result<Option<DhcpPacket>, DhcpError> {
     let declined_ip = packet.requested_ip().ok_or_else(|| {
@@ -1070,7 +1078,7 @@ pub async fn handle_inform(
     client_id: &ClientIdentifier,
     context: &DhcpContext,
     interface: &Interface,
-    logger: Arc<Logger>,
+    _logger: Arc<Logger>,
     options: DaemonOptions,
     _now: SystemTime,
 ) -> Result<Option<DhcpPacket>, DhcpError> {
@@ -1107,7 +1115,7 @@ pub async fn handle_inform(
         let dns_bytes: Vec<u8> = context
             .dns_servers
             .iter()
-            .flat_map(|ip| ip.octets())
+            .flat_map(std::net::Ipv4Addr::octets)
             .collect();
         response.options.insert(6, dns_bytes);
     }
@@ -1299,7 +1307,7 @@ fn build_requested_options(
                     let ntp_bytes: Vec<u8> = context
                         .dns_servers
                         .iter()
-                        .flat_map(|ip| ip.octets())
+                        .flat_map(std::net::Ipv4Addr::octets)
                         .collect();
                     response.options.insert(42, ntp_bytes);
                 }

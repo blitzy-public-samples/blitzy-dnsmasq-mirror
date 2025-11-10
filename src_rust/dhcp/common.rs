@@ -15,8 +15,8 @@
 
 //! Shared DHCPv4/DHCPv6 utilities
 //!
-//! This module implements common functionality used by both DHCPv4 (dhcp.c, rfc2131.c)
-//! and DHCPv6 (dhcp6.c, rfc3315.c) servers. It provides essential shared utilities
+//! This module implements common functionality used by both `DHCPv4` (dhcp.c, rfc2131.c)
+//! and `DHCPv6` (dhcp6.c, rfc3315.c) servers. It provides essential shared utilities
 //! for option parsing and encoding, vendor class matching, tag-based conditional
 //! configuration, device binding, packet validation, and client configuration matching.
 //!
@@ -25,7 +25,7 @@
 //! All C manual memory management patterns are replaced with Rust's safe alternatives:
 //! - `malloc/free` → `Vec<u8>` with automatic Drop deallocation
 //! - `expand_buf` realloc → `Vec::reserve` with safe capacity checks
-//! - Manual buffer expansion with MSG_PEEK → tokio async peek_from with automatic sizing
+//! - Manual buffer expansion with `MSG_PEEK` → tokio async `peek_from` with automatic sizing
 //! - `strcmp` loops → String equality and `PartialEq` trait
 //! - Pointer arithmetic → safe slice indexing with bounds checking
 //! - Linked list traversal → Iterator trait methods
@@ -34,7 +34,7 @@
 //!
 //! # Key Responsibilities
 //!
-//! - `find_config()`: Matches clients to dhcp_config entries by client ID, MAC, or hostname
+//! - `find_config()`: Matches clients to `dhcp_config` entries by client ID, MAC, or hostname
 //! - `match_bytes()`: Compares byte arrays for option matching with wildcard support
 //! - `option_filter()`: Applies tag-based filtering to determine which options are valid
 //! - `match_netid()`: Checks if network ID sets match for conditional configuration
@@ -45,9 +45,9 @@
 //!
 //! # Dependencies
 //!
-//! - `config::types`: For DaemonOptions, network ID tags, DHCP config structures
-//! - `utils::general`: For hostname_isequal() case-insensitive comparison
-//! - `dns::cache`: For /etc/hosts integration in dhcp_update_configs()
+//! - `config::types`: For `DaemonOptions`, network ID tags, DHCP config structures
+//! - `utils::general`: For `hostname_isequal()` case-insensitive comparison
+//! - `dns::cache`: For /etc/hosts integration in `dhcp_update_configs()`
 //!
 //! # Original C File
 //!
@@ -72,75 +72,75 @@ use crate::utils::general::hostname_isequal;
 /// Action code for adding a lease (DHCP script parameter)
 ///
 /// Used when calling external DHCP scripts with "add" action.
-/// Original C: ACTION_ADD in dhcp-common.c
+/// Original C: `ACTION_ADD` in dhcp-common.c
 pub const ACTION_ADD: &str = "add";
 
 /// Action code for deleting a lease (DHCP script parameter)
 ///
 /// Used when calling external DHCP scripts with "del" action.
-/// Original C: ACTION_DEL in dhcp-common.c
+/// Original C: `ACTION_DEL` in dhcp-common.c
 pub const ACTION_DEL: &str = "del";
 
 /// Action code for old lease update (DHCP script parameter)
 ///
 /// Used when renewing an existing lease with same client.
-/// Original C: ACTION_OLD in dhcp-common.c
+/// Original C: `ACTION_OLD` in dhcp-common.c
 pub const ACTION_OLD: &str = "old";
 
 /// Action code for old hostname update (DHCP script parameter)
 ///
 /// Used when hostname changes for an existing lease.
-/// Original C: ACTION_OLD_HOSTNAME in dhcp-common.c
+/// Original C: `ACTION_OLD_HOSTNAME` in dhcp-common.c
 pub const ACTION_OLD_HOSTNAME: &str = "old-hostname";
 
 /// Action code for TFTP file transfer (script parameter)
 ///
 /// Used when calling TFTP-related scripts.
-/// Original C: ACTION_TFTP in dhcp-common.c
+/// Original C: `ACTION_TFTP` in dhcp-common.c
 pub const ACTION_TFTP: &str = "tftp";
 
 /// Action code for ARP table entry addition (script parameter)
 ///
 /// Used when adding ARP entries for DHCP clients.
-/// Original C: ACTION_ARP in dhcp-common.c
+/// Original C: `ACTION_ARP` in dhcp-common.c
 pub const ACTION_ARP: &str = "arp";
 
 /// Action code for ARP table entry deletion (script parameter)
 ///
 /// Used when removing ARP entries for expired leases.
-/// Original C: ACTION_ARP_DEL in dhcp-common.c
+/// Original C: `ACTION_ARP_DEL` in dhcp-common.c
 pub const ACTION_ARP_DEL: &str = "arp-del";
 
 /// Action code for DHCP relay snoop (script parameter)
 ///
 /// Used when snooping DHCP relay traffic.
-/// Original C: ACTION_RELAY_SNOOP in dhcp-common.c
+/// Original C: `ACTION_RELAY_SNOOP` in dhcp-common.c
 pub const ACTION_RELAY_SNOOP: &str = "relay-snoop";
 
 /// Maximum hardware address length for DHCP (16 bytes per RFC 2131)
 ///
-/// DHCPv4 chaddr field size. Most commonly 6 bytes for Ethernet MAC addresses,
+/// `DHCPv4` chaddr field size. Most commonly 6 bytes for Ethernet MAC addresses,
 /// but RFC 2131 allows up to 16 bytes for other hardware types.
-/// Original C: DHCP_CHADDR_MAX in dnsmasq.h
+/// Original C: `DHCP_CHADDR_MAX` in dnsmasq.h
 pub const DHCP_CHADDR_MAX: usize = 16;
 
-/// DHCPv6 lease type: Temporary Address (IA_TA)
+/// `DHCPv6` lease type: Temporary Address (`IA_TA`)
 ///
 /// Used to identify temporary IPv6 addresses with short lifetimes.
-/// Original C: LEASE_TA in dnsmasq.h
+/// Original C: `LEASE_TA` in dnsmasq.h
 pub const LEASE_TA: u32 = 1;
 
-/// DHCPv6 lease type: Non-temporary Address (IA_NA)
+/// `DHCPv6` lease type: Non-temporary Address (`IA_NA`)
 ///
 /// Used to identify standard IPv6 addresses with normal lifetimes.
-/// Original C: LEASE_NA in dnsmasq.h
+/// Original C: `LEASE_NA` in dnsmasq.h
 pub const LEASE_NA: u32 = 2;
 
-/// ARP hardware type: Ethernet (from if_arp.h)
+/// ARP hardware type: Ethernet (from `if_arp.h`)
 ///
 /// Standard hardware type value for Ethernet networks (10Mbps, 100Mbps, 1Gbps, etc.).
 /// Used in DHCP packets to identify hardware address type.
-/// Original C: ARPHRD_ETHER from <net/if_arp.h>
+/// Original C: `ARPHRD_ETHER` from <`net/if_arp.h`>
 pub const ARPHRD_ETHER: u16 = 1;
 
 // ========== Type Definitions ==========
@@ -155,14 +155,14 @@ pub type MacAddr = [u8; 6];
 ///
 /// Used in static DHCP host configurations to match client MAC addresses
 /// with optional wildcard bits for matching ranges of addresses.
-/// Original C: struct hwaddr_config in dnsmasq.h:853-858
+/// Original C: struct `hwaddr_config` in dnsmasq.h:853-858
 #[derive(Debug, Clone)]
 pub struct HwaddrConfig {
     /// Hardware address bytes
     pub hwaddr: Vec<u8>,
     /// Length of hardware address
     pub hwaddr_len: usize,
-    /// Hardware address type (e.g., ARPHRD_ETHER for Ethernet)
+    /// Hardware address type (e.g., `ARPHRD_ETHER` for Ethernet)
     pub hwaddr_type: u16,
     /// Wildcard mask for partial matching (0 = exact match)
     pub wildcard_mask: u64,
@@ -174,7 +174,7 @@ pub struct HwaddrConfig {
 ///
 /// Tags are used to mark DHCP clients and contexts, enabling conditional
 /// option delivery based on vendor class, user class, subnet, etc.
-/// Original C: struct dhcp_netid in dnsmasq.h:831-834
+/// Original C: struct `dhcp_netid` in dnsmasq.h:831-834
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DhcpNetid {
     /// Tag name (e.g., "known", "vlan10", "pxeclient")
@@ -185,7 +185,7 @@ pub struct DhcpNetid {
 ///
 /// Represents a DHCP option to be sent to clients, with tag-based
 /// conditional delivery support.
-/// Original C: struct dhcp_opt in dnsmasq.h:892-902
+/// Original C: struct `dhcp_opt` in dnsmasq.h:892-902
 #[derive(Debug, Clone)]
 pub struct DhcpOpt {
     /// Option number (e.g., 3 for router, 6 for DNS server)
@@ -194,11 +194,11 @@ pub struct DhcpOpt {
     pub val: Vec<u8>,
     /// Length of option value
     pub len: usize,
-    /// Option flags (DHOPT_TAGOK, DHOPT_HEX, DHOPT_STRING, etc.)
+    /// Option flags (`DHOPT_TAGOK`, `DHOPT_HEX`, `DHOPT_STRING`, etc.)
     pub flags: u32,
     /// Network ID tags for conditional delivery (None = always deliver)
     pub netid: Option<Vec<DhcpNetid>>,
-    /// Wildcard mask for DHOPT_HEX matching
+    /// Wildcard mask for `DHOPT_HEX` matching
     pub wildcard_mask: Option<Vec<u8>>,
     /// Next option in linked list
     pub next: Option<Box<DhcpOpt>>,
@@ -216,10 +216,10 @@ const DHOPT_STRING: u32 = 1 << 5; // Value is string (substring match)
 ///
 /// Defines static IP assignments and options for specific clients
 /// identified by client ID, MAC address, or hostname.
-/// Original C: struct dhcp_config in dnsmasq.h:860-875
+/// Original C: struct `dhcp_config` in dnsmasq.h:860-875
 #[derive(Debug, Clone)]
 pub struct DhcpConfig {
-    /// Configuration flags (CONFIG_ADDR, CONFIG_CLID, CONFIG_NAME, etc.)
+    /// Configuration flags (`CONFIG_ADDR`, `CONFIG_CLID`, `CONFIG_NAME`, etc.)
     pub flags: u32,
     /// Client identifier for matching
     pub clid: Option<Vec<u8>>,
@@ -251,10 +251,10 @@ const CONFIG_ADDR6_HOSTS: u32 = 1 << 5; // IPv6 address from /etc/hosts
 ///
 /// Defines a DHCP address pool for a specific subnet or interface,
 /// with associated network ID tags for conditional configuration.
-/// Original C: struct dhcp_context in dnsmasq.h:994-1010
+/// Original C: struct `dhcp_context` in dnsmasq.h:994-1010
 #[derive(Debug, Clone)]
 pub struct DhcpContext {
-    /// Context flags (CONTEXT_V6, CONTEXT_STATIC, etc.)
+    /// Context flags (`CONTEXT_V6`, `CONTEXT_STATIC`, etc.)
     pub flags: u32,
     /// Start of address range (IPv4)
     pub start: Option<Ipv4Addr>,
@@ -283,8 +283,8 @@ const CONTEXT_V6: u32 = 1 << 0; // IPv6 context (else IPv4)
 ///
 /// Compares byte array `p` of length `len` against the value stored in `DhcpOpt`.
 /// Supports three matching modes:
-/// 1. DHOPT_HEX flag: masked comparison using wildcard_mask for partial byte matching
-/// 2. DHOPT_STRING flag: substring search allowing match at any position
+/// 1. `DHOPT_HEX` flag: masked comparison using `wildcard_mask` for partial byte matching
+/// 2. `DHOPT_STRING` flag: substring search allowing match at any position
 /// 3. default: exact match at aligned positions only
 ///
 /// Used for vendor class, user class, and client ID matching with flexible wildcarding.
@@ -303,6 +303,7 @@ const CONTEXT_V6: u32 = 1 << 0; // IPv6 context (else IPv4)
 /// # Original C
 ///
 /// `int match_bytes(struct dhcp_opt *o, unsigned char *p, int len)` in dhcp-common.c:618-646
+#[must_use] 
 pub fn match_bytes(opt: &DhcpOpt, p: &[u8], len: usize) -> bool {
     if opt.len > len {
         return false;
@@ -322,7 +323,7 @@ pub fn match_bytes(opt: &DhcpOpt, p: &[u8], len: usize) -> bool {
     // Standard comparison (exact or substring)
     let mut i = 0;
     while i <= len - opt.len {
-        if &p[i..i + opt.len] == &opt.val[..opt.len] {
+        if p[i..i + opt.len] == opt.val[..opt.len] {
             return true;
         }
 
@@ -355,7 +356,7 @@ pub fn match_bytes(opt: &DhcpOpt, p: &[u8], len: usize) -> bool {
 ///
 /// # Original C
 ///
-/// `memcmp_masked()` in util.c (called by match_bytes)
+/// `memcmp_masked()` in util.c (called by `match_bytes`)
 fn memcmp_masked(a: &[u8], b: &[u8], len: usize, mask: &[u8]) -> bool {
     for i in 0..len {
         let byte_a = a.get(i).copied().unwrap_or(0);
@@ -392,6 +393,7 @@ fn memcmp_masked(a: &[u8], b: &[u8], len: usize, mask: &[u8]) -> bool {
 ///
 /// `int match_netid(struct dhcp_netid *check, struct dhcp_netid *netid, int negonly)` 
 /// in dhcp-common.c:453-508
+#[must_use] 
 pub fn match_netid(check: &DhcpNetid, netid: Option<&Vec<DhcpNetid>>) -> bool {
     // Wildcard matches everything
     if check.net == "*" {
@@ -435,14 +437,14 @@ pub fn strip_hostname(hostname: &mut String) {
 
 /// Log active network ID tags for debugging
 ///
-/// Outputs list of active tags for DHCP transaction if OPT_LOG_OPTS is enabled.
+/// Outputs list of active tags for DHCP transaction if `OPT_LOG_OPTS` is enabled.
 /// Used for troubleshooting tag-based conditional configuration.
 ///
 /// # Arguments
 ///
 /// * `prefix` - Descriptive prefix string (e.g., "tags", "available tags")
 /// * `netid` - Active tag set to log
-/// * `options` - Daemon options (checks OPT_LOG_OPTS flag)
+/// * `options` - Daemon options (checks `OPT_LOG_OPTS` flag)
 ///
 /// # Original C
 ///
@@ -474,7 +476,7 @@ pub fn log_tags(prefix: &str, netid: Option<&Vec<DhcpNetid>>, options: &DaemonOp
 /// * `config` - DHCP configuration entry
 /// * `hwaddr` - MAC address to search for
 /// * `len` - Length of MAC address (typically 6 for Ethernet)
-/// * `hwaddr_type` - Hardware address type (e.g., ARPHRD_ETHER)
+/// * `hwaddr_type` - Hardware address type (e.g., `ARPHRD_ETHER`)
 ///
 /// # Returns
 ///
@@ -485,6 +487,7 @@ pub fn log_tags(prefix: &str, netid: Option<&Vec<DhcpNetid>>, options: &DaemonOp
 ///
 /// `int config_has_mac(struct dhcp_config *config, unsigned char *hwaddr, int len, int type)`
 /// in dhcp-common.c:682-701
+#[must_use] 
 pub fn config_has_mac(
     config: &DhcpConfig,
     hwaddr: &[u8],
@@ -504,7 +507,7 @@ pub fn config_has_mac(
     false
 }
 
-/// Iterator helper for traversing linked list of HwaddrConfig
+/// Iterator helper for traversing linked list of `HwaddrConfig`
 fn iterate_hwaddr_list(head: &[HwaddrConfig]) -> impl Iterator<Item = &HwaddrConfig> {
     head.iter()
 }
@@ -528,26 +531,22 @@ fn iterate_hwaddr_list(head: &[HwaddrConfig]) -> impl Iterator<Item = &HwaddrCon
 ///
 /// # Original C
 ///
-/// `struct dhcp_config *find_config(...)` with CONFIG_HWADDR flag check
+/// `struct dhcp_config *find_config(...)` with `CONFIG_HWADDR` flag check
 /// in dhcp-common.c:917-960
+#[must_use] 
 pub fn find_mac<'a>(
     configs: &'a [DhcpConfig],
     hwaddr: &[u8],
     len: usize,
     hwaddr_type: u16,
 ) -> Option<&'a DhcpConfig> {
-    for config in configs {
-        if config_has_mac(config, hwaddr, len, hwaddr_type) {
-            return Some(config);
-        }
-    }
-    None
+    configs.iter().find(|&config| config_has_mac(config, hwaddr, len, hwaddr_type)).map(|v| v as _)
 }
 
 /// Apply tag-based filtering to DHCP option list
 ///
 /// Filters DHCP options based on active network ID tags. Options with matching
-/// tags are marked with DHOPT_TAGOK flag. Handles negation tags (starting with "!")
+/// tags are marked with `DHOPT_TAGOK` flag. Handles negation tags (starting with "!")
 /// and supports multiple tag requirements (all must match).
 ///
 /// This is the core mechanism for conditional DHCP option delivery based on
@@ -560,7 +559,7 @@ pub fn find_mac<'a>(
 ///
 /// # Returns
 ///
-/// Number of options that passed filtering (have DHOPT_TAGOK set)
+/// Number of options that passed filtering (have `DHOPT_TAGOK` set)
 ///
 /// # Original C
 ///
@@ -632,12 +631,12 @@ pub fn option_filter(opts: &mut [DhcpOpt], netid: Option<&Vec<DhcpNetid>>) -> us
 ///
 /// * `configs` - List of static DHCP host configurations
 /// * `context` - Active DHCP context (subnet) for this transaction
-/// * `clid` - Client identifier from DHCP packet (DHCPv4 option 61 / DHCPv6 DUID)
+/// * `clid` - Client identifier from DHCP packet (`DHCPv4` option 61 / `DHCPv6` DUID)
 /// * `clid_len` - Length of client identifier
 /// * `hwaddr` - Hardware address (MAC) from DHCP packet
 /// * `hwaddr_len` - Length of hardware address
-/// * `hwaddr_type` - Hardware address type (e.g., ARPHRD_ETHER)
-/// * `hostname` - Hostname from DHCP packet (option 12 for DHCPv4)
+/// * `hwaddr_type` - Hardware address type (e.g., `ARPHRD_ETHER`)
+/// * `hostname` - Hostname from DHCP packet (option 12 for `DHCPv4`)
 /// * `netid` - Active network ID tags
 ///
 /// # Returns
@@ -666,12 +665,10 @@ pub fn find_config<'a>(
                 if let Some(ref config_clid) = config.clid {
                     if config.clid_len == clid_len
                         && config_clid.get(..clid_len) == Some(&clid_bytes[..clid_len])
-                    {
-                        if is_config_valid_for_context(config, context, netid) {
+                        && is_config_valid_for_context(config, context, netid) {
                             debug!("Found config by client ID (len={})", clid_len);
                             return Some(config);
                         }
-                    }
                 }
             }
         }
@@ -680,15 +677,14 @@ pub fn find_config<'a>(
     // Priority 2: Match by MAC address
     if let Some(hwaddr_bytes) = hwaddr {
         for config in configs {
-            if config_has_mac(config, hwaddr_bytes, hwaddr_len, hwaddr_type) {
-                if is_config_valid_for_context(config, context, netid) {
+            if config_has_mac(config, hwaddr_bytes, hwaddr_len, hwaddr_type)
+                && is_config_valid_for_context(config, context, netid) {
                     debug!(
                         "Found config by MAC address (len={}, type={})",
                         hwaddr_len, hwaddr_type
                     );
                     return Some(config);
                 }
-            }
         }
     }
 
@@ -697,12 +693,11 @@ pub fn find_config<'a>(
         for config in configs {
             if config.flags & CONFIG_NAME != 0 {
                 if let Some(ref config_hostname) = config.hostname {
-                    if hostname_isequal(hostname_str, config_hostname) {
-                        if is_config_valid_for_context(config, context, netid) {
+                    if hostname_isequal(hostname_str, config_hostname)
+                        && is_config_valid_for_context(config, context, netid) {
                             debug!("Found config by hostname: {}", hostname_str);
                             return Some(config);
                         }
-                    }
                 }
             }
         }
@@ -714,7 +709,7 @@ pub fn find_config<'a>(
 
 /// Check if DHCP config is valid for current context and tags
 ///
-/// Helper function for find_config that validates config against context
+/// Helper function for `find_config` that validates config against context
 /// (subnet) and applies tag-based filtering.
 ///
 /// # Arguments
@@ -870,7 +865,7 @@ pub fn log_context(context: &DhcpContext) {
 /// DHCP relay information for logging
 ///
 /// Contains relay agent information for DHCP relay scenarios.
-/// Original C: struct dhcp_relay in dnsmasq.h:1084-1097
+/// Original C: struct `dhcp_relay` in dnsmasq.h:1084-1097
 #[derive(Debug, Clone)]
 pub struct DhcpRelay {
     /// Relay agent IP address
@@ -902,9 +897,9 @@ pub fn log_relay(relay: &DhcpRelay, client_addr: Option<IpAddr>) {
 
 /// Receive DHCP packet with automatic buffer expansion
 ///
-/// Receives UDP packet using MSG_PEEK to determine size, then allocates
-/// appropriately sized buffer for actual receive. Handles both DHCPv4
-/// (typically 576-1500 bytes) and DHCPv6 (variable, often >1280 bytes).
+/// Receives UDP packet using `MSG_PEEK` to determine size, then allocates
+/// appropriately sized buffer for actual receive. Handles both `DHCPv4`
+/// (typically 576-1500 bytes) and `DHCPv6` (variable, often >1280 bytes).
 ///
 /// Uses tokio async I/O to avoid blocking event loop during receive.
 ///
@@ -966,7 +961,7 @@ pub async fn recv_dhcp_packet(
 /// DHCP option metadata entry
 ///
 /// Describes a DHCP option with its number, name, and data type for parsing/formatting.
-/// Original C: struct opttab_t in dhcp-common.c (static tables opttab[] and opttab6[])
+/// Original C: struct `opttab_t` in dhcp-common.c (static tables opttab[] and opttab6[])
 #[derive(Debug, Clone)]
 pub struct DhcpOptMeta {
     /// Option number (e.g., 3 for router, 6 for DNS)
@@ -985,7 +980,7 @@ pub struct DhcpOptMeta {
 /// # Arguments
 ///
 /// * `opt_code` - DHCP option number to look up
-/// * `is_v6` - true for DHCPv6, false for DHCPv4
+/// * `is_v6` - true for `DHCPv6`, false for `DHCPv4`
 ///
 /// # Returns
 ///
@@ -1014,7 +1009,7 @@ pub fn lookup_dhcp_opt(opt_code: u8, is_v6: bool) -> Option<&'static DhcpOptMeta
 /// # Arguments
 ///
 /// * `opt_code` - DHCP option number
-/// * `is_v6` - true for DHCPv6, false for DHCPv4
+/// * `is_v6` - true for `DHCPv6`, false for `DHCPv4`
 ///
 /// # Returns
 ///
@@ -1023,6 +1018,7 @@ pub fn lookup_dhcp_opt(opt_code: u8, is_v6: bool) -> Option<&'static DhcpOptMeta
 /// # Original C
 ///
 /// `lookup_dhcp_len(int prot, int val)` in dhcp-common.c:1419-1450
+#[must_use] 
 pub fn lookup_dhcp_len(opt_code: u8, is_v6: bool) -> usize {
     // Simplified implementation with common options
     if is_v6 {
@@ -1052,7 +1048,7 @@ pub fn lookup_dhcp_len(opt_code: u8, is_v6: bool) -> usize {
 /// # Arguments
 ///
 /// * `opt` - DHCP option to format
-/// * `is_v6` - true for DHCPv6, false for DHCPv4
+/// * `is_v6` - true for `DHCPv6`, false for `DHCPv4`
 ///
 /// # Returns
 ///
@@ -1062,6 +1058,7 @@ pub fn lookup_dhcp_len(opt_code: u8, is_v6: bool) -> usize {
 ///
 /// `char *option_string(int prot, unsigned int opt, unsigned char *val, ...)` 
 /// in dhcp-common.c:1603-1756
+#[must_use] 
 pub fn option_string(opt: &DhcpOpt, is_v6: bool) -> String {
     // Check if we have metadata for this option
     if let Some(meta) = lookup_dhcp_opt(opt.opt, is_v6) {
@@ -1103,18 +1100,18 @@ pub fn option_string(opt: &DhcpOpt, is_v6: bool) -> String {
 
 /// Format byte array as hex string
 ///
-/// Helper for option_string to display unknown options.
+/// Helper for `option_string` to display unknown options.
 fn hex_string(bytes: &[u8]) -> String {
     bytes
         .iter()
-        .map(|b| format!("{:02x}", b))
+        .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(":")
 }
 
-/// Display DHCPv4 options for logging
+/// Display `DHCPv4` options for logging
 ///
-/// Formats all DHCPv4 options in packet for operational visibility.
+/// Formats all `DHCPv4` options in packet for operational visibility.
 /// Logs option number, name (if known), and formatted value.
 ///
 /// # Arguments
@@ -1131,9 +1128,9 @@ pub fn display_opts(opts: &[DhcpOpt]) {
     }
 }
 
-/// Display DHCPv6 options for logging
+/// Display `DHCPv6` options for logging
 ///
-/// Formats all DHCPv6 options in packet for operational visibility.
+/// Formats all `DHCPv6` options in packet for operational visibility.
 /// Logs option number, name (if known), and formatted value.
 ///
 /// # Arguments
@@ -1152,8 +1149,8 @@ pub fn display_opts6(opts: &[DhcpOpt]) {
 
 /// Determine which network device packet was received on
 ///
-/// Extracts interface name from socket control messages (IP_PKTINFO or
-/// IPV6_PKTINFO). Used for multi-interface DHCP server configurations
+/// Extracts interface name from socket control messages (`IP_PKTINFO` or
+/// `IPV6_PKTINFO`). Used for multi-interface DHCP server configurations
 /// to enforce per-interface policy.
 ///
 /// # Arguments
@@ -1175,12 +1172,12 @@ pub fn whichdevice(_socket: &UdpSocket) -> Option<String> {
     None
 }
 
-/// Bind socket to specific network device (Linux SO_BINDTODEVICE)
+/// Bind socket to specific network device (Linux `SO_BINDTODEVICE`)
 ///
 /// Restricts DHCP socket to single network interface for multi-VLAN deployments
-/// (e.g., OpenStack with multiple dnsmasq instances per host).
+/// (e.g., `OpenStack` with multiple dnsmasq instances per host).
 ///
-/// Platform-specific: Linux only via SO_BINDTODEVICE socket option.
+/// Platform-specific: Linux only via `SO_BINDTODEVICE` socket option.
 ///
 /// # Arguments
 ///
@@ -1203,7 +1200,7 @@ pub fn bindtodevice(socket: &UdpSocket, device: &str) -> Result<(), IoError> {
     let sock = unsafe { Socket::from_raw_fd(raw_fd) };
 
     match sock.bind_device(Some(device.as_bytes())) {
-        Ok(_) => {
+        Ok(()) => {
             info!("Bound DHCP socket to device: {}", device);
             // Prevent socket from being closed when sock is dropped
             std::mem::forget(sock);
@@ -1212,7 +1209,7 @@ pub fn bindtodevice(socket: &UdpSocket, device: &str) -> Result<(), IoError> {
         Err(e) => {
             error!("Failed to bind socket to device {}: {}", device, e);
             std::mem::forget(sock);
-            Err(IoError::new(ErrorKind::Other, e))
+            Err(IoError::other(e))
         }
     }
 }
@@ -1229,14 +1226,14 @@ pub fn bindtodevice(_socket: &UdpSocket, device: &str) -> Result<(), IoError> {
 /// Bind all DHCP sockets to their configured devices
 ///
 /// Iterates through all DHCP listening sockets and binds each to its
-/// configured interface using SO_BINDTODEVICE (Linux only).
+/// configured interface using `SO_BINDTODEVICE` (Linux only).
 ///
 /// Used in multi-VLAN scenarios where multiple dnsmasq instances run
 /// on same host with different interface bindings.
 ///
 /// # Arguments
 ///
-/// * `sockets` - List of (socket, device_name) tuples to bind
+/// * `sockets` - List of (socket, `device_name`) tuples to bind
 ///
 /// # Returns
 ///
@@ -1251,15 +1248,14 @@ pub fn bind_dhcp_devices(sockets: &[(UdpSocket, String)]) -> Result<(), IoError>
 
     for (socket, device) in sockets {
         if let Err(e) = bindtodevice(socket, device) {
-            errors.push(format!("Failed to bind to {}: {}", device, e));
+            errors.push(format!("Failed to bind to {device}: {e}"));
         }
     }
 
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(IoError::new(
-            ErrorKind::Other,
+        Err(IoError::other(
             format!("Device binding errors: {}", errors.join("; ")),
         ))
     }

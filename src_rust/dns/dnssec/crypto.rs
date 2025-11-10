@@ -167,11 +167,11 @@ pub enum CryptoError {
         reason: String,
     },
 
-    /// ECDSA or EdDSA public key parsing error
+    /// ECDSA or `EdDSA` public key parsing error
     ///
     /// The elliptic curve public key is malformed or the point is not on the curve.
     EcKeyFormatError {
-        /// DNSSEC algorithm (ECDSA or EdDSA)
+        /// DNSSEC algorithm (ECDSA or `EdDSA`)
         algo: DnssecAlgorithm,
         /// Detailed error description
         reason: String,
@@ -182,30 +182,28 @@ impl fmt::Display for CryptoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CryptoError::UnsupportedAlgorithm { algo } => {
-                write!(f, "Unsupported DNSSEC algorithm: {}", algo)
+                write!(f, "Unsupported DNSSEC algorithm: {algo}")
             }
             CryptoError::InvalidKeyLength { algo, expected, found } => {
                 write!(
                     f,
-                    "Invalid key length for {}: expected {}, found {}",
-                    algo, expected, found
+                    "Invalid key length for {algo}: expected {expected}, found {found}"
                 )
             }
             CryptoError::InvalidSignatureLength { algo, expected, found } => {
                 write!(
                     f,
-                    "Invalid signature length for {}: expected {}, found {}",
-                    algo, expected, found
+                    "Invalid signature length for {algo}: expected {expected}, found {found}"
                 )
             }
             CryptoError::VerificationFailed { algo, reason } => {
-                write!(f, "Signature verification failed for {}: {}", algo, reason)
+                write!(f, "Signature verification failed for {algo}: {reason}")
             }
             CryptoError::RsaKeyFormatError { reason } => {
-                write!(f, "RSA key format error: {}", reason)
+                write!(f, "RSA key format error: {reason}")
             }
             CryptoError::EcKeyFormatError { algo, reason } => {
-                write!(f, "{} key format error: {}", algo, reason)
+                write!(f, "{algo} key format error: {reason}")
             }
         }
     }
@@ -248,15 +246,15 @@ impl StdError for CryptoError {}
 ///
 /// # Memory Safety
 ///
-/// Unlike C implementation using GMP bignum and manual mpz_import:
-/// - Uses ring's RsaPublicKeyComponents which handles bignum internally
+/// Unlike C implementation using GMP bignum and manual `mpz_import`:
+/// - Uses ring's `RsaPublicKeyComponents` which handles bignum internally
 /// - No unsafe pointer arithmetic for key parsing
 /// - Automatic bounds checking on all slice operations
 /// - No manual memory management
 ///
 /// # Arguments
 ///
-/// * `key_data` - BlockData containing RSA public key in RFC 3110 format
+/// * `key_data` - `BlockData` containing RSA public key in RFC 3110 format
 /// * `sig` - Signature bytes to verify
 /// * `digest` - Message digest (hash of signed data)
 /// * `algo` - DNSSEC algorithm (5, 7, 8, or 10)
@@ -285,7 +283,7 @@ fn rsa_verify(
 
     if key_len < 3 {
         return Err(CryptoError::RsaKeyFormatError {
-            reason: format!("Key too short: {} bytes (minimum 3)", key_len),
+            reason: format!("Key too short: {key_len} bytes (minimum 3)"),
         });
     }
 
@@ -414,14 +412,14 @@ fn rsa_verify(
 /// # Memory Safety
 ///
 /// Unlike C implementation using nettle ECC structures:
-/// - Uses ring's UnparsedPublicKey which handles EC point validation
-/// - No manual mpz_import for r, s components
+/// - Uses ring's `UnparsedPublicKey` which handles EC point validation
+/// - No manual `mpz_import` for r, s components
 /// - Automatic curve parameter selection
-/// - No unsafe ecc_point_set validation
+/// - No unsafe `ecc_point_set` validation
 ///
 /// # Arguments
 ///
-/// * `key_data` - BlockData containing ECDSA public key (x || y)
+/// * `key_data` - `BlockData` containing ECDSA public key (x || y)
 /// * `sig` - Signature bytes (r || s)
 /// * `digest` - Message digest (SHA-256 or SHA-384)
 /// * `algo` - DNSSEC algorithm (13 or 14)
@@ -525,41 +523,41 @@ fn ecdsa_verify(
     })
 }
 
-/// Verify EdDSA signature for DNSSEC algorithms 15, 16
+/// Verify `EdDSA` signature for DNSSEC algorithms 15, 16
 ///
-/// Implements EdDSA signature verification for:
+/// Implements `EdDSA` signature verification for:
 /// - Algorithm 15: Ed25519 (Curve25519)
 /// - Algorithm 16: Ed448 (Curve448) - Note: Limited ring support
 ///
-/// # EdDSA Key Format (RFC 8080)
+/// # `EdDSA` Key Format (RFC 8080)
 ///
-/// The DNSKEY record contains the EdDSA public key as raw bytes:
+/// The DNSKEY record contains the `EdDSA` public key as raw bytes:
 /// - Ed25519: 32 bytes (public key point)
 /// - Ed448: 57 bytes (public key point)
 ///
-/// # EdDSA Signature Format
+/// # `EdDSA` Signature Format
 ///
 /// - Ed25519: 64 bytes (R || S)
 /// - Ed448: 114 bytes (R || S)
 ///
-/// # EdDSA vs RSA/ECDSA Difference
+/// # `EdDSA` vs RSA/ECDSA Difference
 ///
-/// Unlike RSA and ECDSA which sign a hash digest, EdDSA algorithms
+/// Unlike RSA and ECDSA which sign a hash digest, `EdDSA` algorithms
 /// (Ed25519, Ed448) operate on the complete message. The C implementation
-/// used a "null_hash" mechanism to accumulate the full message. In Rust,
+/// used a "`null_hash`" mechanism to accumulate the full message. In Rust,
 /// we receive the complete message directly in the digest parameter.
 ///
 /// # Memory Safety
 ///
-/// Unlike C implementation using nettle EdDSA structures:
+/// Unlike C implementation using nettle `EdDSA` structures:
 /// - Uses ring's ED25519 which handles key validation internally
-/// - No null_hash buffer management (message passed directly)
-/// - No manual SHA-512 or SHAKE256 hashing (EdDSA does it internally)
+/// - No `null_hash` buffer management (message passed directly)
+/// - No manual SHA-512 or SHAKE256 hashing (`EdDSA` does it internally)
 /// - Automatic signature format validation
 ///
 /// # Arguments
 ///
-/// * `key_data` - BlockData containing EdDSA public key
+/// * `key_data` - `BlockData` containing `EdDSA` public key
 /// * `sig` - Signature bytes
 /// * `message` - Complete message to verify (not a hash digest)
 /// * `algo` - DNSSEC algorithm (15 or 16)
@@ -573,14 +571,14 @@ fn ecdsa_verify(
 ///
 /// # RFC Compliance
 ///
-/// - RFC 8080: EdDSA for DNSSEC (algorithms 15 and 16)
-/// - RFC 8032: Edwards-Curve Digital Signature Algorithm (EdDSA)
+/// - RFC 8080: `EdDSA` for DNSSEC (algorithms 15 and 16)
+/// - RFC 8032: Edwards-Curve Digital Signature Algorithm (`EdDSA`)
 /// - RFC 4034: DNSSEC Resource Records
 ///
 /// # Note on Ed448
 ///
 /// Ed448 support in ring is limited. As of ring 0.17, Ed448 is not fully
-/// implemented. This function returns UnsupportedAlgorithm for Ed448 until
+/// implemented. This function returns `UnsupportedAlgorithm` for Ed448 until
 /// ring adds support.
 fn eddsa_verify(
     key_data: &BlockData,
@@ -657,7 +655,7 @@ fn eddsa_verify(
 ///
 /// # Arguments
 ///
-/// * `_key_data` - BlockData containing GOST public key (unused)
+/// * `_key_data` - `BlockData` containing GOST public key (unused)
 /// * `_sig` - Signature bytes (unused)
 /// * `_digest` - Message digest (unused)
 /// * `algo` - DNSSEC algorithm (must be 12)
@@ -673,7 +671,7 @@ fn eddsa_verify(
 /// # Note
 ///
 /// GOST algorithm support is optional per RFC 8624. Most DNSSEC deployments
-/// outside Russia use RSA, ECDSA, or EdDSA algorithms instead.
+/// outside Russia use RSA, ECDSA, or `EdDSA` algorithms instead.
 #[allow(unused_variables)]
 fn gost_verify(
     _key_data: &BlockData,
@@ -695,7 +693,7 @@ fn gost_verify(
 ///
 /// Main entry point for DNSSEC signature verification. Dispatches to
 /// algorithm-specific verification functions based on the DNSSEC algorithm
-/// number from the RRSIG and DNSKEY records. Supports RSA, ECDSA, EdDSA,
+/// number from the RRSIG and DNSKEY records. Supports RSA, ECDSA, `EdDSA`,
 /// and GOST signature algorithms (though GOST returns unsupported).
 ///
 /// # Algorithm Dispatch
@@ -715,9 +713,9 @@ fn gost_verify(
 ///
 /// # Arguments
 ///
-/// * `key_data` - BlockData chain containing public key from DNSKEY record
+/// * `key_data` - `BlockData` chain containing public key from DNSKEY record
 /// * `sig` - Signature bytes from RRSIG record
-/// * `digest` - Hash digest of signed data (or complete message for EdDSA)
+/// * `digest` - Hash digest of signed data (or complete message for `EdDSA`)
 /// * `algo` - DNSSEC algorithm number from RRSIG/DNSKEY records
 ///
 /// # Returns
@@ -765,7 +763,7 @@ fn gost_verify(
 /// - RFC 4035: Protocol Modifications for DNSSEC (validation process)
 /// - RFC 5702: RSA/SHA-2 for DNSSEC (algorithms 8, 10)
 /// - RFC 6605: ECDSA for DNSSEC (algorithms 13, 14)
-/// - RFC 8080: EdDSA for DNSSEC (algorithms 15, 16)
+/// - RFC 8080: `EdDSA` for DNSSEC (algorithms 15, 16)
 /// - RFC 5933: GOST for DNSSEC (algorithm 12)
 /// - RFC 6944: Algorithm deprecation (RSA/MD5, DSA variants)
 /// - RFC 8624: Algorithm implementation requirements
@@ -826,13 +824,13 @@ pub fn verify(
 /// - **12**: GOST → "gost94" (not fully supported)
 /// - **13**: ECDSA P-256 → "sha256"
 /// - **14**: ECDSA P-384 → "sha384"
-/// - **15, 16**: EdDSA → "null" (operates on whole message)
+/// - **15, 16**: `EdDSA` → "null" (operates on whole message)
 ///
-/// # EdDSA Special Case
+/// # `EdDSA` Special Case
 ///
-/// EdDSA algorithms (15, 16) return "null" because they don't hash the
+/// `EdDSA` algorithms (15, 16) return "null" because they don't hash the
 /// message before signing. Instead, they operate on the complete message.
-/// The C implementation used a "null_hash" that accumulated the full message.
+/// The C implementation used a "`null_hash`" that accumulated the full message.
 ///
 /// # Unsupported Algorithms
 ///
@@ -874,7 +872,7 @@ pub fn verify(
 /// - RFC 4034: DNSSEC algorithm numbers
 /// - RFC 5702: RSA/SHA-2 (algorithms 8, 10)
 /// - RFC 6605: ECDSA (algorithms 13, 14)
-/// - RFC 8080: EdDSA (algorithms 15, 16)
+/// - RFC 8080: `EdDSA` (algorithms 15, 16)
 /// - RFC 5933: GOST (algorithm 12)
 /// - RFC 6944: Deprecates RSA/MD5 (algorithm 1)
 /// - RFC 8624: Deprecates DSA variants (algorithms 3, 6)
@@ -882,6 +880,7 @@ pub fn verify(
 /// # Thread Safety
 ///
 /// Thread-safe. Returns static string references.
+#[must_use] 
 pub fn algo_digest_name(algo: DnssecAlgorithm) -> Option<&'static str> {
     match algo {
         DnssecAlgorithm::RsaSha1 | DnssecAlgorithm::RsaSha1Nsec3 => Some("sha1"),
@@ -953,6 +952,7 @@ pub fn algo_digest_name(algo: DnssecAlgorithm) -> Option<&'static str> {
 /// # Thread Safety
 ///
 /// Thread-safe. Returns static string references.
+#[must_use] 
 pub fn ds_digest_name(digest_type: u8) -> Option<&'static str> {
     match digest_type {
         1 => Some("sha1"),
@@ -1017,6 +1017,7 @@ pub fn ds_digest_name(digest_type: u8) -> Option<&'static str> {
 /// # Thread Safety
 ///
 /// Thread-safe. Returns static string references.
+#[must_use] 
 pub fn nsec3_digest_name(digest_type: u8) -> Option<&'static str> {
     match digest_type {
         1 => Some("sha1"),

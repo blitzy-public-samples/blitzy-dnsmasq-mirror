@@ -106,16 +106,16 @@ impl std::fmt::Display for AuthError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthError::InvalidQuery { reason } => {
-                write!(f, "Invalid query: {}", reason)
+                write!(f, "Invalid query: {reason}")
             }
             AuthError::BufferOverflow { attempted, available } => {
-                write!(f, "Buffer overflow: attempted {}, available {}", attempted, available)
+                write!(f, "Buffer overflow: attempted {attempted}, available {available}")
             }
             AuthError::UnauthorizedAxfr { peer_addr } => {
-                write!(f, "Unauthorized AXFR from {}", peer_addr)
+                write!(f, "Unauthorized AXFR from {peer_addr}")
             }
             AuthError::NameTooLong { length } => {
-                write!(f, "Domain name too long: {}", length)
+                write!(f, "Domain name too long: {length}")
             }
             AuthError::AxfrTimeout => {
                 write!(f, "Zone transfer timeout")
@@ -171,7 +171,7 @@ fn find_addrlist<'a>(list: &'a [AddrList], addr: &IpAddr) -> Option<&'a AddrList
                     }
                 }
             }
-            _ => continue, // Address family mismatch
+            _ => {} // Address family mismatch
         }
     }
     None
@@ -272,6 +272,7 @@ pub fn filter_zone(zone: &AuthZone, addr: &IpAddr) -> bool {
 /// # RFC Compliance
 ///
 /// Implements DNS zone matching per RFC 1035 Section 4.3.2 (zone authority determination)
+#[must_use] 
 pub fn in_zone(zone: &AuthZone, name: &str) -> (bool, Option<usize>) {
     let namelen = name.len();
     let domainlen = zone.domain.len();
@@ -366,7 +367,7 @@ pub fn answer_auth(
 
     // Check question count (must be at least 1)
     let qdcount = read_u16(&packet[4..6]).map_err(|e| AuthError::InvalidQuery {
-        reason: format!("Cannot read qdcount: {:?}", e),
+        reason: format!("Cannot read qdcount: {e:?}"),
         })?;
     
     if qdcount == 0 {
@@ -379,7 +380,7 @@ pub fn answer_auth(
     let opcode = (packet[2] >> 3) & 0x0F;
     if opcode != QUERY {
         return Err(AuthError::InvalidQuery {
-            reason: format!("Invalid opcode: {}", opcode),
+            reason: format!("Invalid opcode: {opcode}"),
         });
     }
 
@@ -388,12 +389,21 @@ pub fn answer_auth(
     let question_start = &packet[12..]; // Skip DNS header (12 bytes)
     let ansp_slice = skip_questions(packet, question_start, qdcount).map_err(|e| {
         AuthError::InvalidQuery {
-            reason: format!("Cannot skip questions: {:?}", e),
+            reason: format!("Cannot skip questions: {e:?}"),
         }
     })?;
     
     // Calculate offset of ansp from start of packet
     let ansp = packet.len() - ansp_slice.len();
+
+    // CRITICAL: Copy the question section from query to response
+    // The question section goes from byte 12 (after header) to ansp (before answers)
+    // Without this, the response packet would have zeros in the question section,
+    // making it unparseable per RFC 1035 Section 4.1.2
+    if ansp > 12 && header.len() >= ansp {
+        header[12..ansp].copy_from_slice(&packet[12..ansp]);
+        debug!("Copied question section: {} bytes (from offset 12 to {})", ansp - 12, ansp);
+    }
 
     let mut answer_buffer = BytesMut::with_capacity(limit - ansp);
     let mut anscount: u16 = 0;
@@ -422,7 +432,7 @@ pub fn answer_auth(
             }
             Err(e) => {
                 return Err(AuthError::InvalidQuery {
-                    reason: format!("Cannot extract name: {:?}", e),
+                    reason: format!("Cannot extract name: {e:?}"),
                 });
             }
         };
@@ -436,10 +446,10 @@ pub fn answer_auth(
         }
         
         let qtype = read_u16(&packet[p..p+2]).map_err(|e| AuthError::InvalidQuery {
-            reason: format!("Cannot read qtype: {:?}", e),
+            reason: format!("Cannot read qtype: {e:?}"),
         })?;
         let qclass = read_u16(&packet[p+2..p+4]).map_err(|e| AuthError::InvalidQuery {
-            reason: format!("Cannot read qclass: {:?}", e),
+            reason: format!("Cannot read qclass: {e:?}"),
         })?;
         p += 4;
 
@@ -457,10 +467,10 @@ pub fn answer_auth(
             if let Ok(addr) = in_arpa_name_2_addr(&name) {
                 // Find zone that matches this reverse address
                 zone = config.auth.auth_zones.iter().find(|z| {
-                    find_subnet(z, &addr).map(|s| {
+                    find_subnet(z, &addr).is_some_and(|s| {
                         subnet = Some(s);
                         true
-                    }).unwrap_or(false)
+                    })
                 });
 
                 if zone.is_none() {
@@ -508,9 +518,16 @@ pub fn answer_auth(
             zone = config.auth.auth_zones.iter().find(|z| in_zone(z, &name).0);
 
             if zone.is_none() {
+                // No explicit zone found, but we may still answer from host_records
+                // (hosts file entries are considered locally authoritative)
+                // Continue processing A/AAAA queries to check host_records
                 out_of_zone = true;
-                auth = false;
-                continue;
+                // Don't set auth = false yet - we'll determine this based on whether we find records
+            } else {
+                // Query is within our authoritative zone - set auth flag
+                // per RFC 2181 Section 5.4.1 (AA bit should be set for all
+                // responses from authoritative zones, including NXDOMAIN)
+                auth = true;
             }
         }
 
@@ -639,12 +656,31 @@ pub fn answer_auth(
 
             // Add NS records
             if anscount != 0 || ns {
-                if let Some(_auth_server) = &auth_config.auth_server {
-                    // TODO: Actually add NS record using auth_server
-                    if ns {
-                        anscount += 1;
+                if let Some(auth_server) = &auth_config.auth_server {
+                    // Add NS record for auth_server
+                    let rdata = RDataType::NS(auth_server.clone());
+                    let name_offset = 12i32;  // Points to question name
+                    
+                    if let Ok(_bytes_written) = add_resource_record(
+                        &mut answer_buffer,
+                        limit,
+                        &mut trunc,
+                        name_offset,
+                        None,  // No explicit name, using compression pointer
+                        auth_config.auth_ttl as u32,
+                        T_NS,
+                        C_IN,
+                        &rdata,
+                        None,  // No compression context needed
+                    ) {
+                        if ns {
+                            anscount += 1;
+                        } else {
+                            authcount += 1;
+                        }
+                        trace!("Added NS record for {} -> {}", z.domain, auth_server);
                     } else {
-                        authcount += 1;
+                        warn!("Failed to add NS record for {}", z.domain);
                     }
                 }
 
@@ -722,8 +758,15 @@ pub fn answer_auth(
     }
     
     // Copy the built answer records into the response buffer
+    debug!("Copying answer buffer: answer_len={}, ansp={}, header.len()={}, anscount={}", 
+           answer_len, ansp, header.len(), anscount);
+    
     if answer_len > 0 && ansp + answer_len <= header.len() {
         header[ansp..ansp + answer_len].copy_from_slice(&answer_buffer[..]);
+        debug!("Successfully copied {} bytes of answer data", answer_len);
+    } else if answer_len > 0 {
+        warn!("Cannot copy answer buffer: ansp={}, answer_len={}, header.len()={}", 
+              ansp, answer_len, header.len());
     }
     
     // Calculate final packet size

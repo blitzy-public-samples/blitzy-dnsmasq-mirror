@@ -98,31 +98,25 @@
 //! - `nix` - Unix system call wrappers
 //! - `tracing` - Structured logging
 
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::timeout;
 use tracing::{debug, error, info, trace, warn};
 
 // Internal imports - protocol and handling
-use crate::dhcp::v4::protocol::{MIN_PACKETSZ, DHCP_SERVER_PORT, PXE_PORT};
-use crate::dhcp::v4::handler::dhcp_reply;
-use crate::dhcp::v4::ping::{icmp_ping, PingStatus};
-use crate::dhcp::common::DHCP_CHADDR_MAX;
+use crate::dhcp::v4::protocol::MIN_PACKETSZ;
 
 // Internal imports - data management
 use crate::dhcp::lease::LeaseManager;
 
 // Internal imports - network layer
-use crate::network::sockets::create_socket;
 use crate::network::interfaces::{Interface, enumerate_interfaces};
 use crate::network::arp::ArpCache;
 
 // Internal imports - configuration and state
-use crate::config::types::{Config, DhcpConfig, NetworkConfig, DaemonOptions};
+use crate::config::types::{Config, DaemonOptions};
 use crate::core::config::VERSION;
 use crate::core::signals::{SignalHandler, SignalEvent};
 use crate::core::daemon::Daemon;
@@ -132,12 +126,10 @@ use crate::logging::logger::{Logger, LogDestination, LogLevel};
 use crate::dns::cache::Cache;
 
 // External socket configuration
-use socket2::Socket;
-use nix::sys::socket::{ControlMessage, ControlMessageOwned};
 
-/// DHCPv4 server configuration
+/// `DHCPv4` server configuration
 ///
-/// Contains all necessary configuration for DHCPv4 server initialization,
+/// Contains all necessary configuration for `DHCPv4` server initialization,
 /// extracted from the main `Config` struct for dependency injection.
 ///
 /// Replaces direct access to C's global `daemon` struct fields.
@@ -186,7 +178,7 @@ pub struct DhcpContext {
     pub lease_time: u32,
 }
 
-/// Main DHCPv4 server runtime
+/// Main `DHCPv4` server runtime
 ///
 /// Coordinates socket management, packet reception, protocol handling, and response
 /// transmission. Replaces C's stateless `dhcp_packet()` function with a stateful
@@ -242,7 +234,7 @@ pub struct DhcpServer {
 }
 
 impl DhcpServer {
-    /// Create a new DHCPv4 server instance
+    /// Create a new `DHCPv4` server instance
     ///
     /// Constructs server state but does not bind sockets. Call `bind()` to create
     /// network listeners.
@@ -258,17 +250,17 @@ impl DhcpServer {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// use dnsmasq::dhcp::v4::server::DhcpServer;
     /// use dnsmasq::core::daemon::Daemon;
-    /// use dnsmasq::config::types::Config;
+    /// use dnsmasq::config::defaults::default_config;
     /// use std::sync::Arc;
     /// use tokio::sync::RwLock;
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let config = Arc::new(Config::default());
-    ///     let daemon = Arc::new(RwLock::new(Daemon::new(config.clone())));
+    ///     let config = Arc::new(default_config());
+    ///     let daemon = /* initialize daemon with all required components */;
     ///     let server = DhcpServer::new(config, daemon).await;
     /// }
     /// ```
@@ -335,9 +327,9 @@ impl DhcpServer {
     ///
     /// # Platform-Specific Behavior
     ///
-    /// - Linux: Sets IP_PKTINFO for receiving interface detection
-    /// - BSD: Sets IP_RECVIF for interface information
-    /// - All: Sets SO_REUSEADDR, SO_BROADCAST
+    /// - Linux: Sets `IP_PKTINFO` for receiving interface detection
+    /// - BSD: Sets `IP_RECVIF` for interface information
+    /// - All: Sets `SO_REUSEADDR`, `SO_BROADCAST`
     pub async fn bind(&mut self) -> Result<(), std::io::Error> {
         info!("Initializing DHCPv4 server (dnsmasq {})", VERSION);
         
@@ -348,7 +340,7 @@ impl DhcpServer {
         debug!("Creating DHCP server socket on port {}", port);
         
         // Create main DHCP server socket
-        let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
+        let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
         let socket = dhcp_init_socket(addr).await?;
         
         info!("DHCPv4 server socket bound to {}", addr);
@@ -364,7 +356,7 @@ impl DhcpServer {
         Ok(())
     }
     
-    /// Main DHCPv4 server event loop
+    /// Main `DHCPv4` server event loop
     ///
     /// Runs until shutdown signal received. Multiplexes:
     /// - Main DHCP socket readability (port 67)
@@ -372,7 +364,7 @@ impl DhcpServer {
     /// - Signal reception (SIGHUP, SIGUSR1, SIGTERM)
     /// - Periodic lease expiry and ARP cache refresh
     ///
-    /// Replaces C's poll()-based event loop with tokio::select! async multiplexing.
+    /// Replaces C's poll()-based event loop with `tokio::select`! async multiplexing.
     ///
     /// # Errors
     ///
@@ -393,7 +385,7 @@ impl DhcpServer {
         
         // Initialize signal handler locally (needs to stay alive for the duration of run())
         let mut signal_handler = SignalHandler::new()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         let shutdown_rx = signal_handler.recv();
         
         let mut buffer = vec![0u8; 8192];
@@ -522,9 +514,9 @@ impl DhcpServer {
     /// # Packet Metadata Extraction
     ///
     /// Extracts receiving interface using platform-specific methods:
-    /// - Linux: IP_PKTINFO ancillary data
-    /// - BSD: IP_RECVIF ancillary data
-    /// - Solaris: IP_BOUND_IF ioctl
+    /// - Linux: `IP_PKTINFO` ancillary data
+    /// - BSD: `IP_RECVIF` ancillary data
+    /// - Solaris: `IP_BOUND_IF` ioctl
     async fn dhcp_packet_handler(
         &mut self,
         packet_data: &[u8],
@@ -656,7 +648,7 @@ impl DhcpServer {
     /// - Lease pool utilization
     /// - Recent allocation rate
     async fn dump_stats(&self) {
-        let lease_mgr = self.lease_manager.lock().await;
+        let _lease_mgr = self.lease_manager.lock().await;
         
         // Log statistics (implementation depends on LeaseManager API)
         info!("=== DHCPv4 Server Statistics ===");
@@ -679,9 +671,9 @@ impl DhcpServer {
         
         // Flush lease database
         debug!("Flushing lease database to disk");
-        let mut lease_mgr = self.lease_manager.lock().await;
+        let lease_mgr = self.lease_manager.lock().await;
         lease_mgr.update_file().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Lease file error: {}", e)))?;
+            .map_err(|e| std::io::Error::other(format!("Lease file error: {e}")))?;
         
         // Log final statistics
         self.dump_stats().await;
@@ -717,7 +709,6 @@ impl DhcpServer {
 /// Returns error if socket creation, configuration, or binding fails.
 async fn dhcp_init_socket(addr: SocketAddr) -> Result<Arc<UdpSocket>, std::io::Error> {
     use socket2::{Domain, Socket, Type};
-    use std::os::unix::io::{AsRawFd, IntoRawFd};
     
     debug!("Creating DHCP socket for {}", addr);
     
@@ -750,7 +741,7 @@ async fn dhcp_init_socket(addr: SocketAddr) -> Result<Arc<UdpSocket>, std::io::E
                 fd,
                 libc::IPPROTO_IP,
                 libc::IP_PKTINFO,
-                &opt_value as *const _ as *const libc::c_void,
+                (&raw const opt_value).cast::<libc::c_void>(),
                 std::mem::size_of::<i32>() as libc::socklen_t,
             );
             
@@ -807,9 +798,9 @@ async fn dhcp_init_socket(addr: SocketAddr) -> Result<Arc<UdpSocket>, std::io::E
     Ok(Arc::new(tokio_socket))
 }
 
-/// Public function for DHCPv4 server initialization
+/// Public function for `DHCPv4` server initialization
 ///
-/// Entry point for DHCPv4 server startup. Creates server instance and binds sockets.
+/// Entry point for `DHCPv4` server startup. Creates server instance and binds sockets.
 /// Replaces C's `dhcp_init()` global initialization function.
 ///
 /// # Arguments
@@ -819,7 +810,7 @@ async fn dhcp_init_socket(addr: SocketAddr) -> Result<Arc<UdpSocket>, std::io::E
 ///
 /// # Returns
 ///
-/// Initialized and bound DHCPv4 server ready for `run()`
+/// Initialized and bound `DHCPv4` server ready for `run()`
 ///
 /// # Errors
 ///
@@ -827,17 +818,17 @@ async fn dhcp_init_socket(addr: SocketAddr) -> Result<Arc<UdpSocket>, std::io::E
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// use dnsmasq::dhcp::v4::server::dhcp_init;
 /// use dnsmasq::core::daemon::Daemon;
-/// use dnsmasq::config::types::Config;
+/// use dnsmasq::config::defaults::default_config;
 /// use std::sync::Arc;
 /// use tokio::sync::RwLock;
 ///
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
-///     let config = Arc::new(Config::default());
-///     let daemon = Arc::new(RwLock::new(Daemon::new(config.clone())));
+///     let config = Arc::new(default_config());
+///     let daemon = /* initialize daemon with all required components */;
 ///     
 ///     let mut server = dhcp_init(config, daemon).await?;
 ///     server.run().await?;

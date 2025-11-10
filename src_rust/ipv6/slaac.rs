@@ -53,10 +53,10 @@
 //!
 //! Refactored from `src/slaac.c` with the following memory safety enhancements:
 //!
-//! - **Manual linked lists → Vec**: Eliminates use-after-free bugs in slaac_address list
-//! - **Global static ping_id → Arc<AtomicU16>**: Thread-safe shared state
+//! - **Manual linked lists → Vec**: Eliminates use-after-free bugs in `slaac_address` list
+//! - **Global static `ping_id` → Arc<AtomicU16>**: Thread-safe shared state
 //! - **Manual memcpy → Safe slice operations**: Prevents buffer overflows in EUI-64 conversion
-//! - **Blocking sendto() → async socket.send_to()**: Non-blocking ICMPv6 transmission
+//! - **Blocking `sendto()` → async `socket.send_to()`**: Non-blocking `ICMPv6` transmission
 //! - **errno → Result<T, E>**: Type-safe error propagation
 //!
 //! # Original C Mapping
@@ -96,15 +96,13 @@ use crate::utils::rand::rand16;
 use tokio::net::UdpSocket;
 
 use std::collections::HashMap;
-use std::io::{Error as IoError, Result as IoResult};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 use tokio::sync::RwLock;
-use tokio::time::{interval, sleep, Instant};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Hardware address type for Ethernet/802.11 (MAC-48)
 const ARPHRD_ETHER: u16 = 1;
@@ -116,14 +114,14 @@ const ARPHRD_IEEE802: u16 = 6;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 const ARPHRD_EUI64: u16 = 27;
 
-/// Hardware address type for FireWire (IEEE 1394)
+/// Hardware address type for `FireWire` (IEEE 1394)
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 const ARPHRD_IEEE1394: u16 = 24;
 
 /// Maximum backoff attempts (2^12 = 4096 seconds = ~68 minutes)
 const MAX_BACKOFF: u8 = 12;
 
-/// ICMPv6 Echo Request packet structure
+/// `ICMPv6` Echo Request packet structure
 ///
 /// Per RFC 4443 Section 4.1, Echo Request format:
 /// ```text
@@ -140,9 +138,9 @@ const MAX_BACKOFF: u8 = 12;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct PingPacket {
-    /// ICMPv6 message type (128 for Echo Request, 129 for Echo Reply)
+    /// `ICMPv6` message type (128 for Echo Request, 129 for Echo Reply)
     icmp_type: u8,
-    /// ICMPv6 code (0 for Echo Request/Reply)
+    /// `ICMPv6` code (0 for Echo Request/Reply)
     code: u8,
     /// Checksum (computed by kernel for raw sockets)
     checksum: u16,
@@ -153,7 +151,7 @@ struct PingPacket {
 }
 
 impl PingPacket {
-    /// Create a new ICMPv6 Echo Request packet
+    /// Create a new `ICMPv6` Echo Request packet
     fn new(identifier: u16, sequence: u16) -> Self {
         Self {
             icmp_type: ICMP6_ECHO_REQUEST,
@@ -168,7 +166,7 @@ impl PingPacket {
     fn as_bytes(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
-                self as *const Self as *const u8,
+                std::ptr::from_ref::<Self>(self).cast::<u8>(),
                 std::mem::size_of::<Self>(),
             )
         }
@@ -180,7 +178,7 @@ impl PingPacket {
             return None;
         }
         unsafe {
-            Some(*(bytes.as_ptr() as *const Self))
+            Some(*bytes.as_ptr().cast::<Self>())
         }
     }
 
@@ -197,7 +195,7 @@ impl PingPacket {
 pub struct SlaacAddress {
     /// IPv6 address with EUI-64 interface identifier
     pub addr: Ipv6Addr,
-    /// Next ping time (absolute SystemTime)
+    /// Next ping time (absolute `SystemTime`)
     pub ping_time: SystemTime,
     /// Exponential backoff counter (0 = confirmed, 1-12 = retry count)
     pub backoff: u8,
@@ -221,7 +219,7 @@ impl SlaacAddress {
         self.backoff == 0
     }
 
-    /// Check if DAD has been given up (ping_time == 0 in C, represented as SystemTime::UNIX_EPOCH)
+    /// Check if DAD has been given up (`ping_time` == 0 in C, represented as `SystemTime::UNIX_EPOCH`)
     fn is_given_up(&self) -> bool {
         self.ping_time == SystemTime::UNIX_EPOCH
     }
@@ -231,17 +229,18 @@ impl SlaacAddress {
 ///
 /// Replaces C global state with structured ownership
 pub struct SlaacManager {
-    /// Atomic ping identifier for ICMPv6 Echo Request
+    /// Atomic ping identifier for `ICMPv6` Echo Request
     /// Replaces C global `static int ping_id`
     ping_id: Arc<AtomicU16>,
     
-    /// SLAAC addresses by lease (HashMap<lease_key, Vec<SlaacAddress>>)
+    /// SLAAC addresses by lease (`HashMap`<`lease_key`, Vec<SlaacAddress>>)
     /// Replaces C linked list `lease->slaac_address`
     addresses: Arc<RwLock<HashMap<Vec<u8>, Vec<SlaacAddress>>>>,
 }
 
 impl SlaacManager {
     /// Create a new SLAAC manager
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             ping_id: Arc::new(AtomicU16::new(0)),
@@ -266,7 +265,7 @@ impl SlaacManager {
                     id = new_id;
                     break;
                 }
-                Err(_) => continue,
+                Err(_) => {},
             }
         }
         id
@@ -422,7 +421,7 @@ impl SlaacManager {
                 // Check if ping is due
                 if slaac.ping_time <= now {
                     // Send ICMPv6 Echo Request
-                    let ping = PingPacket::new(ping_id, slaac.backoff as u16);
+                    let ping = PingPacket::new(ping_id, u16::from(slaac.backoff));
                     let dest = SocketAddrV6::new(slaac.addr, 0, 0, 0);
                     let dest_addr = std::net::SocketAddr::V6(dest);
 
@@ -436,9 +435,9 @@ impl SlaacManager {
                             
                             // Calculate next ping time with exponential backoff and jitter
                             let base_delay = 1u64 << (slaac.backoff - 1); // 2^(backoff-1)
-                            let jitter1 = (rand16() as u64) / 21785; // 0-3 seconds
+                            let jitter1 = u64::from(rand16()) / 21785; // 0-3 seconds
                             let jitter2 = if slaac.backoff > 4 {
-                                (rand16() as u64) / 4000 // 0-15 seconds
+                                u64::from(rand16()) / 4000 // 0-15 seconds
                             } else {
                                 0
                             };
@@ -478,22 +477,19 @@ impl SlaacManager {
         next_event
     }
 
-    /// Process ICMPv6 Echo Reply for DAD confirmation
+    /// Process `ICMPv6` Echo Reply for DAD confirmation
     pub async fn process_ping_reply(
         &self,
         sender: &Ipv6Addr,
         packet: &[u8],
         interface: &str,
-        logger: &Logger,
+        _logger: &Logger,
         config: &Config,
     ) -> bool {
         // Parse ping packet
-        let ping = match PingPacket::from_bytes(packet) {
-            Some(p) => p,
-            None => {
-                warn!("Invalid ICMPv6 Echo Reply packet");
-                return false;
-            }
+        let ping = if let Some(p) = PingPacket::from_bytes(packet) { p } else {
+            warn!("Invalid ICMPv6 Echo Reply packet");
+            return false;
         };
 
         // Verify identifier matches our ping_id
@@ -558,8 +554,8 @@ pub struct SlaacContext {
 /// * `lease_key` - Unique identifier for the lease (client ID or MAC)
 /// * `contexts` - List of SLAAC contexts (RA prefixes)
 /// * `hwaddr` - Hardware address bytes (MAC-48, EUI-64, etc.)
-/// * `hwaddr_type` - Hardware address type (ARPHRD_ETHER, ARPHRD_IEEE802, etc.)
-/// * `clid` - Optional client identifier (for FireWire EUI-64)
+/// * `hwaddr_type` - Hardware address type (`ARPHRD_ETHER`, `ARPHRD_IEEE802`, etc.)
+/// * `clid` - Optional client identifier (for `FireWire` EUI-64)
 /// * `hostname` - Hostname for DNS registration
 /// * `now` - Current time for initializing DAD timing
 /// * `force` - Force re-validation of existing addresses
@@ -568,7 +564,7 @@ pub struct SlaacContext {
 ///
 /// Replaces C's manual linked list manipulation with Vec operations:
 /// - No use-after-free bugs from incorrect list splicing
-/// - No memory leaks from forgotten free() calls
+/// - No memory leaks from forgotten `free()` calls
 /// - Automatic cleanup via Drop trait
 ///
 /// # Example
@@ -619,14 +615,14 @@ pub async fn slaac_add_addrs(
     }
 }
 
-/// Perform periodic Duplicate Address Detection for SLAAC addresses via ICMPv6 ping
+/// Perform periodic Duplicate Address Detection for SLAAC addresses via `ICMPv6` ping
 ///
 /// Refactored from C `periodic_slaac()` (src/slaac.c:314-383) with async I/O.
 ///
 /// # Arguments
 ///
 /// * `manager` - SLAAC manager instance
-/// * `socket` - ICMPv6 socket for sending Echo Requests
+/// * `socket` - `ICMPv6` socket for sending Echo Requests
 /// * `now` - Current time for scheduling
 ///
 /// # Returns
@@ -664,7 +660,7 @@ pub async fn periodic_slaac(
     manager.periodic_dad(now, socket).await
 }
 
-/// Process ICMPv6 Echo Reply to confirm SLAAC address uniqueness or detect conflicts
+/// Process `ICMPv6` Echo Reply to confirm SLAAC address uniqueness or detect conflicts
 ///
 /// Refactored from C `slaac_ping_reply()` (src/slaac.c:453-473) with type-safe Result.
 ///
@@ -672,17 +668,17 @@ pub async fn periodic_slaac(
 ///
 /// * `manager` - SLAAC manager instance
 /// * `sender` - IPv6 address that sent the Echo Reply
-/// * `packet` - Received ICMPv6 packet bytes
+/// * `packet` - Received `ICMPv6` packet bytes
 /// * `interface` - Network interface name for logging
 /// * `logger` - Logger instance
-/// * `config` - Configuration for OPT_QUIET_DHCP6 flag
+/// * `config` - Configuration for `OPT_QUIET_DHCP6` flag
 /// * `lease_manager` - Lease manager for DNS updates
 ///
 /// # DAD Semantics
 ///
 /// Receipt of Echo Reply indicates another host is using the address:
 /// - Sets backoff = 0 to mark address as confirmed
-/// - Logs "SLAAC-CONFIRM" message (unless OPT_QUIET_DHCP6)
+/// - Logs "SLAAC-CONFIRM" message (unless `OPT_QUIET_DHCP6`)
 /// - Updates DNS cache with confirmed address
 ///
 /// Per RFC 4862, this is not standard DAD (which uses Neighbor Solicitation),

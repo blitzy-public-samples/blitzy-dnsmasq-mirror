@@ -134,7 +134,7 @@ impl BlockAllocator {
     /// malloc overhead compared to individual allocations. Typical expansion
     /// size is 50 blocks.
     fn expand(&self, n: usize) {
-        let mut freelist = self.freelist.lock().unwrap();
+        let mut freelist = self.freelist.lock().unwrap_or_else(|e| e.into_inner());
         freelist.reserve(n);
         
         for _ in 0..n {
@@ -151,12 +151,12 @@ impl BlockAllocator {
     ///
     /// Returns None only if heap allocation fails (extremely rare).
     fn alloc_block(&self) -> Option<Box<BlockDataNode>> {
-        let mut freelist = self.freelist.lock().unwrap();
+        let mut freelist = self.freelist.lock().unwrap_or_else(|e| e.into_inner());
         
         if freelist.is_empty() {
             drop(freelist); // Release lock before expansion
             self.expand(50);
-            freelist = self.freelist.lock().unwrap();
+            freelist = self.freelist.lock().unwrap_or_else(|e| e.into_inner());
         }
         
         if let Some(block) = freelist.pop() {
@@ -209,7 +209,7 @@ impl BlockAllocator {
         self.count.fetch_sub(count, Ordering::Relaxed);
 
         // Return all blocks to freelist
-        let mut freelist = self.freelist.lock().unwrap();
+        let mut freelist = self.freelist.lock().unwrap_or_else(|e| e.into_inner());
         freelist.extend(chain_blocks);
     }
 
@@ -220,7 +220,7 @@ impl BlockAllocator {
     /// heap fragmentation during runtime.
     fn reset(&self, cache_size: usize, dnssec_enabled: bool) {
         // Clear freelist
-        self.freelist.lock().unwrap().clear();
+        self.freelist.lock().unwrap_or_else(|e| e.into_inner()).clear();
         
         // Reset all counters
         self.count.store(0, Ordering::Relaxed);

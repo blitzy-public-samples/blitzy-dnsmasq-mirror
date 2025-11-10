@@ -76,9 +76,7 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
-use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
 
@@ -87,7 +85,6 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::config::types::{Config, DaemonOptions};
-use crate::dns::parser::extract_name;
 use crate::dns::protocol::{DnsHeader, LOOP_TEST_DOMAIN, LOOP_TEST_TYPE, QUERY, C_IN};
 use crate::dns::upstream::{ServerFlags, UpstreamServer};
 use crate::utils::rand::rand16;
@@ -108,21 +105,21 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 /// # Thread Safety
 ///
 /// This struct is designed for async/await concurrency. The Config is immutable after
-/// construction (Arc), the server list uses RwLock for safe concurrent access, and
+/// construction (Arc), the server list uses `RwLock` for safe concurrent access, and
 /// the UDP socket is wrapped in Arc for shared ownership across async tasks.
 ///
 /// # Memory Safety
 ///
 /// Unlike the C implementation which uses global mutable state (daemon->packet,
 /// daemon->servers), this implementation uses dependency injection with Arc for
-/// shared ownership and RwLock for interior mutability, eliminating data races
+/// shared ownership and `RwLock` for interior mutability, eliminating data races
 /// and use-after-free bugs.
 pub struct LoopDetector {
-    /// Immutable configuration containing OPT_LOOP_DETECT flag
+    /// Immutable configuration containing `OPT_LOOP_DETECT` flag
     config: Arc<Config>,
     
     /// Shared mutable access to upstream server list
-    /// Uses RwLock to allow multiple readers or single writer
+    /// Uses `RwLock` to allow multiple readers or single writer
     servers: Arc<RwLock<Vec<UpstreamServer>>>,
     
     /// UDP socket for sending probe queries
@@ -131,11 +128,11 @@ pub struct LoopDetector {
 }
 
 impl LoopDetector {
-    /// Create a new LoopDetector instance
+    /// Create a new `LoopDetector` instance
     ///
     /// # Arguments
     ///
-    /// * `config` - Shared configuration containing OPT_LOOP_DETECT flag
+    /// * `config` - Shared configuration containing `OPT_LOOP_DETECT` flag
     /// * `servers` - Shared upstream server list with interior mutability
     /// * `socket` - UDP socket for sending probes
     ///
@@ -174,10 +171,10 @@ impl LoopDetector {
     ///
     /// # Behavior
     ///
-    /// - Only sends probes if OPT_LOOP_DETECT option is enabled
+    /// - Only sends probes if `OPT_LOOP_DETECT` option is enabled
     /// - Only probes "default" upstream servers (servers without specific domain restrictions)
-    /// - Skips servers marked with SERV_FOR_NODOTS flag
-    /// - Clears SERV_LOOP flag before sending to allow recovery if configuration corrected
+    /// - Skips servers marked with `SERV_FOR_NODOTS` flag
+    /// - Clears `SERV_LOOP` flag before sending to allow recovery if configuration corrected
     ///
     /// # Returns
     ///
@@ -215,7 +212,7 @@ impl LoopDetector {
         // Acquire read lock on server list (safe concurrent access)
         let servers = self.servers.read().map_err(|e| {
             error!("Failed to acquire read lock on servers: {}", e);
-            IoError::new(ErrorKind::Other, "Server list lock poisoned")
+            IoError::other("Server list lock poisoned")
         })?;
 
         let mut probes_sent = 0;
@@ -281,32 +278,32 @@ impl LoopDetector {
     /// previously sent by `send_probes()`. If the query is for a TXT record matching
     /// the pattern "XXXXXXXX.test" (where XXXXXXXX is a hex-encoded UID), this function
     /// extracts the UID and searches for a matching upstream server. If found, the server
-    /// is marked with SERV_LOOP flag to prevent forwarding queries to it.
+    /// is marked with `SERV_LOOP` flag to prevent forwarding queries to it.
     ///
     /// # Arguments
     ///
     /// * `query` - DNS query name (domain name) to examine
-    /// * `qtype` - DNS query type (e.g., T_A=1, T_TXT=16)
+    /// * `qtype` - DNS query type (e.g., `T_A=1`, `T_TXT=16`)
     ///
     /// # Returns
     ///
-    /// * `Ok(true)` - Loop detected, server marked with SERV_LOOP flag
+    /// * `Ok(true)` - Loop detected, server marked with `SERV_LOOP` flag
     /// * `Ok(false)` - Not a loop probe, or no matching server found, or feature disabled
     /// * `Err(IoError)` - Error accessing server list (lock poisoned)
     ///
     /// # Validation Steps
     ///
-    /// 1. Check if qtype == LOOP_TEST_TYPE (TXT record = 16)
-    /// 2. Verify query length matches expected pattern (LOOP_TEST_DOMAIN + 9 chars)
-    /// 3. Confirm LOOP_TEST_DOMAIN appears at correct position (after 8 hex digits + ".")
+    /// 1. Check if qtype == `LOOP_TEST_TYPE` (TXT record = 16)
+    /// 2. Verify query length matches expected pattern (`LOOP_TEST_DOMAIN` + 9 chars)
+    /// 3. Confirm `LOOP_TEST_DOMAIN` appears at correct position (after 8 hex digits + ".")
     /// 4. Validate first 8 characters are hexadecimal digits
     /// 5. Extract UID and search for matching server
-    /// 6. Mark server with SERV_LOOP flag if match found
+    /// 6. Mark server with `SERV_LOOP` flag if match found
     ///
     /// # Side Effects
     ///
     /// When loop detected:
-    /// - Sets SERV_LOOP flag on matching server
+    /// - Sets `SERV_LOOP` flag on matching server
     /// - Calls `check_servers(true)` to log server state change
     ///
     /// # Examples
@@ -373,7 +370,7 @@ impl LoopDetector {
         // Search for matching server and mark with SERV_LOOP flag (C version lines 325-333)
         let mut servers = self.servers.write().map_err(|e| {
             error!("Failed to acquire write lock on servers: {}", e);
-            IoError::new(ErrorKind::Other, "Server list lock poisoned")
+            IoError::other("Server list lock poisoned")
         })?;
 
         for server in servers.iter_mut() {
@@ -474,7 +471,7 @@ fn make_probe(uid: u32) -> IoResult<Vec<u8>> {
     let mut name_buffer = [0u8; 256]; // Max domain name length per RFC 1035
     let name_len = do_rfc1035_name(&query_name, &mut name_buffer, None).map_err(|e| {
         error!("Failed to encode domain name {}: {:?}", query_name, e);
-        IoError::new(ErrorKind::InvalidInput, format!("Domain encoding failed: {:?}", e))
+        IoError::new(ErrorKind::InvalidInput, format!("Domain encoding failed: {e:?}"))
     })?;
 
     packet.extend_from_slice(&name_buffer[..name_len]);
@@ -501,7 +498,7 @@ fn make_probe(uid: u32) -> IoResult<Vec<u8>> {
 ///
 /// # Arguments
 ///
-/// * `detector` - Reference to LoopDetector instance
+/// * `detector` - Reference to `LoopDetector` instance
 ///
 /// # Returns
 ///
@@ -528,7 +525,7 @@ pub async fn send_probes(detector: &LoopDetector) -> IoResult<()> {
 ///
 /// # Arguments
 ///
-/// * `detector` - Reference to LoopDetector instance
+/// * `detector` - Reference to `LoopDetector` instance
 /// * `query` - DNS query name to examine
 /// * `qtype` - DNS query type
 ///

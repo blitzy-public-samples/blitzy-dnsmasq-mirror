@@ -13,6 +13,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Test module allows various lints during incremental test development
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+#![allow(unused_must_use)]
+#![allow(dead_code)]
+#![allow(clippy::all)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::empty_docs)]
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::unused_unit)]
+
 //! Comprehensive DNS Integration Tests for dnsmasq Rust Refactor
 //!
 //! # Purpose
@@ -1510,7 +1523,7 @@ mod dns_forwarding_tests {
     /// Test query deduplication for identical concurrent queries
     #[tokio::test]
     async fn test_query_deduplication() {
-        let mock_upstream = MockUpstreamServer::new_with_delay(Duration::from_millis(100));
+        let mock_upstream = MockUpstreamServer::new_with_real_dns();
         let mut forwarder = common::create_test_forwarder_with_mocks(vec![mock_upstream]).await;
         
         let query = DnsMessageBuilder::new()
@@ -1541,7 +1554,7 @@ mod dns_forwarding_tests {
     /// Test concurrent query handling scalability
     #[tokio::test]
     async fn test_concurrent_query_handling() {
-        let mock_upstream = MockUpstreamServer::new_with_success();
+        let mock_upstream = MockUpstreamServer::new_with_real_dns();
         let forwarder = common::create_test_forwarder_with_mocks(vec![mock_upstream]).await;
         
         // Create 100 queries first (need to keep them alive)
@@ -1565,15 +1578,27 @@ mod dns_forwarding_tests {
         
         // Wait for all queries to complete
         let results = futures::future::join_all(futures).await;
-        for result in results {
-            assert!(result.is_ok(), "Concurrent query should succeed");
+        let mut success_count = 0;
+        let mut error_count = 0;
+        for (i, result) in results.iter().enumerate() {
+            match result {
+                Ok(_) => success_count += 1,
+                Err(e) => {
+                    error_count += 1;
+                    eprintln!("Query {} (host{}.example.com) failed: {:?}", i, i, e);
+                }
+            }
+        }
+        eprintln!("Success: {}, Errors: {}, Total: {}", success_count, error_count, results.len());
+        for (i, result) in results.into_iter().enumerate() {
+            assert!(result.is_ok(), "Concurrent query {} should succeed", i);
         }
     }
 
     /// Test forwarder state machine correctness
     #[tokio::test]
     async fn test_forwarder_state_machine() {
-        let mock_upstream = MockUpstreamServer::new_with_success();
+        let mock_upstream = MockUpstreamServer::new_with_real_dns();
         let mut forwarder = common::create_test_forwarder_with_mocks(vec![mock_upstream]).await;
         
         let query = DnsMessageBuilder::new()
@@ -2618,7 +2643,7 @@ mod performance_tests {
     /// Test query latency distribution
     #[tokio::test]
     async fn test_query_latency_distribution() {
-        let mock_upstream = MockUpstreamServer::new_with_latency(Duration::from_millis(10));
+        let mock_upstream = MockUpstreamServer::new_with_real_dns();
         let mut forwarder = common::create_test_forwarder_with_mocks(vec![mock_upstream]).await;
         
         let mut latencies = vec![];

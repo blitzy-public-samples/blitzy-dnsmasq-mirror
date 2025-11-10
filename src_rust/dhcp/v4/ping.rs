@@ -60,12 +60,10 @@
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind, Result};
 use std::net::Ipv4Addr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::io::unix::AsyncFd;
-use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tracing::{debug, error, info, trace, warn};
 
@@ -85,7 +83,7 @@ const ICMP_ECHOREPLY: u8 = 0;
 
 /// Timeout duration for ICMP ping operations (500ms)
 ///
-/// Original C: PING_WAIT = 3 seconds, but actual implementation uses shorter timeout.
+/// Original C: `PING_WAIT` = 3 seconds, but actual implementation uses shorter timeout.
 /// This Rust implementation uses 500ms to match production behavior and avoid blocking
 /// DHCP processing for too long.
 const PING_TIMEOUT: Duration = Duration::from_millis(500);
@@ -94,7 +92,7 @@ const PING_TIMEOUT: Duration = Duration::from_millis(500);
 ///
 /// Ping results are cached for 90 seconds to prevent redundant ICMP traffic when clients
 /// repeatedly request the same address during DHCP negotiation. This matches the C
-/// implementation's PING_CACHE_TIME constant.
+/// implementation's `PING_CACHE_TIME` constant.
 ///
 /// Original C: `#define PING_CACHE_TIME 90` (dhcp.c line 1238, 1253)
 const PING_CACHE_TIME: Duration = Duration::from_secs(90);
@@ -128,7 +126,7 @@ pub enum PingStatus {
     /// Status unknown (permission error, network unreachable, or other failure)
     ///
     /// The ping operation could not complete due to insufficient permissions
-    /// (CAP_NET_RAW not available), network errors, or other system failures.
+    /// (`CAP_NET_RAW` not available), network errors, or other system failures.
     /// Caller should decide whether to allocate (risky) or skip this address (safe).
     Unknown,
 }
@@ -138,7 +136,7 @@ impl PingStatus {
     ///
     /// # Returns
     ///
-    /// * `true` - Address responded to ping (InUse variant)
+    /// * `true` - Address responded to ping (`InUse` variant)
     /// * `false` - Address is available or status is unknown
     #[must_use]
     pub fn is_in_use(&self) -> bool {
@@ -161,7 +159,7 @@ impl PingStatus {
     /// # Returns
     ///
     /// * `true` - Ping operation failed or could not complete (Unknown variant)
-    /// * `false` - Address status is determined (Available or InUse)
+    /// * `false` - Address status is determined (Available or `InUse`)
     #[must_use]
     pub fn is_unknown(&self) -> bool {
         matches!(self, PingStatus::Unknown)
@@ -171,7 +169,7 @@ impl PingStatus {
 /// Cached ping result with timestamp
 ///
 /// Records the result of a ping operation along with the time it was performed,
-/// enabling cache expiry based on PING_CACHE_TIME (90 seconds).
+/// enabling cache expiry based on `PING_CACHE_TIME` (90 seconds).
 ///
 /// Replaces C's `struct ping_result` (dnsmasq.h):
 /// ```c
@@ -184,7 +182,7 @@ impl PingStatus {
 /// ```
 #[derive(Debug, Clone)]
 struct CachedPingResult {
-    /// Status of the ping (Available, InUse, or Unknown)
+    /// Status of the ping (Available, `InUse`, or Unknown)
     status: PingStatus,
 
     /// Timestamp when this result was obtained
@@ -200,7 +198,7 @@ impl CachedPingResult {
         }
     }
 
-    /// Check if this cached result has expired (older than PING_CACHE_TIME)
+    /// Check if this cached result has expired (older than `PING_CACHE_TIME`)
     fn is_expired(&self) -> bool {
         self.timestamp.elapsed() > PING_CACHE_TIME
     }
@@ -219,7 +217,7 @@ impl CachedPingResult {
 ///
 /// # Original C Structure
 ///
-/// Uses standard `struct icmp` from netinet/ip_icmp.h:
+/// Uses standard `struct icmp` from `netinet/ip_icmp.h`:
 /// ```c
 /// struct icmp {
 ///   u_int8_t icmp_type;
@@ -279,7 +277,7 @@ impl IcmpPacket {
     ///
     /// # Arguments
     ///
-    /// * `packet` - ICMP packet to checksum (with icmp_cksum field zeroed)
+    /// * `packet` - ICMP packet to checksum (with `icmp_cksum` field zeroed)
     ///
     /// # Returns
     ///
@@ -298,7 +296,7 @@ impl IcmpPacket {
     fn compute_checksum(packet: &Self) -> u16 {
         let bytes = unsafe {
             std::slice::from_raw_parts(
-                packet as *const Self as *const u8,
+                std::ptr::from_ref::<Self>(packet).cast::<u8>(),
                 std::mem::size_of::<Self>(),
             )
         };
@@ -313,7 +311,7 @@ impl IcmpPacket {
                 // Odd-length padding with zero
                 u16::from_be_bytes([chunk[0], 0])
             };
-            sum += word as u32;
+            sum += u32::from(word);
         }
 
         // Fold carry bits
@@ -330,7 +328,7 @@ impl IcmpPacket {
     fn as_bytes(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
-                self as *const Self as *const u8,
+                std::ptr::from_ref::<Self>(self).cast::<u8>(),
                 std::mem::size_of::<Self>(),
             )
         }
@@ -350,21 +348,21 @@ impl IcmpPacket {
             return None;
         }
 
-        Some(unsafe { *(bytes.as_ptr() as *const Self) })
+        Some(unsafe { *bytes.as_ptr().cast::<Self>() })
     }
 }
 
 /// Ping result cache with automatic expiry
 ///
 /// Maintains a cache of recent ping results to avoid redundant ICMP traffic when
-/// clients repeatedly request the same address. Entries expire after PING_CACHE_TIME
+/// clients repeatedly request the same address. Entries expire after `PING_CACHE_TIME`
 /// (90 seconds) and are automatically purged on lookup.
 ///
 /// # Thread Safety
 ///
 /// This struct is wrapped in Arc<Mutex<>> for thread-safe access across async tasks.
 /// The C implementation used a global static linked list with manual freelist
-/// management; Rust's HashMap with automatic Drop eliminates all memory management bugs.
+/// management; Rust's `HashMap` with automatic Drop eliminates all memory management bugs.
 ///
 /// # Original C Implementation
 ///
@@ -384,7 +382,8 @@ impl PingCache {
     ///
     /// # Returns
     ///
-    /// New PingCache with no entries
+    /// New `PingCache` with no entries
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             cache: HashMap::new(),
@@ -407,7 +406,7 @@ impl PingCache {
     ///
     /// # Original C Function
     ///
-    /// Replaces cache lookup loop in do_icmp_ping() (dhcp.c lines 1302-1310):
+    /// Replaces cache lookup loop in `do_icmp_ping()` (dhcp.c lines 1302-1310):
     /// ```c
     /// for (count = 0, r = daemon->ping_results; r; r = r->next)
     ///   if (difftime(now, r->time) > (float)PING_CACHE_TIME)
@@ -418,12 +417,12 @@ impl PingCache {
     pub fn check(&mut self, addr: Ipv4Addr) -> Option<PingStatus> {
         // Check if entry exists and is not expired
         if let Some(result) = self.cache.get(&addr) {
-            if !result.is_expired() {
-                trace!("Ping cache HIT for {} -> {:?}", addr, result.status);
-                return Some(result.status);
-            } else {
+            if result.is_expired() {
                 trace!("Ping cache entry EXPIRED for {}", addr);
                 self.cache.remove(&addr);
+            } else {
+                trace!("Ping cache HIT for {} -> {:?}", addr, result.status);
+                return Some(result.status);
             }
         }
 
@@ -443,7 +442,7 @@ impl PingCache {
     ///
     /// # Original C Function
     ///
-    /// Replaces cache insertion in do_icmp_ping() (dhcp.c lines 1335-1340):
+    /// Replaces cache insertion in `do_icmp_ping()` (dhcp.c lines 1335-1340):
     /// ```c
     /// if (victim) {
     ///   victim->addr = addr;
@@ -458,7 +457,7 @@ impl PingCache {
 
     /// Remove all expired entries from cache
     ///
-    /// Performs a full cache sweep to remove all entries older than PING_CACHE_TIME.
+    /// Performs a full cache sweep to remove all entries older than `PING_CACHE_TIME`.
     /// This is called periodically to prevent unbounded cache growth.
     ///
     /// # Returns
@@ -491,12 +490,12 @@ impl Default for PingCache {
 
 /// Perform ICMP ping to check if address is in use
 ///
-/// Sends an ICMP echo request to the specified IPv4 address and waits up to PING_TIMEOUT
-/// (500ms) for a reply. Returns Available if no reply received, InUse if reply received,
+/// Sends an ICMP echo request to the specified IPv4 address and waits up to `PING_TIMEOUT`
+/// (500ms) for a reply. Returns Available if no reply received, `InUse` if reply received,
 /// or Unknown if the operation failed (e.g., permission denied).
 ///
 /// This function is async and non-blocking, using tokio for I/O. It creates a raw ICMP
-/// socket (requires CAP_NET_RAW capability), sends an echo request, and awaits a reply
+/// socket (requires `CAP_NET_RAW` capability), sends an echo request, and awaits a reply
 /// with timeout. If permission is denied, returns Unknown rather than failing hard,
 /// allowing the DHCP server to continue operation with degraded conflict detection.
 ///
@@ -544,9 +543,9 @@ impl Default for PingCache {
 ///
 /// Key transformations:
 /// - Blocking sendto/recvfrom → async tokio I/O
-/// - SIGALRM timeout → tokio::time::timeout
+/// - SIGALRM timeout → `tokio::time::timeout`
 /// - Global errno → Result<T, Error>
-/// - delay_dhcp() poll loop → single async await with timeout
+/// - `delay_dhcp()` poll loop → single async await with timeout
 pub async fn icmp_ping(
     addr: Ipv4Addr,
     arp_cache: Option<&mut ArpCache>,
@@ -643,14 +642,14 @@ pub async fn icmp_ping(
 
 /// Create raw ICMP socket for ping operations
 ///
-/// Creates a raw socket with IPPROTO_ICMP protocol. Requires CAP_NET_RAW capability
-/// on Linux. If permission is denied, returns PermissionDenied error which the caller
+/// Creates a raw socket with `IPPROTO_ICMP` protocol. Requires `CAP_NET_RAW` capability
+/// on Linux. If permission is denied, returns `PermissionDenied` error which the caller
 /// should handle gracefully.
 ///
 /// # Returns
 ///
 /// - `Ok(Socket)` - Successfully created ICMP socket
-/// - `Err(io::Error)` - Socket creation failed (check ErrorKind::PermissionDenied)
+/// - `Err(io::Error)` - Socket creation failed (check `ErrorKind::PermissionDenied`)
 ///
 /// # Original C Code
 ///
@@ -699,7 +698,7 @@ fn create_icmp_socket() -> Result<Socket> {
 ///
 /// # Original C Code
 ///
-/// From delay_dhcp() in dnsmasq.c lines 2985-3077, specifically the ICMP reply
+/// From `delay_dhcp()` in dnsmasq.c lines 2985-3077, specifically the ICMP reply
 /// checking logic that validates source address and ICMP ID.
 async fn receive_icmp_reply(
     socket: &Socket,
@@ -720,7 +719,7 @@ async fn receive_icmp_reply(
         // Wait for socket to be readable
         let mut guard = async_socket.readable().await?;
 
-        match guard.try_io(|inner| {
+        match guard.try_io(|_inner| {
             socket.recv_from(&mut recv_buf)
         }) {
             Ok(result) => {
@@ -772,26 +771,22 @@ async fn receive_icmp_reply(
                         {
                             trace!("ICMP echo reply matched!");
                             return Ok(true);
-                        } else {
-                            trace!(
-                                "ICMP packet ID mismatch or wrong type (expected reply type={} id={})",
-                                ICMP_ECHOREPLY,
-                                expected_id
-                            );
-                            continue; // Keep waiting for matching reply
                         }
+                        trace!(
+                            "ICMP packet ID mismatch or wrong type (expected reply type={} id={})",
+                            ICMP_ECHOREPLY,
+                            expected_id
+                        );
+                        // Keep waiting for matching reply
                     } else {
                         trace!("Failed to parse ICMP packet");
-                        continue;
                     }
                 } else {
                     trace!("Received packet from non-IPv4 address");
-                    continue;
                 }
             }
             Err(_would_block) => {
                 // Operation would block, continue waiting
-                continue;
             }
         }
     }
@@ -815,7 +810,7 @@ fn format_mac(mac: &[u8; 16], len: usize) -> String {
 
     mac[..len]
         .iter()
-        .map(|b| format!("{:02x}", b))
+        .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(":")
 }

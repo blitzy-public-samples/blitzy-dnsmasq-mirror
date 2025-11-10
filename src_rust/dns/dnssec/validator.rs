@@ -79,8 +79,7 @@ use crate::dns::dnssec::types::{
 };
 use crate::dns::parser::{extract_name, skip_name, skip_section};
 use crate::dns::protocol::{
-    C_IN, NAME_ESCAPE, NOERROR, NXDOMAIN,
-    T_A, T_DS, T_NSEC, T_NSEC3, T_RRSIG,
+    C_IN, NAME_ESCAPE, NOERROR, NXDOMAIN, T_A, T_DS, T_NSEC, T_NSEC3, T_RRSIG,
 };
 use crate::dns::serializer::{read_u16, write_u16, write_u32, SerializationError};
 
@@ -142,17 +141,17 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::PacketTooShort { expected, actual } => {
-                write!(f, "Packet too short: expected {}, got {}", expected, actual)
+                write!(f, "Packet too short: expected {expected}, got {actual}")
             }
-            Self::InvalidName(msg) => write!(f, "Invalid DNS name: {}", msg),
+            Self::InvalidName(msg) => write!(f, "Invalid DNS name: {msg}"),
             Self::MissingRecords { record_type } => {
-                write!(f, "Missing required {} records", record_type)
+                write!(f, "Missing required {record_type} records")
             }
-            Self::CryptoError(msg) => write!(f, "Crypto error: {}", msg),
-            Self::ProofFailed(msg) => write!(f, "Proof validation failed: {}", msg),
+            Self::CryptoError(msg) => write!(f, "Crypto error: {msg}"),
+            Self::ProofFailed(msg) => write!(f, "Proof validation failed: {msg}"),
             Self::Timeout => write!(f, "Validation timeout"),
-            Self::CacheError(msg) => write!(f, "Cache error: {}", msg),
-            Self::SerializationFailed(msg) => write!(f, "Serialization failed: {}", msg),
+            Self::CacheError(msg) => write!(f, "Cache error: {msg}"),
+            Self::SerializationFailed(msg) => write!(f, "Serialization failed: {msg}"),
         }
     }
 }
@@ -175,7 +174,7 @@ impl From<String> for ValidationError {
 // Helper Structures
 // ============================================================================
 
-/// Iterator state for canonicalizing RRset RDATA during signature verification
+/// Iterator state for canonicalizing `RRset` RDATA during signature verification
 ///
 /// This structure maintains state for iterating through RDATA one byte at a time,
 /// performing DNS name canonicalization as required by RFC 4034 Section 6.2.
@@ -190,7 +189,7 @@ struct RdataState<'a> {
     using_buff: bool,
     /// Remaining bytes in current chunk
     c: usize,
-    /// RR type descriptor (0 = domain name, N = N bytes, u16::MAX = rest)
+    /// RR type descriptor (0 = domain name, N = N bytes, `u16::MAX` = rest)
     desc: &'a [u16],
     /// Buffer for name canonicalization (MAXDNAME * 2)
     buff: &'a mut [u8],
@@ -221,7 +220,7 @@ struct ResourceRecord {
 ///
 /// Converts dot-separated labels to length-prefixed labels and performs
 /// case normalization (A-Z to a-z) per RFC 4034 Section 6.2. Handles
-/// escaped special characters (NAME_ESCAPE prefix).
+/// escaped special characters (`NAME_ESCAPE` prefix).
 ///
 /// # Arguments
 ///
@@ -286,7 +285,7 @@ fn to_wire(name: &mut [u8]) -> usize {
 /// Convert DNS name from wire format to presentation format in place
 ///
 /// Converts length-prefixed labels to dot-separated labels. Escapes
-/// special characters (NUL, dot, NAME_ESCAPE) with NAME_ESCAPE prefix.
+/// special characters (NUL, dot, `NAME_ESCAPE`) with `NAME_ESCAPE` prefix.
 ///
 /// # Arguments
 ///
@@ -427,7 +426,7 @@ fn serial_compare_32(s1: u32, s2: u32) -> i32 {
 ///
 /// # Returns
 ///
-/// * `true` - More data available, read from buff[buff_offset] if using_buff, else from ip[0]
+/// * `true` - More data available, read from buff[`buff_offset`] if `using_buff`, else from ip[0]
 /// * `false` - End of RDATA reached
 fn get_rdata<'a>(packet: &'a [u8], state: &mut RdataState<'a>) -> bool {
     // If we have bytes remaining in current chunk, advance to next byte
@@ -464,32 +463,27 @@ fn get_rdata<'a>(packet: &'a [u8], state: &mut RdataState<'a>) -> bool {
         
         if desc_val == 0 {
             // Domain name - extract and canonicalize
-            match extract_name(packet, state.ip) {
-                Ok((remaining, name)) => {
-                    // Copy name to buffer and canonicalize
-                    let name_bytes = name.as_bytes();
-                    let copy_len = name_bytes.len().min(state.buff.len() - 1);
-                    state.buff[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
-                    state.buff[copy_len] = 0;
-                    
-                    let wire_len = to_wire(&mut state.buff[..copy_len + 1]);
-                    if wire_len == 0 {
-                        // Invalid name, skip
-                        state.ip = remaining;
-                        continue;
-                    }
-                    
-                    state.c = wire_len;
-                    state.buff_offset = 0;
-                    state.using_buff = true;
+            if let Ok((remaining, name)) = extract_name(packet, state.ip) {
+                // Copy name to buffer and canonicalize
+                let name_bytes = name.as_bytes();
+                let copy_len = name_bytes.len().min(state.buff.len() - 1);
+                state.buff[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
+                state.buff[copy_len] = 0;
+                
+                let wire_len = to_wire(&mut state.buff[..=copy_len]);
+                if wire_len == 0 {
+                    // Invalid name, skip
                     state.ip = remaining;
-                    return true;
-                }
-                Err(_) => {
-                    // Skip on error
                     continue;
                 }
+                
+                state.c = wire_len;
+                state.buff_offset = 0;
+                state.using_buff = true;
+                state.ip = remaining;
+                return true;
             }
+            // Skip on error
         } else if desc_val == u16::MAX {
             // All remaining bytes
             state.c = state.ip.len();
@@ -510,9 +504,9 @@ fn get_rdata<'a>(packet: &'a [u8], state: &mut RdataState<'a>) -> bool {
     }
 }
 
-/// Sort RRset in canonical order per RFC 4034 Section 6.3
+/// Sort `RRset` in canonical order per RFC 4034 Section 6.3
 ///
-/// RRsets must be sorted in canonical order before signature verification.
+/// `RRsets` must be sorted in canonical order before signature verification.
 /// Comparison is performed on wire-format RDATA (after canonicalization).
 ///
 /// # Arguments
@@ -574,18 +568,18 @@ fn hash_name(name: &[u8], salt: &[u8], iterations: u16) -> [u8; 20] {
 /// Decoded bytes or error
 fn base32_decode(encoded: &str) -> Result<Vec<u8>, ValidationError> {
     BASE32_NOPAD.decode(encoded.as_bytes())
-        .map_err(|e| ValidationError::ProofFailed(format!("Base32 decode error: {}", e)))
+        .map_err(|e| ValidationError::ProofFailed(format!("Base32 decode error: {e}")))
 }
 
 // ============================================================================
 // Core Validation Functions
 // ============================================================================
 
-/// Validate RRSIG signature over RRset using DNSKEY
+/// Validate RRSIG signature over `RRset` using DNSKEY
 ///
-/// Core cryptographic verification function. Constructs canonical RRset data
+/// Core cryptographic verification function. Constructs canonical `RRset` data
 /// per RFC 4034 Section 6.2, then verifies RRSIG signature using DNSKEY
-/// public key via crypto::verify().
+/// public key via `crypto::verify()`.
 ///
 /// # Arguments
 ///
@@ -613,8 +607,8 @@ async fn validate_rrset(
         .as_secs() as u32;
     
     if trust_anchor::is_check_date(None, false, curtime) {
-        let inception = UNIX_EPOCH + Duration::from_secs(rrsig.signature_inception() as u64);
-        let expiration = UNIX_EPOCH + Duration::from_secs(rrsig.signature_expiration() as u64);
+        let inception = UNIX_EPOCH + Duration::from_secs(u64::from(rrsig.signature_inception()));
+        let expiration = UNIX_EPOCH + Duration::from_secs(u64::from(rrsig.signature_expiration()));
         
         if current_time < inception || current_time > expiration {
             return Err(ValidationError::CryptoError(
@@ -664,10 +658,10 @@ async fn validate_rrset(
     
     // Verify signature (note: crypto::verify expects (key_data, signature, data, algorithm))
     crypto::verify(&canonical_blockdata, rrsig.signature(), dnskey.public_key(), rrsig.algorithm())
-        .map_err(|e| ValidationError::CryptoError(format!("Signature verification failed: {}", e)))
+        .map_err(|e| ValidationError::CryptoError(format!("Signature verification failed: {e}")))
 }
 
-/// Validate DNSKEY RRset against parent zone DS records
+/// Validate DNSKEY `RRset` against parent zone DS records
 ///
 /// Establishes trust for zone's public keys by verifying DNSKEY records match
 /// DS records from parent zone. Computes digest of DNSKEY and compares with
@@ -850,7 +844,6 @@ pub async fn dnssec_validate_ds(
                 }
                 Err(e) => {
                     trace!("dnssec_validate_ds: validation attempt failed: {}", e);
-                    continue;
                 }
             }
         }
@@ -862,7 +855,7 @@ pub async fn dnssec_validate_ds(
 
 /// Main DNSSEC validation entry point
 ///
-/// Validates all RRsets in DNS response including answer section, CNAME chains,
+/// Validates all `RRsets` in DNS response including answer section, CNAME chains,
 /// wildcard expansion, and negative answers (NXDOMAIN/NODATA). Coordinates
 /// NSEC/NSEC3 denial-of-existence proofs for negative responses.
 ///
@@ -912,7 +905,7 @@ pub async fn dnssec_validate_reply(
     let mut remaining = &packet[12..];
     for _ in 0..qdcount {
         remaining = skip_name(packet, remaining)
-            .map_err(|e| ValidationError::InvalidName(format!("Skip question failed: {:?}", e)))?;
+            .map_err(|e| ValidationError::InvalidName(format!("Skip question failed: {e:?}")))?;
         
         if remaining.len() < 4 {
             return Err(ValidationError::PacketTooShort {
@@ -937,13 +930,13 @@ pub async fn dnssec_validate_reply(
         // Skip answer section
         remaining = &packet[offset..];
         remaining = skip_section(packet, remaining, ancount)
-            .map_err(|e| ValidationError::InvalidName(format!("Skip answer section failed: {:?}", e)))?;
+            .map_err(|e| ValidationError::InvalidName(format!("Skip answer section failed: {e:?}")))?;
         
         // Parse authority section to detect NSEC/NSEC3 presence
         for _ in 0..nscount {
             // Skip name
             remaining = skip_name(packet, remaining)
-                .map_err(|e| ValidationError::InvalidName(format!("Skip authority name failed: {:?}", e)))?;
+                .map_err(|e| ValidationError::InvalidName(format!("Skip authority name failed: {e:?}")))?;
             
             if remaining.len() < 10 {
                 break;
@@ -971,10 +964,9 @@ pub async fn dnssec_validate_reply(
             // In production, would validate NSEC/NSEC3 proofs here
             // For now, accept if proofs exist
             return Ok(ValidationStatus::Secure);
-        } else {
-            warn!("dnssec_validate_reply: no denial proofs found for negative answer");
-            return Ok(ValidationStatus::Bogus(vec![]));
         }
+        warn!("dnssec_validate_reply: no denial proofs found for negative answer");
+        return Ok(ValidationStatus::Bogus(vec![]));
     }
     
     // For positive answers, validate RRSIGs over answer RRsets
