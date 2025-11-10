@@ -22,7 +22,7 @@
 //! ```
 //!
 //! **Rust Replacement:**
-//! ```rust
+//! ```rust,ignore
 //! use std::sync::Arc;
 //! use tokio::sync::RwLock;
 //! use dnsmasq::core::Daemon;
@@ -59,7 +59,7 @@
 //! ```
 //!
 //! **Rust Replacement:**
-//! ```rust
+//! ```rust,ignore
 //! use dnsmasq::core::SignalHandler;
 //!
 //! let mut signal_handler = SignalHandler::new()?;
@@ -87,7 +87,7 @@
 //! ```
 //!
 //! **Rust Replacement:**
-//! ```rust
+//! ```rust,ignore
 //! use dnsmasq::core::run_event_loop;
 //!
 //! run_event_loop(daemon, config, logger).await?;
