@@ -185,10 +185,6 @@ pub mod helper;
 pub mod pidfile;
 pub mod privileges;
 
-// Ad-hoc test module (temporary, for validation only)
-#[cfg(test)]
-mod blitzy_adhoc_test_helper;
-
 // Re-export commonly-used types and functions for convenient access
 
 /// Helper process management
