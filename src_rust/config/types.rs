@@ -277,6 +277,10 @@ pub struct DnsConfig {
     /// Bogus IP addresses to filter
     /// Original C field: `bogus_addr` in struct daemon (line 4106)
     pub bogus_addresses: Vec<IpAddr>,
+
+    /// Query timeout in seconds for upstream DNS servers
+    /// Optional timeout value; if None, default timeout is used
+    pub query_timeout: Option<u64>,
 }
 
 impl Default for DnsConfig {
@@ -303,6 +307,7 @@ impl Default for DnsConfig {
             cname_records: Vec::new(),
             host_records: Vec::new(),
             bogus_addresses: Vec::new(),
+            query_timeout: None, // Use default timeout if not specified
         }
     }
 }

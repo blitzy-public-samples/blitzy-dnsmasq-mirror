@@ -383,7 +383,7 @@ pub use self::domain::{
     canonicalise, CondDomain, Addrlist, AddrlistFlags, QueryFlags, SynthDomainResult,
 };
 pub use self::edns0::{ClientSubnet, Edns0Option, Edns0OptionCode};
-pub use self::forwarder::{Forwarder, ForwardConfig, ForwardQuery};
+pub use self::forwarder::{Forwarder, ForwardError, ForwardRecord};
 pub use self::hash::{hash_questions_init, hash_questions, SHA256_DIGEST_SIZE};
 pub use self::parser::{extract_name, skip_name, skip_questions, skip_section, extract_addresses, extract_request, in_arpa_name_2_addr, ParseError};
 pub use self::protocol::{DnsOpcode, DnsRcode, DnsRrType, DnsHeader};

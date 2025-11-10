@@ -105,16 +105,14 @@ use tracing::{debug, error, info, trace, warn};
 
 // Internal module imports - ALL from depends_on_files
 use crate::config::types::{Config, DaemonOptions, DnsConfig, NetworkConfig};
-use crate::dns::cache::{Cache, CacheFlags, CacheRecord};
-use crate::dns::domain::{
-    canonicalise, get_domain, get_domain6, hostname_isequal, hostname_issubdomain,
-    hostname_order, is_name_synthetic, is_rev_synth,
-};
+use crate::dns::cache::Cache;
+use crate::dns::cache_types::CacheRecord;
+// Note: dns::domain imports removed as they are not used in this file
 use crate::dns::edns0::{
     add_do_bit, add_edns0_config, add_pseudoheader, check_source, find_pseudoheader,
-    EDNS0_OPTION_CLIENT_SUBNET,
 };
-use crate::dns::hash::{hash_questions, hash_questions_init, SHA256_DIGEST_SIZE};
+use crate::dns::protocol::EDNS0_OPTION_CLIENT_SUBNET;
+use crate::dns::hash::{hash_questions, SHA256_DIGEST_SIZE};
 use crate::dns::parser::{extract_addresses, extract_name, extract_request, skip_name, skip_questions, skip_section, ParseError};
 use crate::dns::pattern::{
     add_update_server, build_server_array, cleanup_servers, dnssec_server, filter_servers,
@@ -131,14 +129,14 @@ use crate::dns::serializer::{
     SerializationError,
 };
 use crate::dns::upstream::{
-    check_servers, DomainPattern, Server, ServerFlags, ServerHealth, UpstreamManager,
+    check_servers, DomainPattern, ServerFlags, ServerHealth, UpstreamPool, UpstreamServer,
     FORWARD_TEST, FORWARD_TIME, SERV_FROM_DBUS,
 };
 use crate::logging::logger::{log_query, LogLevel, Logger};
 use crate::network::sockets::{
-    create_bound_listeners, create_socket, indextoname, random_sock, TcpListener, UdpSocket,
+    create_bound_listeners, create_socket, indextoname, random_sock, TcpListener,
 };
-use crate::utils::rand_utils::{rand16, rand32, rand64};
+use crate::utils::rand::{rand16, rand32, rand64};
 
 // ============================================================================
 // Constants
@@ -241,7 +239,7 @@ pub struct ForwardRecord {
     pub dest_addr: SocketAddr,
 
     /// Upstream server selected for this query
-    pub upstream_server: Option<Arc<RwLock<Server>>>,
+    pub upstream_server: Option<Arc<UpstreamServer>>,
 
     /// Timestamp when query was sent to upstream (for timeout calculation)
     pub sent_time: Instant,
@@ -377,7 +375,7 @@ pub struct Forwarder {
     cache: Arc<RwLock<Cache>>,
 
     /// Upstream server manager
-    upstream_manager: Arc<RwLock<UpstreamManager>>,
+    upstream_manager: Arc<RwLock<UpstreamPool>>,
 
     /// Active forward records indexed by transaction ID
     forward_records: Arc<Mutex<HashMap<TransactionId, ForwardRecord>>>,
@@ -407,16 +405,16 @@ impl Forwarder {
     /// Returns a new Forwarder instance ready to process queries
     pub async fn new(
         cache: Arc<RwLock<Cache>>,
-        upstream_manager: Arc<RwLock<UpstreamManager>>,
+        upstream_manager: Arc<RwLock<UpstreamPool>>,
         config: Arc<Config>,
         logger: Arc<Logger>,
     ) -> Result<Self, ForwardError> {
-        // Create default UDP socket for queries
-        let default_udp_socket = Arc::new(
-            create_socket(0, false)
-                .await
-                .map_err(|e| ForwardError::NetworkError(format!("Failed to create UDP socket: {}", e)))?,
-        );
+        // Create default UDP socket for queries (bind to any interface, ephemeral port)
+        let bind_addr: SocketAddr = "0.0.0.0:0".parse()
+            .map_err(|e| ForwardError::NetworkError(format!("Invalid bind address: {}", e)))?;
+        let default_udp_socket = create_socket(bind_addr, false)
+            .await
+            .map_err(|e| ForwardError::NetworkError(format!("Failed to create UDP socket: {}", e)))?;
 
         Ok(Self {
             cache,
@@ -508,7 +506,7 @@ impl Forwarder {
         if packet.len() < 12 {
             return Err(ForwardError::ParseError("Packet too short for DNS header".to_string()));
         }
-        let orig_query_id = read_u16(packet, 0)?;
+        let orig_query_id = read_u16(packet)?;
 
         // Parse query for server selection
         let (query_name, query_type, _query_class) =
@@ -518,7 +516,7 @@ impl Forwarder {
         let upstream_manager = self.upstream_manager.read()
             .map_err(|_| ForwardError::ServerUnavailable)?;
         
-        let server = upstream_manager.select_server(&query_name, query_type)
+        let server = upstream_manager.select_server(Some(&query_name))
             .ok_or(ForwardError::ServerUnavailable)?;
 
         // Generate random query ID (RFC 5452)
@@ -559,12 +557,13 @@ impl Forwarder {
 
         // Modify packet with new query ID
         let mut modified_packet = BytesMut::from(packet);
-        write_u16(&mut modified_packet, 0, new_query_id)?;
+        // Directly modify the query ID bytes (first 2 bytes of DNS header)
+        let query_id_bytes = new_query_id.to_be_bytes();
+        modified_packet[0] = query_id_bytes[0];
+        modified_packet[1] = query_id_bytes[1];
 
         // Send query to upstream
-        let server_guard = server.read()
-            .map_err(|_| ForwardError::ServerUnavailable)?;
-        let upstream_addr = server_guard.address();
+        let upstream_addr = server.addr();
 
         info!(
             query_name = %query_name,
@@ -614,7 +613,7 @@ impl Forwarder {
                 continue;
             }
 
-            let response_id = read_u16(response_packet, 0)?;
+            let response_id = read_u16(response_packet)?;
 
             // Look up forward record by response ID
             if let Some(frec) = self.lookup_frec_by_query_id(response_id).await {
@@ -666,8 +665,13 @@ impl Forwarder {
         // Create mutable copy of response
         let mut modified_response = BytesMut::from(response_packet);
 
-        // Restore original query ID
-        write_u16(&mut modified_response, 0, frec.orig_query_id)?;
+        // Restore original query ID (overwrite first 2 bytes)
+        if modified_response.len() >= 2 {
+            modified_response[0] = (frec.orig_query_id >> 8) as u8;
+            modified_response[1] = (frec.orig_query_id & 0xFF) as u8;
+        } else {
+            return Err(ForwardError::InvalidResponse);
+        }
 
         // TODO: Update cache with response
         // TODO: Update upstream server health statistics
@@ -919,9 +923,8 @@ impl Forwarder {
     /// Used for response validation to prevent cache poisoning attacks (RFC 5452).
     /// Hashes query name, type, and class.
     fn compute_query_hash(&self, packet: &[u8]) -> Result<[u8; SHA256_DIGEST_SIZE], ForwardError> {
-        let mut hasher = hash_questions_init();
-        hash_questions(packet, &mut hasher)
-            .map_err(|e| ForwardError::ParseError(format!("Failed to hash query: {:?}", e)))
+        hash_questions(packet)
+            .ok_or_else(|| ForwardError::ParseError("Failed to hash query".to_string()))
     }
 }
 
@@ -929,28 +932,7 @@ impl Forwarder {
 // Public API Functions (exported at module level)
 // ============================================================================
 
-/// Add or update upstream server configuration
-///
-/// Public API for dynamic server configuration updates (e.g., from D-Bus).
-pub fn add_update_server(
-    _server_addr: SocketAddr,
-    _domain: Option<String>,
-) -> Result<(), ForwardError> {
-    // Delegated to pattern module
-    // Implementation would update UpstreamManager
-    Ok(())
-}
-
-/// Clean up stale servers and free resources
-///
-/// Called during configuration reload to remove obsolete servers.
-pub fn cleanup_servers<F>(_callback: F)
-where
-    F: FnMut(&Server),
-{
-    // Delegated to pattern module
-    // cleanup_servers(callback);
-}
+// Note: add_update_server and cleanup_servers are imported from dns::pattern module
 
 /// Clear cache and trigger reload
 ///
@@ -969,7 +951,7 @@ pub async fn clear_cache_and_reload(cache: Arc<RwLock<Cache>>) -> Result<(), For
 /// Mark server as gone (removed from configuration)
 ///
 /// Called when server is removed from configuration or detected as causing loops.
-pub fn server_gone(_server: &Server) {
+pub fn server_gone(_server: &UpstreamServer) {
     // Implementation would mark server for removal
     debug!("Server marked as gone");
 }
