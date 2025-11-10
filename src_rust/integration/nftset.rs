@@ -64,21 +64,22 @@
 //! use std::net::IpAddr;
 //! use dnsmasq::integration::nftset::{NftsetManager, AddressFamily};
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! // Initialize manager (context created once at startup)
-//! let mut manager = NftsetManager::new()?;
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Initialize manager (context created once at startup)
+//!     let mut manager = NftsetManager::new()?;
 //!
-//! // Add IPv4 address to set
-//! let addr: IpAddr = "192.0.2.1".parse()?;
-//! manager.add_element("filter#ip#blacklist", addr, AddressFamily::V4).await?;
+//!     // Add IPv4 address to set
+//!     let addr: IpAddr = "192.0.2.1".parse()?;
+//!     manager.add_element("filter#ip#blacklist", addr, AddressFamily::V4).await?;
 //!
-//! // Add with address family filtering (only IPv4)
-//! manager.add_element("4 filter#ip#whitelist", addr, AddressFamily::V4).await?;
+//!     // Add with address family filtering (only IPv4)
+//!     manager.add_element("4 filter#ip#whitelist", addr, AddressFamily::V4).await?;
 //!
-//! // Remove address from set
-//! manager.delete_element("filter#ip#blacklist", addr, AddressFamily::V4).await?;
-//! # Ok(())
-//! # }
+//!     // Remove address from set
+//!     manager.delete_element("filter#ip#blacklist", addr, AddressFamily::V4).await?;
+//!     Ok(())
+//! }
 //! ```
 //!
 //! # Behavioral Preservation

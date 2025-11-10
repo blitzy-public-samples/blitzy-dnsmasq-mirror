@@ -224,28 +224,43 @@
 //! use dnsmasq::dhcp::v6::{Dhcp6Server, Dhcp6ServerConfig};
 //! use dnsmasq::dhcp::v6::duid::DuidGenerator;
 //! use dnsmasq::dhcp::v6::handler::Dhcp6Handler;
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // 1. Generate server DUID
-//! let generator = DuidGenerator::new();
-//! let server_duid = generator.generate_llt().await?;
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // 1. Generate server DUID
+//!     let generator = DuidGenerator::new();
+//!     let server_duid = generator.generate_llt().await?;
 //!
-//! // 2. Create DHCPv6 handler
-//! let handler = Dhcp6Handler::new(
-//!     server_duid,
-//!     /* dhcp_contexts */ vec![],
-//!     /* lease_manager */ lease_mgr,
-//! );
+//!     // 2. Setup dependencies (simplified for example)
+//!     # use dnsmasq::dhcp::lease::LeaseManager;
+//!     # use dnsmasq::config::{DaemonOptions, Config};
+//!     # let lease_mgr = Arc::new(RwLock::new(LeaseManager::new(
+//!     #     std::path::PathBuf::from("/tmp/leases"),
+//!     #     1000,
+//!     #     DaemonOptions::default(),
+//!     #     false
+//!     # )));
+//!     # let daemon_options = Arc::new(RwLock::new(DaemonOptions::default()));
+//!     # let daemon_config = Arc::new(Config::default());
+//!     
+//!     // 3. Create DHCPv6 handler
+//!     let handler = Dhcp6Handler::new(
+//!         Arc::clone(&lease_mgr),
+//!         Arc::clone(&daemon_options),
+//!         server_duid,
+//!     );
 //!
-//! // 3. Create and bind server
-//! let config = Dhcp6ServerConfig::default();
-//! let mut server = Dhcp6Server::new(config, handler);
-//! server.bind("::".parse()?).await?;
+//!     // 4. Create and bind server
+//!     let config = Dhcp6ServerConfig::default();
+//!     let mut server = Dhcp6Server::new(config, handler, lease_mgr, daemon_config)?;
+//!     server.bind().await?;
 //!
-//! // 4. Run async event loop
-//! server.run().await?;
-//! # Ok(())
-//! # }
+//!     // 5. Run async event loop
+//!     server.run().await?;
+//!     Ok(())
+//! }
 //! ```
 //!
 //! ## Performance Characteristics
