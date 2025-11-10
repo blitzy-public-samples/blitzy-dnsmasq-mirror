@@ -133,6 +133,41 @@ pub enum PingStatus {
     Unknown,
 }
 
+impl PingStatus {
+    /// Returns true if the address is in use
+    ///
+    /// # Returns
+    ///
+    /// * `true` - Address responded to ping (InUse variant)
+    /// * `false` - Address is available or status is unknown
+    #[must_use]
+    pub fn is_in_use(&self) -> bool {
+        matches!(self, PingStatus::InUse)
+    }
+
+    /// Returns true if the address is available
+    ///
+    /// # Returns
+    ///
+    /// * `true` - Address did not respond to ping (Available variant)
+    /// * `false` - Address is in use or status is unknown
+    #[must_use]
+    pub fn is_available(&self) -> bool {
+        matches!(self, PingStatus::Available)
+    }
+
+    /// Returns true if the status is unknown
+    ///
+    /// # Returns
+    ///
+    /// * `true` - Ping operation failed or could not complete (Unknown variant)
+    /// * `false` - Address status is determined (Available or InUse)
+    #[must_use]
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, PingStatus::Unknown)
+    }
+}
+
 /// Cached ping result with timestamp
 ///
 /// Records the result of a ping operation along with the time it was performed,

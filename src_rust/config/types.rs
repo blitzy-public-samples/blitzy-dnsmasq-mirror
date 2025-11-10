@@ -72,69 +72,151 @@ bitflags::bitflags! {
     /// #define option_bool(x) (daemon->options[x >> 5] & (1u << (x & 31)))
     /// ```
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    pub struct DaemonOptions: u64 {
-        /// Filter private IP addresses (OPT_BOGUSPRIV)
+    pub struct DaemonOptions: u128 {
+        /// Filter private IP addresses (OPT_BOGUSPRIV = 0)
         const OPT_BOGUSPRIV      = 1 << 0;
-        /// Enable DNS filtering (OPT_FILTER)
+        /// Enable DNS filtering (OPT_FILTER = 1)
         const OPT_FILTER         = 1 << 1;
-        /// Log DNS queries (OPT_LOG)
+        /// Log DNS queries (OPT_LOG = 2)
         const OPT_LOG            = 1 << 2;
-        /// Authoritative DNS mode (OPT_AUTHORITATIVE)
-        const OPT_AUTHORITATIVE  = 1 << 3;
-        /// Localize queries (OPT_LOCALISE)
-        const OPT_LOCALISE       = 1 << 4;
-        /// Enable D-Bus interface (OPT_DBUS)
-        const OPT_DBUS           = 1 << 5;
-        /// Add FQDN to DHCP (OPT_DHCP_FQDN)
-        const OPT_DHCP_FQDN      = 1 << 6;
-        /// Disable upstream polling (OPT_NO_POLL)
-        const OPT_NO_POLL        = 1 << 7;
-        /// Disable negative caching (OPT_NO_NEG)
-        const OPT_NO_NEG         = 1 << 8;
-        /// Don't read /etc/hosts (OPT_NO_HOSTS)
-        const OPT_NO_HOSTS       = 1 << 9;
-        /// Enable loop detection (OPT_LOOP_DETECT)
-        const OPT_LOOP_DETECT    = 1 << 10;
-        /// DNSSEC validation enabled (OPT_DNSSEC_VALID)
-        const OPT_DNSSEC_VALID   = 1 << 11;
-        /// DNSSEC time validation (OPT_DNSSEC_TIME)
-        const OPT_DNSSEC_TIME    = 1 << 12;
-        /// Expand hosts into A+AAAA (OPT_EXPAND)
-        const OPT_EXPAND         = 1 << 13;
-        /// Use UBus interface (OPT_UBUS)
-        const OPT_UBUS           = 1 << 14;
-        /// Don't fork to background (OPT_DEBUG)
-        const OPT_DEBUG          = 1 << 15;
-        /// Don't fork daemon (OPT_NO_FORK)
+        /// Self MX (OPT_SELFMX = 3)
+        const OPT_SELFMX         = 1 << 3;
+        /// Don't read /etc/hosts (OPT_NO_HOSTS = 4)
+        const OPT_NO_HOSTS       = 1 << 4;
+        /// Disable upstream polling (OPT_NO_POLL = 5)
+        const OPT_NO_POLL        = 1 << 5;
+        /// Don't fork to background (OPT_DEBUG = 6)
+        const OPT_DEBUG          = 1 << 6;
+        /// Order hosts (OPT_ORDER = 7)
+        const OPT_ORDER          = 1 << 7;
+        /// Don't read /etc/resolv.conf (OPT_NO_RESOLV = 8)
+        const OPT_NO_RESOLV      = 1 << 8;
+        /// Expand hosts into A+AAAA (OPT_EXPAND = 9)
+        const OPT_EXPAND         = 1 << 9;
+        /// Local MX (OPT_LOCALMX = 10)
+        const OPT_LOCALMX        = 1 << 10;
+        /// Disable negative caching (OPT_NO_NEG = 11)
+        const OPT_NO_NEG         = 1 << 11;
+        /// No dots local (OPT_NODOTS_LOCAL = 12)
+        const OPT_NODOTS_LOCAL   = 1 << 12;
+        /// No wildcard (OPT_NOWILD = 13)
+        const OPT_NOWILD         = 1 << 13;
+        /// Read /etc/ethers (OPT_ETHERS = 14)
+        const OPT_ETHERS         = 1 << 14;
+        /// Resolv domain (OPT_RESOLV_DOMAIN = 15)
+        const OPT_RESOLV_DOMAIN  = 1 << 15;
+        /// Don't fork daemon (OPT_NO_FORK = 16)
         const OPT_NO_FORK        = 1 << 16;
-        /// Add options to logs (OPT_LOG_OPTS)
-        const OPT_LOG_OPTS       = 1 << 17;
-        /// Use ARP for DHCP (OPT_SCRIPT_ARP)
-        const OPT_SCRIPT_ARP     = 1 << 18;
-        /// Add MAC to DHCP (OPT_ADD_MAC)
-        const OPT_ADD_MAC        = 1 << 19;
-        /// Add subnet to DNS (OPT_CLIENT_SUBNET)
-        const OPT_CLIENT_SUBNET  = 1 << 20;
-        /// Quiet DHCP (OPT_QUIET_DHCP)
-        const OPT_QUIET_DHCP     = 1 << 21;
-        /// Quiet DHCP6 (OPT_QUIET_DHCP6)
-        const OPT_QUIET_DHCP6    = 1 << 22;
-        /// Quiet RA (OPT_QUIET_RA)
-        const OPT_QUIET_RA       = 1 << 23;
-        /// Single port TFTP (OPT_SINGLE_PORT)
-        const OPT_SINGLE_PORT    = 1 << 24;
-        /// Lease file read only (OPT_LEASE_RO)
-        const OPT_LEASE_RO       = 1 << 25;
-        /// All servers (OPT_ALL_SERVERS)
-        const OPT_ALL_SERVERS    = 1 << 26;
-        /// Bind interfaces (OPT_BIND_INTERFACES)
-        const OPT_BIND_INTERFACES = 1 << 27;
-        /// No DHCP interfaces (OPT_NO_DHCP_IFACE)
-        const OPT_NO_DHCP_IFACE  = 1 << 28;
-        /// Local service only (OPT_LOCAL_SERVICE)
-        const OPT_LOCAL_SERVICE  = 1 << 29;
-        /// Conntrack mark (OPT_CONNTRACK)
-        const OPT_CONNTRACK      = 1 << 30;
+        /// Authoritative DNS mode (OPT_AUTHORITATIVE = 17)
+        const OPT_AUTHORITATIVE  = 1 << 17;
+        /// Localize queries (OPT_LOCALISE = 18)
+        const OPT_LOCALISE       = 1 << 18;
+        /// Enable D-Bus interface (OPT_DBUS = 19)
+        const OPT_DBUS           = 1 << 19;
+        /// Add FQDN to DHCP (OPT_DHCP_FQDN = 20)
+        const OPT_DHCP_FQDN      = 1 << 20;
+        /// Skip ping check before DHCP allocation (OPT_NO_PING = 21)
+        const OPT_NO_PING        = 1 << 21;
+        /// Lease file read only (OPT_LEASE_RO = 22)
+        const OPT_LEASE_RO       = 1 << 22;
+        /// All servers (OPT_ALL_SERVERS = 23)
+        const OPT_ALL_SERVERS    = 1 << 23;
+        /// Reload (OPT_RELOAD = 24)
+        const OPT_RELOAD         = 1 << 24;
+        /// Local rebind (OPT_LOCAL_REBIND = 25)
+        const OPT_LOCAL_REBIND   = 1 << 25;
+        /// TFTP secure (OPT_TFTP_SECURE = 26)
+        const OPT_TFTP_SECURE    = 1 << 26;
+        /// TFTP no block (OPT_TFTP_NOBLOCK = 27)
+        const OPT_TFTP_NOBLOCK   = 1 << 27;
+        /// Add options to logs (OPT_LOG_OPTS = 28)
+        const OPT_LOG_OPTS       = 1 << 28;
+        /// TFTP prefer IP (OPT_TFTP_APREF_IP = 29)
+        const OPT_TFTP_APREF_IP  = 1 << 29;
+        /// No override (OPT_NO_OVERRIDE = 30)
+        const OPT_NO_OVERRIDE    = 1 << 30;
+        /// No rebind (OPT_NO_REBIND = 31)
+        const OPT_NO_REBIND      = 1 << 31;
+        /// Add MAC to DHCP (OPT_ADD_MAC = 32)
+        const OPT_ADD_MAC        = 1 << 32;
+        /// DNSSEC proxy (OPT_DNSSEC_PROXY = 33)
+        const OPT_DNSSEC_PROXY   = 1 << 33;
+        /// Consecutive addresses (OPT_CONSEC_ADDR = 34)
+        const OPT_CONSEC_ADDR    = 1 << 34;
+        /// Conntrack mark (OPT_CONNTRACK = 35)
+        const OPT_CONNTRACK      = 1 << 35;
+        /// FQDN update (OPT_FQDN_UPDATE = 36)
+        const OPT_FQDN_UPDATE    = 1 << 36;
+        /// Router Advertisement (OPT_RA = 37)
+        const OPT_RA             = 1 << 37;
+        /// TFTP lowercase (OPT_TFTP_LC = 38)
+        const OPT_TFTP_LC        = 1 << 38;
+        /// Clever bind (OPT_CLEVERBIND = 39)
+        const OPT_CLEVERBIND     = 1 << 39;
+        /// TFTP enabled (OPT_TFTP = 40)
+        const OPT_TFTP           = 1 << 40;
+        /// Add subnet to DNS (OPT_CLIENT_SUBNET = 41)
+        const OPT_CLIENT_SUBNET  = 1 << 41;
+        /// Quiet DHCP (OPT_QUIET_DHCP = 42)
+        const OPT_QUIET_DHCP     = 1 << 42;
+        /// Quiet DHCP6 (OPT_QUIET_DHCP6 = 43)
+        const OPT_QUIET_DHCP6    = 1 << 43;
+        /// Quiet RA (OPT_QUIET_RA = 44)
+        const OPT_QUIET_RA       = 1 << 44;
+        /// DNSSEC validation enabled (OPT_DNSSEC_VALID = 45)
+        const OPT_DNSSEC_VALID   = 1 << 45;
+        /// DNSSEC time validation (OPT_DNSSEC_TIME = 46)
+        const OPT_DNSSEC_TIME    = 1 << 46;
+        /// DNSSEC debug (OPT_DNSSEC_DEBUG = 47)
+        const OPT_DNSSEC_DEBUG   = 1 << 47;
+        /// DNSSEC ignore NS (OPT_DNSSEC_IGN_NS = 48)
+        const OPT_DNSSEC_IGN_NS  = 1 << 48;
+        /// Local service only (OPT_LOCAL_SERVICE = 49)
+        const OPT_LOCAL_SERVICE  = 1 << 49;
+        /// Enable loop detection (OPT_LOOP_DETECT = 50)
+        const OPT_LOOP_DETECT    = 1 << 50;
+        /// Extra logging (OPT_EXTRALOG = 51)
+        const OPT_EXTRALOG       = 1 << 51;
+        /// TFTP no fail (OPT_TFTP_NO_FAIL = 52)
+        const OPT_TFTP_NO_FAIL   = 1 << 52;
+        /// Use ARP for DHCP (OPT_SCRIPT_ARP = 53)
+        const OPT_SCRIPT_ARP     = 1 << 53;
+        /// MAC base64 (OPT_MAC_B64 = 54)
+        const OPT_MAC_B64        = 1 << 54;
+        /// MAC hex (OPT_MAC_HEX = 55)
+        const OPT_MAC_HEX        = 1 << 55;
+        /// TFTP prefer MAC (OPT_TFTP_APREF_MAC = 56)
+        const OPT_TFTP_APREF_MAC = 1 << 56;
+        /// Rapid commit (OPT_RAPID_COMMIT = 57)
+        const OPT_RAPID_COMMIT   = 1 << 57;
+        /// Use UBus interface (OPT_UBUS = 58)
+        const OPT_UBUS           = 1 << 58;
+        /// Ignore client ID (OPT_IGNORE_CLID = 59)
+        const OPT_IGNORE_CLID    = 1 << 59;
+        /// Single port TFTP (OPT_SINGLE_PORT = 60)
+        const OPT_SINGLE_PORT    = 1 << 60;
+        /// Lease renew (OPT_LEASE_RENEW = 61)
+        const OPT_LEASE_RENEW    = 1 << 61;
+        /// Log debug (OPT_LOG_DEBUG = 62)
+        const OPT_LOG_DEBUG      = 1 << 62;
+        /// Umbrella (OPT_UMBRELLA = 63)
+        const OPT_UMBRELLA       = 1 << 63;
+        /// Umbrella device ID (OPT_UMBRELLA_DEVID = 64)
+        const OPT_UMBRELLA_DEVID = 1 << 64;
+        /// Conntrack mark all servers enabled (OPT_CMARK_ALST_EN = 65)
+        const OPT_CMARK_ALST_EN  = 1 << 65;
+        /// Quiet TFTP (OPT_QUIET_TFTP = 66)
+        const OPT_QUIET_TFTP     = 1 << 66;
+        /// Filter A records (OPT_FILTER_A = 67)
+        const OPT_FILTER_A       = 1 << 67;
+        /// Filter AAAA records (OPT_FILTER_AAAA = 68)
+        const OPT_FILTER_AAAA    = 1 << 68;
+        /// Strip ECS (OPT_STRIP_ECS = 69)
+        const OPT_STRIP_ECS      = 1 << 69;
+        /// Strip MAC (OPT_STRIP_MAC = 70)
+        const OPT_STRIP_MAC      = 1 << 70;
+        /// Bind interfaces (OPT_BIND_INTERFACES duplicated as legacy alias)
+        const OPT_NO_DHCP_IFACE  = 1 << 71;
     }
 }
 

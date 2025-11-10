@@ -552,6 +552,12 @@ pub const ETHERSFILE: &str = "/etc/ethers";
 /// RFC 2131 Section 3.3 allows any lease duration.
 pub const DEFLEASE: u32 = 3600;
 
+/// Alias for DEFLEASE for compatibility with handler module
+///
+/// Some modules use DHCP_LEASE_DEFAULT as the constant name.
+/// This is an alias to maintain consistency across the codebase.
+pub const DHCP_LEASE_DEFAULT: u32 = DEFLEASE;
+
 /// Default `DHCPv6` lease time (default: 86400 seconds / 24 hours)
 ///
 /// Default duration for `DHCPv6` address leases when not explicitly configured.
