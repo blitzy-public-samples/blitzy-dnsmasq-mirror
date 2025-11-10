@@ -1,0 +1,70 @@
+# DHCPv4 Active Lease Database Fixture
+# Format: <timestamp> <hw_addr> <ip_addr> <hostname> <client_id>
+# Timestamp: Unix epoch (future timestamps for active leases)
+# hw_addr: MAC address in hex with colons (01:23:45:67:89:ab)
+# ip_addr: IPv4 address
+# hostname: hostname string or '*' if not present
+# client_id: hex-encoded client ID with colons or '*' if not present
+#
+# This fixture tests standard DHCPv4 lease parsing from src/lease.c lines 542-578
+# All leases have future expiry timestamps to simulate active lease state
+
+# Active lease with FQDN hostname and client ID
+1800000000 00:11:22:33:44:55 192.168.1.100 desktop-01.example.com 01:00:11:22:33:44:55
+
+# Active lease with simple hostname and client ID
+1805000000 aa:bb:cc:dd:ee:ff 192.168.1.101 laptop-wifi 01:aa:bb:cc:dd:ee:ff
+
+# Active lease with hostname but no client ID (using '*')
+1810000000 12:34:56:78:9a:bc 192.168.1.102 server-backend *
+
+# Active lease without hostname or client ID (both '*')
+1815000000 fe:dc:ba:98:76:54 192.168.1.103 * *
+
+# Active lease with hostname containing hyphens and client ID
+1820000000 08:00:27:ab:cd:ef 192.168.1.104 test-device-01 01:08:00:27:ab:cd:ef
+
+# Active lease with numeric hostname and different client ID format
+1825000000 52:54:00:12:34:56 192.168.1.105 host-192-168-1-105 ff:52:54:00:12:34:56:00:01:02
+
+# Active lease with FQDN and extended client ID
+1830000000 00:50:56:00:00:01 192.168.1.106 workstation.internal.example.org 01:00:50:56:00:00:01:ab:cd:ef
+
+# Active lease with short hostname
+1835000000 ac:de:48:00:11:22 192.168.1.107 nas *
+
+# Active lease with underscore in hostname (valid per RFC 1123 extension)
+1840000000 b8:27:eb:a1:b2:c3 192.168.1.108 rpi_server 01:b8:27:eb:a1:b2:c3
+
+# Active lease at edge of subnet range
+1845000000 00:0c:29:4f:5a:6b 192.168.1.254 gateway-device 01:00:0c:29:4f:5a:6b
+
+# Active lease with mixed case MAC (should be handled identically)
+1850000000 A0:B1:C2:D3:E4:F5 192.168.1.110 mixed-case-mac 01:a0:b1:c2:d3:e4:f5
+
+# Active lease with long client ID
+1855000000 00:1a:2b:3c:4d:5e 192.168.1.111 printer-office 01:00:1a:2b:3c:4d:5e:01:02:03:04:05:06:07:08:09:0a
+
+# Active lease with numeric-only hostname
+1860000000 01:02:03:04:05:06 192.168.1.112 192168001112 *
+
+# Active lease with dots in hostname (subdomain style)
+1865000000 ff:ee:dd:cc:bb:aa 192.168.1.113 iot.sensors.local 01:ff:ee:dd:cc:bb:aa
+
+# Active lease with very long lease time (far future expiry)
+2000000000 10:20:30:40:50:60 192.168.1.114 long-lease-device 01:10:20:30:40:50:60
+
+# Active lease with short client ID
+1870000000 77:88:99:aa:bb:cc 192.168.1.115 camera-01 01:77:88
+
+# Active lease in low IP range
+1875000000 11:11:11:11:11:11 192.168.1.10 early-ip-host *
+
+# Active lease with client ID different from MAC
+1880000000 22:22:22:22:22:22 192.168.1.116 different-clid-host 02:33:33:33:33:33:33
+
+# Active lease with hostname containing numbers
+1885000000 33:44:55:66:77:88 192.168.1.117 device123test 01:33:44:55:66:77:88
+
+# Active lease with mid-range timestamp
+1890000000 44:55:66:77:88:99 192.168.1.118 mid-range-lease *

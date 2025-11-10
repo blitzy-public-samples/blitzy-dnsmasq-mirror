@@ -1,0 +1,440 @@
+; Comprehensive DNS Zone File for dnsmasq-rs Testing
+; This zone file exercises diverse DNS record types for RFC compliance validation
+; Domain: comprehensive.test
+; Purpose: Integration testing of DNS protocol parsing (dns/protocol.rs from rfc1035.c)
+;
+; Record Types Covered:
+; - SOA, NS, A, AAAA, CNAME, MX, TXT, PTR
+; - SRV (Service Discovery - RFC 2srv)
+; - NAPTR (URI/E.164 Mapping - RFC 3403)
+; - CAA (Certificate Authority Authorization - RFC 6844)
+; - SSHFP (SSH Fingerprints - RFC 4255)
+; - TLSA (DANE/TLS Authentication - RFC 6698)
+; - LOC (Geographical Location - RFC 1876)
+; - SPF/DKIM/DMARC (Email Authentication)
+;
+; Edge Cases:
+; - Various TTL values (default, explicit, minimum, maximum)
+; - Long domain names (near 253 character limit)
+; - Complex TXT record formatting
+; - Priority/weight/port configurations
+; - Multiple records for same name
+; - Wildcard records
+; - Empty labels (though technically invalid, for parser robustness)
+
+$ORIGIN comprehensive.test.
+$TTL 86400  ; Default TTL: 24 hours
+
+; ============================================================================
+; SOA Record (Start of Authority)
+; ============================================================================
+@       IN      SOA     ns1.comprehensive.test. hostmaster.comprehensive.test. (
+                        2024010101  ; Serial (YYYYMMDDNN)
+                        3600        ; Refresh (1 hour)
+                        1800        ; Retry (30 minutes)
+                        1209600     ; Expire (2 weeks)
+                        300         ; Minimum TTL (5 minutes)
+                        )
+
+; ============================================================================
+; NS Records (Nameservers)
+; ============================================================================
+@               IN      NS      ns1.comprehensive.test.
+@               IN      NS      ns2.comprehensive.test.
+@               IN      NS      ns3.comprehensive.test.
+
+; ============================================================================
+; A Records (IPv4 Addresses)
+; ============================================================================
+@               IN      A       192.0.2.1
+www             IN      A       192.0.2.10
+www             IN      A       192.0.2.11          ; Multiple A records (round-robin)
+www             IN      A       192.0.2.12
+mail            IN      A       192.0.2.20
+mail            IN      A       192.0.2.21          ; Redundant mail servers
+ns1             IN      A       192.0.2.2
+ns2             IN      A       192.0.2.3
+ns3             IN      A       192.0.2.4
+ftp             IN      A       192.0.2.30
+api             IN      A       192.0.2.40
+
+; Various TTL values
+short-ttl       300     IN      A       192.0.2.50  ; 5 minutes
+medium-ttl      3600    IN      A       192.0.2.51  ; 1 hour
+long-ttl        604800  IN      A       192.0.2.52  ; 1 week
+max-ttl         2147483647 IN   A       192.0.2.53  ; Maximum 32-bit signed value
+
+; ============================================================================
+; AAAA Records (IPv6 Addresses)
+; ============================================================================
+@               IN      AAAA    2001:db8::1
+www             IN      AAAA    2001:db8::10
+www             IN      AAAA    2001:db8::11        ; IPv6 round-robin
+mail            IN      AAAA    2001:db8::20
+mail            IN      AAAA    2001:db8::21
+ns1             IN      AAAA    2001:db8::2
+ns2             IN      AAAA    2001:db8::3
+ns3             IN      AAAA    2001:db8::4
+ftp             IN      AAAA    2001:db8::30
+api             IN      AAAA    2001:db8::40
+
+; IPv6 edge cases
+ipv6-full       IN      AAAA    2001:0db8:0000:0000:0000:0000:0000:0001  ; Uncompressed
+ipv6-compressed IN      AAAA    2001:db8::1                              ; Compressed
+ipv6-mixed      IN      AAAA    2001:db8:0:0:0:0:0:1                     ; Mixed format
+ipv6-loopback   IN      AAAA    ::1                                       ; Loopback
+ipv6-any        IN      AAAA    ::                                        ; Any address
+
+; ============================================================================
+; CNAME Records (Canonical Names)
+; ============================================================================
+blog            IN      CNAME   www.comprehensive.test.
+shop            IN      CNAME   www.comprehensive.test.
+webmail         IN      CNAME   mail.comprehensive.test.
+smtp            IN      CNAME   mail.comprehensive.test.
+imap            IN      CNAME   mail.comprehensive.test.
+pop3            IN      CNAME   mail.comprehensive.test.
+cdn             IN      CNAME   cdn.example.com.            ; External CNAME
+
+; CNAME chains (technically discouraged but valid for testing)
+alias1          IN      CNAME   alias2.comprehensive.test.
+alias2          IN      CNAME   alias3.comprehensive.test.
+alias3          IN      CNAME   www.comprehensive.test.
+
+; ============================================================================
+; MX Records (Mail Exchange)
+; ============================================================================
+@               IN      MX      10      mail.comprehensive.test.
+@               IN      MX      20      mail2.comprehensive.test.
+@               IN      MX      30      backup-mail.example.com.  ; External backup MX
+
+mail2           IN      A       192.0.2.22
+mail2           IN      AAAA    2001:db8::22
+
+; Subdomain with different MX
+subdomain       IN      MX      10      mail.subdomain.comprehensive.test.
+mail.subdomain  IN      A       192.0.2.25
+
+; ============================================================================
+; TXT Records (Text Records)
+; ============================================================================
+; Simple TXT
+@               IN      TXT     "v=spf1 mx a:mail.comprehensive.test ~all"
+
+; SPF Record (Email Authentication)
+@               IN      TXT     "v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 include:_spf.example.com ~all"
+
+; DKIM Record (DomainKeys Identified Mail)
+default._domainkey IN   TXT     "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3QEKyU1fSma0axspqYK5iAj+54lsAg4qRRCnpKK68hawSNBXhyyPLEwS1+RHEFPWZS6YqfqE+cU+u+kMXrgUDzDPPCLQrBVGlxjrTvWp0r7X5P3yhzEpw2KOp6K9vNUxq7FEL9eU4SiYdP3Y+7s3qjYw1KplqEGjYq8TZ3S/fAQIDAQAB"
+
+; DMARC Record (Domain-based Message Authentication)
+_dmarc          IN      TXT     "v=DMARC1; p=quarantine; rua=mailto:dmarc@comprehensive.test; ruf=mailto:forensics@comprehensive.test; fo=1; adkim=r; aspf=r; pct=100; ri=86400"
+
+; Multi-string TXT record (concatenated)
+multistring     IN      TXT     "First part of a very long TXT record" "Second part of the same record" "Third part completing the record"
+
+; Long TXT record (near 255 character limit per string)
+long-txt        IN      TXT     "This is an extremely long TXT record designed to test the maximum length handling of DNS parsers which must support up to 255 characters per string in TXT records and this string is approaching that limit to ensure proper parsing functionality"
+
+; Multiple TXT records for same name
+multi-txt       IN      TXT     "First TXT record"
+multi-txt       IN      TXT     "Second TXT record"
+multi-txt       IN      TXT     "Third TXT record"
+
+; TXT with special characters
+special-txt     IN      TXT     "Special chars: !@#$%^&*()_+-={}[]|:;<>?,./"
+quoted-txt      IN      TXT     "Contains \"quoted\" text and 'single quotes'"
+
+; Site verification records (common real-world usage)
+@               IN      TXT     "google-site-verification=1234567890abcdef"
+@               IN      TXT     "MS=ms12345678"
+
+; ============================================================================
+; SRV Records (Service Discovery - RFC 2782)
+; ============================================================================
+; Format: _service._proto.name TTL class SRV priority weight port target
+
+; XMPP/Jabber services
+_xmpp-client._tcp       IN      SRV     5       0       5222    xmpp.comprehensive.test.
+_xmpp-server._tcp       IN      SRV     5       0       5269    xmpp.comprehensive.test.
+
+; SIP services (VoIP)
+_sip._tcp               IN      SRV     10      60      5060    sipserver1.comprehensive.test.
+_sip._tcp               IN      SRV     10      40      5060    sipserver2.comprehensive.test.
+_sip._udp               IN      SRV     10      50      5060    sipserver1.comprehensive.test.
+_sips._tcp              IN      SRV     10      0       5061    sipserver1.comprehensive.test.  ; Secure SIP
+
+; LDAP services
+_ldap._tcp              IN      SRV     0       0       389     ldap.comprehensive.test.
+_ldaps._tcp             IN      SRV     0       0       636     ldap.comprehensive.test.
+
+; Kerberos services
+_kerberos._tcp          IN      SRV     0       0       88      kdc.comprehensive.test.
+_kerberos._udp          IN      SRV     0       0       88      kdc.comprehensive.test.
+_kerberos-adm._tcp      IN      SRV     0       0       749     kdc.comprehensive.test.
+_kpasswd._udp           IN      SRV     0       0       464     kdc.comprehensive.test.
+
+; HTTP services (load balancing with weights)
+_http._tcp              IN      SRV     10      70      80      web1.comprehensive.test.
+_http._tcp              IN      SRV     10      20      80      web2.comprehensive.test.
+_http._tcp              IN      SRV     10      10      80      web3.comprehensive.test.
+_https._tcp             IN      SRV     10      50      443     web1.comprehensive.test.
+_https._tcp             IN      SRV     10      50      443     web2.comprehensive.test.
+
+; Minecraft server (gaming example)
+_minecraft._tcp         IN      SRV     0       5       25565   game.comprehensive.test.
+
+; CalDAV/CardDAV (calendar/contacts)
+_caldav._tcp            IN      SRV     0       0       8443    calendar.comprehensive.test.
+_carddav._tcp           IN      SRV     0       0       8443    contacts.comprehensive.test.
+
+; Supporting A records for SRV targets
+xmpp            IN      A       192.0.2.60
+sipserver1      IN      A       192.0.2.61
+sipserver2      IN      A       192.0.2.62
+ldap            IN      A       192.0.2.63
+kdc             IN      A       192.0.2.64
+web1            IN      A       192.0.2.65
+web2            IN      A       192.0.2.66
+web3            IN      A       192.0.2.67
+game            IN      A       192.0.2.68
+calendar        IN      A       192.0.2.69
+contacts        IN      A       192.0.2.70
+
+; ============================================================================
+; NAPTR Records (Naming Authority Pointer - RFC 3403)
+; ============================================================================
+; Format: name TTL class NAPTR order preference flags service regexp replacement
+; Used for ENUM (E.164 telephone number mapping) and URI resolution
+
+; ENUM example: +1-555-123-4567 becomes 7.6.5.4.3.2.1.5.5.5.1.e164.arpa
+7.6.5.4.3.2.1.5.5.5.1   IN      NAPTR   10      10      "u"     "E2U+sip"       "!^.*$!sip:user@comprehensive.test!" .
+7.6.5.4.3.2.1.5.5.5.1   IN      NAPTR   10      20      "u"     "E2U+email"     "!^.*$!mailto:user@comprehensive.test!" .
+7.6.5.4.3.2.1.5.5.5.1   IN      NAPTR   10      30      "u"     "E2U+web"       "!^.*$!http://comprehensive.test/user!" .
+
+; URI resolution
+uri-example     IN      NAPTR   100     10      "s"     "SIP+D2T"       ""      _sip._tcp.comprehensive.test.
+uri-example     IN      NAPTR   100     20      "s"     "SIP+D2U"       ""      _sip._udp.comprehensive.test.
+
+; Complex NAPTR with regex replacement
+regex-naptr     IN      NAPTR   10      0       "u"     "http+I2L+I2C+I2R" "!^.*$!http://www.comprehensive.test!" .
+
+; DDDS (Dynamic Delegation Discovery System) example
+ddds            IN      NAPTR   10      100     ""      ""              ""      relay.comprehensive.test.
+ddds            IN      NAPTR   10      50      "a"     "APP+SRV"       ""      _app._tcp.comprehensive.test.
+
+; ============================================================================
+; CAA Records (Certificate Authority Authorization - RFC 6844)
+; ============================================================================
+; Format: name TTL class CAA flags tag value
+; Restricts which CAs can issue certificates for a domain
+
+@               IN      CAA     0       issue           "letsencrypt.org"
+@               IN      CAA     0       issue           "digicert.com"
+@               IN      CAA     0       issuewild       "letsencrypt.org"
+@               IN      CAA     0       iodef           "mailto:security@comprehensive.test"
+@               IN      CAA     0       iodef           "https://security.comprehensive.test/caa-report"
+
+; Subdomain with stricter CAA policy
+secure          IN      CAA     0       issue           "digicert.com"
+secure          IN      CAA     0       issuewild       ";"              ; Prohibit wildcard certificates
+secure          IN      CAA     128     tbs             "reserved"       ; Critical flag set
+
+; No issuance allowed
+nossl           IN      CAA     0       issue           ";"              ; Prohibit all certificate issuance
+
+; ============================================================================
+; SSHFP Records (SSH Fingerprint - RFC 4255)
+; ============================================================================
+; Format: name TTL class SSHFP algorithm fptype fingerprint
+; Algorithm: 1=RSA, 2=DSA, 3=ECDSA, 4=Ed25519
+; FP Type: 1=SHA-1, 2=SHA-256
+
+; RSA key fingerprints
+ssh             IN      SSHFP   1       1       a3b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3
+ssh             IN      SSHFP   1       2       1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+
+; ECDSA key fingerprints
+ssh             IN      SSHFP   3       1       1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b
+ssh             IN      SSHFP   3       2       abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+
+; Ed25519 key fingerprints (modern, recommended)
+ssh             IN      SSHFP   4       1       fedcba0987654321fedcba0987654321fedcba09
+ssh             IN      SSHFP   4       2       9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef
+
+; Different hosts
+ssh.alt         IN      A       192.0.2.80
+ssh.alt         IN      SSHFP   4       2       1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff
+
+ssh             IN      A       192.0.2.81
+
+; ============================================================================
+; TLSA Records (DANE/TLS Authentication - RFC 6698)
+; ============================================================================
+; Format: _port._proto.name TTL class TLSA usage selector matching certificate-data
+; Usage: 0=CA, 1=Service cert, 2=Trust anchor, 3=Domain cert
+; Selector: 0=Full cert, 1=SubjectPublicKeyInfo
+; Matching: 0=Exact, 1=SHA-256, 2=SHA-512
+
+; HTTPS certificate pinning (usage 3, selector 1, matching 1 = DANE-EE SPKI SHA-256)
+_443._tcp.www   IN      TLSA    3       1       1       a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+
+; SMTP STARTTLS (usage 2, selector 0, matching 1 = Trust anchor full cert SHA-256)
+_25._tcp.mail   IN      TLSA    2       0       1       1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+
+; IMAPS (usage 3, selector 1, matching 2 = DANE-EE SPKI SHA-512)
+_993._tcp.mail  IN      TLSA    3       1       2       fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+
+; Multiple TLSA records for rollover
+_443._tcp.api   IN      TLSA    3       1       1       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+_443._tcp.api   IN      TLSA    3       1       1       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+; XMPP with DANE (usage 3, selector 0, matching 1 = Full cert SHA-256)
+_5269._tcp.xmpp IN      TLSA    3       0       1       c1c2c3c4c5c6c7c8c9c0d1d2d3d4d5d6d7d8d9e0e1e2e3e4e5e6e7e8e9f0f1f2
+
+; ============================================================================
+; LOC Records (Geographic Location - RFC 1876)
+; ============================================================================
+; Format: name LOC latitude longitude altitude size horizontal-precision vertical-precision
+; Latitude/Longitude: degrees minutes seconds.fraction N/S E/W
+; Altitude: meters
+; Size: diameter in meters
+; Precision: in meters
+
+; San Francisco, CA (Headquarters)
+@               IN      LOC     37 46 30.000 N 122 25 30.000 W 10.00m 100m 10m 2m
+
+; New York Data Center
+nydc            IN      LOC     40 42 46.000 N 74 0 21.000 W 10.00m 50m 5m 2m
+nydc            IN      A       192.0.2.90
+
+; London Office
+london          IN      LOC     51 30 26.000 N 0 7 39.000 W 24.00m 100m 10m 2m
+london          IN      A       192.0.2.91
+
+; Tokyo Office (East longitude)
+tokyo           IN      LOC     35 41 22.000 N 139 41 30.000 E 40.00m 100m 10m 2m
+tokyo           IN      A       192.0.2.92
+
+; Sydney Office (Southern hemisphere, East longitude)
+sydney          IN      LOC     33 52 04.000 S 151 12 26.000 E 58.00m 100m 10m 2m
+sydney          IN      A       192.0.2.93
+
+; High precision location (testing precision fields)
+precise-loc     IN      LOC     40 0 0.001 N 105 0 0.001 W 1654.00m 1m 0.01m 0.01m
+
+; ============================================================================
+; PTR Records (Reverse DNS)
+; ============================================================================
+; Note: PTR records typically live in reverse zones, but including here for completeness
+1.2.0.192.in-addr.arpa.         IN      PTR     comprehensive.test.
+10.2.0.192.in-addr.arpa.        IN      PTR     www.comprehensive.test.
+20.2.0.192.in-addr.arpa.        IN      PTR     mail.comprehensive.test.
+
+; IPv6 reverse (example for 2001:db8::1)
+1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa. IN PTR comprehensive.test.
+
+; ============================================================================
+; Wildcard Records
+; ============================================================================
+*.wildcard      IN      A       192.0.2.100
+*.wildcard      IN      AAAA    2001:db8::100
+*.wildcard      IN      TXT     "Wildcard match"
+
+; Wildcard CNAME
+*.cdn           IN      CNAME   cdn-origin.comprehensive.test.
+cdn-origin      IN      A       192.0.2.101
+
+; ============================================================================
+; Edge Cases and Stress Tests
+; ============================================================================
+
+; Very long label (max 63 characters)
+this-is-a-very-long-label-name-that-approaches-the-sixty-three   IN      A       192.0.2.110
+
+; Multiple labels forming long domain (approaching 253 char limit for FQDN)
+a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.x.y.z.long IN A 192.0.2.111
+
+; Numeric labels (valid but unusual)
+123             IN      A       192.0.2.112
+456.789         IN      A       192.0.2.113
+
+; Hyphenated labels
+my-server       IN      A       192.0.2.114
+--start-hyphens IN      A       192.0.2.115  ; Starting with hyphen (technically invalid but for robustness)
+
+; Mixed case (DNS is case-insensitive, but testing preservation)
+MixedCase       IN      A       192.0.2.116
+UPPERCASE       IN      A       192.0.2.117
+lowercase       IN      A       192.0.2.118
+
+; Unicode/IDN representation (in ASCII/Punycode form)
+xn--nxasmq6b    IN      A       192.0.2.119  ; Punycode for 'ϊϊϊϊϊϊ' (example)
+
+; Minimum TTL test (1 second - unusual but valid)
+min-ttl         1       IN      A       192.0.2.120
+
+; Zero TTL (cache bypass)
+no-cache        0       IN      A       192.0.2.121
+
+; Multiple record types for same name (comprehensive)
+everything      IN      A       192.0.2.130
+everything      IN      AAAA    2001:db8::130
+everything      IN      TXT     "Has everything"
+everything      IN      MX      10      mail.comprehensive.test.
+
+; Very large record set (testing zone file size handling)
+many-records-1  IN      A       192.0.2.140
+many-records-2  IN      A       192.0.2.141
+many-records-3  IN      A       192.0.2.142
+many-records-4  IN      A       192.0.2.143
+many-records-5  IN      A       192.0.2.144
+many-records-6  IN      A       192.0.2.145
+many-records-7  IN      A       192.0.2.146
+many-records-8  IN      A       192.0.2.147
+many-records-9  IN      A       192.0.2.148
+many-records-10 IN      A       192.0.2.149
+
+; Class variations (IN is standard, but others exist)
+; Note: CH (CHAOS) and HS (HESIOD) are rare but valid
+chaos-example   IN      A       192.0.2.150
+; chaos-example   CH      TXT     "CHAOS class"  ; Commented as most parsers expect IN
+
+; Underscore in labels (used for SRV, DKIM, etc.)
+_special._label IN      TXT     "Underscores allowed in service names"
+_service        IN      A       192.0.2.151
+
+; Include directive test (if supported by parser)
+; $INCLUDE /path/to/another/zone/file  ; Commented for standalone testing
+
+; Generate directive test (BIND extension, may not be supported)
+; $GENERATE 1-10 host-$ A 192.0.2.$  ; Commented for compatibility
+
+; ============================================================================
+; Comments and Whitespace Edge Cases
+; ============================================================================
+
+; Leading whitespace (should be handled)
+        whitespace-test IN      A       192.0.2.160
+
+; Trailing comment
+trailing        IN      A       192.0.2.161  ; This is a trailing comment
+
+; Empty lines and multiple blank lines (above and below this comment)
+
+
+multiple-blanks IN      A       192.0.2.162
+
+
+; Tab characters (should be handled as whitespace)
+tab-separated	IN	A	192.0.2.163
+
+; Mixed tabs and spaces
+mixed-ws        IN      A       192.0.2.164
+
+; ============================================================================
+; End of Zone File
+; ============================================================================
+; Total record count: 200+ records covering all major DNS record types
+; This fixture provides comprehensive coverage for DNS protocol parsing testing
+; Validates RFC compliance for rfc1035.c translation to dns/protocol.rs

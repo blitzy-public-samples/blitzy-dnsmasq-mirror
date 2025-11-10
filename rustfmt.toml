@@ -1,0 +1,172 @@
+# rustfmt configuration for dnsmasq Rust refactoring project
+#
+# This file configures rustfmt to enforce consistent code style across the entire
+# Rust codebase. All settings are chosen to maximize readability and maintainability
+# for a network services daemon with complex protocol implementations.
+#
+# CI Pipeline Integration: This configuration is enforced via 'cargo fmt --check'
+# in the CI pipeline, ensuring all contributions adhere to the project's style guide.
+
+# ==============================================================================
+# Edition and Compatibility
+# ==============================================================================
+
+# Rust edition for the project (matches Cargo.toml and rust-toolchain.toml)
+edition = "2021"
+
+# Rustfmt version: "Two" is the stable rustfmt configuration format
+# This ensures compatibility with Rust 1.91.0 as specified in rust-toolchain.toml
+version = "Two"
+
+# ==============================================================================
+# Line Length and Indentation
+# ==============================================================================
+
+# Maximum line width before wrapping (100 characters for readability)
+# Chosen to balance readability on modern displays while avoiding excessive wrapping
+# for complex protocol parsing code common in dnsmasq (DNS, DHCP, TFTP)
+max_width = 100
+
+# Use spaces instead of tabs for consistent rendering across editors
+hard_tabs = false
+
+# Standard Rust indentation: 4 spaces
+tab_spaces = 4
+
+# Unix-style line endings (LF) for cross-platform compatibility
+# Critical for ensuring consistent behavior across Linux, BSD, and macOS deployments
+newline_style = "Unix"
+
+# Use default heuristics for smart formatting decisions
+# Allows rustfmt to make intelligent choices about when to break lines
+use_small_heuristics = "Default"
+
+# ==============================================================================
+# Import Organization
+# ==============================================================================
+
+# Group imports by crate for better organization
+# Results in: use std::...; use external_crate::...; use crate::...;
+imports_granularity = "Crate"
+
+# Group imports into three sections: std library, external crates, internal modules
+# This makes it immediately clear which dependencies are external vs. internal
+# Example organization:
+#   use std::collections::HashMap;
+#   use std::net::IpAddr;
+#
+#   use tokio::net::UdpSocket;
+#   use serde::{Deserialize, Serialize};
+#
+#   use crate::dns::cache::DnsCache;
+#   use crate::dhcp::lease::LeaseDatabase;
+group_imports = "StdExternalCrate"
+
+# Automatically reorder imports alphabetically within each group
+reorder_imports = true
+
+# Reorder module declarations for consistency
+reorder_modules = true
+
+# ==============================================================================
+# Function and Type Formatting
+# ==============================================================================
+
+# Never put function signatures on a single line
+# Complex protocol parsing functions benefit from explicit multi-line signatures
+# Example (forced multi-line):
+#   fn parse_dns_message(
+#       buffer: &[u8],
+#       offset: usize,
+#   ) -> Result<DnsMessage, ParseError> {
+fn_single_line = false
+
+# Force where clauses onto multiple lines for clarity
+# Generic trait bounds are common in async code and benefit from explicit formatting
+# Example:
+#   fn forward_query<T>(query: T) -> impl Future<Output = Result<Response, Error>>
+#   where
+#       T: Into<Query>,
+#       T: Send + 'static,
+where_single_line = false
+
+# Format code examples in documentation comments
+# Ensures doc tests and examples follow the same style as regular code
+format_code_in_doc_comments = true
+
+# Normalize comment style for consistency
+# Ensures uniform spacing and formatting in comments throughout the codebase
+normalize_comments = true
+
+# Wrap long comments at max_width
+# Improves readability of detailed protocol implementation comments
+wrap_comments = true
+
+# ==============================================================================
+# Struct and Enum Formatting
+# ==============================================================================
+
+# Use block indent for array literals (more readable for large protocol constant arrays)
+# Common in dnsmasq for DNS opcodes, DHCP option tables, etc.
+indent_style = "Block"
+
+# Format string literals consistently
+# Important for log messages and error strings throughout the daemon
+format_strings = true
+
+# ==============================================================================
+# Error Handling and Enforcement
+# ==============================================================================
+
+# Warn about lines that exceed max_width but don't fail the build
+# Some protocol parsing expressions may legitimately need longer lines
+error_on_line_overflow = false
+
+# Fail the build if code is not formatted according to this configuration
+# This enforces style consistency in CI and prevents unformatted code from being merged
+error_on_unformatted = true
+
+# ==============================================================================
+# Additional Formatting Options
+# ==============================================================================
+
+# Use field initialization shorthand when possible
+# Example: Config { port, address } instead of Config { port: port, address: address }
+use_field_init_shorthand = true
+
+# Use try shorthand (?) instead of try! macro
+use_try_shorthand = true
+
+# Force explicit discriminants in enums when present
+# Important for protocol enums (e.g., DNS opcodes, DHCP message types)
+force_explicit_abi = true
+
+# Merge derives into a single line when possible
+# Example: #[derive(Debug, Clone, Serialize, Deserialize)]
+merge_derives = true
+
+# ==============================================================================
+# Project-Specific Notes
+# ==============================================================================
+#
+# This configuration is specifically tailored for the dnsmasq C-to-Rust refactoring:
+#
+# 1. Protocol Clarity: Settings prioritize readability of complex protocol parsing
+#    code (DNS RFC 1035, DHCP RFC 2131/3315, TFTP, etc.)
+#
+# 2. Async Code: Multi-line function signatures and where clauses improve clarity
+#    for Tokio-based async implementations replacing C's poll() event loop
+#
+# 3. Import Organization: Clear separation between std, external (tokio, serde, etc.),
+#    and internal modules mirrors the modular refactoring structure
+#
+# 4. Consistency: Strict formatting enforcement ensures all contributors follow
+#    the same style, critical for a large refactoring with 80+ Rust files
+#
+# 5. CI Integration: error_on_unformatted = true ensures 'cargo fmt --check'
+#    fails in CI if code is not properly formatted
+#
+# To format code: cargo fmt
+# To check formatting in CI: cargo fmt --check
+#
+# ==============================================================================

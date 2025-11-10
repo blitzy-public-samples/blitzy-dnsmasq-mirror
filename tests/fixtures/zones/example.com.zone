@@ -1,0 +1,81 @@
+; DNS Zone File for example.com
+; RFC 1035 compliant BIND format zone file
+; Used for integration testing of DNS authoritative server functionality
+
+$ORIGIN example.com.
+$TTL 86400      ; Default TTL of 24 hours
+
+; SOA (Start of Authority) Record
+; Format: domain IN SOA primary-ns admin-email (serial refresh retry expire minimum)
+@       IN      SOA     ns1.example.com. admin.example.com. (
+                        2025010601      ; Serial number (YYYYMMDDNN)
+                        3600            ; Refresh (1 hour)
+                        1800            ; Retry (30 minutes)
+                        604800          ; Expire (1 week)
+                        86400           ; Minimum TTL (24 hours)
+                        )
+
+; NS (Nameserver) Records
+; Authoritative nameservers for this zone
+@       IN      NS      ns1.example.com.
+@       IN      NS      ns2.example.com.
+
+; A Records (IPv4 addresses)
+; Primary domain and common hostnames
+@       IN      A       192.0.2.1
+ns1     IN      A       192.0.2.10
+ns2     IN      A       192.0.2.11
+www     IN      A       192.0.2.100
+mail    IN      A       192.0.2.20
+ftp     IN      A       192.0.2.30
+smtp    IN      A       192.0.2.20
+webmail IN      A       192.0.2.101
+api     IN      A       192.0.2.102
+db      IN      A       192.0.2.50
+
+; AAAA Records (IPv6 addresses)
+; IPv6 equivalents for dual-stack hosts
+@       IN      AAAA    2001:db8::1
+ns1     IN      AAAA    2001:db8::10
+ns2     IN      AAAA    2001:db8::11
+www     IN      AAAA    2001:db8::100
+mail    IN      AAAA    2001:db8::20
+api     IN      AAAA    2001:db8::102
+
+; CNAME Records (Aliases)
+; Canonical name records pointing to other hosts
+www2    IN      CNAME   www.example.com.
+blog    IN      CNAME   www.example.com.
+shop    IN      CNAME   www.example.com.
+portal  IN      CNAME   www.example.com.
+imap    IN      CNAME   mail.example.com.
+pop     IN      CNAME   mail.example.com.
+pop3    IN      CNAME   mail.example.com.
+
+; MX Records (Mail Exchangers)
+; Mail server priorities (lower number = higher priority)
+@       IN      MX      10 mail.example.com.
+@       IN      MX      20 mail2.example.com.
+
+; Additional A record for backup mail server
+mail2   IN      A       192.0.2.21
+
+; TXT Records
+; Various text records for SPF, domain verification, etc.
+@       IN      TXT     "v=spf1 mx a:mail.example.com ip4:192.0.2.20 -all"
+@       IN      TXT     "example-domain-verification=abc123def456"
+_dmarc  IN      TXT     "v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@example.com"
+
+; Subdomain TXT records
+test    IN      TXT     "Test record for integration testing"
+info    IN      TXT     "Contact: admin@example.com"
+
+; Additional hosts for testing
+host1   IN      A       192.0.2.201
+host2   IN      A       192.0.2.202
+host3   IN      A       192.0.2.203
+
+; Wildcard record for testing
+*.test  IN      A       192.0.2.250
+
+; End of zone file

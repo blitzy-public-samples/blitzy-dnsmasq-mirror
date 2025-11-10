@@ -1,0 +1,108 @@
+; IPv6 Reverse DNS Zone File for 2001:db8::/32 (RFC 3849 Documentation Prefix)
+; Zone: 8.b.d.0.1.0.0.2.ip6.arpa
+; Purpose: Integration testing for IPv6 reverse DNS lookups
+; Format: RFC 3596 nibble-format PTR records
+;
+; Each IPv6 address is expanded to full 32 hex digits, then reversed
+; at nibble (4-bit) boundaries for ip6.arpa delegation.
+;
+; Example: 2001:db8::1
+;   Full format: 2001:0db8:0000:0000:0000:0000:0000:0001
+;   Hex digits:  2 0 0 1 0 d b 8 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
+;   Reversed:    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 b d 0 1 0 0 2
+;   Result:      1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa
+
+$ORIGIN 8.b.d.0.1.0.0.2.ip6.arpa.
+$TTL 3600
+
+; Start of Authority
+@       IN      SOA     ns1.example.com. admin.example.com. (
+                        2024010601      ; Serial (YYYYMMDDNN)
+                        3600            ; Refresh (1 hour)
+                        1800            ; Retry (30 minutes)
+                        604800          ; Expire (1 week)
+                        86400 )         ; Negative Cache TTL (1 day)
+
+; Name Servers
+@       IN      NS      ns1.example.com.
+@       IN      NS      ns2.example.com.
+
+; PTR Records for IPv6 Reverse Lookups
+; Each record maps an IPv6 address to a hostname
+
+; 2001:db8::1 -> host1.example.com
+1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     host1.example.com.
+
+; 2001:db8::2 -> host2.example.com
+2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     host2.example.com.
+
+; 2001:db8::10 -> host10.example.com
+0.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     host10.example.com.
+
+; 2001:db8::53 -> dns.example.com (DNS server)
+3.5.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     dns.example.com.
+
+; 2001:db8::100 -> server.example.com
+0.0.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     server.example.com.
+
+; 2001:db8:0:1::1 -> subnet1-gw.example.com (Gateway in subnet 1)
+1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.1.0.0.0.0.0.0.0     IN      PTR     subnet1-gw.example.com.
+
+; 2001:db8:0:1::2 -> subnet1-host.example.com
+2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.1.0.0.0.0.0.0.0     IN      PTR     subnet1-host.example.com.
+
+; 2001:db8:0:2::1 -> subnet2-gw.example.com (Gateway in subnet 2)
+1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.2.0.0.0.0.0.0.0     IN      PTR     subnet2-gw.example.com.
+
+; 2001:db8:1:2:3:4:5:6 -> complex-host.example.com (Complex address)
+6.0.0.0.5.0.0.0.4.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0     IN      PTR     complex-host.example.com.
+
+; 2001:db8:abcd:ef01:2345:6789:abcd:ef01 -> hex-test.example.com (All hex digits)
+1.0.f.e.d.c.b.a.9.8.7.6.5.4.3.2.1.0.f.e.d.c.b.a     IN      PTR     hex-test.example.com.
+
+; 2001:db8::dead:beef -> deadbeef.example.com (Common test pattern)
+f.e.e.b.d.a.e.d.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     deadbeef.example.com.
+
+; 2001:db8::cafe:babe -> cafebabe.example.com (Another test pattern)
+e.b.a.b.e.f.a.c.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     cafebabe.example.com.
+
+; 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff -> max-address.example.com (Maximum address in range)
+f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f.f     IN      PTR     max-address.example.com.
+
+; Delegation examples for deeper zones
+; Delegate a /48 subnet (2001:db8:1::/48) to other name servers
+1.0.0.0     IN      NS      ns1.subnet1.example.com.
+1.0.0.0     IN      NS      ns2.subnet1.example.com.
+
+; Delegate another /48 subnet (2001:db8:2::/48)
+2.0.0.0     IN      NS      ns1.subnet2.example.com.
+2.0.0.0     IN      NS      ns2.subnet2.example.com.
+
+; Infrastructure hosts
+; 2001:db8::fe:1 -> router1.example.com
+1.0.0.0.e.f.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     router1.example.com.
+
+; 2001:db8::fe:2 -> router2.example.com
+2.0.0.0.e.f.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     router2.example.com.
+
+; 2001:db8::ff:1 -> firewall.example.com
+1.0.0.0.f.f.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     firewall.example.com.
+
+; SLAAC-style addresses (EUI-64 based)
+; 2001:db8::a00:27ff:fe12:3456 -> slaac-host.example.com
+6.5.4.3.2.1.e.f.f.f.7.2.0.0.a.0.0.0.0.0.0.0.0.0     IN      PTR     slaac-host.example.com.
+
+; Privacy extension addresses (random interface ID)
+; 2001:db8::1234:5678:9abc:def0 -> privacy-host.example.com
+0.f.e.d.c.b.a.9.8.7.6.5.4.3.2.1.0.0.0.0.0.0.0.0     IN      PTR     privacy-host.example.com.
+
+; Multi-homed host with multiple PTR records (same IP, multiple hostnames)
+; 2001:db8::999 -> multi1.example.com and multi2.example.com
+9.9.9.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     multi1.example.com.
+9.9.9.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     multi2.example.com.
+
+; Test edge cases
+; 2001:db8::0 -> zero-host.example.com (All zeros in interface ID)
+0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0     IN      PTR     zero-host.example.com.
+
+; End of IPv6 Reverse Zone File

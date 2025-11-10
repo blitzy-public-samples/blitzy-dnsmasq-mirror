@@ -1,0 +1,140 @@
+# Multi-stage Dockerfile for dnsmasq Rust implementation
+# Supports Alpine Linux 3.19.9, 3.20.8, 3.21.5, and 3.22.2
+# Produces a minimal, secure container with statically-linked dnsmasq-rs binary
+
+# =============================================================================
+# STAGE 1: Builder - Compile Rust binary with musl for static linking
+# =============================================================================
+FROM rust:1.91.0-alpine AS builder
+
+# Install build dependencies required for compiling dnsmasq-rs
+# - musl-dev: musl C library development files for static linking
+# - pkgconf: pkg-config implementation for dependency detection
+# - linux-headers: kernel headers for netlink, BPF, and platform-specific APIs
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconf \
+    linux-headers
+
+# Set working directory for build
+WORKDIR /usr/src/dnsmasq
+
+# Copy dependency manifests first for better layer caching
+# Cargo will download dependencies if Cargo.toml or Cargo.lock changes
+COPY Cargo.toml Cargo.lock ./
+COPY rust-toolchain.toml ./
+
+# Copy entire source tree
+# Note: This maintains coexistence with C implementation as per Section 0.1.1
+COPY src/ ./src/
+COPY benches/ ./benches/
+COPY tests/ ./tests/
+
+# Build release binary with default features (DNS, DHCP v4/v6, TFTP)
+# --release: optimized production build
+# --features default: enables DNS, DHCPv4, DHCPv6, and TFTP subsystems
+# --target x86_64-unknown-linux-musl: statically linked musl binary
+RUN cargo build --release --features default
+
+# Verify the binary was created
+RUN ls -lh /usr/src/dnsmasq/target/release/dnsmasq-rs
+
+# =============================================================================
+# STAGE 2: Runtime - Minimal Alpine Linux container
+# =============================================================================
+# ARG allows building with different Alpine versions via --build-arg
+ARG ALPINE_VERSION=3.22.2
+FROM alpine:${ALPINE_VERSION} AS runtime
+
+# Install minimal runtime dependencies
+# - ca-certificates: required for DNSSEC validation with HTTPS bootstrapping
+# - tzdata: accurate timestamp handling for lease expiry and log messages
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata
+
+# Create unprivileged user and group for security (Section 0.7.5)
+# -S: create system user/group
+# -G: add user to specified group
+# Running as non-root follows principle of least privilege
+RUN addgroup -S dnsmasq && \
+    adduser -S -G dnsmasq -H -h /var/lib/dnsmasq dnsmasq
+
+# Copy statically-linked binary from builder stage
+COPY --from=builder /usr/src/dnsmasq/target/release/dnsmasq-rs /usr/local/sbin/dnsmasq-rs
+
+# Create required directories with proper ownership
+# /etc/dnsmasq.d/: configuration drop-in directory
+# /var/lib/misc/: DHCP lease database storage
+# /var/run/dnsmasq/: PID file and runtime state
+RUN mkdir -p \
+    /etc/dnsmasq.d \
+    /var/lib/misc \
+    /var/run/dnsmasq && \
+    chown -R dnsmasq:dnsmasq \
+    /etc/dnsmasq.d \
+    /var/lib/misc \
+    /var/run/dnsmasq
+
+# Set secure permissions on binary
+RUN chmod 755 /usr/local/sbin/dnsmasq-rs
+
+# Expose standard dnsmasq service ports
+# 53/udp, 53/tcp: DNS queries
+# 67/udp: DHCPv4 server (BOOTPS)
+# 69/udp: TFTP server for network boot (PXE)
+EXPOSE 53/udp 53/tcp 67/udp 69/udp
+
+# Declare volumes for persistent data and configuration
+# These can be mounted from host or other containers
+VOLUME ["/etc/dnsmasq.conf"]
+VOLUME ["/var/lib/misc"]
+VOLUME ["/etc/hosts"]
+
+# Switch to unprivileged user
+# Container runs as dnsmasq user, not root
+USER dnsmasq
+
+# Set entrypoint to dnsmasq-rs binary
+ENTRYPOINT ["/usr/local/sbin/dnsmasq-rs"]
+
+# Default command-line arguments
+# --conf-file: primary configuration file location
+# --no-daemon: run in foreground for container compatibility (required for proper signal handling)
+CMD ["--conf-file=/etc/dnsmasq.conf", "--no-daemon"]
+
+# =============================================================================
+# Build Instructions:
+# =============================================================================
+# Default build (Alpine 3.22.2):
+#   docker build -f Dockerfile.rust -t dnsmasq-rs:latest .
+#
+# Build with specific Alpine version:
+#   docker build -f Dockerfile.rust --build-arg ALPINE_VERSION=3.19.9 -t dnsmasq-rs:alpine3.19 .
+#   docker build -f Dockerfile.rust --build-arg ALPINE_VERSION=3.20.8 -t dnsmasq-rs:alpine3.20 .
+#   docker build -f Dockerfile.rust --build-arg ALPINE_VERSION=3.21.5 -t dnsmasq-rs:alpine3.21 .
+#
+# Run container:
+#   docker run -d --name dnsmasq \
+#     -p 53:53/udp -p 53:53/tcp \
+#     -p 67:67/udp -p 69:69/udp \
+#     -v /path/to/dnsmasq.conf:/etc/dnsmasq.conf:ro \
+#     -v /path/to/hosts:/etc/hosts:ro \
+#     -v dnsmasq-leases:/var/lib/misc \
+#     dnsmasq-rs:latest
+#
+# Configuration validation:
+#   docker run --rm -v /path/to/dnsmasq.conf:/etc/dnsmasq.conf:ro \
+#     dnsmasq-rs:latest --test
+# =============================================================================
+
+# =============================================================================
+# Security Notes:
+# =============================================================================
+# - Binary is statically linked (no runtime library dependencies)
+# - Runs as unprivileged user (dnsmasq, not root)
+# - Minimal attack surface (only required runtime dependencies)
+# - No shell or package manager in final image
+# - Read-only configuration volumes recommended
+# - Supports capability-based privilege management (e.g., CAP_NET_BIND_SERVICE)
+# =============================================================================

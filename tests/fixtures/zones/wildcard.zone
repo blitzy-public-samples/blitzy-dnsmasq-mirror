@@ -1,0 +1,235 @@
+; Wildcard DNS Zone File for Testing
+; Demonstrates wildcard matching behavior, precedence rules, and exception handling
+; Tests domain matching module (dns/domain from domain.c and domain-match.c)
+; Validates RFC 4592 compliance for wildcard DNS records
+;
+; Domain: wildcard.test
+; Purpose: Integration testing of wildcard resolution logic
+;
+; RFC 4592 Wildcard Rules Tested:
+; 1. Wildcards only match when there's no exact match
+; 2. Specific records always take precedence over wildcards
+; 3. Empty non-terminals block wildcard matching
+; 4. Wildcards apply to the immediate child label only
+;
+
+$TTL 3600
+$ORIGIN wildcard.test.
+
+; Standard zone authority records
+@       SOA     ns1.wildcard.test. admin.wildcard.test. (
+                2024010601      ; Serial (YYYYMMDDNN format)
+                7200            ; Refresh (2 hours)
+                3600            ; Retry (1 hour)
+                1209600         ; Expire (2 weeks)
+                86400 )         ; Minimum TTL (1 day)
+
+; Nameservers
+@       NS      ns1.wildcard.test.
+@       NS      ns2.wildcard.test.
+
+ns1     A       192.0.2.1
+ns2     A       192.0.2.2
+
+;
+; SECTION 1: Basic Wildcard Records
+; Tests simple wildcard matching at the zone apex level
+;
+
+; Wildcard A record - matches any subdomain not explicitly defined
+*.wildcard.test.        A       192.0.2.100
+
+; Wildcard AAAA record - matches any subdomain for IPv6
+*.wildcard.test.        AAAA    2001:db8::100
+
+; Wildcard MX record - provides mail exchanger for any subdomain
+*.wildcard.test.        MX      10 mail.wildcard.test.
+
+; Wildcard TXT record - informational text for any subdomain
+*.wildcard.test.        TXT     "Wildcard TXT record for any subdomain"
+
+;
+; SECTION 2: Specific Records Override Wildcards (RFC 4592 Section 2.2.1)
+; Tests precedence where explicit records take priority over wildcards
+;
+
+; Explicit record for www - overrides wildcard *.wildcard.test
+www.wildcard.test.      A       192.0.2.10
+www.wildcard.test.      AAAA    2001:db8::10
+www.wildcard.test.      TXT     "Explicit www record, NOT wildcard"
+
+; Explicit record for mail - overrides wildcard *.wildcard.test
+mail.wildcard.test.     A       192.0.2.20
+mail.wildcard.test.     AAAA    2001:db8::20
+mail.wildcard.test.     MX      10 mail.wildcard.test.
+mail.wildcard.test.     TXT     "Explicit mail server"
+
+; Explicit record for ftp - overrides wildcard *.wildcard.test
+ftp.wildcard.test.      A       192.0.2.30
+ftp.wildcard.test.      TXT     "Explicit FTP server"
+
+;
+; SECTION 3: Multiple Wildcard Levels
+; Tests wildcards at different delegation levels
+;
+
+; Second-level wildcard for subdomain
+*.sub.wildcard.test.    A       192.0.2.200
+*.sub.wildcard.test.    AAAA    2001:db8::200
+*.sub.wildcard.test.    TXT     "Wildcard for *.sub.wildcard.test"
+
+; Specific override within sub.wildcard.test
+www.sub.wildcard.test.  A       192.0.2.210
+www.sub.wildcard.test.  TXT     "Explicit www.sub, overrides *.sub wildcard"
+
+; Third-level wildcard
+*.deep.sub.wildcard.test.       A       192.0.2.300
+*.deep.sub.wildcard.test.       TXT     "Third-level wildcard"
+
+;
+; SECTION 4: Wildcard with CNAME Records
+; Tests CNAME behavior with wildcards
+;
+
+; Wildcard CNAME - any subdomain under alias points to target
+*.alias.wildcard.test.  CNAME   target.wildcard.test.
+target.wildcard.test.   A       192.0.2.50
+target.wildcard.test.   AAAA    2001:db8::50
+
+;
+; SECTION 5: Empty Non-Terminals (RFC 4592 Section 2.2.2)
+; Tests wildcard blocking by intermediate labels
+;
+
+; Empty non-terminal: creates intermediate.wildcard.test without records
+; This blocks *.wildcard.test from matching hosts.intermediate.wildcard.test
+intermediate.wildcard.test.     NS      ns.intermediate.wildcard.test.
+
+; Glue record for the NS delegation
+ns.intermediate.wildcard.test.  A       192.0.2.60
+
+; Explicit record deeper in the tree
+host.intermediate.wildcard.test.        A       192.0.2.61
+host.intermediate.wildcard.test.        TXT     "Explicit host under empty non-terminal"
+
+; Note: Queries for random.intermediate.wildcard.test will return NXDOMAIN
+; because 'intermediate' is an empty non-terminal that blocks wildcard matching
+
+;
+; SECTION 6: Multiple Record Types on Same Wildcard
+; Tests comprehensive record type coverage for wildcard domains
+;
+
+*.multi.wildcard.test.  A       192.0.2.150
+*.multi.wildcard.test.  A       192.0.2.151
+*.multi.wildcard.test.  AAAA    2001:db8::150
+*.multi.wildcard.test.  AAAA    2001:db8::151
+*.multi.wildcard.test.  MX      10 mail1.wildcard.test.
+*.multi.wildcard.test.  MX      20 mail2.wildcard.test.
+*.multi.wildcard.test.  TXT     "Multiple record types"
+*.multi.wildcard.test.  TXT     "Second TXT record"
+
+;
+; SECTION 7: Wildcard Matching Edge Cases
+;
+
+; Wildcard at different TTLs to test TTL handling
+*.ttl.wildcard.test.    300     A       192.0.2.250
+*.ttl.wildcard.test.    600     AAAA    2001:db8::250
+
+; Wildcard for testing case-insensitive matching
+*.CaSe.wildcard.test.   A       192.0.2.251
+*.CaSe.wildcard.test.   TXT     "Case-insensitive test"
+
+;
+; SECTION 8: Wildcard with Internationalized Labels
+; Tests wildcard behavior with non-ASCII labels (if IDN support is enabled)
+;
+
+; Example with punycode for internationalized domain names
+*.xn--example-9ua.wildcard.test.        A       192.0.2.252
+*.xn--example-9ua.wildcard.test.        TXT     "IDN wildcard (xn--example-9ua = exämple)"
+
+;
+; SECTION 9: Wildcard Precedence Test Cases
+; Explicit scenarios for testing precedence logic
+;
+
+; Scenario A: Wildcard exists, no specific record
+; Query: anything.wildcard.test -> Should return 192.0.2.100 (from *.wildcard.test)
+
+; Scenario B: Wildcard exists, specific record exists
+; Query: www.wildcard.test -> Should return 192.0.2.10 (specific record)
+
+; Scenario C: Nested wildcard, no specific record
+; Query: anything.sub.wildcard.test -> Should return 192.0.2.200 (from *.sub.wildcard.test)
+
+; Scenario D: Nested wildcard, specific record exists
+; Query: www.sub.wildcard.test -> Should return 192.0.2.210 (specific record)
+
+; Scenario E: Empty non-terminal blocks wildcard
+; Query: random.intermediate.wildcard.test -> Should return NXDOMAIN
+
+; Scenario F: Triple-level query
+; Query: random.deep.sub.wildcard.test -> Should return 192.0.2.300
+
+; Scenario G: Wildcard CNAME resolution
+; Query: random.alias.wildcard.test -> Should CNAME to target.wildcard.test, then return 192.0.2.50
+
+;
+; SECTION 10: Negative Testing - No Wildcard Match
+;
+
+; Explicit record with no wildcard at this level
+explicit-only.wildcard.test.    A       192.0.2.253
+explicit-only.wildcard.test.    TXT     "No wildcard at this level"
+
+; Query: anything.explicit-only.wildcard.test -> Should return NXDOMAIN
+; (No wildcard *.explicit-only.wildcard.test defined)
+
+;
+; SECTION 11: RFC 4592 Compliance Examples
+;
+
+; Example from RFC 4592 Section 2.1.1
+; Demonstrates closest encloser and source of synthesis
+*.example.wildcard.test.        A       192.0.2.254
+*.example.wildcard.test.        MX      10 mail.wildcard.test.
+
+host1.example.wildcard.test.    A       192.0.2.240
+host1.example.wildcard.test.    TXT     "Explicit host1"
+
+; Query: host2.example.wildcard.test -> Synthesized from *.example.wildcard.test
+; Query: host1.example.wildcard.test -> Returns explicit record 192.0.2.240
+
+;
+; SECTION 12: Wildcard with Different Classes (Future Extension)
+; Standard zone files typically only use IN (Internet) class
+;
+
+*.class-test.wildcard.test.     IN      A       192.0.2.255
+*.class-test.wildcard.test.     IN      TXT     "Internet class wildcard"
+
+;
+; END OF WILDCARD ZONE FILE
+;
+; Test Coverage Summary:
+; - Basic wildcard records (A, AAAA, MX, TXT, CNAME)
+; - Specific record precedence over wildcards
+; - Multiple wildcard levels (2nd and 3rd level)
+; - Empty non-terminal blocking
+; - Multiple record types on same wildcard
+; - TTL variations
+; - Case-insensitive matching
+; - IDN/Punycode wildcards
+; - RFC 4592 compliance scenarios
+; - Negative test cases (NXDOMAIN expectations)
+;
+; Expected Behavior for Rust Implementation:
+; 1. dns/domain module must implement wildcard matching per RFC 4592
+; 2. Specific records must always take precedence over wildcards
+; 3. Empty non-terminals must block wildcard expansion
+; 4. Wildcard synthesis must generate appropriate responses
+; 5. Case-insensitive domain matching must be preserved
+; 6. CNAME wildcards must follow CNAME chain resolution rules
+;
