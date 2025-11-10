@@ -334,7 +334,7 @@ pub use options::{
 
 // IA re-exports
 pub use ia::{
-    IdentityAssociation, IaNa, IaTa, IaPd,
+    IdentityAssociation,
     IaAddr, IaPrefix, IaBuilder, IaParser, IaError,
     check_ia, build_ia, add_address,
 };
@@ -342,15 +342,11 @@ pub use ia::{
 // Handler re-exports
 pub use handler::{
     Dhcp6Handler, Dhcp6State, Dhcp6Response, Dhcp6HandlerError,
-    process_message,
-    handle_solicit, handle_request, handle_renew, handle_rebind,
-    handle_confirm, handle_release, handle_decline, handle_information_request,
 };
 
 // Server re-exports
 pub use server::{
-    Dhcp6Server, Dhcp6ServerConfig, Dhcp6ServerError,
-    bind, run, send_response, recv_packet,
+    Dhcp6Server, Dhcp6ServerConfig,
 };
 
 // ================================================================================================
@@ -358,21 +354,22 @@ pub use server::{
 // ================================================================================================
 
 use std::fmt;
-use std::error::Error;
 use std::io;
 use std::net::{Ipv6Addr, SocketAddrV6};
+use thiserror::Error;
 
 /// Comprehensive DHCPv6 error type encompassing all failure modes
 ///
 /// This enum consolidates errors from all DHCPv6 submodules into a single
 /// type for ergonomic error handling at module boundaries. Each variant maps
 /// to specific protocol violations, resource failures, or configuration issues.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Dhcp6Error {
     /// Packet is too small to contain valid DHCPv6 header (minimum 4 bytes)
     ///
     /// DHCPv6 messages require at minimum: 1-byte message type + 3-byte transaction ID.
     /// This error indicates a truncated packet or non-DHCPv6 data.
+    #[error("DHCPv6 packet too small: {actual} bytes (required {required})")]
     PacketTooSmall {
         /// Actual packet size received
         actual: usize,
@@ -383,6 +380,7 @@ pub enum Dhcp6Error {
     /// Message type value is not a valid DHCPv6 message type (1-13)
     ///
     /// RFC 3315 defines message types 1-13. Values outside this range are protocol violations.
+    #[error("Invalid DHCPv6 message type: {value} (valid range 1-13)")]
     InvalidMessageType {
         /// Invalid message type value received
         value: u8,
@@ -391,6 +389,7 @@ pub enum Dhcp6Error {
     /// General packet parsing error (malformed options, truncated fields)
     ///
     /// Covers option parsing failures, invalid TLV encoding, or corrupted packet structure.
+    #[error("Invalid DHCPv6 packet: {reason}")]
     InvalidPacket {
         /// Human-readable description of parsing failure
         reason: String,
@@ -399,11 +398,13 @@ pub enum Dhcp6Error {
     /// CLIENT-ID option (OptionCode::ClientId) is missing but mandatory
     ///
     /// All DHCPv6 messages except INFORMATION-REQUEST from clients must contain CLIENT-ID.
+    #[error("DHCPv6 CLIENT-ID option missing (mandatory)")]
     ClientIdMissing,
 
     /// SERVER-ID in REQUEST/RENEW/REBIND does not match this server's DUID
     ///
     /// Client is attempting to renew from wrong server. Server must ignore the message.
+    #[error("DHCPv6 SERVER-ID mismatch: expected {expected:?}, received {received:?}")]
     ServerIdMismatch {
         /// Expected server DUID (this server)
         expected: Vec<u8>,
@@ -415,6 +416,7 @@ pub enum Dhcp6Error {
     ///
     /// All addresses in matching DHCPv6 contexts are exhausted or outside allocation range.
     /// Server responds with STATUS_NoAddrsAvail.
+    #[error("No DHCPv6 address available for client DUID {client_duid:?} IAID {iaid:#x}")]
     NoAddressAvailable {
         /// Client DUID requesting address
         client_duid: Vec<u8>,
@@ -426,6 +428,7 @@ pub enum Dhcp6Error {
     ///
     /// Client sent CONFIRM with addresses not valid for its current link.
     /// Server responds with STATUS_NotOnLink.
+    #[error("DHCPv6 address {address} not valid on interface {interface}")]
     NotOnLink {
         /// Address that failed validation
         address: Ipv6Addr,
@@ -437,6 +440,7 @@ pub enum Dhcp6Error {
     ///
     /// Client incorrectly sent unicast where multicast is required.
     /// Server responds with STATUS_UseMulticast.
+    #[error("DHCPv6 {message_type} must be sent to multicast address")]
     UseMulticast {
         /// Message type that violated multicast requirement
         message_type: MessageType,
@@ -446,6 +450,7 @@ pub enum Dhcp6Error {
     ///
     /// Client is attempting operation on IAID with no active lease.
     /// Server responds with STATUS_NoBinding.
+    #[error("No DHCPv6 binding found for client DUID {client_duid:?} IAID {iaid:#x}")]
     NoBinding {
         /// Client DUID
         client_duid: Vec<u8>,
@@ -456,6 +461,7 @@ pub enum Dhcp6Error {
     /// Relay agent processing error
     ///
     /// Failed to parse or construct RELAY-FORW/RELAY-REPL messages.
+    #[error("DHCPv6 relay error: {reason}")]
     RelayError {
         /// Description of relay processing failure
         reason: String,
@@ -464,60 +470,12 @@ pub enum Dhcp6Error {
     /// I/O error during socket operations (bind, recv, send)
     ///
     /// Wraps `std::io::Error` from socket operations.
+    #[error("DHCPv6 I/O error: {source}")]
     IoError {
         /// Underlying I/O error
         #[source]
         source: io::Error,
     },
-}
-
-impl fmt::Display for Dhcp6Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Dhcp6Error::PacketTooSmall { actual, required } => {
-                write!(f, "DHCPv6 packet too small: {} bytes (required {})", actual, required)
-            }
-            Dhcp6Error::InvalidMessageType { value } => {
-                write!(f, "Invalid DHCPv6 message type: {} (valid range 1-13)", value)
-            }
-            Dhcp6Error::InvalidPacket { reason } => {
-                write!(f, "Invalid DHCPv6 packet: {}", reason)
-            }
-            Dhcp6Error::ClientIdMissing => {
-                write!(f, "DHCPv6 CLIENT-ID option missing (mandatory)")
-            }
-            Dhcp6Error::ServerIdMismatch { expected, received } => {
-                write!(f, "DHCPv6 SERVER-ID mismatch: expected {:?}, received {:?}", expected, received)
-            }
-            Dhcp6Error::NoAddressAvailable { client_duid, iaid } => {
-                write!(f, "No DHCPv6 address available for client DUID {:?} IAID {:#x}", client_duid, iaid)
-            }
-            Dhcp6Error::NotOnLink { address, interface } => {
-                write!(f, "DHCPv6 address {} not valid on interface {}", address, interface)
-            }
-            Dhcp6Error::UseMulticast { message_type } => {
-                write!(f, "DHCPv6 {} must be sent to multicast address", message_type)
-            }
-            Dhcp6Error::NoBinding { client_duid, iaid } => {
-                write!(f, "No DHCPv6 binding found for client DUID {:?} IAID {:#x}", client_duid, iaid)
-            }
-            Dhcp6Error::RelayError { reason } => {
-                write!(f, "DHCPv6 relay error: {}", reason)
-            }
-            Dhcp6Error::IoError { source } => {
-                write!(f, "DHCPv6 I/O error: {}", source)
-            }
-        }
-    }
-}
-
-impl Error for Dhcp6Error {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Dhcp6Error::IoError { source } => Some(source),
-            _ => None,
-        }
-    }
 }
 
 impl From<io::Error> for Dhcp6Error {
