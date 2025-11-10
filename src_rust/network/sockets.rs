@@ -151,8 +151,10 @@ use socket2::{Domain, Protocol, Socket, Type as SocketType};
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::net::{TcpListener, UdpSocket};
 use tracing::{debug, error, info, trace, warn};
+
+// Re-export tokio socket types for public API
+pub use tokio::net::{TcpListener, UdpSocket};
 
 // TCP constants
 const TCP_BACKLOG: i32 = 32;
