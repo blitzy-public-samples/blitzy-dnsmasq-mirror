@@ -544,6 +544,12 @@ pub struct DhcpContext {
     pub flags: u32,
     /// Next context (represented as Option for Rust safety)
     pub next: Option<Box<DhcpContext>>,
+    /// Router Advertisement short period start time (for fast initial RAs)
+    /// Used to track when fast RA transmission period began (first 60 seconds)
+    pub ra_short_period_start: Option<SystemTime>,
+    /// Next scheduled Router Advertisement transmission time
+    /// Used for periodic RA timing and event loop scheduling
+    pub ra_time: Option<SystemTime>,
 }
 
 /// Static DHCP lease configuration

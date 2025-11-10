@@ -70,24 +70,21 @@
 //! gracefully without panicking.
 
 use std::collections::HashMap;
-use std::io::{Error as IoError, Result as IoResult};
-use std::net::{Ipv6Addr, SocketAddrV6, IpAddr};
+use std::io::Error as IoError;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime, Instant};
+use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
 use tokio::net::UdpSocket;
-use tokio::select;
-use tokio::sync::RwLock as TokioRwLock;
-use tokio::time::{interval, sleep, Duration as TokioDuration, Instant as TokioInstant};
+use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::task::{spawn, JoinHandle};
 
-use byteorder::{WriteBytesExt, BigEndian, ReadBytesExt};
+use byteorder::{WriteBytesExt, BigEndian};
 use nix::sys::socket::{
-    socket, setsockopt, SockaddrIn6, AddressFamily, SockType, SockProtocol,
-    sockopt::Ipv6PktInfo,
+    socket, setsockopt, AddressFamily, SockType, SockProtocol, SockFlag,
+    sockopt::{Ipv6RecvPacketInfo, Ipv6Ttl, Ipv6MulticastHops},
 };
-use nix::libc::IPPROTO_ICMPV6;
 use tracing::{info, debug, warn, error, trace};
 
 use crate::ipv6::radv::protocol::ICMP6_OPT_SOURCE_MAC;
@@ -125,6 +122,7 @@ const MAX_RTR_ADV_INTERVAL: u32 = 1800;
 const DEFAULT_LIFETIME_MULTIPLIER: u32 = 3;
 
 /// Maximum router lifetime in seconds
+#[allow(dead_code)]
 const MAX_ROUTER_LIFETIME: u32 = 9000;
 
 /// Short period duration in seconds (fast initial RAs for first 60 seconds)
@@ -325,27 +323,27 @@ impl RadVServer {
     async fn create_icmp6_socket() -> Result<UdpSocket, RadVError> {
         // Use standard library socket creation then convert to tokio
         // This allows us to set socket options before making it async
-        use std::os::unix::io::{AsRawFd, FromRawFd};
+        use std::os::unix::io::FromRawFd;
         
         // Create raw ICMPv6 socket
         let sock_fd = socket(
             AddressFamily::Inet6,
             SockType::Raw,
-            nix::sys::socket::SockFlag::SOCK_NONBLOCK | nix::sys::socket::SockFlag::SOCK_CLOEXEC,
-            Some(nix::sys::socket::SockProtocol::from(IPPROTO_ICMPV6)),
+            SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+            Some(SockProtocol::IcmpV6),
         ).map_err(|e| RadVError::SocketError(IoError::from_raw_os_error(e as i32)))?;
         
         // Set hop limit to 255 for unicast (RFC 4861 requirement)
         let hop_limit: i32 = DEFAULT_HOP_LIMIT as i32;
-        nix::sys::socket::setsockopt(sock_fd, nix::sys::socket::sockopt::Ipv6HopLimit, &hop_limit)
+        setsockopt(&sock_fd, Ipv6Ttl, &hop_limit)
             .map_err(|e| RadVError::SocketError(IoError::from_raw_os_error(e as i32)))?;
         
         // Set multicast hop limit to 255
-        nix::sys::socket::setsockopt(sock_fd, nix::sys::socket::sockopt::Ipv6MulticastHops, &hop_limit)
+        setsockopt(&sock_fd, Ipv6MulticastHops, &hop_limit)
             .map_err(|e| RadVError::SocketError(IoError::from_raw_os_error(e as i32)))?;
         
         // Enable receiving packet info (interface index and destination address)
-        nix::sys::socket::setsockopt(sock_fd, Ipv6PktInfo, &true)
+        setsockopt(&sock_fd, Ipv6RecvPacketInfo, &true)
             .map_err(|e| RadVError::SocketError(IoError::from_raw_os_error(e as i32)))?;
         
         // Configure ICMP6 filter to pass Router Solicitation and Echo Reply
@@ -353,16 +351,17 @@ impl RadVServer {
         // For now, we'll rely on application-level filtering
         
         // Convert to tokio UdpSocket
-        let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(sock_fd) };
+        use std::os::fd::IntoRawFd;
+        let raw_fd = sock_fd.into_raw_fd();
+        let std_socket = unsafe { std::net::UdpSocket::from_raw_fd(raw_fd) };
         std_socket.set_nonblocking(true)
             .map_err(|e| RadVError::SocketError(e))?;
         
         let tokio_socket = UdpSocket::from_std(std_socket)
             .map_err(|e| RadVError::SocketError(e))?;
         
-        // Bind to :: (all interfaces) for receiving
-        let bind_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
-        // Note: Raw sockets don't need explicit bind in same way as UDP
+        // Note: Raw ICMPv6 sockets don't require explicit bind like UDP sockets
+        // The socket will receive packets on all interfaces
         
         Ok(tokio_socket)
     }
@@ -722,7 +721,7 @@ impl RadVServer {
             
             // Process overdue contexts
             for ctx_idx in overdue_contexts {
-                let (if_index, if_name) = {
+                let (if_index, _if_name) = {
                     let contexts = dhcp_contexts.read().unwrap();
                     if let Some(context) = contexts.get(ctx_idx) {
                         (context.if_index, format!("if{}", context.if_index))
@@ -810,7 +809,7 @@ impl RadVServer {
     /// `Result<(), RadVError>` - Success or transmission error
     async fn send_ra_for_interface(
         socket: &Arc<UdpSocket>,
-        logger: &Arc<Logger>,
+        _logger: &Arc<Logger>,
         dhcp_contexts: &Arc<RwLock<Vec<DhcpContext>>>,
         interfaces: &Arc<RwLock<Vec<Interface>>>,
         if_index: u32,
@@ -976,9 +975,9 @@ impl RadVServer {
     /// `Result<Vec<u8>, RadVError>` - Serialized RA packet or construction error
     async fn build_ra_packet_internal(
         dhcp_contexts: &Arc<RwLock<Vec<DhcpContext>>>,
-        interfaces: &Arc<RwLock<Vec<Interface>>>,
+        _interfaces: &Arc<RwLock<Vec<Interface>>>,
         if_index: u32,
-        if_name: &str,
+        _if_name: &str,
         hop_limit: u8,
     ) -> Result<Vec<u8>, RadVError> {
         let mut packet = Vec::new();
@@ -1073,7 +1072,8 @@ impl RadVServer {
         
         // Add MTU option if configured
         let mtu_option = MtuOption::new();
-        let mtu_bytes = mtu_option.mtu(1500).build();
+        let mtu_bytes = mtu_option.mtu(1500).build()
+            .map_err(|e| RadVError::PacketBuildError(format!("Failed to build MTU option: {}", e)))?;
         packet.extend_from_slice(&mtu_bytes);
         
         trace!("Built RA packet: {} bytes", packet.len());
@@ -1162,7 +1162,7 @@ impl RadVServer {
 /// // ra_start_unsolicited(now, None).await;
 /// # }
 /// ```
-pub async fn ra_start_unsolicited(now: SystemTime, context_id: Option<usize>) {
+pub async fn ra_start_unsolicited(now: SystemTime, _context_id: Option<usize>) {
     // This would be called on the actual RadVServer instance
     // Placeholder for module-level function
     info!("ra_start_unsolicited called for timestamp {:?}", now);

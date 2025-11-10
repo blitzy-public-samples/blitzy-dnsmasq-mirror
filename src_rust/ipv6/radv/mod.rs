@@ -60,16 +60,15 @@
 //! # Example Usage
 //!
 //! ```rust,ignore
-//! use crate::ipv6::radv::{RadVServer, RadVServerBuilder};
-//! use std::net::Ipv6Addr;
+//! use crate::ipv6::radv::RadVServer;
+//! use std::sync::{Arc, RwLock};
 //!
-//! // Create RA server with DHCPv6 coordination
-//! let server = RadVServerBuilder::new("eth0".to_string())
-//!     .with_managed_flag(true)   // M-bit: use DHCPv6 for addresses
-//!     .with_other_flag(true)     // O-bit: use DHCPv6 for other config
-//!     .add_prefix("2001:db8::".parse()?, 64, 2592000, 604800)
-//!     .with_router_lifetime(1800)
-//!     .build();
+//! // Create RA server with shared contexts and interfaces
+//! let logger = Arc::new(Logger::new(/* ... */));
+//! let contexts = Arc::new(RwLock::new(Vec::new()));
+//! let interfaces = Arc::new(RwLock::new(Vec::new()));
+//!
+//! let server = RadVServer::new(logger, contexts, interfaces).await?;
 //!
 //! // Start periodic RA transmission (async task)
 //! server.start().await?;
@@ -98,7 +97,7 @@ pub use protocol::{
     PREFIX_FLAG_ONLINK, PREFIX_FLAG_AUTO,
 };
 
-pub use server::{RadVServer, RadVServerBuilder};
+pub use server::RadVServer;
 
 pub use options::{
     MtuOption, RdnssOption, DnsslOption, AdvIntervalOption,
