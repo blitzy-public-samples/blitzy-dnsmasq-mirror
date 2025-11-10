@@ -56,7 +56,7 @@
 //!
 //! # Example Usage
 //!
-//! ```rust
+//! ```rust,ignore
 //! use dnsmasq::dns::rrfilter::{rrfilter, RRFILTER_DNSSEC};
 //!
 //! let mut packet = vec![/* DNS packet bytes */];

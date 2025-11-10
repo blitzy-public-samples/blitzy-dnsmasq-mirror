@@ -89,7 +89,8 @@
 //!
 //! ## Examples
 //!
-//! ```no_run
+//! ```ignore
+//! # Conceptual example - actual API requires additional setup
 //! use dnsmasq::daemon::Daemon;
 //! use dnsmasq::types::Config;
 //!

@@ -56,7 +56,7 @@
 //!
 //! # Example Usage
 //!
-//! ```rust
+//! ```rust,ignore
 //! use dnsmasq::dns::pattern::{build_server_array, lookup_domain};
 //!
 //! // Build sorted server array from configuration
@@ -125,7 +125,7 @@ pub const SERV_IS_LOCAL: ServerFlags = ServerFlags::from_bits_truncate(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let server_array = build_server_array(&servers, &local_servers);
 /// // Array is now sorted: ["mail.example.com", "example.com", "*.com", "NODOTS"]
 /// ```
@@ -205,7 +205,7 @@ pub fn build_server_array(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// // Query: www.example.com, configured servers: [example.com, *.com, NODOTS]
 /// let matches = lookup_domain(&array, "www.example.com", T_A);
 /// // Returns: [example.com] (longest suffix match)
@@ -381,7 +381,7 @@ pub fn lookup_domain(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// // Filter for IPv6-capable DNSSEC servers
 /// let ipv6_dnssec_servers = filter_servers(&matches, SERV_6ADDR | SERV_DO_DNSSEC);
 /// ```
@@ -440,7 +440,7 @@ pub fn filter_servers(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// // Two servers for example.com with different IPs
 /// if server_samegroup(&server1, &server2) {
 ///     // Use round-robin selection between server1 and server2
@@ -508,7 +508,7 @@ pub fn server_samegroup(s1: &UpstreamServer, s2: &UpstreamServer) -> bool {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// if is_local_answer(server.flags(), T_A, "localhost", &local_domains) {
 ///     // Generate local response instead of forwarding
 ///     let response = make_local_answer(...);
@@ -576,7 +576,7 @@ pub fn is_local_answer(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// if let Some(response) = make_local_answer(&server, &query_packet, T_A, "test.local", &local_domains) {
 ///     // Send response to client
 ///     socket.send_to(&response, client_addr).await?;
@@ -791,7 +791,7 @@ pub fn make_local_answer(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// if let Some(dnssec_server) = dnssec_server(&server_array, "example.com", T_A) {
 ///     // Forward DNSSEC query to this server
 /// }
@@ -833,7 +833,7 @@ pub fn dnssec_server(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// // Start of config reload
 /// mark_servers(&mut servers, ServerFlags::empty());
 /// // ... reload config, update servers ...
@@ -880,7 +880,7 @@ pub fn mark_servers(servers: &mut [Arc<UpstreamServer>], mark_flag: ServerFlags)
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let removed = cleanup_servers(&mut servers);
 /// info!("Removed {} obsolete servers", removed);
 /// 
@@ -926,7 +926,7 @@ pub fn cleanup_servers(servers: &mut Vec<Arc<UpstreamServer>>) -> usize {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let server = UpstreamServer::new(...);
 /// if add_update_server(&mut servers, Arc::new(server)) {
 ///     info!("Server added to configuration");

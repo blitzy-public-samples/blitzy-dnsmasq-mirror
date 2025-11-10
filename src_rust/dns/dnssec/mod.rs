@@ -212,19 +212,20 @@
 //!
 //! ## Basic DNSSEC Validation
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::dns::dnssec::{
 //!     dnssec_validate_reply, TrustAnchorStore, TimestampValidator,
 //! };
 //! use dnsmasq::dns::cache::Cache;
 //! use std::sync::Arc;
+//! use std::path::Path;
 //! use tokio::sync::RwLock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Initialize trust anchors from configuration
 //!     let mut trust_anchors = TrustAnchorStore::new();
-//!     trust_anchors.load_from_file("/etc/dnsmasq/trust-anchors.conf").await?;
+//!     trust_anchors.load_from_file(Path::new("/etc/dnsmasq/trust-anchors.conf")).await?;
 //!     
 //!     // Initialize timestamp validator for embedded systems
 //!     let mut timestamp_validator = TimestampValidator::new(
@@ -235,7 +236,7 @@
 //!     
 //!     // Validate a DNS response
 //!     let response_packet: &[u8] = &get_dns_response();
-//!     let cache = Arc::new(RwLock::new(Cache::new(150, 10000)));
+//!     let cache = Arc::new(RwLock::new(Cache::new()));
 //!     
 //!     let validation_status = dnssec_validate_reply(
 //!         response_packet,

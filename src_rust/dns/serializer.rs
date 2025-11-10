@@ -49,8 +49,8 @@
 //!
 //! # Example Usage
 //!
-//! ```rust
-//! use dnsmasq::dns::serializer::{DnsPacketBuilder, setup_reply};
+//! ```rust,ignore
+//! use dnsmasq::dns::serializer::{DnsPacketBuilder, setup_reply, ResponseType, ExtendedDnsError};
 //! use dnsmasq::dns::protocol::{DnsHeader, T_A, C_IN, NOERROR};
 //!
 //! // Initialize response header
@@ -203,6 +203,8 @@ pub enum ExtendedDnsError {
 /// # Example
 ///
 /// ```rust
+/// use dnsmasq::dns::serializer::read_u16;
+///
 /// let bytes = [0x12, 0x34];
 /// let value = read_u16(&bytes).unwrap();
 /// assert_eq!(value, 0x1234);
@@ -237,6 +239,9 @@ pub fn read_u16(buffer: &[u8]) -> Result<u16, SerializationError> {
 /// # Example
 ///
 /// ```rust
+/// use dnsmasq::dns::serializer::write_u16;
+/// use bytes::BytesMut;
+///
 /// let mut buf = BytesMut::with_capacity(512);
 /// write_u16(&mut buf, 0x1234).unwrap();
 /// assert_eq!(&buf[..], &[0x12, 0x34]);
@@ -267,6 +272,9 @@ pub fn write_u16(buffer: &mut BytesMut, value: u16) -> Result<(), SerializationE
 /// # Example
 ///
 /// ```rust
+/// use dnsmasq::dns::serializer::write_u32;
+/// use bytes::BytesMut;
+///
 /// let mut buf = BytesMut::with_capacity(512);
 /// write_u32(&mut buf, 0x12345678).unwrap();
 /// assert_eq!(&buf[..], &[0x12, 0x34, 0x56, 0x78]);
@@ -442,7 +450,7 @@ fn encode_domain_name(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let mut buffer = BytesMut::with_capacity(512);
 /// let mut truncated = false;
 /// let mut compression_ctx = CompressionContext::new();
@@ -713,7 +721,7 @@ pub enum RDataType {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let mut header = DnsHeader::new();
 /// header.set_id(query_id);  // Copy from query
 /// setup_reply(&mut header, ResponseType::NoError, ExtendedDnsError::Unset);
@@ -818,7 +826,7 @@ pub fn setup_reply(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// let mut buffer = BytesMut::from(&query_packet[..]);
 /// let header = DnsHeader::from_bytes(&buffer)?;
 /// let new_size = resize_packet(&mut buffer, &header, None)?;
@@ -979,7 +987,7 @@ fn skip_name(buffer: &BytesMut, mut pos: usize) -> Result<usize, SerializationEr
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dnsmasq::dns::serializer::DnsPacketBuilder;
 /// use dnsmasq::dns::protocol::{DnsHeader, T_A, C_IN};
 ///

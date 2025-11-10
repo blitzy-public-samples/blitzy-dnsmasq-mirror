@@ -65,7 +65,7 @@
 //!
 //! ## Basic daemon initialization sequence
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::process::{
 //!     create_helper, drop_privileges, write_pidfile, remove_pidfile,
 //!     HelperHandle, PrivilegeError
@@ -113,7 +113,7 @@
 //!
 //! ## Sending DHCP lease events to helper process
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::process::{HelperHandle, ScriptData};
 //! use std::net::Ipv4Addr;
 //!

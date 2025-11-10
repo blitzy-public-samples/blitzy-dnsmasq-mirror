@@ -82,10 +82,10 @@
 //!
 //! ```rust
 //! use dnsmasq::dns::cache::{Cache, CacheConfig};
-//! use dnsmasq::dns::cache_types::{CacheRecord, CacheRecordData, CacheFlags};
+//! use dnsmasq::dns::cache_types::{CacheRecord, CacheRecordData, CacheFlags, UID_NONE};
 //! use dnsmasq::dns::protocol::T_A;
-//! use std::net::Ipv4Addr;
-//! use std::time::{SystemTime, Duration};
+//! use std::net::{Ipv4Addr, IpAddr};
+//! use std::time::{Instant, Duration};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = CacheConfig {
@@ -98,20 +98,20 @@
 //! let mut cache = Cache::with_config(config);
 //!
 //! // Insert A record
-//! let now = SystemTime::now();
+//! let now = Instant::now();
 //! let expiry = now + Duration::from_secs(300);
-//! let record = CacheRecord {
-//!     name: "example.com".to_string(),
-//!     data: CacheRecordData::Ipv4(Ipv4Addr::new(93, 184, 216, 34)),
-//!     ttd: expiry,
-//!     flags: CacheFlags::F_FORWARD | CacheFlags::F_IPV4,
-//!     uid: 0,
-//! };
+//! let record = CacheRecord::new(
+//!     "example.com".to_string(),
+//!     CacheRecordData::Address(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))),
+//!     expiry,
+//!     UID_NONE,
+//!     CacheFlags::FORWARD | CacheFlags::IPV4,
+//! );
 //!
 //! cache.insert(record)?;
 //!
 //! // Lookup
-//! if let Some(found) = cache.lookup("example.com", T_A, now) {
+//! if let Some(found) = cache.lookup("example.com", T_A) {
 //!     println!("Found cached record for example.com");
 //! }
 //!
@@ -435,22 +435,22 @@ impl Cache {
     ///
     /// ```rust
     /// use dnsmasq::dns::cache::{Cache, CacheConfig};
-    /// use dnsmasq::dns::cache_types::{CacheRecord, CacheRecordData, CacheFlags};
-    /// use std::net::Ipv4Addr;
-    /// use std::time::{SystemTime, Duration};
+    /// use dnsmasq::dns::cache_types::{CacheRecord, CacheRecordData, CacheFlags, UID_NONE};
+    /// use std::net::{Ipv4Addr, IpAddr};
+    /// use std::time::{Instant, Duration};
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut cache = Cache::new();
-    /// let now = SystemTime::now();
+    /// let now = Instant::now();
     /// let expiry = now + Duration::from_secs(300);
     ///
-    /// let record = CacheRecord {
-    ///     name: "example.com".to_string(),
-    ///     data: CacheRecordData::Ipv4(Ipv4Addr::new(93, 184, 216, 34)),
-    ///     ttd: expiry,
-    ///     flags: CacheFlags::F_FORWARD | CacheFlags::F_IPV4,
-    ///     uid: 0,
-    /// };
+    /// let record = CacheRecord::new(
+    ///     "example.com".to_string(),
+    ///     CacheRecordData::Address(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))),
+    ///     expiry,
+    ///     UID_NONE,
+    ///     CacheFlags::FORWARD | CacheFlags::IPV4,
+    /// );
     ///
     /// let id = cache.insert(record)?;
     /// println!("Inserted record with ID {:?}", id);
@@ -528,12 +528,10 @@ impl Cache {
     /// ```rust
     /// use dnsmasq::dns::cache::Cache;
     /// use dnsmasq::dns::protocol::T_A;
-    /// use std::time::SystemTime;
     ///
     /// let mut cache = Cache::new();
-    /// let now = SystemTime::now();
     ///
-    /// if let Some(record) = cache.lookup("example.com", T_A, now) {
+    /// if let Some(record) = cache.lookup("example.com", T_A) {
     ///     println!("Found: {:?}", record);
     /// } else {
     ///     println!("Cache miss");
@@ -671,12 +669,10 @@ impl Cache {
     ///
     /// ```rust
     /// use dnsmasq::dns::cache::Cache;
-    /// use std::time::SystemTime;
     ///
-    /// let mut cache = Cache::new();
-    /// let now = SystemTime::now();
+    /// let cache = Cache::new();
     ///
-    /// let records = cache.find_by_name("example.com", now);
+    /// let records = cache.find_by_name("example.com");
     /// println!("Found {} records for example.com", records.len());
     /// ```
     pub fn find_by_name(&self, name: &str) -> Vec<&CacheRecord> {
@@ -716,13 +712,11 @@ impl Cache {
     /// ```rust
     /// use dnsmasq::dns::cache::Cache;
     /// use std::net::{IpAddr, Ipv4Addr};
-    /// use std::time::SystemTime;
     ///
-    /// let mut cache = Cache::new();
-    /// let now = SystemTime::now();
+    /// let cache = Cache::new();
     /// let addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
     ///
-    /// let records = cache.find_by_addr(&addr, now);
+    /// let records = cache.find_by_addr(&addr);
     /// println!("Found {} PTR records for {}", records.len(), addr);
     /// ```
     pub fn find_by_addr(&self, addr: &IpAddr) -> Vec<&CacheRecord> {
@@ -790,20 +784,17 @@ impl Cache {
     /// ```rust
     /// use dnsmasq::dns::cache::Cache;
     /// use dnsmasq::dns::cache_types::CacheFlags;
-    /// use std::time::SystemTime;
     ///
     /// let mut cache = Cache::new();
-    /// let now = SystemTime::now();
     ///
     /// // Scan entire cache for expired entries
-    /// cache.scan_free(None, None, now, CacheFlags::empty());
+    /// cache.scan_free(None, None, CacheFlags::empty());
     ///
     /// // Check for conflicts before inserting "example.com"
     /// cache.scan_free(
     ///     Some("example.com"),
     ///     None,
-    ///     now,
-    ///     CacheFlags::F_FORWARD | CacheFlags::F_IPV4
+    ///     CacheFlags::FORWARD | CacheFlags::IPV4
     /// );
     /// ```
     pub fn scan_free(
@@ -877,7 +868,7 @@ impl Cache {
     ///
     /// let cache = Cache::new();
     /// for record in cache.enumerate() {
-    ///     println!("Cached: {} -> {:?}", record.name, record.data);
+    ///     println!("Cached: {} -> {:?}", record.name(), record.data());
     /// }
     /// ```
     pub fn enumerate(&self) -> Vec<&CacheRecord> {
@@ -911,12 +902,12 @@ impl Cache {
     /// ```rust
     /// use dnsmasq::dns::cache::Cache;
     /// use std::net::IpAddr;
-    /// use std::time::{SystemTime, Duration};
+    /// use std::time::{Instant, Duration};
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut cache = Cache::new();
     /// let addr = "192.0.2.100".parse::<IpAddr>()?;
-    /// let expiry = SystemTime::now() + Duration::from_secs(3600);
+    /// let expiry = Instant::now() + Duration::from_secs(3600);
     ///
     /// let id = cache.add_dhcp_entry("client.local", addr, expiry)?;
     /// println!("Added DHCP entry with ID {:?}", id);

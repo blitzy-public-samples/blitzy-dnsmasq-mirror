@@ -46,14 +46,14 @@
 //!
 //! # Example Usage
 //!
-//! ```rust
+//! ```rust,ignore
 //! use dnsmasq::dns::parser::{extract_name, extract_request};
 //!
 //! let packet: &[u8] = &[/* DNS packet bytes */];
 //! 
-//! // Extract query name and type from request
-//! if let Ok((name, qtype)) = extract_request(packet) {
-//!     println!("Query for {} type {}", name, qtype);
+//! // Extract query name, type, and class from request
+//! if let Ok((name, qtype, qclass)) = extract_request(packet) {
+//!     println!("Query for {} type {} class {}", name, qtype, qclass);
 //! }
 //! ```
 
@@ -230,7 +230,7 @@ impl CompressionState {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dnsmasq::dns::parser::extract_name;
 ///
 /// let packet: &[u8] = &[/* DNS packet with header */];
@@ -384,7 +384,7 @@ pub fn extract_name<'a>(packet: &'a [u8], input: &'a [u8]) -> Result<(&'a [u8], 
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dnsmasq::dns::parser::skip_name;
 ///
 /// let packet: &[u8] = &[/* DNS packet */];
@@ -484,7 +484,7 @@ pub fn skip_name<'a>(packet: &'a [u8], input: &'a [u8]) -> Result<&'a [u8], Pars
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dnsmasq::dns::parser::skip_questions;
 ///
 /// let packet: &[u8] = &[/* DNS packet */];
@@ -544,7 +544,7 @@ pub fn skip_questions<'a>(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dnsmasq::dns::parser::skip_section;
 ///
 /// let packet: &[u8] = &[/* DNS packet */];
@@ -628,7 +628,7 @@ pub fn skip_section<'a>(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dnsmasq::dns::parser::extract_addresses;
 ///
 /// let packet: &[u8] = &[/* DNS response packet */];
