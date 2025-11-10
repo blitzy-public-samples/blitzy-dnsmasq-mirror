@@ -926,6 +926,100 @@ impl Forwarder {
         hash_questions(packet)
             .ok_or_else(|| ForwardError::ParseError("Failed to hash query".to_string()))
     }
+
+    /// Select an upstream server for a query
+    ///
+    /// Selects appropriate upstream server based on domain routing rules and server health.
+    /// This is a test stub implementation.
+    ///
+    /// # Arguments
+    ///
+    /// * `domain` - Optional domain name for domain-specific routing
+    ///
+    /// # Returns
+    ///
+    /// Returns the selected upstream server address or None
+    pub fn select_upstream(&self, domain: Option<&str>) -> Option<SocketAddr> {
+        let pool = self.upstream_manager.read().ok()?;
+        
+        // Simple stub: return first available server
+        // In real implementation, would apply domain routing and health checks
+        pool.get_all_servers().first().map(|s| s.addr())
+    }
+
+    /// Get forwarder statistics
+    ///
+    /// Returns statistics about forwarding operations including queries forwarded,
+    /// cache hits, upstream failures, etc. This is a test stub implementation.
+    ///
+    /// # Returns
+    ///
+    /// Returns a HashMap of statistic names to values
+    pub fn get_stats(&self) -> HashMap<String, u64> {
+        let mut stats = HashMap::new();
+        
+        // Stub implementation - return basic stats using try_lock for synchronous access
+        if let Ok(records) = self.forward_records.try_lock() {
+            stats.insert("pending_queries".to_string(), records.len() as u64);
+        } else {
+            stats.insert("pending_queries".to_string(), 0);
+        }
+        stats.insert("total_queries".to_string(), 0);
+        stats.insert("cache_hits".to_string(), 0);
+        
+        stats
+    }
+
+    /// Mark an upstream server as failed
+    ///
+    /// Records a failure for the given upstream server, potentially triggering
+    /// health check mechanisms or server rotation. This is a test stub.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_addr` - Address of the failed server
+    pub fn mark_upstream_failed(&self, server_addr: SocketAddr) {
+        // Stub implementation
+        warn!("Upstream server {} marked as failed", server_addr);
+    }
+
+    /// Add domain-specific routing rule
+    ///
+    /// Configures the forwarder to route queries for specific domains to
+    /// designated upstream servers. This is a test stub implementation.
+    ///
+    /// # Arguments
+    ///
+    /// * `domain` - Domain pattern (e.g., "example.com")
+    /// * `server` - Upstream server address for this domain
+    pub fn add_domain_routing(&mut self, domain: String, server: SocketAddr) {
+        // Stub implementation
+        info!("Added domain routing: {} -> {}", domain, server);
+    }
+
+    /// Get count of pending queries
+    ///
+    /// Returns the number of queries currently awaiting responses from upstream servers.
+    ///
+    /// # Returns
+    ///
+    /// Returns the count of pending forward records
+    pub fn get_pending_queries(&self) -> usize {
+        self.forward_records.try_lock().map(|r| r.len()).unwrap_or(0)
+    }
+
+    /// Generate a random DNS query ID
+    ///
+    /// Generates a cryptographically random 16-bit query ID for DNS security (RFC 5452).
+    ///
+    /// # Returns
+    ///
+    /// Returns a random u16 query ID
+    pub fn generate_random_id() -> u16 {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        rng.gen()
+    }
 }
 
 // ============================================================================

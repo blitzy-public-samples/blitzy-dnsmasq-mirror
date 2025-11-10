@@ -388,7 +388,7 @@ impl IntegrationManager {
         &mut self,
         _daemon: std::sync::Arc<tokio::sync::RwLock<crate::core::daemon::Daemon>>,
         _logger: std::sync::Arc<crate::logging::logger::Logger>,
-    ) -> Result<(), ()> {
+    ) -> std::result::Result<(), ()> {
         Ok(())
     }
 

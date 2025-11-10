@@ -1016,6 +1016,12 @@ pub struct DnsPacketBuilder {
     authority_count: u16,
     /// Current additional count
     additional_count: u16,
+    /// DNS message ID (for fluent API)
+    id: u16,
+    /// DNS flags (for fluent API)
+    flags: u16,
+    /// Question count (for fluent API)
+    question_count: u16,
 }
 
 impl DnsPacketBuilder {
@@ -1040,7 +1046,183 @@ impl DnsPacketBuilder {
             answer_count: 0,
             authority_count: 0,
             additional_count: 0,
+            id: 0,
+            flags: 0,
+            question_count: 0,
         }
+    }
+    
+    /// Set DNS message ID (fluent builder API)
+    #[must_use]
+    pub fn with_id(mut self, id: u16) -> Self {
+        self.id = id;
+        self
+    }
+    
+    /// Set query flags (fluent builder API)
+    /// Sets standard query flags (RD bit set)
+    #[must_use]
+    pub fn with_query_flags(mut self) -> Self {
+        self.flags = 0x0100; // RD (Recursion Desired) bit set
+        self
+    }
+    
+    /// Set response flags with RCODE (fluent builder API)
+    /// Automatically sets QR bit to mark as response
+    #[must_use]
+    pub fn with_response_flags(mut self, rcode: u16) -> Self {
+        self.flags = 0x8000 | (rcode & 0x0F); // QR bit + RCODE
+        self
+    }
+    
+    /// Helper method to apply 16-bit flags value to DnsHeader
+    /// Flags format: high byte = hb3 (QR, OPCODE, AA, TC, RD), low byte = hb4 (RA, Z, AD, CD, RCODE)
+    fn apply_flags_to_header(header: &mut DnsHeader, flags: u16) {
+        let hb3 = (flags >> 8) as u8;
+        let hb4 = (flags & 0xFF) as u8;
+        
+        // Set QR bit
+        header.set_qr((hb3 & 0x80) != 0);
+        
+        // Set OPCODE (bits 3-6 of hb3)
+        header.set_opcode((hb3 >> 3) & 0x0F);
+        
+        // Set AA bit
+        header.set_aa((hb3 & 0x04) != 0);
+        
+        // Set TC bit
+        header.set_tc((hb3 & 0x02) != 0);
+        
+        // Set RD bit
+        header.set_rd((hb3 & 0x01) != 0);
+        
+        // Set RA bit
+        header.set_ra((hb4 & 0x80) != 0);
+        
+        // Set AD bit
+        header.set_ad((hb4 & 0x20) != 0);
+        
+        // Set CD bit
+        header.set_cd((hb4 & 0x10) != 0);
+        
+        // Set RCODE
+        header.set_rcode(hb4 & 0x0F);
+    }
+    
+    /// Add a question section entry (fluent builder API)
+    /// Returns Result because it needs to encode the name
+    pub fn add_question(mut self, name: &str, qtype: u16, qclass: u16) -> Self {
+        // Initialize header if not already done
+        if self.buffer.is_empty() {
+            let mut header = DnsHeader::new();
+            header.set_id(self.id);
+            Self::apply_flags_to_header(&mut header, self.flags);
+            let header_bytes = header.to_bytes();
+            self.buffer.extend_from_slice(&header_bytes);
+        }
+        
+        // Encode question
+        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+            // Write QTYPE and QCLASS
+            let _ = write_u16(&mut self.buffer, qtype);
+            let _ = write_u16(&mut self.buffer, qclass);
+            self.question_count += 1;
+        }
+        
+        self
+    }
+    
+    /// Add an answer record (fluent builder API for tests)
+    /// Accepts raw rdata bytes instead of RDataType enum
+    pub fn with_answer(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: &[u8]) -> Self {
+        // Ensure header is initialized
+        if self.buffer.is_empty() {
+            let mut header = DnsHeader::new();
+            header.set_id(self.id);
+            Self::apply_flags_to_header(&mut header, self.flags);
+            let header_bytes = header.to_bytes();
+            self.buffer.extend_from_slice(&header_bytes);
+        }
+        
+        // Encode name
+        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+            // Write TYPE, CLASS, TTL
+            let _ = write_u16(&mut self.buffer, rtype);
+            let _ = write_u16(&mut self.buffer, rclass);
+            let _ = write_u32(&mut self.buffer, ttl);
+            
+            // Write RDLENGTH
+            let _ = write_u16(&mut self.buffer, rdata.len() as u16);
+            
+            // Write RDATA
+            self.buffer.extend_from_slice(rdata);
+            
+            self.answer_count += 1;
+        }
+        
+        self
+    }
+    
+    /// Add an authority record (fluent builder API for tests)
+    /// Accepts raw rdata bytes instead of RDataType enum
+    pub fn with_authority(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: &[u8]) -> Self {
+        // Ensure header is initialized
+        if self.buffer.is_empty() {
+            let mut header = DnsHeader::new();
+            header.set_id(self.id);
+            Self::apply_flags_to_header(&mut header, self.flags);
+            let header_bytes = header.to_bytes();
+            self.buffer.extend_from_slice(&header_bytes);
+        }
+        
+        // Encode name
+        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+            // Write TYPE, CLASS, TTL
+            let _ = write_u16(&mut self.buffer, rtype);
+            let _ = write_u16(&mut self.buffer, rclass);
+            let _ = write_u32(&mut self.buffer, ttl);
+            
+            // Write RDLENGTH
+            let _ = write_u16(&mut self.buffer, rdata.len() as u16);
+            
+            // Write RDATA
+            self.buffer.extend_from_slice(rdata);
+            
+            self.authority_count += 1;
+        }
+        
+        self
+    }
+    
+    /// Add an additional record (fluent builder API for tests)
+    /// Accepts raw rdata bytes instead of RDataType enum
+    pub fn with_additional(mut self, name: &str, rtype: u16, rclass: u16, ttl: u32, rdata: &[u8]) -> Self {
+        // Ensure header is initialized
+        if self.buffer.is_empty() {
+            let mut header = DnsHeader::new();
+            header.set_id(self.id);
+            Self::apply_flags_to_header(&mut header, self.flags);
+            let header_bytes = header.to_bytes();
+            self.buffer.extend_from_slice(&header_bytes);
+        }
+        
+        // Encode name
+        if let Ok(_) = encode_domain_name(&mut self.buffer, name, self.max_size) {
+            // Write TYPE, CLASS, TTL
+            let _ = write_u16(&mut self.buffer, rtype);
+            let _ = write_u16(&mut self.buffer, rclass);
+            let _ = write_u32(&mut self.buffer, ttl);
+            
+            // Write RDLENGTH
+            let _ = write_u16(&mut self.buffer, rdata.len() as u16);
+            
+            // Write RDATA
+            self.buffer.extend_from_slice(rdata);
+            
+            self.additional_count += 1;
+        }
+        
+        self
     }
     
     /// Set DNS header
@@ -1175,6 +1357,7 @@ impl DnsPacketBuilder {
                 })?;
             
             // Update counts
+            header.set_qdcount(self.question_count);
             header.set_ancount(self.answer_count);
             header.set_nscount(self.authority_count);
             header.set_arcount(self.additional_count);

@@ -509,6 +509,11 @@ impl UpstreamServer {
         self.addr
     }
 
+    /// Get server socket address (alias for addr)
+    pub fn address(&self) -> SocketAddr {
+        self.addr
+    }
+
     /// Get source address for binding
     pub fn source_addr(&self) -> Option<SocketAddr> {
         self.source_addr
