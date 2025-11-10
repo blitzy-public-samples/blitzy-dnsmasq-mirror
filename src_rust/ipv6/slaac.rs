@@ -92,8 +92,8 @@ use crate::dhcp::lease::{lease_update_dns, LeaseManager};
 use crate::ipv6::radv::protocol::ICMP6_ECHO_REQUEST;
 use crate::ipv6::radv::server::ra_start_unsolicited;
 use crate::logging::logger::Logger;
-use crate::network::sockets::UdpSocket;
 use crate::utils::rand::rand16;
+use tokio::net::UdpSocket;
 
 use std::collections::HashMap;
 use std::io::{Error as IoError, Result as IoResult};
@@ -424,8 +424,9 @@ impl SlaacManager {
                     // Send ICMPv6 Echo Request
                     let ping = PingPacket::new(ping_id, slaac.backoff as u16);
                     let dest = SocketAddrV6::new(slaac.addr, 0, 0, 0);
+                    let dest_addr = std::net::SocketAddr::V6(dest);
 
-                    match socket.send_to(ping.as_bytes(), &dest.into()).await {
+                    match socket.send_to(ping.as_bytes(), dest_addr).await {
                         Ok(_) => {
                             trace!(
                                 "Sent DAD ping to {} (backoff={})",
