@@ -134,7 +134,7 @@
 //! # Timestamp Calculation
 //!
 //! DUID-LLT timestamps are seconds since **2000-01-01 00:00:00 UTC** per RFC 3315:
-//! ```
+//! ```text
 //! Unix epoch:      1970-01-01 00:00:00 UTC = 0
 //! DUID epoch:      2000-01-01 00:00:00 UTC = 946684800 seconds since Unix epoch
 //! Current time:    time(NULL) returns seconds since Unix epoch
@@ -406,13 +406,13 @@ impl From<io::Error> for DuidError {
 ///
 /// # Rust Representation
 ///
-/// ```no_run
+/// ```
 /// # use dnsmasq::dhcp::v6::duid::{Duid, DuidType};
-/// let duid = Duid {
-///     duid_type: DuidType::Llt,
-///     data: vec![/* ... */],  // Automatic memory management
-/// };
-/// // Length is data.len(), no separate tracking needed
+/// // Create DUID using the public API
+/// let mut duid_data = vec![0x00, 0x01]; // Hardware type
+/// duid_data.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // MAC
+/// let duid = Duid::new(DuidType::Ll, duid_data).unwrap();
+/// // Length is automatically tracked via Vec
 /// ```
 ///
 /// # Wire Format

@@ -335,6 +335,7 @@ impl DhcpLease {
 }
 
 /// Central lease database manager
+#[derive(Debug)]
 pub struct LeaseManager {
     /// Active leases indexed by client ID
     leases: Arc<RwLock<HashMap<ClientId, Arc<RwLock<DhcpLease>>>>>,

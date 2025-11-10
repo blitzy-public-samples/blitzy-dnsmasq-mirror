@@ -109,21 +109,29 @@
 //! use dnsmasq::dhcp::v6::server::{Dhcp6Server, Dhcp6ServerConfig};
 //! use dnsmasq::dhcp::v6::handler::Dhcp6Handler;
 //! use dnsmasq::dhcp::lease::LeaseManager;
-//! use dnsmasq::dhcp::v6::duid::Duid;
+//! use dnsmasq::dhcp::v6::duid::generate_duid_llt;
+//! use dnsmasq::config::types::{Config, DaemonOptions};
+//! use std::path::PathBuf;
 //! use std::sync::Arc;
 //! use tokio::sync::RwLock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Initialize dependencies
-//!     let lease_manager = Arc::new(RwLock::new(LeaseManager::new()));
+//!     let daemon_options = Arc::new(RwLock::new(DaemonOptions::default()));
+//!     let lease_manager = Arc::new(RwLock::new(LeaseManager::new(
+//!         PathBuf::from("/var/lib/dnsmasq/dnsmasq.leases"),
+//!         1000,
+//!         DaemonOptions::default(),
+//!         false
+//!     )));
 //!     let config = Arc::new(Config::default());
-//!     let server_duid = Duid::generate_duid_llt()?;
+//!     let server_duid = generate_duid_llt().await?;
 //!     
 //!     // Create handler and server
-//!     let handler = Dhcp6Handler::new(lease_manager.clone(), config.clone(), server_duid.clone());
+//!     let handler = Dhcp6Handler::new(lease_manager.clone(), daemon_options.clone(), server_duid.clone());
 //!     let server_config = Dhcp6ServerConfig::default();
-//!     let server = Dhcp6Server::new(server_config, handler, lease_manager, config)?;
+//!     let mut server = Dhcp6Server::new(server_config, handler, lease_manager, config)?;
 //!     
 //!     // Bind socket and run event loop
 //!     server.bind().await?;
@@ -335,8 +343,7 @@ impl Dhcp6Server {
         {
             // Linux uses SO_REUSEPORT for multiple instances
             use nix::sys::socket::sockopt::ReusePort;
-            let fd = socket.as_raw_fd();
-            setsockopt(fd, ReusePort, &true)
+            setsockopt(&socket, ReusePort, &true)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to set SO_REUSEPORT: {}", e)))?;
         }
 
@@ -344,16 +351,14 @@ impl Dhcp6Server {
         #[cfg(target_os = "linux")]
         {
             use nix::sys::socket::sockopt::Ipv6RecvPacketInfo;
-            let fd = socket.as_raw_fd();
-            setsockopt(fd, Ipv6RecvPacketInfo, &true)
+            setsockopt(&socket, Ipv6RecvPacketInfo, &true)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to set IPV6_RECVPKTINFO: {}", e)))?;
         }
 
         #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "macos"))]
         {
             use nix::sys::socket::sockopt::Ipv6RecvPacketInfo as Ipv6PacketInfo;
-            let fd = socket.as_raw_fd();
-            setsockopt(fd, Ipv6PacketInfo, &true)
+            setsockopt(&socket, Ipv6PacketInfo, &true)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to set IPV6_PKTINFO: {}", e)))?;
         }
 
@@ -361,9 +366,8 @@ impl Dhcp6Server {
         #[cfg(target_os = "linux")]
         {
             use nix::sys::socket::sockopt::Ipv6TClass;
-            let fd = socket.as_raw_fd();
             let tclass: i32 = 0xC0; // IPTOS_CLASS_CS6
-            setsockopt(fd, Ipv6TClass, &tclass)
+            setsockopt(&socket, Ipv6TClass, &tclass)
                 .map_err(|e| warn!("Failed to set IPV6_TCLASS: {}", e))
                 .ok();
         }
@@ -561,7 +565,7 @@ impl Dhcp6Server {
         }
 
         // Convert interface index to name
-        let if_name = if_indextoname(if_index)
+        let if_name = indextoname(if_index)
             .map_err(|e| io::Error::new(
                 io::ErrorKind::Other,
                 format!("Failed to get interface name for index {}: {}", if_index, e)
@@ -576,13 +580,8 @@ impl Dhcp6Server {
         // Prune expired leases before processing
         {
             let mut lease_mgr = self.lease_manager.write().await;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            lease_mgr.prune(now).await.map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("Lease prune failed: {}", e))
-            })?;
+            let pruned = lease_mgr.prune().await;
+            debug!("Pruned {} expired leases", pruned);
         }
 
         // Dispatch to handler
@@ -606,18 +605,11 @@ impl Dhcp6Server {
                 dest.set_port(port);
                 self.send_response(&response_bytes, dest).await?;
 
-                // Update lease file and DNS
+                // Update lease file
                 {
-                    let mut lease_mgr = self.lease_manager.write().await;
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs();
-                    lease_mgr.update_file(now).await.map_err(|e| {
+                    let lease_mgr = self.lease_manager.read().await;
+                    lease_mgr.update_file().await.map_err(|e| {
                         io::Error::new(io::ErrorKind::Other, format!("Lease update failed: {}", e))
-                    })?;
-                    lease_mgr.update_dns().await.map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, format!("DNS update failed: {}", e))
                     })?;
                 }
 

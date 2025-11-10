@@ -118,10 +118,10 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 
 use tokio::spawn;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 
 use tracing::{debug, error, info, trace, warn};
@@ -133,9 +133,6 @@ use crate::dhcp::v6::duid::Duid;
 use crate::dhcp::v6::ia::IaBuilder;
 use crate::dhcp::v6::options::Dhcp6OptionBuilder;
 use crate::dhcp::v6::protocol::{MessageType, OptionCode, StatusCode};
-use crate::dns::domain::strip_hostname;
-use crate::logging::logger::log_packet;
-use crate::utils::general::hostname_isequal;
 
 // ================================================================================================
 // Local Type Definitions
@@ -195,7 +192,7 @@ impl DhcpContext {
 ///
 /// Replaces C's implicit error handling (return 0, errno) with explicit Result-based errors.
 /// Each variant corresponds to a specific failure mode in the DHCPv6 protocol.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Dhcp6HandlerError {
     /// Packet is malformed or truncated
     ///
@@ -553,7 +550,7 @@ impl Dhcp6State {
         tags.insert(interface_name.to_string());
         tags.insert("dhcpv6".to_string());
 
-        let mut state = Self {
+        let state = Self {
             client_duid: Vec::new(),
             server_duid: server_duid.to_bytes(),
             transaction_id,
@@ -739,8 +736,8 @@ impl Dhcp6Response {
     ///
     /// Returns error if option building fails (should not happen with valid usage)
     pub fn build(&mut self) -> Result<Vec<u8>, Dhcp6HandlerError> {
-        // Build options first
-        let option_bytes = self.options.build().map_err(|e| Dhcp6HandlerError::OptionParseError {
+        // Build options first (clone because build() consumes self)
+        let option_bytes = self.options.clone().build().map_err(|e| Dhcp6HandlerError::OptionParseError {
             details: format!("Failed to build options: {e}"),
         })?;
 
@@ -1112,11 +1109,7 @@ impl Dhcp6Handler {
 
         // Reset lease USED flags for allocation tracking (C line 947)
         {
-            let lease_mgr = self.lease_manager.write().map_err(|e| {
-                Dhcp6HandlerError::LeaseError {
-                    details: format!("Failed to acquire lease manager lock: {e}"),
-                }
-            })?;
+            let _lease_mgr = self.lease_manager.write().await;
             
             // Note: reset_used_flags is called to mark all leases as potentially allocatable
             // This is done at the start of each SOLICIT processing cycle

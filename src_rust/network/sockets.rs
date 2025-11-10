@@ -311,7 +311,7 @@ pub fn indextoname(index: u32) -> IoResult<String> {
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
 ///     let addr: SocketAddr = "0.0.0.0:53".parse().unwrap();
-///     let socket = create_udp_socket(addr).await?;
+///     let socket = create_socket(addr, false).await?;
 ///     println!("Created UDP socket on {}", addr);
 ///     Ok(())
 /// }
@@ -677,7 +677,8 @@ pub async fn create_socket(addr: SocketAddr, is_tcp: bool) -> IoResult<Arc<UdpSo
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
+/// // Private function - use create_socket(addr, true) instead
 /// use dnsmasq::network::sockets::create_tcp_socket;
 /// use std::net::SocketAddr;
 ///
