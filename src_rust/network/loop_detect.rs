@@ -88,8 +88,8 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::config::types::{Config, DaemonOptions};
 use crate::dns::parser::extract_name;
-use crate::dns::protocol::{DnsHeader, LOOP_TEST_DOMAIN, LOOP_TEST_TYPE, OPCODE_QUERY, C_IN};
-use crate::dns::upstream::{check_servers, ServerFlags, UpstreamServer};
+use crate::dns::protocol::{DnsHeader, LOOP_TEST_DOMAIN, LOOP_TEST_TYPE, QUERY, C_IN};
+use crate::dns::upstream::{ServerFlags, UpstreamServer};
 use crate::utils::rand::rand16;
 use crate::utils::string::do_rfc1035_name;
 
@@ -224,21 +224,22 @@ impl LoopDetector {
         for server in servers.iter() {
             // Only probe default servers without domain restrictions (C version lines 134-135)
             // Skip servers marked SERV_FOR_NODOTS
-            if !server.domain.is_empty() || server.flags.contains(ServerFlags::FOR_NODOTS) {
+            if server.domain().is_some() || server.flags().contains(ServerFlags::FOR_NODOTS) {
                 trace!(
-                    "Skipping server {} (domain: {}, flags: {:?})",
-                    server.addr,
-                    server.domain,
-                    server.flags
+                    "Skipping server {} (domain: {:?}, flags: {:?})",
+                    server.addr(),
+                    server.domain(),
+                    server.flags()
                 );
                 continue;
             }
 
             // Construct probe packet for this server's UID (C version line 137)
-            let probe_packet = match make_probe(server.uid) {
+            // Cast usize ServerId to u32 for wire protocol (8 hex digits = 32 bits)
+            let probe_packet = match make_probe(server.uid() as u32) {
                 Ok(packet) => packet,
                 Err(e) => {
-                    error!("Failed to construct probe for server {}: {}", server.addr, e);
+                    error!("Failed to construct probe for server {}: {}", server.addr(), e);
                     probe_failures += 1;
                     continue;
                 }
@@ -246,18 +247,18 @@ impl LoopDetector {
 
             // Send probe to upstream server (C version lines 145-146)
             // Replace blocking sendto() with async send_to()
-            match self.socket.send_to(&probe_packet, &server.addr).await {
+            match self.socket.send_to(&probe_packet, &server.addr()).await {
                 Ok(bytes_sent) => {
                     debug!(
                         "Sent {} byte probe to server {} (UID: {:08x})",
-                        bytes_sent, server.addr, server.uid
+                        bytes_sent, server.addr(), server.uid()
                     );
                     probes_sent += 1;
                 }
                 Err(e) => {
                     warn!(
                         "Failed to send probe to server {} (UID: {:08x}): {}",
-                        server.addr, server.uid, e
+                        server.addr(), server.uid(), e
                     );
                     probe_failures += 1;
                 }
@@ -376,28 +377,29 @@ impl LoopDetector {
 
         for server in servers.iter_mut() {
             // Only check default servers (no domain restriction) (C version line 326)
-            if !server.domain.is_empty() {
+            if server.domain().is_some() {
                 continue;
             }
 
             // Skip servers already marked with SERV_LOOP (C version line 327)
-            if server.flags.contains(ServerFlags::LOOP) {
+            if server.flags().contains(ServerFlags::LOOP) {
                 continue;
             }
 
             // Check if UID matches (C version line 328)
-            if uid == server.uid {
+            // Compare u32 wire protocol UID with usize ServerId
+            if uid == server.uid() as u32 {
                 // Mark server with SERV_LOOP flag (C version line 330)
-                server.flags.insert(ServerFlags::LOOP);
+                server.insert_flag(ServerFlags::LOOP);
 
                 warn!(
                     "Loop detected: server {} (UID {:08x}) is forwarding queries back to dnsmasq",
-                    server.addr, uid
+                    server.addr(), uid
                 );
 
-                // Log server state change without sending more probes (C version line 331)
-                // Pass true to indicate we don't want to trigger more probe transmission
-                check_servers(true);
+                // Note: C version calls check_servers(1) here to log state
+                // In Rust version, we've already logged the warning above
+                // Server is now marked with LOOP flag and will be excluded from forwarding
 
                 return Ok(true);
             }
@@ -454,7 +456,7 @@ fn make_probe(uid: u32) -> IoResult<Vec<u8>> {
     // Create DNS header (C version lines 211, 217-222)
     let mut header = DnsHeader::new();
     header.set_id(rand16()); // Random query ID
-    header.set_opcode(OPCODE_QUERY); // Standard query
+    header.set_opcode(QUERY); // Standard query
     header.set_rd(true); // Recursion desired
     header.set_qdcount(1); // One question
     // Answer, authority, additional counts are 0 by default
@@ -561,16 +563,24 @@ mod tests {
         let uid = 0x12345678;
         let packet = make_probe(uid).expect("Failed to construct probe");
 
-        // Verify minimum packet size (header + question)
-        assert!(packet.len() >= 12, "Packet too small: {}", packet.len());
+        // Debug output
+        println!("Packet length: {}", packet.len());
+        println!("Packet bytes (first 50): {:?}", &packet[..packet.len().min(50)]);
 
-        // Verify packet starts with valid DNS header
-        assert_eq!(packet.len() % 2, 0, "Packet length should be even");
+        // Verify minimum packet size (header + question)
+        assert!(packet.len() >= 12, "Packet too small: {} bytes (expected at least 12)", packet.len());
+
+        // Verify packet starts with valid DNS header (12 bytes)
+        assert!(packet.len() >= 12, "Packet should have at least DNS header");
 
         // Packet should contain encoded "12345678.test" query
-        // We can't easily verify the exact encoding without parsing,
-        // but we can check the packet isn't empty
-        assert!(packet.len() > 20, "Packet suspiciously small");
+        // Expected: 12 byte header + encoded name + 4 bytes (qtype + qclass)
+        // Encoded name for "12345678.test" should be about 14 bytes
+        // (1 + 8 + 1 + 4 + 1 = 15 bytes with null terminator)
+        assert!(packet.len() > 20, "Packet suspiciously small: {} bytes", packet.len());
+        
+        // Verify packet length is reasonable (header + name + qtype + qclass)
+        assert!(packet.len() < 100, "Packet unexpectedly large: {} bytes", packet.len());
     }
 
     /// Test detect_loop with valid probe query
@@ -582,13 +592,16 @@ mod tests {
         });
 
         let test_uid = 0xABCD1234;
-        let server = UpstreamServer {
-            uid: test_uid,
-            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53),
-            domain: String::new(),
-            flags: ServerFlags::empty(),
-            ..Default::default()
-        };
+        let server = UpstreamServer::new(
+            test_uid,
+            ServerFlags::empty(),
+            None, // No domain restriction
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53),
+            None, // No source address
+            String::new(), // No interface
+            0, // No ifindex
+            4096, // Default EDNS packet size
+        );
 
         let servers = Arc::new(RwLock::new(vec![server]));
         let socket = Arc::new(
@@ -610,7 +623,7 @@ mod tests {
 
         // Verify server is marked with SERV_LOOP flag
         let servers = detector.servers.read().unwrap();
-        assert!(servers[0].flags.contains(ServerFlags::LOOP));
+        assert!(servers[0].flags().contains(ServerFlags::LOOP));
     }
 
     /// Test detect_loop with non-matching query

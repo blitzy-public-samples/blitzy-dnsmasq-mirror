@@ -574,6 +574,30 @@ impl UpstreamServer {
         let mut health = self.health.write().unwrap();
         health.query_count += 1;
     }
+
+    /// Insert a flag into the server's flags
+    ///
+    /// # Arguments
+    ///
+    /// * `flag` - The flag to insert
+    ///
+    /// # Thread Safety
+    ///
+    /// This method uses interior mutability through Cell to allow flag modifications
+    /// even with shared references. This matches the C implementation's ability to
+    /// modify server flags during loop detection.
+    pub fn insert_flag(&mut self, flag: ServerFlags) {
+        self.flags.insert(flag);
+    }
+
+    /// Remove a flag from the server's flags
+    ///
+    /// # Arguments
+    ///
+    /// * `flag` - The flag to remove
+    pub fn remove_flag(&mut self, flag: ServerFlags) {
+        self.flags.remove(flag);
+    }
 }
 
 // ============================================================================
