@@ -455,9 +455,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Mutex to serialize tests that manipulate environment variables
+    // This prevents race conditions when tests run in parallel
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_log_format_from_env() {
+        // Lock mutex to serialize environment variable access across tests
+        let _guard = ENV_MUTEX.lock().unwrap();
+
         // Test JSON format detection
         env::set_var("DNSMASQ_LOG_FORMAT", "json");
         assert_eq!(LogFormat::from_env(), LogFormat::Json);
@@ -475,6 +483,8 @@ mod tests {
         // Test default when unset
         env::remove_var("DNSMASQ_LOG_FORMAT");
         assert_eq!(LogFormat::from_env(), LogFormat::PlainText);
+        
+        // Mutex is automatically released when _guard goes out of scope
     }
 
     #[test]
@@ -554,6 +564,9 @@ mod tests {
     // Integration test demonstrating usage
     #[test]
     fn test_formatter_integration() {
+        // Lock mutex to serialize environment variable access across tests
+        let _guard = ENV_MUTEX.lock().unwrap();
+
         // Set environment for JSON format
         env::set_var("DNSMASQ_LOG_FORMAT", "json");
         let format = LogFormat::from_env();
@@ -565,6 +578,11 @@ mod tests {
 
         // Verify both formatters can be created
         // In actual usage, these would be passed to tracing_subscriber::fmt()
+        
+        // Clean up environment variable
+        env::remove_var("DNSMASQ_LOG_FORMAT");
+        
+        // Mutex is automatically released when _guard goes out of scope
     }
 }
 
