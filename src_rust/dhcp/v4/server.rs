@@ -124,11 +124,11 @@ use crate::network::arp::ArpCache;
 // Internal imports - configuration and state
 use crate::config::types::{Config, DhcpConfig, NetworkConfig, DaemonOptions};
 use crate::core::config::VERSION;
-use crate::core::signals::SignalHandler;
+use crate::core::signals::{SignalHandler, SignalEvent};
 use crate::core::daemon::Daemon;
 
 // Internal imports - utilities
-use crate::logging::logger::Logger;
+use crate::logging::logger::{Logger, LogDestination, LogLevel};
 use crate::dns::cache::Cache;
 
 // External socket configuration
@@ -217,19 +217,16 @@ pub struct DhcpServer {
     config: Arc<Config>,
     
     /// Lease database manager
-    lease_manager: Arc<RwLock<LeaseManager>>,
+    lease_manager: Arc<Mutex<LeaseManager>>,
     
     /// DNS cache for hostname resolution
-    dns_cache: Arc<RwLock<Cache>>,
+    dns_cache: Arc<Mutex<Cache>>,
     
     /// ARP cache for address conflict detection
     arp_cache: Arc<Mutex<ArpCache>>,
     
     /// Structured logger instance
     logger: Arc<Logger>,
-    
-    /// Signal handler for SIGHUP/SIGUSR1/SIGTERM
-    signal_handler: Arc<SignalHandler>,
     
     /// Currently active network interfaces
     interfaces: Arc<RwLock<Vec<Interface>>>,
@@ -239,6 +236,9 @@ pub struct DhcpServer {
     
     /// Last time ARP cache was refreshed
     last_arp_refresh: Arc<Mutex<Instant>>,
+    
+    /// Platform-specific network operations
+    platform: Arc<Box<dyn crate::network::platform::Platform>>,
 }
 
 impl DhcpServer {
@@ -269,24 +269,39 @@ impl DhcpServer {
     /// async fn main() {
     ///     let config = Arc::new(Config::default());
     ///     let daemon = Arc::new(RwLock::new(Daemon::new(config.clone())));
-    ///     let server = DhcpServer::new(config, daemon);
+    ///     let server = DhcpServer::new(config, daemon).await;
     /// }
     /// ```
-    pub fn new(config: Arc<Config>, daemon: Arc<RwLock<Daemon>>) -> Self {
+    pub async fn new(config: Arc<Config>, daemon: Arc<RwLock<Daemon>>) -> Self {
         let lease_manager = {
-            let daemon_guard = daemon.blocking_read();
-            daemon_guard.lease_manager.clone()
+            let daemon_guard = daemon.read().await;
+            daemon_guard.get_lease_manager().unwrap_or_else(|| {
+                Arc::new(Mutex::new(LeaseManager::new(
+                    config.dhcp.lease_file.clone(),
+                    config.dhcp.lease_max,
+                    DaemonOptions::empty(),
+                    false,
+                )))
+            })
         };
         
         let dns_cache = {
-            let daemon_guard = daemon.blocking_read();
-            daemon_guard.cache.clone()
+            let daemon_guard = daemon.read().await;
+            daemon_guard.get_cache()
         };
         
-        let logger = Arc::new(Logger::new());
-        let signal_handler = Arc::new(SignalHandler::new());
-        let arp_cache = Arc::new(Mutex::new(ArpCache::new()));
+        let logger = Arc::new(Logger::new(
+            LogDestination::Syslog,
+            LogLevel::Info,
+            150,
+            libc::LOG_DAEMON,
+        ));
+        let arp_cache = Arc::new(Mutex::new(ArpCache::new(config.clone())));
         let interfaces = Arc::new(RwLock::new(Vec::new()));
+        let platform = Arc::new(
+            crate::network::platform::create_platform()
+                .expect("Failed to initialize platform-specific network support")
+        );
         
         // Placeholder socket - will be replaced in bind()
         let placeholder_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
@@ -302,10 +317,10 @@ impl DhcpServer {
             dns_cache,
             arp_cache,
             logger,
-            signal_handler,
             interfaces,
             daemon,
             last_arp_refresh: Arc::new(Mutex::new(Instant::now())),
+            platform,
         }
     }
     
@@ -328,7 +343,7 @@ impl DhcpServer {
         
         // Get DHCP configuration
         let dhcp_config = &self.config.dhcp;
-        let port = dhcp_config.server_port.unwrap_or(DHCP_SERVER_PORT);
+        let port = dhcp_config.server_port;
         
         debug!("Creating DHCP server socket on port {}", port);
         
@@ -339,16 +354,9 @@ impl DhcpServer {
         info!("DHCPv4 server socket bound to {}", addr);
         self.socket = socket;
         
-        // Create PXE socket if enabled
-        if dhcp_config.enable_pxe {
-            debug!("Creating PXE proxy DHCP socket on port {}", PXE_PORT);
-            
-            let pxe_addr: SocketAddr = format!("0.0.0.0:{}", PXE_PORT).parse().unwrap();
-            let pxe_socket = dhcp_init_socket(pxe_addr).await?;
-            
-            info!("PXE proxy DHCP socket bound to {}", pxe_addr);
-            self.pxe_socket = Some(pxe_socket);
-        }
+        // PXE socket support would be added here if enable_pxe config is implemented
+        // For now, PXE is not enabled in the configuration
+        // TODO: Add enable_pxe field to DhcpConfig if PXE support is needed
         
         // Enumerate initial interfaces
         self.refresh_contexts().await?;
@@ -383,7 +391,11 @@ impl DhcpServer {
     pub async fn run(&mut self) -> Result<(), std::io::Error> {
         info!("Starting DHCPv4 server event loop");
         
-        let mut shutdown_rx = self.signal_handler.recv();
+        // Initialize signal handler locally (needs to stay alive for the duration of run())
+        let mut signal_handler = SignalHandler::new()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let shutdown_rx = signal_handler.recv();
+        
         let mut buffer = vec![0u8; 8192];
         let mut pxe_buffer = vec![0u8; 8192];
         
@@ -436,18 +448,18 @@ impl DhcpServer {
                 signal = shutdown_rx.recv() => {
                     if let Some(sig) = signal {
                         match sig {
-                            nix::sys::signal::Signal::SIGTERM | nix::sys::signal::Signal::SIGINT => {
+                            SignalEvent::Shutdown => {
                                 info!("Received shutdown signal, stopping DHCPv4 server");
                                 self.shutdown().await?;
                                 return Ok(());
                             }
-                            nix::sys::signal::Signal::SIGHUP => {
+                            SignalEvent::Reload => {
                                 info!("Received SIGHUP, reloading configuration");
                                 if let Err(e) = self.reload_config().await {
                                     error!("Error reloading configuration: {}", e);
                                 }
                             }
-                            nix::sys::signal::Signal::SIGUSR1 => {
+                            SignalEvent::DumpCache => {
                                 info!("Received SIGUSR1, dumping statistics");
                                 self.dump_stats().await;
                             }
@@ -462,7 +474,7 @@ impl DhcpServer {
                 _ = lease_prune_interval.tick() => {
                     trace!("Running periodic lease expiry check");
                     
-                    let mut lease_mgr = self.lease_manager.write().await;
+                    let mut lease_mgr = self.lease_manager.lock().await;
                     lease_mgr.prune();
                     
                     // Persist to disk
@@ -476,7 +488,7 @@ impl DhcpServer {
                     trace!("Refreshing ARP cache");
                     
                     let mut arp_cache = self.arp_cache.lock().await;
-                    if let Err(e) = arp_cache.refresh().await {
+                    if let Err(e) = arp_cache.refresh(self.platform.as_ref().as_ref()).await {
                         warn!("Error refreshing ARP cache: {}", e);
                     }
                     
@@ -644,11 +656,11 @@ impl DhcpServer {
     /// - Lease pool utilization
     /// - Recent allocation rate
     async fn dump_stats(&self) {
-        let lease_mgr = self.lease_manager.read().await;
+        let lease_mgr = self.lease_manager.lock().await;
         
         // Log statistics (implementation depends on LeaseManager API)
         info!("=== DHCPv4 Server Statistics ===");
-        info!("Lease database: {}", self.config.dhcp.lease_file_path);
+        info!("Lease database: {}", self.config.dhcp.lease_file.display());
         info!("================================");
     }
     
@@ -667,8 +679,9 @@ impl DhcpServer {
         
         // Flush lease database
         debug!("Flushing lease database to disk");
-        let mut lease_mgr = self.lease_manager.write().await;
-        lease_mgr.update_file().await?;
+        let mut lease_mgr = self.lease_manager.lock().await;
+        lease_mgr.update_file().await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Lease file error: {}", e)))?;
         
         // Log final statistics
         self.dump_stats().await;
@@ -838,7 +851,7 @@ pub async fn dhcp_init(
 ) -> Result<DhcpServer, std::io::Error> {
     info!("Initializing DHCPv4 server");
     
-    let mut server = DhcpServer::new(config, daemon);
+    let mut server = DhcpServer::new(config, daemon).await;
     server.bind().await?;
     
     info!("DHCPv4 server initialization complete");

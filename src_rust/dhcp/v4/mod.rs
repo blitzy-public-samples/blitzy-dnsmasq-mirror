@@ -4,6 +4,7 @@ pub mod protocol;
 pub mod options;
 pub mod ping;
 pub mod handler;
+pub mod server;
 
 /// `DHCPv4` server
 pub struct DhcpV4Server {}
