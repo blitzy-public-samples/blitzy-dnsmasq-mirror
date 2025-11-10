@@ -362,6 +362,10 @@ criterion = "0.5"
 # - Usage: Lease file, config file, PID file testing
 tempfile = "3.14"
 
+# futures: Future combinators for async testing
+# - Usage: join_all for concurrent test coordination
+futures = "0.3"
+
 # =============================================================================
 # BUILD DEPENDENCIES - Compile-Time Tools (Section 0.11.10)
 # =============================================================================
