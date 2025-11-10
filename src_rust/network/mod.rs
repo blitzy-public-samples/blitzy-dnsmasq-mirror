@@ -133,10 +133,10 @@
 //! // Enumerate all available interfaces
 //! let interfaces = enumerate_interfaces().await?;
 //!
-//! // Create a listening socket on port 53
+//! // Create a listening socket on port 53 (UDP)
 //! for iface in interfaces {
 //!     let addr: SocketAddr = format!("{}:53", iface.addr).parse().unwrap();
-//!     let socket = create_socket(&addr).await?;
+//!     let socket = create_socket(addr, false).await?;
 //!     println!("Listening on {} via {}", addr, iface.name);
 //! }
 //! # Ok(())
@@ -147,15 +147,20 @@
 //!
 //! ```no_run
 //! use dnsmasq::network::{ArpCache, find_mac};
-//! use std::net::Ipv4Addr;
+//! use dnsmasq::config::types::Config;
+//! use dnsmasq::network::platform::create_platform;
+//! use std::net::{Ipv4Addr, IpAddr};
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
 //! # async fn example() -> std::io::Result<()> {
-//! let cache = ArpCache::new();
-//! cache.refresh().await?;
+//! let config = Arc::new(Config::default());
+//! let platform = create_platform().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+//! let cache = Arc::new(RwLock::new(ArpCache::new(config)));
 //!
-//! let ip = Ipv4Addr::new(192, 168, 1, 100);
-//! if let Some(mac) = find_mac(&cache, ip.into()).await? {
-//!     println!("Address {} is in use by MAC {}", ip, mac);
+//! let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
+//! if let Some((mac_bytes, len)) = find_mac(cache.clone(), Some(&ip), false, platform.as_ref()).await? {
+//!     println!("Address {} is in use by MAC (length: {})", ip, len);
 //! } else {
 //!     println!("Address {} is available", ip);
 //! }
@@ -166,13 +171,16 @@
 //! ## Loop Detection for DNS Forwarding
 //!
 //! ```no_run
-//! use dnsmasq::network::{LoopDetector, send_probes};
+//! use dnsmasq::network::{LoopDetector, send_probes, create_socket};
 //! use dnsmasq::config::types::Config;
-//! use std::sync::Arc;
+//! use dnsmasq::dns::upstream::UpstreamServer;
+//! use std::sync::{Arc, RwLock};
 //!
 //! # async fn example() -> std::io::Result<()> {
 //! let config = Arc::new(Config::default());
-//! let detector = LoopDetector::new(config);
+//! let upstream_servers = Arc::new(RwLock::new(Vec::<UpstreamServer>::new()));
+//! let socket = create_socket("0.0.0.0:0".parse().unwrap(), false).await?;
+//! let detector = LoopDetector::new(config, upstream_servers, socket);
 //!
 //! // Periodically send probe queries
 //! send_probes(&detector).await?;
