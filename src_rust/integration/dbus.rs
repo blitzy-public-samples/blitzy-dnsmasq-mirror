@@ -150,31 +150,23 @@
 //! - Introspection XML → #[dbus_interface] derive macro
 
 use std::collections::HashMap;
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
-use zbus::{dbus_interface, interface, Connection, ConnectionBuilder, SignalContext};
+use zbus::{dbus_interface, Connection, ConnectionBuilder, SignalContext};
 
 use crate::core::config::VERSION;
 use crate::core::daemon::Daemon;
-use crate::dns::cache::Cache;
-use crate::dns::upstream::ServerFlags;
-#[cfg(feature = "dhcp")]
-use crate::dhcp::lease::LeaseManager;
 use crate::logging::logger::Logger;
 
 // ============================================================================
 // Constants
 // ============================================================================
-
-/// D-Bus interface name
-const DBUS_INTERFACE: &str = "uk.org.thekelleys.dnsmasq";
 
 /// D-Bus object path
 const DBUS_PATH: &str = "/uk/org/thekelleys/dnsmasq";
@@ -274,8 +266,8 @@ pub struct DbusInterface {
     /// Shared daemon state with thread-safe concurrent access
     daemon: Arc<RwLock<Daemon>>,
     
-    /// Logger for D-Bus operations
-    logger: Arc<Logger>,
+    /// Logger for D-Bus operations (currently unused as tracing macros are used instead)
+    _logger: Arc<Logger>,
     
     /// Signal context for emitting D-Bus signals
     signal_ctx: Arc<RwLock<Option<SignalContext<'static>>>>,
@@ -299,7 +291,7 @@ impl DbusInterface {
     pub fn new(daemon: Arc<RwLock<Daemon>>, logger: Arc<Logger>) -> Self {
         Self {
             daemon,
-            logger,
+            _logger: logger,
             signal_ctx: Arc::new(RwLock::new(None)),
         }
     }
@@ -324,7 +316,7 @@ impl DbusInterface {
         info!("Initializing D-Bus interface on system bus");
 
         // Build connection to system bus
-        let connection = ConnectionBuilder::system()
+        let _connection = ConnectionBuilder::system()
             .map_err(|e| DbusError::ConnectionFailed(format!("Failed to connect to system bus: {e}")))?
             .name(DBUS_SERVICE)
             .map_err(|e| DbusError::RegistrationFailed(format!("Failed to request service name: {e}")))?
@@ -336,17 +328,13 @@ impl DbusInterface {
 
         info!("D-Bus interface registered at {DBUS_PATH}");
 
-        // Keep connection alive
-        loop {
-            // Process D-Bus messages
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            
-            // Check if connection is still alive
-            if connection.is_closed() {
-                warn!("D-Bus connection closed");
-                return Err(DbusError::Disconnected);
-            }
-        }
+        // Keep connection alive indefinitely
+        // In zbus 4.x, the connection automatically processes messages in the background
+        // We just need to keep this future alive to prevent the connection from being dropped
+        std::future::pending::<()>().await;
+        
+        // This line is unreachable but satisfies type checker
+        Ok(())
     }
 
     /// Emit DhcpLeaseAdded signal
@@ -358,6 +346,7 @@ impl DbusInterface {
     /// * `ipaddr` - IP address as string
     /// * `hwaddr` - Hardware address (MAC) as string
     /// * `hostname` - Client hostname
+    #[cfg(feature = "dhcp")]
     pub async fn emit_dhcp_lease_added(
         &self,
         ipaddr: String,
@@ -367,7 +356,7 @@ impl DbusInterface {
         trace!("Emitting DhcpLeaseAdded signal: ip={ipaddr}, mac={hwaddr}, hostname={hostname}");
         
         if let Some(ctx) = self.signal_ctx.read().await.as_ref() {
-            DnsmasqInterface::dhcp_lease_added(ctx, &ipaddr, &hwaddr, &hostname)
+            DbusInterface::dhcp_lease_added(ctx, &ipaddr, &hwaddr, &hostname)
                 .await
                 .map_err(|e| DbusError::SignalEmitFailed(e.to_string()))?;
             debug!("DhcpLeaseAdded signal emitted");
@@ -385,6 +374,7 @@ impl DbusInterface {
     /// * `ipaddr` - IP address as string
     /// * `hwaddr` - Hardware address (MAC) as string
     /// * `hostname` - Client hostname
+    #[cfg(feature = "dhcp")]
     pub async fn emit_dhcp_lease_deleted(
         &self,
         ipaddr: String,
@@ -394,7 +384,7 @@ impl DbusInterface {
         trace!("Emitting DhcpLeaseDeleted signal: ip={ipaddr}, mac={hwaddr}, hostname={hostname}");
         
         if let Some(ctx) = self.signal_ctx.read().await.as_ref() {
-            DnsmasqInterface::dhcp_lease_deleted(ctx, &ipaddr, &hwaddr, &hostname)
+            DbusInterface::dhcp_lease_deleted(ctx, &ipaddr, &hwaddr, &hostname)
                 .await
                 .map_err(|e| DbusError::SignalEmitFailed(e.to_string()))?;
             debug!("DhcpLeaseDeleted signal emitted");
@@ -412,6 +402,7 @@ impl DbusInterface {
     /// * `ipaddr` - IP address as string
     /// * `hwaddr` - Hardware address (MAC) as string
     /// * `hostname` - Client hostname
+    #[cfg(feature = "dhcp")]
     pub async fn emit_dhcp_lease_updated(
         &self,
         ipaddr: String,
@@ -421,7 +412,7 @@ impl DbusInterface {
         trace!("Emitting DhcpLeaseUpdated signal: ip={ipaddr}, mac={hwaddr}, hostname={hostname}");
         
         if let Some(ctx) = self.signal_ctx.read().await.as_ref() {
-            DnsmasqInterface::dhcp_lease_updated(ctx, &ipaddr, &hwaddr, &hostname)
+            DbusInterface::dhcp_lease_updated(ctx, &ipaddr, &hwaddr, &hostname)
                 .await
                 .map_err(|e| DbusError::SignalEmitFailed(e.to_string()))?;
             debug!("DhcpLeaseUpdated signal emitted");
@@ -437,7 +428,7 @@ impl DbusInterface {
         info!("Emitting Up signal");
         
         if let Some(ctx) = self.signal_ctx.read().await.as_ref() {
-            DnsmasqInterface::up(ctx)
+            DbusInterface::up(ctx)
                 .await
                 .map_err(|e| DbusError::SignalEmitFailed(e.to_string()))?;
             info!("Up signal emitted");
@@ -456,7 +447,7 @@ impl DbusInterface {
 /// This struct defines the D-Bus interface using zbus macros. Methods are
 /// automatically exposed via D-Bus and their signatures are derived from
 /// Rust type annotations. Signals are defined as associated functions.
-#[dbus_interface(name = "uk.org.thekelleys.dnsmasq")]
+#[dbus_interface(interface = "uk.org.thekelleys.dnsmasq")]
 impl DbusInterface {
     /// GetVersion D-Bus method
     ///
@@ -518,15 +509,16 @@ impl DbusInterface {
         
         let daemon = self.daemon.read().await;
         let cache = daemon.get_cache();
-        let cache_guard = cache.lock().await;
-        let stats = cache_guard.get_stats();
+        let _cache_guard = cache.lock().await;
+        let stats = _cache_guard.get_stats();
         
         let mut metrics = HashMap::new();
-        metrics.insert("cache_size".to_string(), stats.size as u32);
+        metrics.insert("cache_entries".to_string(), stats.entries as u32);
         metrics.insert("cache_hits".to_string(), stats.hits as u32);
         metrics.insert("cache_misses".to_string(), stats.misses as u32);
         metrics.insert("cache_insertions".to_string(), stats.insertions as u32);
-        metrics.insert("cache_evictions".to_string(), stats.evictions as u32);
+        metrics.insert("cache_evictions_ttl".to_string(), stats.evictions_ttl as u32);
+        metrics.insert("cache_evictions_lru".to_string(), stats.evictions_lru as u32);
         
         debug!("Returning metrics: {} entries", metrics.len());
         Ok(metrics)
@@ -687,7 +679,7 @@ impl DbusInterface {
             }
             
             // Convert expiry timestamp to SystemTime
-            let expiry_time = SystemTime::UNIX_EPOCH + Duration::from_secs(expiry);
+            let _expiry_time = SystemTime::UNIX_EPOCH + Duration::from_secs(expiry);
             
             info!(
                 "Lease details: MAC={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}, client_id_len={}",
@@ -872,102 +864,6 @@ impl DbusInterface {
 }
 
 // ============================================================================
-// Helper Methods for Signal Emission
-// ============================================================================
-
-impl DbusInterface {
-    /// Helper method to emit DhcpLeaseAdded signal
-    ///
-    /// This is called internally when a new DHCP lease is created.
-    /// It wraps the signal emission with proper error handling.
-    ///
-    /// # Arguments
-    ///
-    /// * `signal_ctx` - Signal context from zbus for emitting signals
-    /// * `ipaddr` - IP address as string
-    /// * `hwaddr` - Hardware address (MAC) as string
-    /// * `hostname` - Client hostname
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or `DbusError::SignalEmitFailed` on failure.
-    #[cfg(feature = "dhcp")]
-    pub async fn emit_dhcp_lease_added(
-        signal_ctx: &SignalContext<'_>,
-        ipaddr: String,
-        hwaddr: String,
-        hostname: String,
-    ) -> Result<(), DbusError> {
-        Self::dhcp_lease_added(signal_ctx, &ipaddr, &hwaddr, &hostname)
-            .await
-            .map_err(|e| {
-                error!("Failed to emit DhcpLeaseAdded signal: {}", e);
-                DbusError::SignalEmitFailed(format!("DhcpLeaseAdded: {}", e))
-            })
-    }
-
-    /// Helper method to emit DhcpLeaseUpdated signal
-    ///
-    /// # Arguments
-    ///
-    /// * `signal_ctx` - Signal context from zbus
-    /// * `ipaddr` - IP address as string
-    /// * `hwaddr` - Hardware address (MAC) as string
-    /// * `hostname` - Client hostname
-    #[cfg(feature = "dhcp")]
-    pub async fn emit_dhcp_lease_updated(
-        signal_ctx: &SignalContext<'_>,
-        ipaddr: String,
-        hwaddr: String,
-        hostname: String,
-    ) -> Result<(), DbusError> {
-        Self::dhcp_lease_updated(signal_ctx, &ipaddr, &hwaddr, &hostname)
-            .await
-            .map_err(|e| {
-                error!("Failed to emit DhcpLeaseUpdated signal: {}", e);
-                DbusError::SignalEmitFailed(format!("DhcpLeaseUpdated: {}", e))
-            })
-    }
-
-    /// Helper method to emit DhcpLeaseDeleted signal
-    ///
-    /// # Arguments
-    ///
-    /// * `signal_ctx` - Signal context from zbus
-    /// * `ipaddr` - IP address as string
-    /// * `hwaddr` - Hardware address (MAC) as string
-    /// * `hostname` - Client hostname
-    #[cfg(feature = "dhcp")]
-    pub async fn emit_dhcp_lease_deleted(
-        signal_ctx: &SignalContext<'_>,
-        ipaddr: String,
-        hwaddr: String,
-        hostname: String,
-    ) -> Result<(), DbusError> {
-        Self::dhcp_lease_deleted(signal_ctx, &ipaddr, &hwaddr, &hostname)
-            .await
-            .map_err(|e| {
-                error!("Failed to emit DhcpLeaseDeleted signal: {}", e);
-                DbusError::SignalEmitFailed(format!("DhcpLeaseDeleted: {}", e))
-            })
-    }
-
-    /// Helper method to emit Up signal
-    ///
-    /// Emitted when daemon has completed initialization and is ready to serve requests.
-    ///
-    /// # Arguments
-    ///
-    /// * `signal_ctx` - Signal context from zbus
-    pub async fn emit_up(signal_ctx: &SignalContext<'_>) -> Result<(), DbusError> {
-        Self::up(signal_ctx).await.map_err(|e| {
-            error!("Failed to emit Up signal: {}", e);
-            DbusError::SignalEmitFailed(format!("Up: {}", e))
-        })
-    }
-}
-
-// ============================================================================
 // Public Initialization Function
 // ============================================================================
 
@@ -1048,19 +944,10 @@ pub async fn init_dbus(
         "D-Bus interface registered at uk.org.thekelleys.dnsmasq on path /uk/org/thekelleys/dnsmasq"
     );
 
-    // Spawn async task to run D-Bus connection executor
-    // This replaces the C implementation's manual watch polling with tokio integration
-    let conn_clone = connection.clone();
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = conn_clone.executor().await {
-                error!("D-Bus connection executor error: {}", e);
-                break;
-            }
-        }
-        warn!("D-Bus connection executor terminated");
-    });
-
+    // In zbus 4.x, the connection automatically handles message processing
+    // in the background via tokio. No manual executor loop is needed.
+    // The connection will remain active as long as it's not dropped.
+    
     info!("D-Bus interface initialization complete");
     Ok(connection)
 }
