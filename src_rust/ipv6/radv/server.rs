@@ -267,10 +267,15 @@ impl RadVServer {
     /// ```no_run
     /// use std::sync::{Arc, RwLock};
     /// use dnsmasq::ipv6::radv::server::RadVServer;
-    /// use dnsmasq::logging::logger::Logger;
+    /// use dnsmasq::logging::logger::{Logger, LogDestination, LogLevel};
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let logger = Arc::new(Logger::new(/* ... */));
+    /// let logger = Arc::new(Logger::new(
+    ///     LogDestination::Syslog,
+    ///     LogLevel::Info,
+    ///     150,
+    ///     0,
+    /// ));
     /// let contexts = Arc::new(RwLock::new(Vec::new()));
     /// let interfaces = Arc::new(RwLock::new(Vec::new()));
     ///

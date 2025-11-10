@@ -143,6 +143,7 @@ impl LoopDetector {
     ///
     /// ```no_run
     /// # use dnsmasq::network::loop_detect::LoopDetector;
+    /// # use dnsmasq::config::types::Config;
     /// # use std::sync::{Arc, RwLock};
     /// # async fn example() -> std::io::Result<()> {
     /// let config = Arc::new(Config::default());
@@ -440,8 +441,8 @@ impl LoopDetector {
 ///
 /// # Examples
 ///
-/// ```no_run
-/// # use dnsmasq::network::loop_detect::make_probe;
+/// ```ignore
+/// # Private function - example for illustration only
 /// let probe = make_probe(0x12345678).unwrap();
 /// // probe contains DNS TXT query for "12345678.test"
 /// ```

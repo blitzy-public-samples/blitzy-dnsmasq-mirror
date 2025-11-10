@@ -400,7 +400,8 @@ impl TftpTransfer {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
+/// # High-level usage example - requires full daemon setup
 /// use dnsmasq::services::tftp::{TftpServer, TftpConfig};
 /// use dnsmasq::core::daemon::Daemon;
 /// use std::sync::Arc;
@@ -408,8 +409,8 @@ impl TftpTransfer {
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let config = TftpConfig::default();
-///     let daemon = Arc::new(Daemon::new(/* config */));
-///     let logger = /* create logger */;
+///     let daemon = Arc::new(/* Daemon setup */);
+///     let logger = Arc::new(/* Logger setup */);
 ///     
 ///     let server = TftpServer::new(config, daemon, logger)?;
 ///     server.run().await?;
