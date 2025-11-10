@@ -56,27 +56,22 @@
 use bytes::BytesMut;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::SystemTime;
-use tracing::{debug, error, trace, warn};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, trace, warn};
 
 // Internal imports (ONLY from depends_on_files)
 use crate::config::types::DaemonOptions;
-use crate::dns::parser::{extract_name, skip_name, skip_questions, skip_section};
+use crate::dns::parser::{skip_name, skip_questions, skip_section};
 use crate::dns::protocol::{
-    C_ANY, C_IN, EDNS0_OPTION_CLIENT_SUBNET, EDNS0_OPTION_MAC, EDNS0_OPTION_NOMCPEID,
-    EDNS0_OPTION_NOMDEVICEID, EDNS0_OPTION_UMBRELLA, HB3_TC, IN6ADDRSZ, INADDRSZ, PACKETSZ,
-    T_OPT, T_TKEY, T_TSIG,
+    EDNS0_OPTION_CLIENT_SUBNET, EDNS0_OPTION_MAC, EDNS0_OPTION_NOMCPEID,
+    EDNS0_OPTION_NOMDEVICEID, EDNS0_OPTION_UMBRELLA, PACKETSZ, T_OPT, T_TKEY, T_TSIG,
 };
 use crate::dns::rrfilter::rrfilter;
-use crate::dns::serializer::{check_len, read_u16, write_u16, write_u32};
-use crate::network::arp::find_mac;
+use crate::dns::serializer::{read_u16, write_u16, write_u32};
+use crate::network::arp::{find_mac, ArpCache};
+use crate::network::platform::Platform;
 use crate::utils::general::print_mac;
-
-// Re-export EDNS0 option constants for public API
-pub use crate::dns::protocol::{
-    EDNS0_OPTION_CLIENT_SUBNET, EDNS0_OPTION_MAC, EDNS0_OPTION_NOMCPEID,
-    EDNS0_OPTION_NOMDEVICEID, EDNS0_OPTION_UMBRELLA,
-};
 
 // ============================================================================
 // Constants
@@ -153,7 +148,246 @@ impl std::error::Error for Edns0Error {}
 // Data Structures
 // ============================================================================
 
+/// EDNS0 option codes as defined in various RFCs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Edns0OptionCode {
+    /// LLQ (Long-Lived Queries) - RFC 8764
+    Llq,
+    /// UL (Update Lease) - RFC 2136
+    Ul,
+    /// NSID (Name Server Identifier) - RFC 5001
+    Nsid,
+    /// DAU (DNSSEC Algorithm Understood) - RFC 6975
+    Dau,
+    /// DHU (DS Hash Understood) - RFC 6975
+    Dhu,
+    /// N3U (NSEC3 Hash Understood) - RFC 6975
+    N3u,
+    /// EDNS Client Subnet - RFC 7871
+    ClientSubnet,
+    /// EDNS EXPIRE - RFC 7314
+    Expire,
+    /// Cookie - RFC 7873
+    Cookie,
+    /// EDNS TCP Keepalive - RFC 7828
+    TcpKeepalive,
+    /// Padding - RFC 7830
+    Padding,
+    /// CHAIN - RFC 7901
+    Chain,
+    /// EDNS Key Tag - RFC 8145
+    KeyTag,
+    /// Extended DNS Error - RFC 8914
+    ExtendedDnsError,
+    /// MAC address option (Apple devices) - Proprietary
+    Mac,
+    /// CPE-ID option - Proprietary
+    NomCpeId,
+    /// Device-ID option - Proprietary
+    NomDeviceId,
+    /// Cisco Umbrella device identification - Proprietary
+    Umbrella,
+    /// Unknown option code
+    Unknown(u16),
+}
+
+impl From<u16> for Edns0OptionCode {
+    fn from(code: u16) -> Self {
+        match code {
+            1 => Self::Llq,
+            2 => Self::Ul,
+            3 => Self::Nsid,
+            5 => Self::Dau,
+            6 => Self::Dhu,
+            7 => Self::N3u,
+            c if c == EDNS0_OPTION_CLIENT_SUBNET => Self::ClientSubnet,
+            9 => Self::Expire,
+            10 => Self::Cookie,
+            11 => Self::TcpKeepalive,
+            12 => Self::Padding,
+            13 => Self::Chain,
+            14 => Self::KeyTag,
+            15 => Self::ExtendedDnsError,
+            c if c == EDNS0_OPTION_MAC => Self::Mac,
+            c if c == EDNS0_OPTION_NOMCPEID => Self::NomCpeId,
+            c if c == EDNS0_OPTION_NOMDEVICEID => Self::NomDeviceId,
+            c if c == EDNS0_OPTION_UMBRELLA => Self::Umbrella,
+            c => Self::Unknown(c),
+        }
+    }
+}
+
+impl From<Edns0OptionCode> for u16 {
+    fn from(code: Edns0OptionCode) -> Self {
+        match code {
+            Edns0OptionCode::Llq => 1,
+            Edns0OptionCode::Ul => 2,
+            Edns0OptionCode::Nsid => 3,
+            Edns0OptionCode::Dau => 5,
+            Edns0OptionCode::Dhu => 6,
+            Edns0OptionCode::N3u => 7,
+            Edns0OptionCode::ClientSubnet => EDNS0_OPTION_CLIENT_SUBNET,
+            Edns0OptionCode::Expire => 9,
+            Edns0OptionCode::Cookie => 10,
+            Edns0OptionCode::TcpKeepalive => 11,
+            Edns0OptionCode::Padding => 12,
+            Edns0OptionCode::Chain => 13,
+            Edns0OptionCode::KeyTag => 14,
+            Edns0OptionCode::ExtendedDnsError => 15,
+            Edns0OptionCode::Mac => EDNS0_OPTION_MAC,
+            Edns0OptionCode::NomCpeId => EDNS0_OPTION_NOMCPEID,
+            Edns0OptionCode::NomDeviceId => EDNS0_OPTION_NOMDEVICEID,
+            Edns0OptionCode::Umbrella => EDNS0_OPTION_UMBRELLA,
+            Edns0OptionCode::Unknown(c) => c,
+        }
+    }
+}
+
 /// EDNS Client Subnet option data (RFC 7871)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientSubnet {
+    /// Address family: 1 for IPv4, 2 for IPv6
+    pub family: u16,
+    /// Source netmask bits
+    pub source_netmask: u8,
+    /// Scope netmask bits (0 in queries, set by server in responses)
+    pub scope_netmask: u8,
+    /// Address bytes (truncated to source_netmask bits)
+    pub addr: Vec<u8>,
+}
+
+impl ClientSubnet {
+    /// Create ClientSubnet from IP address and netmask
+    pub fn from_addr(addr: &IpAddr, netmask: u8) -> Self {
+        match addr {
+            IpAddr::V4(ipv4) => {
+                let bytes = ipv4.octets();
+                let byte_count = ((netmask + 7) / 8) as usize;
+                Self {
+                    family: 1,
+                    source_netmask: netmask.min(32),
+                    scope_netmask: 0,
+                    addr: bytes[..byte_count.min(4)].to_vec(),
+                }
+            }
+            IpAddr::V6(ipv6) => {
+                let bytes = ipv6.octets();
+                let byte_count = ((netmask + 7) / 8) as usize;
+                Self {
+                    family: 2,
+                    source_netmask: netmask.min(128),
+                    scope_netmask: 0,
+                    addr: bytes[..byte_count.min(16)].to_vec(),
+                }
+            }
+        }
+    }
+
+    /// Convert to IP address with the source netmask
+    pub fn to_addr(&self) -> Option<(IpAddr, u8)> {
+        match self.family {
+            1 => {
+                // IPv4
+                if self.addr.len() > 4 {
+                    return None;
+                }
+                let mut bytes = [0u8; 4];
+                bytes[..self.addr.len()].copy_from_slice(&self.addr);
+                Some((IpAddr::V4(Ipv4Addr::from(bytes)), self.source_netmask))
+            }
+            2 => {
+                // IPv6
+                if self.addr.len() > 16 {
+                    return None;
+                }
+                let mut bytes = [0u8; 16];
+                bytes[..self.addr.len()].copy_from_slice(&self.addr);
+                Some((IpAddr::V6(Ipv6Addr::from(bytes)), self.source_netmask))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// EDNS0 option with parsed data
+#[derive(Debug, Clone)]
+pub enum Edns0Option {
+    /// EDNS Client Subnet (RFC 7871)
+    ClientSubnet(ClientSubnet),
+    /// MAC address for device identification
+    Mac(Vec<u8>),
+    /// CPE-ID for device tracking
+    NomCpeId(Vec<u8>),
+    /// Device-ID for device tracking
+    NomDeviceId(Vec<u8>),
+    /// Cisco Umbrella device identification
+    Umbrella { device_id: Vec<u8>, asset_id: Vec<u8> },
+    /// DNS Cookie (RFC 7873)
+    Cookie(Vec<u8>),
+    /// NSID (Name Server Identifier - RFC 5001)
+    Nsid(Vec<u8>),
+    /// Extended DNS Error (RFC 8914)
+    ExtendedDnsError { info_code: u16, extra_text: String },
+    /// Padding (RFC 7830)
+    Padding(usize),
+    /// Generic option with raw data
+    Unknown { code: u16, data: Vec<u8> },
+}
+
+impl Edns0Option {
+    /// Get the option code
+    pub fn code(&self) -> u16 {
+        match self {
+            Self::ClientSubnet(_) => EDNS0_OPTION_CLIENT_SUBNET,
+            Self::Mac(_) => EDNS0_OPTION_MAC,
+            Self::NomCpeId(_) => EDNS0_OPTION_NOMCPEID,
+            Self::NomDeviceId(_) => EDNS0_OPTION_NOMDEVICEID,
+            Self::Umbrella { .. } => EDNS0_OPTION_UMBRELLA,
+            Self::Cookie(_) => 10,
+            Self::Nsid(_) => 3,
+            Self::ExtendedDnsError { .. } => 15,
+            Self::Padding(_) => 12,
+            Self::Unknown { code, .. } => *code,
+        }
+    }
+
+    /// Get the option data as bytes
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::ClientSubnet(cs) => {
+                let mut data = Vec::new();
+                data.extend_from_slice(&cs.family.to_be_bytes());
+                data.push(cs.source_netmask);
+                data.push(cs.scope_netmask);
+                data.extend_from_slice(&cs.addr);
+                data
+            }
+            Self::Mac(mac) => mac.clone(),
+            Self::NomCpeId(id) => id.clone(),
+            Self::NomDeviceId(id) => id.clone(),
+            Self::Umbrella { device_id, asset_id } => {
+                let mut data = Vec::new();
+                data.extend_from_slice(device_id);
+                if !asset_id.is_empty() {
+                    data.extend_from_slice(asset_id);
+                }
+                data
+            }
+            Self::Cookie(cookie) => cookie.clone(),
+            Self::Nsid(nsid) => nsid.clone(),
+            Self::ExtendedDnsError { info_code, extra_text } => {
+                let mut data = Vec::new();
+                data.extend_from_slice(&info_code.to_be_bytes());
+                data.extend_from_slice(extra_text.as_bytes());
+                data
+            }
+            Self::Padding(len) => vec![0u8; *len],
+            Self::Unknown { data, .. } => data.clone(),
+        }
+    }
+}
+
+/// Internal EDNS Client Subnet option data (RFC 7871)
 #[derive(Debug, Clone)]
 struct SubnetOption {
     /// Address family: 1 for IPv4, 2 for IPv6
@@ -665,20 +899,26 @@ pub async fn add_edns0_config(
     source: &SocketAddr,
     options: &DaemonOptions,
     pktsz: u16,
+    arp_cache: Option<Arc<RwLock<ArpCache>>>,
+    platform: Option<&dyn Platform>,
 ) -> Result<usize, Edns0Error> {
     let mut opt_data: Vec<(u16, Vec<u8>)> = Vec::new();
 
-    // Add MAC address option if configured
+    // Add MAC address option if configured (requires ARP cache and platform)
     if options.contains(DaemonOptions::OPT_ADD_MAC) {
-        if let Some(mac_data) = add_mac_option(source, options).await {
-            opt_data.push((EDNS0_OPTION_MAC, mac_data));
+        if let (Some(cache), Some(plat)) = (arp_cache.as_ref(), platform) {
+            if let Some(mac_data) = add_mac_option(source, options, cache.clone(), plat).await {
+                opt_data.push((EDNS0_OPTION_MAC, mac_data));
+            }
         }
     }
 
     // Add device ID option (base64/hex MAC) if configured
     // Note: This uses different option codes than MAC
-    if let Some(device_data) = add_device_id_option(source, options).await {
-        opt_data.push(device_data);
+    if let (Some(cache), Some(plat)) = (arp_cache.as_ref(), platform) {
+        if let Some(device_data) = add_device_id_option(source, options, cache.clone(), plat).await {
+            opt_data.push(device_data);
+        }
     }
 
     // Add Client Subnet option if configured
@@ -1028,14 +1268,19 @@ fn add_source_addr_option(source: &IpAddr, options: &DaemonOptions) -> Option<Ve
 }
 
 /// Create MAC address option data
-async fn add_mac_option(source: &SocketAddr, options: &DaemonOptions) -> Option<Vec<u8>> {
-    let mut mac = [0u8; 6];
-
+async fn add_mac_option(
+    source: &SocketAddr,
+    _options: &DaemonOptions,
+    arp_cache: Arc<RwLock<ArpCache>>,
+    platform: &dyn Platform,
+) -> Option<Vec<u8>> {
     // Query ARP cache for MAC address
-    match find_mac(source, &mut mac, 1, SystemTime::now()).await {
-        Ok(mac_len) if mac_len > 0 => {
-            trace!("Found MAC for {}: {:02X?}", source.ip(), &mac[..mac_len]);
-            Some(mac[..mac_len].to_vec())
+    // find_mac expects Option<&IpAddr>, lazy: bool
+    let addr = source.ip();
+    match find_mac(arp_cache, Some(&addr), true, platform).await {
+        Ok(Some((mac_bytes, mac_len))) if mac_len > 0 => {
+            trace!("Found MAC for {}: {:02X?}", source.ip(), &mac_bytes[..mac_len]);
+            Some(mac_bytes[..mac_len].to_vec())
         }
         Ok(_) => {
             trace!("No MAC found for {}", source.ip());
@@ -1051,13 +1296,14 @@ async fn add_mac_option(source: &SocketAddr, options: &DaemonOptions) -> Option<
 /// Create device ID option data (encoded MAC)
 async fn add_device_id_option(
     source: &SocketAddr,
-    options: &DaemonOptions,
+    _options: &DaemonOptions,
+    arp_cache: Arc<RwLock<ArpCache>>,
+    platform: &dyn Platform,
 ) -> Option<(u16, Vec<u8>)> {
-    let mut mac = [0u8; 6];
-
     // Query ARP cache for MAC address
-    let mac_len = match find_mac(source, &mut mac, 1, SystemTime::now()).await {
-        Ok(len) if len > 0 => len,
+    let addr = source.ip();
+    let (mac_bytes, mac_len) = match find_mac(arp_cache, Some(&addr), true, platform).await {
+        Ok(Some((bytes, len))) if len > 0 => (bytes, len),
         _ => return None,
     };
 
@@ -1067,7 +1313,7 @@ async fn add_device_id_option(
     let option_code = EDNS0_OPTION_NOMDEVICEID;
 
     // Encode MAC as hex string for device ID
-    let mac_str = print_mac(&mac[..mac_len]);
+    let mac_str = print_mac(&mac_bytes[..mac_len]);
     let encoded = mac_str.as_bytes().to_vec();
 
     trace!(
