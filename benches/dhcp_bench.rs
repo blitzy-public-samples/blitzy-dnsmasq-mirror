@@ -94,49 +94,43 @@
 use criterion::{
     criterion_group, criterion_main, BenchmarkId, Criterion, BatchSize, black_box,
 };
-use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr, IpAddr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 use tokio::runtime::Runtime;
 use bytes::BytesMut;
 
 // Internal imports - ONLY from depends_on_files per Agent Action Plan section IE3
 use dnsmasq::dhcp::lease::{
     LeaseManager, lease4_allocate, lease6_allocate, lease_find_by_client,
-    lease_find_by_addr, lease_prune, ClientId, Iaid,
+    lease_find_by_addr, lease_prune, ClientId,
 };
-use dnsmasq::dhcp::v4::server::DhcpServer;
-use dnsmasq::dhcp::v6::server::Dhcp6Server;
-use dnsmasq::dhcp::v4::handler::dhcp_reply;
-use dnsmasq::dhcp::v6::handler::Dhcp6Handler;
-use dnsmasq::dhcp::v4::options::build_options;
-use dnsmasq::dhcp::v6::options::Dhcp6OptionBuilder;
 use dnsmasq::dhcp::v4::protocol::{
-    MessageType, OptionCode, DhcpPacket, DHCP_SERVER_PORT, DHCP_CLIENT_PORT, 
-    DHCP_COOKIE, BOOTREQUEST, BOOTREPLY,
+    MessageType, DHCP_COOKIE, BOOTREQUEST, BOOTREPLY,
 };
 use dnsmasq::dhcp::v6::protocol::{
-    MessageType as MessageTypeV6, OptionCode as OptionCodeV6, StatusCode,
-    DHCPV6_SERVER_PORT, DHCPV6_CLIENT_PORT, DUID_LLT, DUID_LL,
+    MessageType as MessageTypeV6, DUID_LLT, OptionCode,
 };
-use dnsmasq::dhcp::v4::ping::icmp_ping;
+use dnsmasq::config::types::DaemonOptions;
 
 // ============================================================================
 // Benchmark Configuration Constants
 // ============================================================================
 
 /// Performance target: >5,000 leases/sec per Agent Action Plan section 0.2.1
+#[allow(dead_code)]
 const TARGET_LEASES_PER_SEC: u32 = 5_000;
 
 /// Benchmark sample size for statistical significance
 const BENCHMARK_SAMPLES: usize = 100;
 
 /// Warm-up iterations before actual measurements
+#[allow(dead_code)]
 const WARMUP_ITERATIONS: usize = 10;
 
 /// Maximum lease database size for scalability benchmarks
+#[allow(dead_code)]
 const MAX_LEASE_COUNT: usize = 10_000;
 
 /// DHCP packet buffer size (typical MTU)
@@ -323,19 +317,19 @@ fn create_dhcpv6_solicit_packet(xid: u32, duid: &[u8], iaid: u32) -> BytesMut {
     
     // Client Identifier option
     let client_id_len = duid.len() as u16;
-    packet.extend_from_slice(&(OptionCodeV6::ClientId as u16).to_be_bytes());
+    packet.extend_from_slice(&(OptionCode::ClientId as u16).to_be_bytes());
     packet.extend_from_slice(&client_id_len.to_be_bytes());
     packet.extend_from_slice(duid);
     
     // IA_NA option (Identity Association for Non-temporary Addresses)
-    packet.extend_from_slice(&(OptionCodeV6::IaNa as u16).to_be_bytes());
+    packet.extend_from_slice(&(OptionCode::IaNa as u16).to_be_bytes());
     packet.extend_from_slice(&12u16.to_be_bytes()); // Length
     packet.extend_from_slice(&iaid.to_be_bytes()); // IAID
     packet.extend_from_slice(&0u32.to_be_bytes()); // T1
     packet.extend_from_slice(&0u32.to_be_bytes()); // T2
     
     // Elapsed time option (required)
-    packet.extend_from_slice(&(OptionCodeV6::ElapsedTime as u16).to_be_bytes());
+    packet.extend_from_slice(&(OptionCode::ElapsedTime as u16).to_be_bytes());
     packet.extend_from_slice(&2u16.to_be_bytes());
     packet.extend_from_slice(&0u16.to_be_bytes());
     
@@ -358,7 +352,9 @@ async fn setup_test_lease_manager(max_leases: usize) -> (LeaseManager, TempDir) 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let lease_file = temp_dir.path().join("dnsmasq.leases");
     
-    let manager = LeaseManager::new(lease_file, max_leases);
+    // Create default daemon options for benchmarking
+    let options = DaemonOptions::empty();
+    let manager = LeaseManager::new(lease_file, max_leases, options, false);
     manager.init().await.expect("Failed to initialize lease manager");
     
     (manager, temp_dir)
@@ -388,7 +384,7 @@ fn bench_dhcpv4_lease_allocation(c: &mut Criterion) {
             BenchmarkId::from_parameter(lease_count),
             &lease_count,
             |b, &count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create lease manager and test data
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -397,24 +393,26 @@ fn bench_dhcpv4_lease_allocation(c: &mut Criterion) {
                         let base_ip = Ipv4Addr::new(192, 0, 2, 0);
                         (manager, _temp_dir, base_ip)
                     },
-                    |(manager, _temp_dir, base_ip)| async move {
+                    |(manager, _temp_dir, base_ip)| {
                         // Benchmark: Allocate leases
-                        for i in 0..100 {
-                            let addr = generate_test_ipv4(base_ip, (i % 250) as u8 + 1);
-                            let mac = generate_test_mac(i);
-                            let client_id = mac.clone();
-                            let hostname = Some(generate_test_hostname(i));
-                            
-                            let _ = lease4_allocate(
-                                &manager,
-                                addr,
-                                mac,
-                                1, // ARPHRD_ETHER
-                                client_id,
-                                hostname,
-                                LEASE_TIME_SECONDS,
-                            ).await;
-                        }
+                        rt.block_on(async {
+                            for i in 0..100 {
+                                let addr = generate_test_ipv4(base_ip, (i % 250) as u8 + 1);
+                                let mac = generate_test_mac(i);
+                                let client_id = mac.clone();
+                                let hostname = Some(generate_test_hostname(i));
+                                
+                                let _ = lease4_allocate(
+                                    &manager,
+                                    addr,
+                                    mac,
+                                    1, // ARPHRD_ETHER
+                                    client_id,
+                                    hostname,
+                                    LEASE_TIME_SECONDS,
+                                ).await;
+                            }
+                        })
                     },
                     BatchSize::SmallInput,
                 );
@@ -445,7 +443,7 @@ fn bench_dhcpv6_lease_allocation(c: &mut Criterion) {
             BenchmarkId::from_parameter(lease_count),
             &lease_count,
             |b, &count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create lease manager and test data
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -454,23 +452,25 @@ fn bench_dhcpv6_lease_allocation(c: &mut Criterion) {
                         let base_ip = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
                         (manager, _temp_dir, base_ip)
                     },
-                    |(manager, _temp_dir, base_ip)| async move {
+                    |(manager, _temp_dir, base_ip)| {
                         // Benchmark: Allocate IPv6 leases
-                        for i in 0..100 {
-                            let addr6 = generate_test_ipv6(base_ip, i as u64);
-                            let duid = generate_test_duid(i);
-                            let iaid = 0x12340000 + i;
-                            let hostname = Some(generate_test_hostname(i));
-                            
-                            let _ = lease6_allocate(
-                                &manager,
-                                addr6,
-                                duid,
-                                iaid,
-                                hostname,
-                                LEASE_TIME_SECONDS_V6,
-                            ).await;
-                        }
+                        rt.block_on(async {
+                            for i in 0..100 {
+                                let addr6 = generate_test_ipv6(base_ip, i as u64);
+                                let duid = generate_test_duid(i);
+                                let iaid = 0x12340000 + i;
+                                let hostname = Some(generate_test_hostname(i));
+                                
+                                let _ = lease6_allocate(
+                                    &manager,
+                                    addr6,
+                                    duid,
+                                    iaid,
+                                    hostname,
+                                    LEASE_TIME_SECONDS_V6,
+                                ).await;
+                            }
+                        })
                     },
                     BatchSize::SmallInput,
                 );
@@ -494,7 +494,7 @@ fn bench_dhcpv4_packet_parsing(c: &mut Criterion) {
     let mut group = c.benchmark_group("dhcpv4_packet_parsing");
     group.sample_size(BENCHMARK_SAMPLES);
     
-    let rt = Runtime::new().expect("Failed to create Tokio runtime");
+    let _rt = Runtime::new().expect("Failed to create Tokio runtime");
     
     group.bench_function("parse_discover", |b| {
         b.iter_batched(
@@ -545,7 +545,7 @@ fn bench_dhcpv6_packet_parsing(c: &mut Criterion) {
     let mut group = c.benchmark_group("dhcpv6_packet_parsing");
     group.sample_size(BENCHMARK_SAMPLES);
     
-    let rt = Runtime::new().expect("Failed to create Tokio runtime");
+    let _rt = Runtime::new().expect("Failed to create Tokio runtime");
     
     group.bench_function("parse_solicit", |b| {
         b.iter_batched(
@@ -562,7 +562,7 @@ fn bench_dhcpv6_packet_parsing(c: &mut Criterion) {
                     // Simulated option parsing (TLV format)
                     let mut pos = 4;
                     while pos + 4 <= packet.len() {
-                        let opt_code = u16::from_be_bytes([packet[pos], packet[pos + 1]]);
+                        let _opt_code = u16::from_be_bytes([packet[pos], packet[pos + 1]]);
                         let opt_len = u16::from_be_bytes([packet[pos + 2], packet[pos + 3]]);
                         pos += 4 + opt_len as usize;
                         if pos > packet.len() {
@@ -685,17 +685,17 @@ fn bench_dhcpv6_packet_serialization(c: &mut Criterion) {
             
             // Client ID option
             let duid = generate_test_duid(1);
-            packet.extend_from_slice(&(OptionCodeV6::ClientId as u16).to_be_bytes());
+            packet.extend_from_slice(&(OptionCode::ClientId as u16).to_be_bytes());
             packet.extend_from_slice(&(duid.len() as u16).to_be_bytes());
             packet.extend_from_slice(&duid);
             
             // Server ID option (simplified)
-            packet.extend_from_slice(&(OptionCodeV6::ServerId as u16).to_be_bytes());
+            packet.extend_from_slice(&(OptionCode::ServerId as u16).to_be_bytes());
             packet.extend_from_slice(&10u16.to_be_bytes());
             packet.extend_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x12, 0x34, 0x56, 0x78, 0xab, 0xcd]);
             
             // IA_NA option with nested IAADDR
-            packet.extend_from_slice(&(OptionCodeV6::IaNa as u16).to_be_bytes());
+            packet.extend_from_slice(&(OptionCode::IaNa as u16).to_be_bytes());
             // Length calculated: 12 (IA_NA header) + 4 (IAADDR option header) + 24 (IAADDR data) = 40
             packet.extend_from_slice(&40u16.to_be_bytes());
             packet.extend_from_slice(&0x12340001u32.to_be_bytes()); // IAID
@@ -703,7 +703,7 @@ fn bench_dhcpv6_packet_serialization(c: &mut Criterion) {
             packet.extend_from_slice(&5400u32.to_be_bytes()); // T2
             
             // IAADDR suboption
-            packet.extend_from_slice(&(OptionCodeV6::IaAddr as u16).to_be_bytes());
+            packet.extend_from_slice(&(OptionCode::IaAddr as u16).to_be_bytes());
             packet.extend_from_slice(&24u16.to_be_bytes());
             let addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
             packet.extend_from_slice(&addr.octets());
@@ -736,7 +736,7 @@ fn bench_lease_database_persistence(c: &mut Criterion) {
             BenchmarkId::new("update_file", lease_count),
             &lease_count,
             |b, &count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create lease manager with pre-populated leases
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -765,9 +765,11 @@ fn bench_lease_database_persistence(c: &mut Criterion) {
                         });
                         (manager, _temp_dir)
                     },
-                    |(manager, _temp_dir)| async move {
+                    |(manager, _temp_dir)| {
                         // Benchmark: Persist leases to disk with atomic write
-                        manager.update_file().await.expect("Failed to update lease file");
+                        rt.block_on(async {
+                            manager.update_file().await.expect("Failed to update lease file");
+                        })
                     },
                     BatchSize::SmallInput,
                 );
@@ -822,10 +824,12 @@ fn bench_lease_database_lookup(c: &mut Criterion) {
                     (mgr, dir, addrs)
                 });
                 
-                b.to_async(&rt).iter(|| async {
+                b.iter(|| {
                     // Benchmark: Lookup random lease by address
-                    let addr = test_addrs[count / 2];
-                    black_box(lease_find_by_addr(&manager, &IpAddr::V4(addr)).await);
+                    rt.block_on(async {
+                        let addr = test_addrs[count / 2];
+                        black_box(lease_find_by_addr(&manager, addr).await);
+                    })
                 });
             },
         );
@@ -863,10 +867,12 @@ fn bench_lease_database_lookup(c: &mut Criterion) {
                     (mgr, dir, clients)
                 });
                 
-                b.to_async(&rt).iter(|| async {
+                b.iter(|| {
                     // Benchmark: Lookup random lease by client ID
-                    let client = &test_clients[count / 2];
-                    black_box(lease_find_by_client(&manager, client).await);
+                    rt.block_on(async {
+                        let client = &test_clients[count / 2];
+                        black_box(lease_find_by_client(&manager, client, None).await);
+                    })
                 });
             },
         );
@@ -890,7 +896,7 @@ fn bench_lease_expiration(c: &mut Criterion) {
             BenchmarkId::from_parameter(lease_count),
             &lease_count,
             |b, &count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create lease manager with expired leases
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -925,9 +931,11 @@ fn bench_lease_expiration(c: &mut Criterion) {
                         });
                         (manager, _temp_dir)
                     },
-                    |(manager, _temp_dir)| async move {
+                    |(manager, _temp_dir)| {
                         // Benchmark: Prune expired leases
-                        lease_prune(&manager).await;
+                        rt.block_on(async {
+                            lease_prune(&manager).await;
+                        })
                     },
                     BatchSize::SmallInput,
                 );
@@ -954,7 +962,7 @@ fn bench_dhcpv4_end_to_end_flow(c: &mut Criterion) {
     let rt = Runtime::new().expect("Failed to create Tokio runtime");
     
     group.bench_function("dora_complete_flow", |b| {
-        b.to_async(&rt).iter_batched(
+        b.iter_batched(
             || {
                 // Setup: Create lease manager and test packets
                 let (manager, _temp_dir) = rt.block_on(async {
@@ -966,30 +974,32 @@ fn bench_dhcpv4_end_to_end_flow(c: &mut Criterion) {
                 
                 (manager, _temp_dir, discover_packet, mac)
             },
-            |(manager, _temp_dir, discover_packet, mac)| async move {
-                // Benchmark: Complete DORA flow
-                // 1. Process DISCOVER -> generate OFFER
-                let offer_xid = 0x12345678;
-                let offered_addr = Ipv4Addr::new(192, 0, 2, 100);
-                
-                // Simulate OFFER processing (would call dhcp_reply in real implementation)
-                black_box(offered_addr);
-                
-                // 2. Process REQUEST -> generate ACK
-                let request_xid = offer_xid;
-                
-                // Allocate lease
-                let lease = lease4_allocate(
-                    &manager,
-                    offered_addr,
-                    mac.clone(),
-                    1,
-                    mac,
-                    Some("test-client".to_string()),
-                    LEASE_TIME_SECONDS,
-                ).await;
-                
-                black_box(lease);
+            |(manager, _temp_dir, _discover_packet, mac)| {
+                rt.block_on(async move {
+                    // Benchmark: Complete DORA flow
+                    // 1. Process DISCOVER -> generate OFFER
+                    let offer_xid = 0x12345678;
+                    let offered_addr = Ipv4Addr::new(192, 0, 2, 100);
+                    
+                    // Simulate OFFER processing (would call dhcp_reply in real implementation)
+                    black_box(offered_addr);
+                    
+                    // 2. Process REQUEST -> generate ACK
+                    let _request_xid = offer_xid;
+                    
+                    // Allocate lease
+                    let lease = lease4_allocate(
+                        &manager,
+                        offered_addr,
+                        mac.clone(),
+                        1,
+                        mac,
+                        Some("test-client".to_string()),
+                        LEASE_TIME_SECONDS,
+                    ).await;
+                    
+                    let _ = black_box(lease);
+                })
             },
             BatchSize::SmallInput,
         );
@@ -1010,7 +1020,7 @@ fn bench_dhcpv6_end_to_end_flow(c: &mut Criterion) {
     let rt = Runtime::new().expect("Failed to create Tokio runtime");
     
     group.bench_function("sarr_complete_flow", |b| {
-        b.to_async(&rt).iter_batched(
+        b.iter_batched(
             || {
                 // Setup: Create lease manager and test packets
                 let (manager, _temp_dir) = rt.block_on(async {
@@ -1023,23 +1033,25 @@ fn bench_dhcpv6_end_to_end_flow(c: &mut Criterion) {
                 
                 (manager, _temp_dir, solicit_packet, duid, iaid)
             },
-            |(manager, _temp_dir, solicit_packet, duid, iaid)| async move {
-                // Benchmark: Complete SARR flow
-                // 1. Process SOLICIT -> generate ADVERTISE
-                let advertised_addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
-                black_box(advertised_addr);
-                
-                // 2. Process REQUEST -> generate REPLY and allocate lease
-                let lease = lease6_allocate(
-                    &manager,
-                    advertised_addr,
-                    duid,
-                    iaid,
-                    Some("test-client-v6".to_string()),
-                    LEASE_TIME_SECONDS_V6,
-                ).await;
-                
-                black_box(lease);
+            |(manager, _temp_dir, _solicit_packet, duid, iaid)| {
+                rt.block_on(async move {
+                    // Benchmark: Complete SARR flow
+                    // 1. Process SOLICIT -> generate ADVERTISE
+                    let advertised_addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+                    black_box(advertised_addr);
+                    
+                    // 2. Process REQUEST -> generate REPLY and allocate lease
+                    let lease = lease6_allocate(
+                        &manager,
+                        advertised_addr,
+                        duid,
+                        iaid,
+                        Some("test-client-v6".to_string()),
+                        LEASE_TIME_SECONDS_V6,
+                    ).await;
+                    
+                    let _ = black_box(lease);
+                })
             },
             BatchSize::SmallInput,
         );
@@ -1064,24 +1076,26 @@ fn bench_ping_before_offer(c: &mut Criterion) {
     let rt = Runtime::new().expect("Failed to create Tokio runtime");
     
     group.bench_function("icmp_ping_timeout", |b| {
-        b.to_async(&rt).iter(|| async {
-            // Benchmark: Ping a non-responsive address (will timeout)
-            // Use a TEST-NET address that won't respond
-            let test_addr = Ipv4Addr::new(192, 0, 2, 254);
-            let timeout = Duration::from_millis(PING_TIMEOUT_MS);
-            
-            // Note: In actual implementation, this would call icmp_ping
-            // For benchmark, we simulate timeout with tokio::time::timeout
-            let result = tokio::time::timeout(
-                timeout,
-                async {
-                    // Simulate ping operation
-                    tokio::time::sleep(Duration::from_micros(100)).await;
-                    Ok::<(), std::io::Error>(())
-                }
-            ).await;
-            
-            black_box(result);
+        b.iter(|| {
+            rt.block_on(async {
+                // Benchmark: Ping a non-responsive address (will timeout)
+                // Use a TEST-NET address that won't respond
+                let _test_addr = Ipv4Addr::new(192, 0, 2, 254);
+                let timeout = Duration::from_millis(PING_TIMEOUT_MS);
+                
+                // Note: In actual implementation, this would call icmp_ping
+                // For benchmark, we simulate timeout with tokio::time::timeout
+                let result = tokio::time::timeout(
+                    timeout,
+                    async {
+                        // Simulate ping operation
+                        tokio::time::sleep(Duration::from_micros(100)).await;
+                        Ok::<(), std::io::Error>(())
+                    }
+                ).await;
+                
+                let _ = black_box(result);
+            })
         });
     });
     
@@ -1108,7 +1122,7 @@ fn bench_lease_database_scalability(c: &mut Criterion) {
             BenchmarkId::new("allocate_from_large_pool", lease_count),
             &lease_count,
             |b, &count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create lease manager with large pre-populated pool
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -1137,22 +1151,24 @@ fn bench_lease_database_scalability(c: &mut Criterion) {
                         });
                         (manager, _temp_dir, count)
                     },
-                    |(manager, _temp_dir, count)| async move {
-                        // Benchmark: Allocate new lease from large pool
-                        let new_mac = generate_test_mac(count as u32 + 1);
-                        let new_addr = generate_test_ipv4(Ipv4Addr::new(192, 0, 2, 0), 251);
-                        
-                        let lease = lease4_allocate(
-                            &manager,
-                            new_addr,
-                            new_mac.clone(),
-                            1,
-                            new_mac,
-                            Some(generate_test_hostname(count as u32 + 1)),
-                            LEASE_TIME_SECONDS,
-                        ).await;
-                        
-                        black_box(lease);
+                    |(manager, _temp_dir, count)| {
+                        rt.block_on(async move {
+                            // Benchmark: Allocate new lease from large pool
+                            let new_mac = generate_test_mac(count as u32 + 1);
+                            let new_addr = generate_test_ipv4(Ipv4Addr::new(192, 0, 2, 0), 251);
+                            
+                            let lease = lease4_allocate(
+                                &manager,
+                                new_addr,
+                                new_mac.clone(),
+                                1,
+                                new_mac,
+                                Some(generate_test_hostname(count as u32 + 1)),
+                                LEASE_TIME_SECONDS,
+                            ).await;
+                            
+                            let _ = black_box(lease);
+                        })
                     },
                     BatchSize::SmallInput,
                 );
@@ -1182,7 +1198,7 @@ fn bench_memory_footprint(c: &mut Criterion) {
             BenchmarkId::new("lease_storage_memory", lease_count),
             &lease_count,
             |b, &count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create empty lease manager
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -1190,30 +1206,32 @@ fn bench_memory_footprint(c: &mut Criterion) {
                         });
                         (manager, _temp_dir)
                     },
-                    |(manager, _temp_dir)| async move {
-                        // Benchmark: Allocate leases and measure memory impact
-                        let base_ip = Ipv4Addr::new(192, 0, 2, 0);
-                        
-                        for i in 0..100 {
-                            let addr = generate_test_ipv4(base_ip, ((i % 250) + 1) as u8);
-                            let mac = generate_test_mac(i);
-                            let client_id = mac.clone();
-                            let hostname = Some(generate_test_hostname(i));
+                    |(manager, _temp_dir)| {
+                        rt.block_on(async move {
+                            // Benchmark: Allocate leases and measure memory impact
+                            let base_ip = Ipv4Addr::new(192, 0, 2, 0);
                             
-                            let _ = lease4_allocate(
-                                &manager,
-                                addr,
-                                mac,
-                                1,
-                                client_id,
-                                hostname,
-                                LEASE_TIME_SECONDS,
-                            ).await;
-                        }
-                        
-                        // Note: Actual memory profiling would use a custom allocator
-                        // For now, we measure allocation throughput as proxy
-                        black_box(&manager);
+                            for i in 0..100 {
+                                let addr = generate_test_ipv4(base_ip, ((i % 250) + 1) as u8);
+                                let mac = generate_test_mac(i);
+                                let client_id = mac.clone();
+                                let hostname = Some(generate_test_hostname(i));
+                                
+                                let _ = lease4_allocate(
+                                    &manager,
+                                    addr,
+                                    mac,
+                                    1,
+                                    client_id,
+                                    hostname,
+                                    LEASE_TIME_SECONDS,
+                                ).await;
+                            }
+                            
+                            // Note: Actual memory profiling would use a custom allocator
+                            // For now, we measure allocation throughput as proxy
+                            black_box(&manager);
+                        })
                     },
                     BatchSize::SmallInput,
                 );
@@ -1244,7 +1262,7 @@ fn bench_concurrent_operations(c: &mut Criterion) {
             BenchmarkId::new("concurrent_allocations", concurrency),
             &concurrency,
             |b, &concurrent_count| {
-                b.to_async(&rt).iter_batched(
+                b.iter_batched(
                     || {
                         // Setup: Create lease manager
                         let (manager, _temp_dir) = rt.block_on(async {
@@ -1253,36 +1271,38 @@ fn bench_concurrent_operations(c: &mut Criterion) {
                         let manager_arc = Arc::new(manager);
                         (manager_arc, _temp_dir)
                     },
-                    |(manager_arc, _temp_dir)| async move {
-                        // Benchmark: Spawn concurrent lease allocation tasks
-                        let mut handles = Vec::new();
-                        
-                        for i in 0..concurrent_count {
-                            let manager = Arc::clone(&manager_arc);
-                            let handle = tokio::spawn(async move {
-                                let base_ip = Ipv4Addr::new(192, 0, 2, 0);
-                                let addr = generate_test_ipv4(base_ip, ((i % 250) + 1) as u8);
-                                let mac = generate_test_mac(i as u32);
-                                let client_id = mac.clone();
-                                let hostname = Some(generate_test_hostname(i as u32));
-                                
-                                lease4_allocate(
-                                    &manager,
-                                    addr,
-                                    mac,
-                                    1,
-                                    client_id,
-                                    hostname,
-                                    LEASE_TIME_SECONDS,
-                                ).await
-                            });
-                            handles.push(handle);
-                        }
-                        
-                        // Wait for all allocations to complete
-                        for handle in handles {
-                            let _ = handle.await;
-                        }
+                    |(manager_arc, _temp_dir)| {
+                        rt.block_on(async move {
+                            // Benchmark: Spawn concurrent lease allocation tasks
+                            let mut handles = Vec::new();
+                            
+                            for i in 0..concurrent_count {
+                                let manager = Arc::clone(&manager_arc);
+                                let handle = tokio::spawn(async move {
+                                    let base_ip = Ipv4Addr::new(192, 0, 2, 0);
+                                    let addr = generate_test_ipv4(base_ip, ((i % 250) + 1) as u8);
+                                    let mac = generate_test_mac(i as u32);
+                                    let client_id = mac.clone();
+                                    let hostname = Some(generate_test_hostname(i as u32));
+                                    
+                                    lease4_allocate(
+                                        &manager,
+                                        addr,
+                                        mac,
+                                        1,
+                                        client_id,
+                                        hostname,
+                                        LEASE_TIME_SECONDS,
+                                    ).await
+                                });
+                                handles.push(handle);
+                            }
+                            
+                            // Wait for all allocations to complete
+                            for handle in handles {
+                                let _ = handle.await;
+                            }
+                        })
                     },
                     BatchSize::SmallInput,
                 );
