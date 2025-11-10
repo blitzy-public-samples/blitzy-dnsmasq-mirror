@@ -222,8 +222,8 @@ pub mod logging;
 ///
 /// Sub-modules: `metrics`, `types`
 ///
-/// This module is enabled by the `prometheus-metrics` feature flag.
-#[cfg(feature = "prometheus-metrics")]
+/// Core metrics collection is always available (matching C implementation).
+/// The `prometheus-metrics` feature flag enables Prometheus export functionality.
 pub mod monitoring;
 
 /// Utility functions and helpers

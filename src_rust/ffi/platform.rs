@@ -1207,6 +1207,18 @@ pub mod ubus {
     }
 
     impl UbusContext {
+        /// Create a UbusContext from a raw pointer without taking ownership
+        ///
+        /// This is used when wrapping a context pointer that is owned by C code.
+        /// The returned UbusContext will NOT call ubus_free when dropped.
+        ///
+        /// # Safety
+        /// Caller must ensure the pointer is valid for the lifetime of the returned wrapper.
+        #[must_use]
+        pub unsafe fn from_raw_borrowed(ctx: *mut ubus_context) -> std::mem::ManuallyDrop<Self> {
+            std::mem::ManuallyDrop::new(Self { ctx })
+        }
+
         /// Get raw context pointer for FFI
         #[must_use] 
         pub fn as_ptr(&self) -> *mut ubus_context {
@@ -1350,6 +1362,44 @@ pub mod ubus {
         }
     }
 
+    /// Send ubus notification (simplified API for broadcast-style notifications)
+    ///
+    /// This is a simplified wrapper that doesn't require an object pointer.
+    /// Used for sending notifications without a specific registered object.
+    ///
+    /// # Arguments
+    /// * `ctx` - Ubus context
+    /// * `type_name` - Event type name as C string
+    /// * `msg` - Blob message data
+    ///
+    /// # Errors
+    /// Returns error if notification fails
+    ///
+    /// # Safety
+    /// Caller must ensure type_name is a valid C string and msg is a valid blob_attr
+    pub unsafe fn ubus_notify_broadcast(
+        ctx: &UbusContext,
+        type_name: *const libc::c_char,
+        msg: *mut blob_attr,
+    ) -> IoResult<()> {
+        // SAFETY: Caller guarantees pointers are valid
+        let result = unsafe {
+            ubus_notify_impl(
+                ctx.ctx,
+                ptr::null_mut(), // No specific object (broadcast)
+                type_name,
+                msg,
+                -1, // Default timeout
+            )
+        };
+
+        if result < 0 {
+            Err(IoError::other("ubus notify failed"))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Reconnect to ubus daemon
     ///
     /// # Errors
@@ -1467,9 +1517,9 @@ pub mod ubus {
             msg: *mut blob_attr,
         ) -> libc::c_int;
         fn ubus_handle_event_impl(ctx: *mut ubus_context) -> libc::c_int;
-        fn blob_buf_init(buf: *mut blob_buf, id: libc::c_int);
-        fn blobmsg_add_u32(buf: *mut blob_buf, name: *const libc::c_char, value: u32);
-        fn blobmsg_add_string(
+        pub fn blob_buf_init(buf: *mut blob_buf, id: libc::c_int);
+        pub fn blobmsg_add_u32(buf: *mut blob_buf, name: *const libc::c_char, value: u32);
+        pub fn blobmsg_add_string(
             buf: *mut blob_buf,
             name: *const libc::c_char,
             value: *const libc::c_char,
@@ -1486,6 +1536,34 @@ pub mod ubus {
             len: libc::c_int,
         ) -> libc::c_int;
         fn ubus_strerror_impl(error: libc::c_int) -> *const libc::c_char;
+        
+        // Additional blob message accessors needed by ubus.rs
+        pub fn blobmsg_get_u32(attr: *const blob_attr) -> u32;
+        pub fn blobmsg_get_string(attr: *const blob_attr) -> *const libc::c_char;
+        pub fn blobmsg_data(attr: *const blob_attr) -> *mut blob_attr;
+        pub fn blobmsg_data_len(attr: *const blob_attr) -> u32;
+        pub fn blob_next(attr: *const blob_attr) -> *mut blob_attr;
+    }
+    
+    /// Get first element in blob array
+    ///
+    /// # Safety
+    /// Caller must ensure attr is a valid blob array attribute
+    #[inline]
+    pub unsafe fn blobmsg_array_first(attr: *const blob_attr) -> *mut blob_attr {
+        // SAFETY: Caller guarantees attr is valid blob array attribute
+        unsafe { blobmsg_data(attr) }
+    }
+    
+    /// Get next element in blob array iteration
+    ///
+    /// # Safety
+    /// Caller must ensure attr is a valid blob attribute
+    #[inline]
+    pub unsafe fn blobmsg_array_next(attr: *const blob_attr) -> *mut blob_attr {
+        // SAFETY: Caller guarantees attr is valid blob attribute
+        // Use blob_next from libubox to get the next attribute
+        unsafe { blob_next(attr) }
     }
 
     /// Blob message policy

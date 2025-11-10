@@ -92,13 +92,12 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::dns::domain::is_valid_dns_name_pattern;
 use crate::ffi::platform::ubus::{
-    self, BlobBuf, BlobmsgPolicy, UbusContext, BLOBMSG_TYPE_ARRAY, BLOBMSG_TYPE_INT32,
-    BLOBMSG_TYPE_STRING, BLOBMSG_TYPE_TABLE,
+    self, BlobmsgPolicy, UbusContext, BLOBMSG_TYPE_ARRAY, BLOBMSG_TYPE_INT32,
+    BLOBMSG_TYPE_TABLE,
 };
 use crate::logging::logger::Logger;
 use crate::monitoring::metrics::MetricsCollector;
 use crate::monitoring::types::MetricId;
-use crate::utils::general::whine_malloc;
 
 // ============================================================================
 // Constants
@@ -504,7 +503,8 @@ impl UbusManager {
             let value = self.inner.metrics.get_value(*metric_id);
 
             // Convert u64 to u32 (metrics are counters, won't overflow in practice)
-            let value_u32 = value.min(u32::MAX as u64) as u32;
+            // Use 0 as default if metric value can't be retrieved
+            let value_u32 = value.unwrap_or(0).min(u32::MAX as u64) as u32;
 
             // Add metric to blob
             let name_cstr = match CString::new(name) {
@@ -563,8 +563,6 @@ impl UbusManager {
         }
 
         // Parse blob message parameters using FFI
-        let mut parsed_attrs: [*mut ubus::blob_attr; 3] = [ptr::null_mut(); 3];
-
         let policy = [
             BlobmsgPolicy {
                 name: b"mark\0".as_ptr() as *const libc::c_char,
@@ -580,20 +578,17 @@ impl UbusManager {
             },
         ];
 
-        // Call blobmsg_parse via FFI to extract parameters
-        let parse_result = unsafe {
-            ubus::blobmsg_parse(
-                policy.as_ptr(),
-                policy.len(),
-                parsed_attrs.as_mut_ptr(),
-                msg,
-            )
-        };
+        // Get blob data length
+        let data_len = unsafe { ubus::blobmsg_data_len(msg) } as usize;
 
-        if parse_result != 0 {
-            error!("Failed to parse set_connmark_allowlist blob message");
-            return UBUS_STATUS_INVALID_ARGUMENT;
-        }
+        // Call blobmsg_parse via FFI to extract parameters
+        let parsed_attrs = match ubus::blobmsg_parse(&policy, msg, data_len) {
+            Ok(attrs) => attrs,
+            Err(e) => {
+                error!("Failed to parse set_connmark_allowlist blob message: {}", e);
+                return UBUS_STATUS_INVALID_ARGUMENT;
+            }
+        };
 
         // Extract mark parameter
         let mark_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_MARK];
@@ -784,7 +779,7 @@ impl UbusManager {
 
         // Send notification to subscribers
         unsafe {
-            ubus::ubus_notify(ctx, notify_type_cstr.as_ptr(), blob_head)
+            ubus::ubus_notify_broadcast(ctx, notify_type_cstr.as_ptr(), blob_head)
                 .map_err(|e| UbusError::NotifyFailed(format!("DHCP event: {}", e)))?;
         }
 
@@ -848,7 +843,7 @@ impl UbusManager {
             .map_err(|_| UbusError::BlobSerializationFailed("invalid event_type".to_string()))?;
 
         unsafe {
-            ubus::ubus_notify(ctx, event_type_cstr.as_ptr(), blob_head)
+            ubus::ubus_notify_broadcast(ctx, event_type_cstr.as_ptr(), blob_head)
                 .map_err(|e| UbusError::NotifyFailed(format!("Event {}: {}", event_type, e)))?;
         }
 
@@ -900,7 +895,7 @@ impl UbusManager {
 
         let event_type = CString::new("connmark.allowlist.refused").unwrap();
         unsafe {
-            ubus::ubus_notify(ctx, event_type.as_ptr(), blob_head)
+            ubus::ubus_notify_broadcast(ctx, event_type.as_ptr(), blob_head)
                 .map_err(|e| UbusError::NotifyFailed(format!("Connmark refused: {}", e)))?;
         }
 
@@ -951,7 +946,7 @@ impl UbusManager {
 
         let event_type = CString::new("connmark.allowlist.resolved").unwrap();
         unsafe {
-            ubus::ubus_notify(ctx, event_type.as_ptr(), blob_head)
+            ubus::ubus_notify_broadcast(ctx, event_type.as_ptr(), blob_head)
                 .map_err(|e| UbusError::NotifyFailed(format!("Connmark resolved: {}", e)))?;
         }
 
@@ -1055,7 +1050,7 @@ pub extern "C" fn ubus_handle_metrics_cb(
 
     // Create temporary UbusContext wrapper (doesn't take ownership)
     // SAFETY: ctx pointer is valid per libubus contract
-    let ctx_wrapper = UbusContext { ctx };
+    let ctx_wrapper = unsafe { UbusContext::from_raw_borrowed(ctx) };
 
     // Delegate to safe Rust implementation
     // Note: We create a temporary UbusManager-like struct to call the method
@@ -1073,7 +1068,8 @@ pub extern "C" fn ubus_handle_metrics_cb(
     for metric_id in MetricId::all() {
         let name = metric_id.as_str();
         let value = manager_arc.metrics.get_value(*metric_id);
-        let value_u32 = value.min(u32::MAX as u64) as u32;
+        // Use 0 as default if metric value can't be retrieved
+        let value_u32 = value.unwrap_or(0).min(u32::MAX as u64) as u32;
 
         let name_cstr = match CString::new(name) {
             Ok(s) => s,
@@ -1131,19 +1127,12 @@ pub extern "C" fn ubus_handle_set_connmark_allowlist_cb(
         }
     };
 
-    // Create temporary UbusContext wrapper (doesn't take ownership)
     // SAFETY: ctx pointer is valid per libubus contract
-    let ctx_wrapper = UbusContext { ctx };
-
-    // Delegate to safe Rust implementation
-    // We need to recreate a temporary UbusManager-like struct to call the method
-    // For now, inline the implementation
+    // Note: We don't need to wrap ctx since we're not storing it
 
     trace!("Handling set_connmark_allowlist request");
 
     // Parse blob message parameters
-    let mut parsed_attrs: [*mut ubus::blob_attr; 3] = [ptr::null_mut(); 3];
-
     let policy = [
         BlobmsgPolicy {
             name: b"mark\0".as_ptr() as *const libc::c_char,
@@ -1159,19 +1148,17 @@ pub extern "C" fn ubus_handle_set_connmark_allowlist_cb(
         },
     ];
 
-    let parse_result = unsafe {
-        ubus::blobmsg_parse(
-            policy.as_ptr(),
-            policy.len(),
-            parsed_attrs.as_mut_ptr(),
-            msg,
-        )
-    };
+    // Get blob data length
+    let data_len = unsafe { ubus::blobmsg_data_len(msg) } as usize;
 
-    if parse_result != 0 {
-        error!("Failed to parse set_connmark_allowlist blob message");
-        return UBUS_STATUS_INVALID_ARGUMENT;
-    }
+    // Call blobmsg_parse to extract parameters
+    let parsed_attrs = match ubus::blobmsg_parse(&policy, msg, data_len) {
+        Ok(attrs) => attrs,
+        Err(e) => {
+            error!("Failed to parse set_connmark_allowlist blob message: {}", e);
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+    };
 
     // Extract and validate parameters
     let mark_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_MARK];
@@ -1256,7 +1243,6 @@ pub extern "C" fn ubus_subscribe_cb(
         if let Some(manager_arc) = manager_lock.as_ref() {
             manager_arc.has_subscribers.store(has_subs, Ordering::Relaxed);
 
-            let logger = &manager_arc.logger;
             if has_subs {
                 debug!("Ubus subscription callback: subscribers present");
             } else {
@@ -1321,9 +1307,11 @@ mod tests {
 
     #[test]
     fn test_has_subscribers_default() {
+        use crate::logging::logger::{LogDestination, LogLevel};
+
         // Mock dependencies
-        let metrics = Arc::new(MetricsCollector::new());
-        let logger = Arc::new(Logger::new());
+        let metrics = Arc::new(MetricsCollector::new().expect("Failed to create metrics collector"));
+        let logger = Arc::new(Logger::new(LogDestination::Stderr, LogLevel::Info, 1000, 0));
 
         let manager = UbusManager::new(metrics, logger);
         assert!(!manager.has_subscribers());

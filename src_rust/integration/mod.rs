@@ -89,6 +89,7 @@
 
 use crate::Result;
 use std::fmt::{self, Debug, Formatter};
+use std::sync::Arc;
 
 //
 // ============================================================================
@@ -690,6 +691,18 @@ pub struct IntegrationManagerBuilder {
     /// Whether to enable inotify integration (if feature enabled)
     #[cfg(all(feature = "inotify", target_os = "linux"))]
     enable_inotify: bool,
+
+    /// Metrics collector for integrations that need metrics reporting
+    #[cfg(all(feature = "ubus", feature = "prometheus-metrics"))]
+    metrics: Option<Arc<crate::monitoring::metrics::MetricsCollector>>,
+
+    /// Logger for integrations that need logging
+    #[cfg(feature = "ubus")]
+    logger: Option<Arc<crate::logging::logger::Logger>>,
+
+    /// ubus object name to register
+    #[cfg(feature = "ubus")]
+    ubus_object_name: Option<String>,
 }
 
 impl IntegrationManagerBuilder {
@@ -882,6 +895,75 @@ impl IntegrationManagerBuilder {
         self
     }
 
+    /// Configures metrics collector for integrations
+    ///
+    /// # Parameters
+    ///
+    /// - `metrics`: Metrics collector to use for integrations that need metrics reporting
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    #[cfg(all(feature = "ubus", feature = "prometheus-metrics"))]
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: Arc<crate::monitoring::metrics::MetricsCollector>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    /// No-op when ubus or prometheus-metrics feature is disabled
+    #[cfg(not(all(feature = "ubus", feature = "prometheus-metrics")))]
+    #[must_use]
+    pub fn with_metrics(self, _metrics: Arc<crate::monitoring::metrics::MetricsCollector>) -> Self {
+        self
+    }
+
+    /// Configures logger for integrations
+    ///
+    /// # Parameters
+    ///
+    /// - `logger`: Logger to use for integrations that need logging
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    #[cfg(feature = "ubus")]
+    #[must_use]
+    pub fn with_logger(mut self, logger: Arc<crate::logging::logger::Logger>) -> Self {
+        self.logger = Some(logger);
+        self
+    }
+
+    /// No-op when ubus feature is disabled
+    #[cfg(not(feature = "ubus"))]
+    #[must_use]
+    pub fn with_logger(self, _logger: Arc<crate::logging::logger::Logger>) -> Self {
+        self
+    }
+
+    /// Configures ubus object name
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Name of the ubus object to register (e.g., "dnsmasq")
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    #[cfg(feature = "ubus")]
+    #[must_use]
+    pub fn with_ubus_object_name(mut self, name: impl Into<String>) -> Self {
+        self.ubus_object_name = Some(name.into());
+        self
+    }
+
+    /// No-op when ubus feature is disabled
+    #[cfg(not(feature = "ubus"))]
+    #[must_use]
+    pub fn with_ubus_object_name(self, _name: impl Into<String>) -> Self {
+        self
+    }
+
     /// Constructs the [`IntegrationManager`] with configured integrations
     ///
     /// This method attempts to initialize each enabled integration. If an integration fails
@@ -935,13 +1017,20 @@ impl IntegrationManagerBuilder {
         // Initialize ubus if enabled
         #[cfg(feature = "ubus")]
         if self.enable_ubus {
-            match ubus::init_ubus() {
-                Ok(ubus_mgr) => {
-                    manager.ubus_manager = Some(ubus_mgr);
+            // Check that required dependencies are provided
+            if let (Some(metrics), Some(logger), Some(object_name)) = 
+                (self.metrics.as_ref(), self.logger.as_ref(), self.ubus_object_name.as_ref()) 
+            {
+                match ubus::init_ubus(object_name, Arc::clone(metrics), Arc::clone(logger)) {
+                    Ok(ubus_mgr) => {
+                        manager.ubus_manager = Some(ubus_mgr);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to initialize ubus integration: {e}");
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Warning: Failed to initialize ubus integration: {e}");
-                }
+            } else {
+                eprintln!("Warning: ubus enabled but missing required dependencies (metrics, logger, or object_name)");
             }
         }
 

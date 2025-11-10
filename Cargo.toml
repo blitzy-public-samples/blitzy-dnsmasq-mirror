@@ -456,7 +456,8 @@ nftset = []
 # ubus: OpenWrt ubus integration (from HAVE_UBUS)
 # - Requires: libubus, libubox (detected by build.rs)
 # - Platform: OpenWrt/Linux only
-ubus = []
+# - Requires: prometheus-metrics for metrics reporting
+ubus = ["prometheus-metrics"]
 
 # inotify: File watching with inotify (from HAVE_INOTIFY)
 # - Platform: Linux only
