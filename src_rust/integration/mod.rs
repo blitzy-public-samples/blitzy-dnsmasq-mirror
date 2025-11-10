@@ -267,9 +267,9 @@ pub use inotify::{InotifyWatcher, InotifyError};
 /// ```
 #[derive(Default)]
 pub struct IntegrationManager {
-    /// D-Bus control interface handle (if feature enabled and initialized)
+    /// D-Bus control interface connection (if feature enabled and initialized)
     #[cfg(feature = "dbus")]
-    dbus_interface: Option<DbusInterface>,
+    dbus_connection: Option<zbus::Connection>,
 
     /// `OpenWrt` ubus control interface handle (if feature enabled and initialized)
     #[cfg(feature = "ubus")]
@@ -341,6 +341,57 @@ impl IntegrationManager {
         IntegrationManagerBuilder::new()
     }
 
+    /// Initialize D-Bus integration
+    ///
+    /// This must be called separately from build() because it's an async operation.
+    /// It connects to the system D-Bus and registers the dnsmasq interface.
+    ///
+    /// # Arguments
+    ///
+    /// * `daemon` - Shared daemon state
+    /// * `logger` - Logger instance
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if D-Bus was successfully initialized, or an error if initialization failed.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use tokio::sync::RwLock;
+    /// # use dnsmasq::core::daemon::Daemon;
+    /// # use dnsmasq::logging::logger::Logger;
+    /// # use dnsmasq::integration::IntegrationManager;
+    /// # async fn example(daemon: Arc<RwLock<Daemon>>, logger: Arc<Logger>) -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut manager = IntegrationManager::builder()
+    ///     .with_dbus(true)
+    ///     .build()?;
+    /// manager.init_dbus_integration(daemon, logger).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "dbus")]
+    pub async fn init_dbus_integration(
+        &mut self,
+        daemon: std::sync::Arc<tokio::sync::RwLock<crate::core::daemon::Daemon>>,
+        logger: std::sync::Arc<crate::logging::logger::Logger>,
+    ) -> std::result::Result<(), dbus::DbusError> {
+        let connection = dbus::init_dbus(daemon, logger).await?;
+        self.dbus_connection = Some(connection);
+        Ok(())
+    }
+
+    /// No-op when D-Bus feature is disabled
+    #[cfg(not(feature = "dbus"))]
+    pub async fn init_dbus_integration(
+        &mut self,
+        _daemon: std::sync::Arc<tokio::sync::RwLock<crate::core::daemon::Daemon>>,
+        _logger: std::sync::Arc<crate::logging::logger::Logger>,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
     //
     // Availability Checks
     //
@@ -354,7 +405,7 @@ impl IntegrationManager {
     #[cfg(feature = "dbus")]
     #[must_use] 
     pub fn has_dbus(&self) -> bool {
-        self.dbus_interface.is_some()
+        self.dbus_connection.is_some()
     }
 
     /// Always returns false when D-Bus feature is disabled
@@ -495,25 +546,25 @@ impl IntegrationManager {
     // Integration Handle Accessors
     //
 
-    /// Gets a reference to the D-Bus interface handle
+    /// Gets a reference to the D-Bus connection
     ///
     /// # Returns
     ///
-    /// `Some(&DbusInterface)` if D-Bus is available and initialized, `None` otherwise.
+    /// `Some(&zbus::Connection)` if D-Bus is available and initialized, `None` otherwise.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # use dnsmasq::integration::IntegrationManager;
     /// # let manager = IntegrationManager::new();
-    /// if let Some(dbus) = manager.dbus() {
-    ///     // Use D-Bus interface
+    /// if let Some(connection) = manager.dbus_connection() {
+    ///     // Use D-Bus connection
     /// }
     /// ```
     #[cfg(feature = "dbus")]
     #[must_use] 
-    pub fn dbus(&self) -> Option<&DbusInterface> {
-        self.dbus_interface.as_ref()
+    pub fn dbus_connection(&self) -> Option<&zbus::Connection> {
+        self.dbus_connection.as_ref()
     }
 
     /// Gets a reference to the ubus manager handle
@@ -1003,18 +1054,12 @@ impl IntegrationManagerBuilder {
         #[allow(unused_mut)]
         let mut manager = IntegrationManager::new();
 
-        // Initialize D-Bus if enabled
+        // D-Bus initialization is deferred to init_dbus_integration()
+        // because it's an async operation that requires daemon and logger
         #[cfg(feature = "dbus")]
-        if self.enable_dbus {
-            match dbus::init_dbus() {
-                Ok(interface) => {
-                    manager.dbus_interface = Some(interface);
-                }
-                Err(e) => {
-                    // Log warning but continue - D-Bus is optional
-                    eprintln!("Warning: Failed to initialize D-Bus integration: {e}");
-                }
-            }
+        {
+            let _ = self.enable_dbus; // Use the field to avoid unused warning
+            // dbus_connection is initialized to None, caller must call init_dbus_integration()
         }
 
         // Initialize ubus if enabled
