@@ -99,26 +99,18 @@ use std::time::Duration;
 use dnsmasq::core::daemon::DaemonBuilder;
 use dnsmasq::config::types::{
     Config, DnsConfig, DhcpConfig, DhcpRange, StaticLease, DhcpOption, NetworkConfig,
-    ProcessConfig, LoggingConfig, IntegrationConfig, UpstreamServer, LocalDomain,
+    ProcessConfig, LoggingConfig, IntegrationConfig,
     DaemonOptions, InterfaceName, MacAddr, DhcpContext,
 };
 use dnsmasq::dns::cache::Cache;
-use dnsmasq::dns::forwarder::Forwarder;
-use dnsmasq::dns::upstream::Server as UpstreamServerImpl;
+use dnsmasq::dns::upstream::{UpstreamServer, ServerFlags};
 
 #[cfg(feature = "dnssec")]
 use dnsmasq::dns::dnssec::trust_anchor::TrustAnchorStore;
-#[cfg(feature = "dnssec")]
-use dnsmasq::dns::dnssec::validator::dnssec_validate_reply;
-
-#[cfg(feature = "dhcp")]
-use dnsmasq::dhcp::v4::server::DhcpServer;
 #[cfg(feature = "dhcp")]
 use dnsmasq::dhcp::lease::LeaseManager;
 
-use dnsmasq::ipv6::radv::server::RadVServer;
-
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 /// Main entry point for custom configuration example
 ///
@@ -141,22 +133,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let upstream_servers = vec![
         // Default upstream for all queries (like /etc/resolv.conf entry)
         // C equivalent: --server=1.1.1.1
-        Arc::new(RwLock::new(UpstreamServerImpl::new(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 53),
+        Arc::new(RwLock::new(UpstreamServer::new(
+            0,  // uid: unique server ID
+            ServerFlags::empty(),  // flags: no special flags
             None,  // domain: None = default server
-            53,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 53),
             None,  // source_addr: None = any
-            None,  // interface: None = any
+            String::new(),  // interface: empty = any
+            0,  // ifindex: 0 = not link-local
+            4096,  // edns_pktsz: default EDNS0 packet size
         ))),
         
         // Domain-specific routing: route example.com queries to Google DNS
         // C equivalent: --server=/example.com/8.8.8.8
-        Arc::new(RwLock::new(UpstreamServerImpl::new(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53),
+        Arc::new(RwLock::new(UpstreamServer::new(
+            1,  // uid: unique server ID
+            ServerFlags::empty(),  // flags: no special flags
             Some("example.com".to_string()),  // Only for example.com
-            53,
-            None,
-            None,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53),
+            None,  // source_addr: None = any
+            String::new(),  // interface: empty = any
+            0,  // ifindex: 0 = not link-local
+            4096,  // edns_pktsz: default EDNS0 packet size
         ))),
         
         // Local domain handling: answer .local from DHCP/hosts only, no forwarding
@@ -176,10 +174,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Default in C: CACHESIZ = 150 (from config.h)
     println!("Configuring DNS cache...");
     
-    let cache = Cache::new(
-        10000,  // cache_size: 10,000 entries (vs C default 150)
-        None,   // neg_ttl: None = use default negative TTL
-    );
+    let cache = Cache::with_size(10000);  // cache_size: 10,000 entries (vs C default 150)
     
     println!("  - Cache size: 10,000 entries (C default: 150)\n");
 
@@ -229,6 +224,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //   --dhcp-host=11:22:33:44:55:66,192.168.1.10,workstation
     //   --dhcp-option=3,192.168.1.1
     //   --dhcp-option=6,192.168.1.1
+    // Define lease_manager outside the cfg block so it's in scope for daemon builder
+    #[cfg(feature = "dhcp")]
+    let lease_manager;
+    
     #[cfg(feature = "dhcp")]
     {
         println!("Configuring DHCPv4 server...");
@@ -236,7 +235,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Address pool configuration
         // C equivalent: --dhcp-range=192.168.1.50,192.168.1.150,24h
         // Implemented in src/option.c (option_read function) and src/dhcp.c
-        let dhcp_ranges = vec![
+        let _dhcp_ranges = vec![
             DhcpRange {
                 start: Ipv4Addr::new(192, 168, 1, 50),
                 end: Ipv4Addr::new(192, 168, 1, 150),
@@ -251,10 +250,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // C equivalent: --dhcp-host=11:22:33:44:55:66,192.168.1.10,workstation
         // Implemented in src/option.c (parse_dhcp_host function)
         let mut static_leases = std::collections::HashMap::new();
+        let workstation_mac: MacAddr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
         static_leases.insert(
-            MacAddr([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]),
+            workstation_mac,
             StaticLease {
-                hwaddr: MacAddr([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]),
+                hwaddr: workstation_mac,
                 addr: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
                 hostname: Some("workstation".to_string()),
                 client_id: None,
@@ -267,7 +267,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // C equivalent: --dhcp-option=3,192.168.1.1 (option 3 = router/gateway)
         // C equivalent: --dhcp-option=6,192.168.1.1 (option 6 = DNS server)
         // Implemented in src/rfc2131.c (option_put function)
-        let dhcp_options = vec![
+        let _dhcp_options = vec![
             DhcpOption {
                 code: 3,  // Router (default gateway)
                 data: Ipv4Addr::new(192, 168, 1, 1).octets().to_vec(),
@@ -285,7 +285,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         // Lease manager initialization
         // C equivalent: lease.c (lease_init function)
-        let lease_manager = LeaseManager::new(
+        lease_manager = LeaseManager::new(
             PathBuf::from("/var/lib/dnsmasq/dnsmasq.leases"),  // lease_file path
             1000,  // max_leases (--dhcp-lease-max)
             DaemonOptions::empty(),  // options (for OPT_LEASE_RO, etc.)
@@ -295,7 +295,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Initialize lease database from file
         // C equivalent: lease.c (lease_init reads existing leases)
         match lease_manager.init().await {
-            Ok(count) => println!("  - Loaded {} existing leases from database", count),
+            Ok(()) => println!("  - Lease database initialized successfully"),
             Err(e) => println!("  - Warning: Could not load lease database: {}", e),
         }
         
@@ -319,7 +319,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // RA context for SLAAC (Stateless Address Autoconfiguration)
     // C equivalent: struct dhcp_context with flags CONTEXT_RA
-    let ra_context = DhcpContext {
+    let _ra_context = DhcpContext {
         start6: Ipv6Addr::UNSPECIFIED,  // :: (unspecified = RA-only, no DHCPv6)
         if_index: 0,  // 0 = all interfaces (will be set during interface enumeration)
         flags: 0x0100,  // CONTEXT_RA flag from C (enables Router Advertisement)
@@ -356,9 +356,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // C equivalent: --interface=eth0, --except-interface=wlan0
     // Implemented in src/network.c (enumerate_interfaces function)
     let network_config = NetworkConfig {
-        interfaces: vec![InterfaceName("eth0".to_string())],
+        interfaces: vec![InterfaceName::new("eth0".to_string())],
         listen_addresses: vec![],  // Empty = bind to all addresses on specified interfaces
-        except_interfaces: vec![InterfaceName("wlan0".to_string())],
+        except_interfaces: vec![InterfaceName::new("wlan0".to_string())],
         bind_interfaces: true,  // --bind-interfaces (bind to specific interfaces, not wildcard)
         bind_dynamic: false,  // --bind-dynamic (bind as interfaces come up)
     };
@@ -423,12 +423,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Use DaemonBuilder for validated construction
     // Each with_* method corresponds to a subsystem initialization in C
-    let daemon = DaemonBuilder::new()
+    let mut daemon_builder = DaemonBuilder::new()
         .with_config(config)
         .with_cache(cache)
-        .with_servers(upstream_servers)
-        #[cfg(feature = "dhcp")]
-        .with_lease_manager(lease_manager)
+        .with_servers(upstream_servers);
+    
+    // Add lease manager if DHCP feature is enabled
+    #[cfg(feature = "dhcp")]
+    {
+        daemon_builder = daemon_builder.with_lease_manager(lease_manager);
+    }
+    
+    let daemon = daemon_builder
         .build()
         .expect("Failed to build daemon - missing required components");
     
@@ -452,7 +458,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Access configuration (immutable Arc clone, cheap operation)
     let config = daemon.get_config();
-    println!("DNS cache: {} entries", cache.capacity());
     println!("Logging: queries={}, dhcp={}", 
         config.logging.log_queries, 
         config.logging.log_dhcp
@@ -460,16 +465,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Access cache (requires lock acquisition for mutations)
     let cache_handle = daemon.get_cache();
-    let mut cache_guard = cache_handle.lock().await;
-    println!("Cache current entries: {}", cache_guard.len());
+    let cache_guard = cache_handle.lock().await;
+    let cache_stats = cache_guard.get_stats();
+    println!("DNS cache: {} max entries, {} currently in use", 
+        10000,  // Our configured cache size
+        cache_stats.entries
+    );
     drop(cache_guard);  // Release lock
     
     // Access lease manager (DHCP feature only)
     #[cfg(feature = "dhcp")]
     {
         if let Some(lease_mgr) = daemon.get_lease_manager() {
-            let lease_guard = lease_mgr.lock().await;
-            println!("DHCP leases: {} active", lease_guard.count());
+            let lease_manager_guard = lease_mgr.lock().await;
+            let lease_count = lease_manager_guard.lease_count().await;
+            println!("DHCP leases: {} active", lease_count);
         }
     }
     
