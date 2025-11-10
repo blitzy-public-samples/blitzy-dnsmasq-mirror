@@ -59,16 +59,10 @@
 //! Tests validate that configuration parsing achieves comparable performance to C implementation
 //! (within 100ms startup time target per Agent Action Plan section 0.2.1).
 
-use std::collections::{HashMap, HashSet};
-use std::fs::{File, read_to_string};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
 
 // External dependencies for testing
 use proptest::prelude::*;
-use tempfile::{NamedTempFile, TempDir};
-use tokio::fs::read_to_string as async_read_to_string;
-use tokio::fs::write as async_write;
+use tempfile::TempDir;
 use tokio::time::{timeout, Duration};
 
 // Internal test utilities
@@ -86,20 +80,8 @@ use common::{
 
 // Configuration module being tested
 use dnsmasq::config::{
-    Config,
-    ConfigBuilder as DnsmasqConfigBuilder,
     parse_config_file,
-    parse_cli_args,
     validate_config,
-    ParseError,
-    ValidationError,
-    CliError,
-    DnsConfig,
-    DhcpConfig,
-    TftpConfig,
-    NetworkConfig,
-    ProcessConfig,
-    LoggingConfig,
     default_config,
     DaemonOptions,
 };
@@ -110,7 +92,6 @@ use dnsmasq::logging::LogLevel;
 // DNS protocol constants for default validation
 use dnsmasq::dns::protocol::{
     NAMESERVER_PORT,
-    PACKETSZ,
     MAXDNAME,
     MAXLABEL,
 };
@@ -950,7 +931,7 @@ async fn test_validation_missing_file() {
         .expect("Failed to parse config");
     
     // Validation may warn or fail for missing files
-    let validation_result = validate_config(&config);
+    let _validation_result = validate_config(&config);
     // Behavior depends on whether missing files are warnings or errors
 }
 
@@ -988,7 +969,7 @@ async fn test_validation_invalid_domain_name() {
     
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     
-    let parse_result = parse_config_file(&config_path).await;
+    let _parse_result = parse_config_file(&config_path).await;
     // Parser or validator should reject domain name exceeding MAXDNAME
 }
 
@@ -1133,7 +1114,7 @@ async fn test_utf8_domain_names() {
     // UTF-8 domain name
     std::fs::write(&config_path, "local=/例え.jp/\n").expect("Failed to write config");
     
-    let config = parse_config_file(&config_path).await;
+    let _config = parse_config_file(&config_path).await;
     // Support depends on HAVE_LIBIDN2 feature flag
     // Should either parse successfully or provide clear error
 }
@@ -1224,7 +1205,7 @@ async fn test_line_continuation() {
     
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     
-    let config = parse_config_file(&config_path).await;
+    let _config = parse_config_file(&config_path).await;
     // Line continuation support depends on parser implementation
     // Should either work or provide clear unsupported feature error
 }
@@ -1263,7 +1244,7 @@ async fn test_missing_required_options() {
         .expect("Failed to parse config");
     
     // Validation should catch missing tftp-root
-    let validation_result = validate_config(&config);
+    let _validation_result = validate_config(&config);
     // Behavior depends on whether tftp-root is required or has a default
 }
 
@@ -1387,7 +1368,7 @@ cache-size 1000
     
     std::fs::write(&config_path, config_content).expect("Failed to write config");
     
-    let config = parse_config_file(&config_path).await;
+    let _config = parse_config_file(&config_path).await;
     // Parser may support both syntaxes or standardize on one
 }
 
@@ -1395,10 +1376,10 @@ cache-size 1000
 // Property-Based Tests (using proptest)
 // ============================================================================
 
-/// Property test: Valid configurations round-trip through serialization
-///
-/// Generate random valid configurations, serialize them, parse them back,
-/// and verify they match the original.
+// Property test: Valid configurations round-trip through serialization
+//
+// Generate random valid configurations, serialize them, parse them back,
+// and verify they match the original.
 proptest! {
     #[test]
     fn prop_config_roundtrip(
@@ -1420,9 +1401,9 @@ proptest! {
     }
 }
 
-/// Property test: Random valid domain names parse correctly
-///
-/// Generate random valid domain names and verify they parse without error.
+// Property test: Random valid domain names parse correctly
+//
+// Generate random valid domain names and verify they parse without error.
 proptest! {
     #[test]
     fn prop_valid_domain_names(domain_name in dns_name_strategy()) {
@@ -1436,9 +1417,9 @@ proptest! {
     }
 }
 
-/// Property test: Configuration mutation preserves validity
-///
-/// Start with valid configuration, make random changes, verify it remains valid.
+// Property test: Configuration mutation preserves validity
+//
+// Start with valid configuration, make random changes, verify it remains valid.
 proptest! {
     #[test]
     fn prop_config_mutation_validity(
@@ -1459,9 +1440,9 @@ proptest! {
     }
 }
 
-/// Property test: Random configuration options parse without panic
-///
-/// Generate random configuration content and verify parser doesn't panic.
+// Property test: Random configuration options parse without panic
+//
+// Generate random configuration content and verify parser doesn't panic.
 proptest! {
     #[test]
     fn prop_parser_no_panic(config_lines in proptest::collection::vec(config_option_strategy(), 0..20)) {
@@ -1487,9 +1468,9 @@ proptest! {
     }
 }
 
-/// Property test: Port number validation
-///
-/// Verify that only valid port numbers are accepted (0 or 1-65535).
+// Property test: Port number validation
+//
+// Verify that only valid port numbers are accepted (0 or 1-65535).
 proptest! {
     #[test]
     fn prop_port_validation(port in any::<u16>()) {
@@ -1504,9 +1485,9 @@ proptest! {
     }
 }
 
-/// Property test: Cache size validation
-///
-/// Verify reasonable cache size limits are enforced.
+// Property test: Cache size validation
+//
+// Verify reasonable cache size limits are enforced.
 proptest! {
     #[test]
     fn prop_cache_size_validation(cache_size in any::<usize>()) {
