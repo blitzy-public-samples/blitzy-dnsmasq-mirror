@@ -65,32 +65,27 @@
 //! }
 //! ```
 
-use crate::config::types::DaemonOptions;
 use crate::dhcp::common::{
-    ACTION_ADD, ACTION_ARP, ACTION_ARP_DEL, ACTION_DEL, ACTION_OLD,
-    ACTION_OLD_HOSTNAME, ACTION_RELAY_SNOOP, ACTION_TFTP, DHCP_CHADDR_MAX,
-    ARPHRD_ETHER, LEASE_NA, LEASE_TA,
+    ACTION_ARP, ACTION_ARP_DEL, ACTION_RELAY_SNOOP, ACTION_TFTP, DHCP_CHADDR_MAX,
+    ARPHRD_ETHER,
 };
+#[cfg(test)]
+use crate::dhcp::common::{ACTION_ADD, ACTION_DEL, ACTION_OLD, ACTION_OLD_HOSTNAME};
 use crate::dhcp::lease::DhcpLease;
-use crate::logging::logger::Logger;
 use crate::network::sockets::indextoname;
-use crate::process::privileges::{drop_privileges, PrivilegeError};
+use crate::process::privileges::PrivilegeError;
 
-use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
 use nix::unistd::{Gid, Uid};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::io::{Error as IoError, ErrorKind};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::PathBuf;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc::{self, Sender, Receiver};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 #[cfg(feature = "lua")]
 use rlua::{Context, Function, Lua, Table, Value};
@@ -480,7 +475,7 @@ async fn helper_main_loop(
                 info!("Lua init() function called successfully");
             }
             
-            Ok(())
+            Ok::<(), HelperError>(())
         })?;
         
         Some(lua)
@@ -495,8 +490,9 @@ async fn helper_main_loop(
                 debug!("Helper received event: action={}", data.action);
                 
                 // Try Lua first if available
+                #[cfg(feature = "lua")]
                 if let Some(ref lua) = lua_state {
-                    match execute_lua_script(lua, &data).await {
+                    match execute_lua_script_sync(lua, data.clone()) {
                         Ok(()) => {
                             debug!("Lua script executed successfully");
                             continue;
@@ -597,7 +593,7 @@ async fn execute_external_script(
     debug!("Executing external script: {} action={}", script_path, data.action);
 
     // Build environment variables
-    let mut env_vars = build_script_environment(data)?;
+    let env_vars = build_script_environment(data)?;
 
     // Create command
     let mut cmd = Command::new(script_path);
@@ -670,7 +666,7 @@ async fn execute_external_script(
 /// - DNSMASQ_TFTP_SIZE - TFTP file size
 /// - DNSMASQ_ARP_MAC - ARP hardware address
 /// - DNSMASQ_ARP_IP - ARP IP address
-fn build_script_environment(data: &ScriptData) -> Result<HashMap<String, String>, HelperError> {
+pub(crate) fn build_script_environment(data: &ScriptData) -> Result<HashMap<String, String>, HelperError> {
     let mut env = HashMap::new();
 
     // Interface name
@@ -807,19 +803,19 @@ fn parse_extradata_into_env(extradata: &[u8], env: &mut HashMap<String, String>)
     }
 }
 
-/// Execute Lua script function (replaces C Lua integration lines 319-496)
+/// Execute Lua script function synchronously
 ///
-/// Calls the appropriate Lua function (lease, tftp, arp, snoop) based on the
-/// action type, passing event data as a Lua table.
+/// This is the synchronous version that runs in a blocking context.
+/// Use execute_lua_script (async wrapper) to call from async code.
 #[cfg(feature = "lua")]
-async fn execute_lua_script(lua: &Lua, data: &ScriptData) -> Result<(), HelperError> {
+fn execute_lua_script_sync(lua: &Lua, data: ScriptData) -> Result<(), HelperError> {
     lua.context(|ctx| {
         // Determine which Lua function to call based on action
         let function_name = match data.action.as_str() {
-            ACTION_ADD | ACTION_DEL | ACTION_OLD | ACTION_OLD_HOSTNAME => "lease",
-            ACTION_TFTP => "tftp",
-            ACTION_ARP | ACTION_ARP_DEL => "arp",
-            ACTION_RELAY_SNOOP => "snoop",
+            "add" | "del" | "old" | "old-hostname" => "lease",
+            "tftp" => "tftp",
+            "arp-add" | "arp-del" => "arp",
+            "relay-snoop" => "snoop",
             _ => {
                 return Err(HelperError::LuaError(format!(
                     "Unknown action type: {}",
@@ -965,10 +961,11 @@ pub async fn queue_script(
     }
 
     // Set hardware address
-    if let Some((hwaddr, hwtype)) = lease.hardware_address() {
+    let hwaddr = lease.hwaddr();
+    if !hwaddr.is_empty() {
         data.hwaddr_len = hwaddr.len().min(DHCP_CHADDR_MAX);
         data.hwaddr = hwaddr.to_vec();
-        data.hwaddr_type = hwtype;
+        data.hwaddr_type = lease.hwaddr_type() as u32;
     }
 
     // Set hostname
@@ -978,44 +975,35 @@ pub async fn queue_script(
     }
 
     // Set client ID
-    if let Some(clid) = lease.client_id() {
-        data.clid = clid.to_bytes();
+    let clid = lease.clid();
+    if !clid.is_empty() {
+        data.clid = clid.to_vec();
         data.clid_len = data.clid.len();
     }
 
     // Set IPv4 or IPv6 address
-    match lease.address() {
-        std::net::IpAddr::V4(addr) => {
-            data.addr = Some(addr);
-        }
-        std::net::IpAddr::V6(addr) => {
-            data.addr6 = Some(addr);
-            data.iaid = lease.iaid().map(|i| i.value()).unwrap_or(0);
-        }
+    if let Some(addr) = lease.addr() {
+        data.addr = Some(addr);
+    } else if let Some(addr6) = lease.addr6() {
+        data.addr6 = Some(addr6);
+        data.iaid = lease.iaid().unwrap_or(0);
     }
 
     // Set lease times
-    if let Some(expires) = lease.expires() {
-        let expires_secs = expires
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_secs();
-        data.expires = expires_secs;
+    let expires = lease.expires();
+    let expires_secs = expires
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .as_secs();
+    data.expires = expires_secs;
 
-        // Calculate remaining time
-        if let Ok(now) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            data.remaining_time = expires_secs.saturating_sub(now.as_secs());
-        }
+    // Calculate remaining time
+    if let Ok(now) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        data.remaining_time = expires_secs.saturating_sub(now.as_secs());
     }
 
     // Set flags
-    data.flags = lease.flags().bits() as u32;
-
-    // Set extra data (DHCP options)
-    if let Some(extradata) = lease.extradata() {
-        data.extradata = extradata.to_vec();
-        data.ed_len = extradata.len();
-    }
+    data.flags = lease.flags();
 
     // Send to helper
     helper.send_event(data).await
@@ -1100,7 +1088,7 @@ pub async fn queue_arp(
     // Set hardware address
     data.hwaddr_len = mac_addr.len().min(DHCP_CHADDR_MAX);
     data.hwaddr = mac_addr.to_vec();
-    data.hwaddr_type = ARPHRD_ETHER;
+    data.hwaddr_type = ARPHRD_ETHER as u32;
 
     // Set IP address
     data.addr = Some(ip_addr);
@@ -1135,26 +1123,28 @@ pub async fn queue_relay_snoop(
     }
 
     // Set hardware address
-    if let Some((hwaddr, hwtype)) = lease.hardware_address() {
+    let hwaddr = lease.hwaddr();
+    if !hwaddr.is_empty() {
         data.hwaddr_len = hwaddr.len().min(DHCP_CHADDR_MAX);
         data.hwaddr = hwaddr.to_vec();
-        data.hwaddr_type = hwtype;
+        data.hwaddr_type = lease.hwaddr_type() as u32;
     }
 
     // Set client ID (DUID for DHCPv6)
-    if let Some(clid) = lease.client_id() {
-        data.clid = clid.to_bytes();
+    let clid = lease.clid();
+    if !clid.is_empty() {
+        data.clid = clid.to_vec();
         data.clid_len = data.clid.len();
     }
 
     // Set IPv6 address
-    if let std::net::IpAddr::V6(addr) = lease.address() {
-        data.addr6 = Some(addr);
-        data.iaid = lease.iaid().map(|i| i.value()).unwrap_or(0);
+    if let Some(addr6) = lease.addr6() {
+        data.addr6 = Some(addr6);
+        data.iaid = lease.iaid().unwrap_or(0);
     }
 
     // Set flags
-    data.flags = lease.flags().bits() as u32;
+    data.flags = lease.flags();
 
     // Send to helper
     helper.send_event(data).await
