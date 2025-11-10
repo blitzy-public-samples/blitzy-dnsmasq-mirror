@@ -330,7 +330,7 @@ impl ArpCache {
     /// let platform = create_platform()?;
     ///
     /// let addr: IpAddr = "192.168.1.100".parse()?;
-    /// if let Some((hwaddr, hwlen)) = cache.find_mac(Some(&addr), false, &platform).await? {
+    /// if let Some((hwaddr, hwlen)) = cache.find_mac(Some(&addr), false, platform.as_ref()).await? {
     ///     println!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
     ///         hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
     /// } else {
@@ -425,7 +425,10 @@ impl ArpCache {
         }
 
         // Enumerate kernel ARP table (may block on I/O, so use spawn_blocking)
-        let arp_entries = platform.enumerate_arp().await?;
+        let arp_entries = platform
+            .enumerate_arp()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         debug!("Kernel returned {} ARP entries", arp_entries.len());
 
