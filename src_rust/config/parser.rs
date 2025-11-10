@@ -62,8 +62,9 @@
 //! - `one_file()` (src/option.c lines 6160-6251): File loading with circular include detection
 //! - `option_read_dynfile()` (src/option.c lines 6377+): Directory scanning with file filtering
 
-use crate::config::types::{Config, ConfigBuilder};
+use crate::config::types::{Config, ConfigBuilder, DhcpRange, Dhcp6Range, StaticLease, DhcpOption, MacAddr, InterfaceName, UpstreamServer, DnsConfig, DhcpConfig, NetworkConfig, TftpConfig, LoggingConfig, DaemonOptions};
 use async_recursion::async_recursion;
+use std::time::Duration;
 use nom::{
     branch::alt,
     bytes::complete::{take_while, take_while1},
@@ -82,6 +83,65 @@ use std::string::String;
 use std::vec::Vec;
 use tokio::fs::{read_dir, read_to_string};
 use tracing::{debug, info, trace};
+
+/// Check if an option name is a known valid dnsmasq option
+///
+/// This function maintains a comprehensive list of all valid dnsmasq option names
+/// to distinguish between unimplemented-but-valid options and truly invalid options.
+///
+/// Returns true if the option is a known valid dnsmasq option (even if not yet implemented),
+/// false if the option is unknown and should be rejected.
+fn is_known_option(name: &str) -> bool {
+    // This list includes all options from dnsmasq man page and dnsmasq.conf.example
+    // Even if not fully implemented in the Rust version yet, valid options return true
+    matches!(
+        name,
+        // DNS options
+        "port" | "domain-needed" | "bogus-priv" | "dnssec" | "dnssec-check-unsigned"
+        | "filterwin2k" | "resolv-file" | "strict-order" | "no-resolv" | "no-poll"
+        | "server" | "local" | "address" | "ipset" | "nftset" | "conntrack"
+        | "domain" | "txt-record" | "ptr-record" | "naptr-record" | "cname"
+        | "mx-host" | "mx-target" | "selfmx" | "localmx" | "srv-host" | "host-record"
+        | "auth-zone" | "auth-server" | "auth-ttl" | "auth-soa" | "auth-sec-servers"
+        | "rev-server" | "bogus-nxdomain" | "alias" | "rebind-domain-ok"
+        | "rebind-localhost-ok" | "stop-dns-rebind" | "query-port" | "min-port"
+        | "max-port" | "edns-packet-max" | "cache-size" | "no-negcache"
+        | "local-ttl" | "neg-ttl" | "max-ttl" | "min-cache-ttl" | "max-cache-ttl"
+        | "dhcp-ttl" | "dns-forward-max" | "clear-on-reload"
+        
+        // DHCP options
+        | "dhcp-range" | "dhcp-host" | "dhcp-hostsfile" | "dhcp-option" | "dhcp-boot" | "dhcp-match"
+        | "dhcp-vendorclass" | "dhcp-userclass" | "dhcp-circuitid" | "dhcp-remoteid"
+        | "dhcp-subscrid" | "dhcp-proxy" | "dhcp-relay" | "dhcp-leasefile"
+        | "leasefile-ro" | "dhcp-script" | "dhcp-luascript" | "script-user"
+        | "dhcp-authoritative" | "dhcp-rapid-commit" | "dhcp-sequential-ip"
+        | "dhcp-ignore" | "dhcp-ignore-names" | "dhcp-generate-names"
+        | "dhcp-client-update" | "dhcp-no-override" | "enable-ra" | "ra-param"
+        | "dhcp-reply-delay" | "dhcp-duid" | "dhcp-fqdn" | "dhcp-alternate-port"
+        | "bootp-dynamic" | "no-ping" | "log-dhcp" | "quiet-dhcp" | "quiet-dhcp6"
+        | "quiet-ra" | "pxe-service" | "pxe-prompt" | "dhcp-pxe-vendor"
+        
+        // TFTP options
+        | "enable-tftp" | "tftp-root" | "tftp-unique-root" | "tftp-secure"
+        | "tftp-lowercase" | "tftp-max" | "tftp-mtu" | "tftp-no-blocksize"
+        | "tftp-port-range" | "tftp-no-fail"
+        
+        // Network interface options
+        | "interface" | "except-interface" | "listen-address" | "no-dhcp-interface"
+        | "bind-interfaces" | "bind-dynamic" | "bridge-interface"
+        
+        // Logging options
+        | "log-queries" | "log-facility" | "log-async" | "log-file" | "log-debug"
+        
+        // Daemon options
+        | "user" | "group" | "conf-file" | "conf-dir" | "pid-file" | "no-daemon"
+        | "keep-in-foreground" | "test"
+        
+        // Other options from real configs
+        | "expand-hosts" | "localise-queries" | "add-cpe-id" | "add-mac"
+        | "add-subnet" | "trust-anchor"
+    )
+}
 
 /// Parse error types for configuration file processing
 ///
@@ -506,15 +566,23 @@ fn parse_config_line(input: &str) -> IResult<&str, ConfigLine> {
         return Ok((input, ConfigLine::Empty));
     }
 
-    // Try key=value pair first
-    if let Ok((rest, (key, value))) = parse_key_value_pair(input) {
-        let (rest, _) = space0(rest)?;
-        // Check for comment at end of line
-        let (rest, _) = opt(parse_comment)(rest)?;
-        return Ok((rest, ConfigLine::OptionWithValue(key, value)));
+    // Check if line contains '=' to distinguish key=value from boolean options
+    let has_equals = input.contains('=');
+
+    // Try key=value pair first if '=' is present
+    if has_equals {
+        if let Ok((rest, (key, value))) = parse_key_value_pair(input) {
+            let (rest, _) = space0(rest)?;
+            // Check for comment at end of line
+            let (rest, _) = opt(parse_comment)(rest)?;
+            return Ok((rest, ConfigLine::OptionWithValue(key, value)));
+        } else {
+            // Has '=' but parsing failed - this is a syntax error (missing or invalid value)
+            return Err(Err::Error(nom::error::Error::new(input, ErrorKind::Tag)));
+        }
     }
 
-    // Try option without value
+    // Try option without value (only if no '=' present)
     if let Ok((rest, option)) = parse_option_name(input) {
         let (rest, _) = space0(rest)?;
         // Check for comment at end of line
@@ -645,6 +713,199 @@ pub fn parse_config_string(content: &str) -> Result<Config, ParseError> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Parse a duration string (e.g., "1h", "24h", "1d", "infinite")
+///
+/// Returns duration in seconds.
+fn parse_duration(s: &str) -> Result<u32, ParseError> {
+    if s == "infinite" {
+        return Ok(u32::MAX);
+    }
+    
+    let s = s.trim();
+    if let Some(s) = s.strip_suffix('h') {
+        if let Ok(hours) = s.parse::<u32>() {
+            return Ok(hours * 3600);
+        }
+    } else if let Some(s) = s.strip_suffix('d') {
+        if let Ok(days) = s.parse::<u32>() {
+            return Ok(days * 86400);
+        }
+    } else if let Some(s) = s.strip_suffix('m') {
+        if let Ok(minutes) = s.parse::<u32>() {
+            return Ok(minutes * 60);
+        }
+    } else if let Ok(seconds) = s.parse::<u32>() {
+        return Ok(seconds);
+    }
+    
+    Err(ParseError::SyntaxError {
+        file: String::from("parse_duration"),
+        line: 0,
+        message: format!("invalid duration: {}", s),
+    })
+}
+
+/// Parse a MAC address string (e.g., "00:11:22:33:44:55")
+///
+/// Returns MacAddr ([u8; 6]) or None if invalid
+fn parse_mac_address(s: &str) -> Option<MacAddr> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    
+    let mut mac = [0u8; 6];
+    for (i, part) in parts.iter().enumerate() {
+        mac[i] = u8::from_str_radix(part, 16).ok()?;
+    }
+    
+    Some(mac)
+}
+
+/// Parse an upstream server specification
+///
+/// Supports formats:
+/// - IP address (defaults to port 53)
+/// - IP:port
+/// - /domain/IP (domain-specific server)
+/// - /domain/IP:port (domain-specific server with port)
+/// Returns UpstreamServer or None if invalid
+fn parse_upstream_server(s: &str) -> Option<UpstreamServer> {
+    use std::net::{IpAddr, SocketAddr};
+    use crate::config::types::UpstreamServer;
+    
+    // Check for domain-specific format: /domain/IP or /domain/IP:port
+    if s.starts_with('/') {
+        let parts: Vec<&str> = s.split('/').collect();
+        if parts.len() >= 3 {
+            let domain = if parts[1].is_empty() { None } else { Some(parts[1].to_string()) };
+            let server_part = parts[2];
+            
+            // Try parsing as SocketAddr first (has port)
+            if let Ok(addr) = server_part.parse::<SocketAddr>() {
+                return Some(UpstreamServer {
+                    addr,
+                    domain,
+                    port: addr.port(),
+                    source_addr: None,
+                    interface: None,
+                });
+            }
+            
+            // Try parsing as IpAddr (default port 53)
+            if let Ok(ip) = server_part.parse::<IpAddr>() {
+                let addr = match ip {
+                    IpAddr::V4(v4) => SocketAddr::new(IpAddr::V4(v4), 53),
+                    IpAddr::V6(v6) => SocketAddr::new(IpAddr::V6(v6), 53),
+                };
+                return Some(UpstreamServer {
+                    addr,
+                    domain,
+                    port: 53,
+                    source_addr: None,
+                    interface: None,
+                });
+            }
+        }
+        return None;
+    }
+    
+    // Try parsing as SocketAddr first (has port)
+    if let Ok(addr) = s.parse::<SocketAddr>() {
+        return Some(UpstreamServer {
+            addr,
+            domain: None,
+            port: addr.port(),
+            source_addr: None,
+            interface: None,
+        });
+    }
+    
+    // Try parsing as IpAddr (default port 53)
+    if let Ok(ip) = s.parse::<IpAddr>() {
+        let addr = match ip {
+            IpAddr::V4(v4) => SocketAddr::new(IpAddr::V4(v4), 53),
+            IpAddr::V6(v6) => SocketAddr::new(IpAddr::V6(v6), 53),
+        };
+        return Some(UpstreamServer {
+            addr,
+            domain: None,
+            port: 53,
+            source_addr: None,
+            interface: None,
+        });
+    }
+    
+    None
+}
+
+/// Merge included configuration into current configuration
+///
+/// Later values override earlier values (following dnsmasq semantics).
+fn merge_configs(
+    dns_config: &mut DnsConfig,
+    dhcp_config: &mut DhcpConfig,
+    network_config: &mut NetworkConfig,
+    tftp_config: &mut TftpConfig,
+    logging_config: &mut LoggingConfig,
+    options: &mut DaemonOptions,
+    included: &Config,
+) {
+    // Merge DNS config (non-default values override)
+    if included.dns.port != 53 {
+        dns_config.port = included.dns.port;
+    }
+    if included.dns.cache_size != 150 {
+        dns_config.cache_size = included.dns.cache_size;
+    }
+    dns_config.upstream_servers.extend(included.dns.upstream_servers.iter().cloned());
+    
+    // Merge DHCP config
+    dhcp_config.dhcp_ranges.extend(included.dhcp.dhcp_ranges.iter().cloned());
+    dhcp_config.dhcp6_ranges.extend(included.dhcp.dhcp6_ranges.iter().cloned());
+    for (mac, lease) in &included.dhcp.static_leases {
+        dhcp_config.static_leases.insert(*mac, lease.clone());
+    }
+    dhcp_config.dhcp_options.extend(included.dhcp.dhcp_options.iter().cloned());
+    
+    // Merge network config
+    network_config.interfaces.extend(included.network.interfaces.iter().cloned());
+    network_config.except_interfaces.extend(included.network.except_interfaces.iter().cloned());
+    network_config.listen_addresses.extend(included.network.listen_addresses.iter().cloned());
+    if included.network.bind_interfaces {
+        network_config.bind_interfaces = true;
+    }
+    if included.network.bind_dynamic {
+        network_config.bind_dynamic = true;
+    }
+    
+    // Merge TFTP config
+    if included.tftp.tftp_root.is_some() {
+        tftp_config.tftp_root = included.tftp.tftp_root.clone();
+    }
+    if included.tftp.secure_mode {
+        tftp_config.secure_mode = true;
+    }
+    
+    // Merge logging config
+    if included.logging.log_queries {
+        logging_config.log_queries = true;
+    }
+    if included.logging.log_dhcp {
+        logging_config.log_dhcp = true;
+    }
+    if included.logging.log_file.is_some() {
+        logging_config.log_file = included.logging.log_file.clone();
+    }
+    if included.logging.log_facility.is_some() {
+        logging_config.log_facility = included.logging.log_facility.clone();
+    }
+    
+    // Merge options (bitflags)
+    *options = *options | included.options;
+}
+
 pub async fn parse_config_file(path: &Path) -> Result<Config, ParseError> {
     let mut context = ParseContext::new();
     parse_config_file_recursive(path, &mut context).await
@@ -702,10 +963,18 @@ async fn parse_config_file_recursive(
     })?;
 
     // Parse content
-    let builder = ConfigBuilder::new();
     let mut line_num = 0;
     let mut conf_files = Vec::new();
     let mut conf_dirs = Vec::new();
+
+    // Create mutable config structs for incremental updates
+    use crate::config::types::{DnsConfig, DhcpConfig, NetworkConfig, TftpConfig, LoggingConfig, DaemonOptions};
+    let mut dns_config = DnsConfig::default();
+    let mut dhcp_config = DhcpConfig::default();
+    let mut network_config = NetworkConfig::default();
+    let mut tftp_config = TftpConfig::default();
+    let mut logging_config = LoggingConfig::default();
+    let mut options = DaemonOptions::default();
 
     for line in content.lines() {
         line_num += 1;
@@ -718,7 +987,55 @@ async fn parse_config_file_recursive(
             Ok((_, ConfigLine::OptionOnly(option))) => {
                 // Handle boolean options
                 trace!("Option without value: {}", option);
-                // In full implementation, would update builder based on option
+                match option.as_str() {
+                    "no-resolv" => {
+                        options.insert(DaemonOptions::OPT_NO_RESOLV);
+                    }
+                    "no-poll" => {
+                        options.insert(DaemonOptions::OPT_NO_POLL);
+                    }
+                    "dnssec" => {
+                        options.insert(DaemonOptions::OPT_DNSSEC_VALID);
+                    }
+                    "dnssec-check-unsigned" => {
+                        // This enables checking of unsigned zones - do NOT set OPT_DNSSEC_IGN_NS
+                    }
+                    "domain-needed" => {
+                        // Filters queries for plain names (no dots) - corresponds to OPT_NODOTS_LOCAL
+                        options.insert(DaemonOptions::OPT_NODOTS_LOCAL);
+                    }
+                    "bogus-priv" => {
+                        options.insert(DaemonOptions::OPT_BOGUSPRIV);
+                    }
+                    "log-queries" => {
+                        options.insert(DaemonOptions::OPT_LOG);
+                        logging_config.log_queries = true;
+                    }
+                    "log-dhcp" => {
+                        logging_config.log_dhcp = true;
+                    }
+                    "bind-interfaces" => {
+                        network_config.bind_interfaces = true;
+                    }
+                    "bind-dynamic" => {
+                        network_config.bind_dynamic = true;
+                    }
+                    "enable-tftp" => {
+                        // TFTP is considered enabled if tftp_root is set
+                        // This flag will be checked later with tftp-root
+                    }
+                    "tftp-secure" => {
+                        tftp_config.secure_mode = true;
+                    }
+                    "enable-ra" => {
+                        options.insert(DaemonOptions::OPT_RA);
+                    }
+                    _ => {
+                        // Other boolean options - log and skip for now
+                        // C dnsmasq typically ignores unknown options or options for uncompiled features
+                        trace!("Unhandled boolean option: {}", option);
+                    }
+                }
             }
             Ok((_, ConfigLine::OptionWithValue(option, value))) => {
                 // Handle conf-file and conf-dir for recursive loading
@@ -729,17 +1046,220 @@ async fn parse_config_file_recursive(
                     "conf-dir" => {
                         conf_dirs.push(PathBuf::from(&value));
                     }
+                    "port" => {
+                        match value.parse::<u16>() {
+                            Ok(port) => dns_config.port = port,
+                            Err(_) => {
+                                return Err(ParseError::SyntaxError {
+                                    file: path_str.clone(),
+                                    line: line_num,
+                                    message: format!("invalid port value: {}", value),
+                                });
+                            }
+                        }
+                    }
+                    "cache-size" => {
+                        match value.parse::<usize>() {
+                            Ok(size) => dns_config.cache_size = size,
+                            Err(_) => {
+                                return Err(ParseError::SyntaxError {
+                                    file: path_str.clone(),
+                                    line: line_num,
+                                    message: format!("invalid cache-size value: {}", value),
+                                });
+                            }
+                        }
+                    }
+                    "server" => {
+                        if let Some(upstream) = parse_upstream_server(&value) {
+                            dns_config.upstream_servers.push(upstream);
+                        }
+                    }
+                    "dhcp-range" => {
+                        use std::net::Ipv6Addr;
+                        // Parse DHCP range - auto-detect IPv4 vs IPv6
+                        let parts: Vec<&str> = value.split(',').collect();
+                        
+                        // Try to detect if this is IPv6 (contains ':' in first part or "constructor:")
+                        if parts.len() >= 2 && (parts[0].contains(':') || parts.get(2).map_or(false, |s| s.starts_with("constructor:"))) {
+                            // IPv6 DHCP range
+                            if let Ok(start) = parts[0].parse::<Ipv6Addr>() {
+                                let end = if parts.len() > 1 && parts[1].contains(':') {
+                                    parts[1].parse().unwrap_or(start)
+                                } else {
+                                    start  // Single address mode
+                                };
+                                
+                                // Find prefix length (default 64)
+                                let mut prefix_len = 64;
+                                let mut lease_time_secs = 3600;
+                                
+                                // Parse remaining parts (could be constructor:, prefix, lease time)
+                                for i in 2..parts.len() {
+                                    let part = parts[i];
+                                    if part.starts_with("constructor:") {
+                                        // Constructor syntax (interface specification)
+                                        // Just skip for now - would need interface parsing
+                                        continue;
+                                    } else if let Ok(num) = part.parse::<u8>() {
+                                        if num <= 128 {
+                                            prefix_len = num;
+                                        }
+                                    } else {
+                                        // Try to parse as duration
+                                        lease_time_secs = parse_duration(part).unwrap_or(3600);
+                                    }
+                                }
+                                
+                                dhcp_config.dhcp6_ranges.push(Dhcp6Range {
+                                    start,
+                                    end,
+                                    prefix_len,
+                                    lease_time: Duration::from_secs(lease_time_secs as u64),
+                                    flags: 0,
+                                });
+                            }
+                        } else if parts.len() >= 2 {
+                            // IPv4 DHCP range
+                            if let (Ok(start), Ok(end)) = (parts[0].parse(), parts[1].parse()) {
+                                let lease_time_secs = if parts.len() > 2 && parts[2] != "infinite" {
+                                    parse_duration(parts[2]).unwrap_or(3600)
+                                } else if parts.len() > 2 && parts[2] == "infinite" {
+                                    u32::MAX
+                                } else {
+                                    3600
+                                };
+                                dhcp_config.dhcp_ranges.push(DhcpRange {
+                                    start,
+                                    end,
+                                    lease_time: Duration::from_secs(lease_time_secs as u64),
+                                    flags: 0,
+                                });
+                            }
+                        }
+                    }
+                    "dhcp6-range" | "dhcp-range6" => {
+                        use std::net::Ipv6Addr;
+                        // Parse IPv6 DHCP range (simplified)
+                        let parts: Vec<&str> = value.split(',').collect();
+                        if !parts.is_empty() {
+                            if let Ok(start) = parts[0].parse::<Ipv6Addr>() {
+                                let end = if parts.len() > 1 && parts[1].contains(':') {
+                                    parts[1].parse().unwrap_or(start)
+                                } else {
+                                    start  // Single address mode
+                                };
+                                let prefix_len = 64;
+                                let lease_time_secs = if parts.len() > 2 {
+                                    parse_duration(parts[2]).unwrap_or(3600)
+                                } else if parts.len() > 1 && !parts[1].contains(':') {
+                                    parse_duration(parts[1]).unwrap_or(3600)
+                                } else {
+                                    3600
+                                };
+                                dhcp_config.dhcp6_ranges.push(Dhcp6Range {
+                                    start,
+                                    end,
+                                    prefix_len,
+                                    lease_time: Duration::from_secs(lease_time_secs as u64),
+                                    flags: 0,
+                                });
+                            }
+                        }
+                    }
+                    "dhcp-host" => {
+                        // Simplified static host parsing
+                        let parts: Vec<&str> = value.split(',').collect();
+                        if parts.len() >= 2 {
+                            if let (Some(mac), Ok(addr)) = (parse_mac_address(parts[0]), parts[1].parse()) {
+                                let lease = StaticLease {
+                                    hwaddr: mac,
+                                    addr,
+                                    hostname: if parts.len() > 2 {
+                                        Some(parts[2].to_string())
+                                    } else {
+                                        None
+                                    },
+                                    client_id: None,
+                                };
+                                dhcp_config.static_leases.insert(mac, lease);
+                            }
+                        }
+                    }
+                    "dhcp-option" => {
+                        // Simplified option parsing
+                        let parts: Vec<&str> = value.split(',').collect();
+                        if !parts.is_empty() {
+                            if let Ok(code) = parts[0].parse::<u8>() {
+                                let data = if parts.len() > 1 {
+                                    parts[1].as_bytes().to_vec()
+                                } else {
+                                    Vec::new()
+                                };
+                                dhcp_config.dhcp_options.push(DhcpOption {
+                                    code,
+                                    data,
+                                    vendor_class: None,
+                                });
+                            }
+                        }
+                    }
+                    "tftp-root" => {
+                        tftp_config.tftp_root = Some(PathBuf::from(&value));
+                    }
+                    "interface" => {
+                        network_config.interfaces.push(InterfaceName::new(value.clone()));
+                    }
+                    "except-interface" => {
+                        network_config.except_interfaces.push(InterfaceName::new(value.clone()));
+                    }
+                    "listen-address" => {
+                        match value.parse() {
+                            Ok(addr) => network_config.listen_addresses.push(addr),
+                            Err(_) => {
+                                return Err(ParseError::SyntaxError {
+                                    file: path_str.clone(),
+                                    line: line_num,
+                                    message: format!("invalid IP address: {}", value),
+                                });
+                            }
+                        }
+                    }
+                    "log-facility" => {
+                        logging_config.log_facility = Some(value.clone());
+                    }
+                    "log-file" => {
+                        logging_config.log_file = Some(PathBuf::from(value.clone()));
+                    }
                     _ => {
-                        // Other options would update builder
-                        trace!("Option with value: {}={}", option, value);
+                        // Check if this is a known valid option
+                        if is_known_option(&option) {
+                            // Known option but not yet implemented - log and skip
+                            trace!("Unimplemented option with value: {}={}", option, value);
+                        } else {
+                            // Truly unknown option - reject
+                            return Err(ParseError::SyntaxError {
+                                file: path_str.clone(),
+                                line: line_num,
+                                message: format!("unknown option: {}", option),
+                            });
+                        }
                     }
                 }
             }
             Err(_) => {
+                // Provide more helpful error message
+                let message = if line.contains('=') {
+                    // Line has '=' but couldn't parse as key=value - likely missing value
+                    let key = line.split('=').next().unwrap_or(line).trim();
+                    format!("invalid syntax: option '{}' has '=' but no value", key)
+                } else {
+                    format!("invalid syntax: {}", line.trim())
+                };
                 return Err(ParseError::SyntaxError {
                     file: path_str.clone(),
                     line: line_num,
-                    message: String::from("invalid syntax"),
+                    message,
                 });
             }
         }
@@ -748,8 +1268,10 @@ async fn parse_config_file_recursive(
     // Recursively load conf-file entries
     for conf_file in conf_files {
         debug!("Loading included file: {:?}", conf_file);
-        let _included_config = parse_config_file_recursive(&conf_file, context).await?;
-        // In full implementation, would merge included_config into current builder
+        let included_config = parse_config_file_recursive(&conf_file, context).await?;
+        // Merge included config into current config (later values override earlier)
+        merge_configs(&mut dns_config, &mut dhcp_config, &mut network_config, 
+                      &mut tftp_config, &mut logging_config, &mut options, &included_config);
     }
 
     // Recursively load conf-dir entries
@@ -757,10 +1279,21 @@ async fn parse_config_file_recursive(
         debug!("Loading included directory: {:?}", conf_dir);
         let dir_files = parse_config_dir(&conf_dir).await?;
         for dir_file in dir_files {
-            let _included_config = parse_config_file_recursive(&dir_file, context).await?;
-            // In full implementation, would merge included_config into current builder
+            let included_config = parse_config_file_recursive(&dir_file, context).await?;
+            // Merge included config into current config (later values override earlier)
+            merge_configs(&mut dns_config, &mut dhcp_config, &mut network_config, 
+                          &mut tftp_config, &mut logging_config, &mut options, &included_config);
         }
     }
+
+    // Build final config with parsed values
+    let builder = ConfigBuilder::new()
+        .dns(dns_config)
+        .dhcp(dhcp_config)
+        .network(network_config)
+        .tftp(tftp_config)
+        .logging(logging_config)
+        .options(options);
 
     Ok(builder.build())
 }
@@ -805,11 +1338,14 @@ pub async fn parse_config_dir(dir: &Path) -> Result<Vec<PathBuf>, ParseError> {
     let dir_str = dir.to_string_lossy().to_string();
 
     // Read directory entries
+    // Note: dnsmasq silently ignores non-existent conf-dir directories (unlike conf-file)
     let mut entries = match read_dir(dir).await {
         Ok(entries) => entries,
         Err(e) => {
             if e.kind() == IoErrorKind::NotFound {
-                return Err(ParseError::FileNotFound { file: dir_str });
+                // Silently skip non-existent directories (matches C dnsmasq behavior)
+                debug!("Skipping non-existent conf-dir: {}", dir_str);
+                return Ok(Vec::new());
             }
             return Err(ParseError::IoError {
                 file: dir_str,
