@@ -557,7 +557,14 @@ impl UbusManager {
     ) -> i32 {
         trace!("Handling set_connmark_allowlist");
 
-        // Parse blob message parameters
+        if msg.is_null() {
+            error!("set_connmark_allowlist: null message");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        // Parse blob message parameters using FFI
+        let mut parsed_attrs: [*mut ubus::blob_attr; 3] = [ptr::null_mut(); 3];
+
         let policy = [
             BlobmsgPolicy {
                 name: b"mark\0".as_ptr() as *const libc::c_char,
@@ -573,15 +580,104 @@ impl UbusManager {
             },
         ];
 
-        // This is a simplified implementation. Full implementation would:
-        // 1. Parse blob message using blobmsg_parse
-        // 2. Validate mark and mask parameters
-        // 3. Extract patterns array
-        // 4. Validate each pattern with is_valid_dns_name_pattern
-        // 5. Update allowlists HashMap
-        // 6. Return appropriate status code
+        // Call blobmsg_parse via FFI to extract parameters
+        let parse_result = unsafe {
+            ubus::blobmsg_parse(
+                policy.as_ptr(),
+                policy.len(),
+                parsed_attrs.as_mut_ptr(),
+                msg,
+            )
+        };
 
-        warn!("set_connmark_allowlist not fully implemented yet");
+        if parse_result != 0 {
+            error!("Failed to parse set_connmark_allowlist blob message");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        // Extract mark parameter
+        let mark_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_MARK];
+        if mark_attr.is_null() {
+            error!("set_connmark_allowlist: missing mark parameter");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        let mark = unsafe { ubus::blobmsg_get_u32(mark_attr) };
+
+        // Extract mask parameter
+        let mask_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_MASK];
+        if mask_attr.is_null() {
+            error!("set_connmark_allowlist: missing mask parameter");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        let mask = unsafe { ubus::blobmsg_get_u32(mask_attr) };
+
+        // Validate mark and mask
+        if mark == 0 && mask == 0 {
+            error!("set_connmark_allowlist: invalid mark/mask combination (both zero)");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        // Extract patterns array
+        let patterns_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_PATTERNS];
+        if patterns_attr.is_null() {
+            error!("set_connmark_allowlist: missing patterns parameter");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        // Parse patterns array from blob
+        let mut patterns = Vec::new();
+        let mut current_attr = unsafe { ubus::blobmsg_array_first(patterns_attr) };
+
+        while !current_attr.is_null() {
+            // Get string from blob attribute
+            let pattern_cstr = unsafe { ubus::blobmsg_get_string(current_attr) };
+            if pattern_cstr.is_null() {
+                warn!("set_connmark_allowlist: skipping null pattern");
+                current_attr = unsafe { ubus::blobmsg_array_next(current_attr) };
+                continue;
+            }
+
+            // Convert to Rust string
+            let pattern = match unsafe { CStr::from_ptr(pattern_cstr) }.to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    warn!("set_connmark_allowlist: skipping invalid UTF-8 pattern");
+                    current_attr = unsafe { ubus::blobmsg_array_next(current_attr) };
+                    continue;
+                }
+            };
+
+            // Validate pattern
+            if !is_valid_dns_name_pattern(&pattern) {
+                warn!("set_connmark_allowlist: invalid DNS pattern: {}", pattern);
+                current_attr = unsafe { ubus::blobmsg_array_next(current_attr) };
+                continue;
+            }
+
+            patterns.push(pattern);
+            current_attr = unsafe { ubus::blobmsg_array_next(current_attr) };
+        }
+
+        if patterns.is_empty() {
+            warn!("set_connmark_allowlist: no valid patterns provided");
+            return UBUS_STATUS_INVALID_ARGUMENT;
+        }
+
+        // Update allowlists
+        {
+            let mut allowlists = self.inner.allowlists.lock().unwrap();
+            allowlists.insert((mark, mask), patterns.clone());
+        }
+
+        info!(
+            "Updated connmark allowlist: mark={:#x}, mask={:#x}, patterns={}",
+            mark,
+            mask,
+            patterns.len()
+        );
+
         UBUS_STATUS_OK
     }
 
@@ -628,6 +724,7 @@ impl UbusManager {
     ) -> UbusResult<()> {
         // Skip if no subscribers
         if !self.has_subscribers() {
+            trace!("Skipping DHCP event broadcast (no subscribers)");
             return Ok(());
         }
 
@@ -636,12 +733,62 @@ impl UbusManager {
             event_type, ip, mac, hostname
         );
 
-        // Construct blob message with event data
-        // Full implementation would:
-        // 1. Create blob_buf
-        // 2. Add event_type, ip, mac, hostname fields
-        // 3. Call ubus_notify with constructed message
+        let ctx = self.context.as_ref().ok_or(UbusError::Disconnected)?;
 
+        // Allocate blob buffer for message
+        let mut blob_buf_storage = vec![0u8; 1024];
+        let blob_buf_ptr = blob_buf_storage.as_mut_ptr() as *mut ubus::blob_buf;
+
+        // Initialize blob buffer
+        unsafe {
+            ubus::blob_buf_init(blob_buf_ptr, BLOBMSG_TYPE_TABLE as i32);
+        }
+
+        // Add event fields to blob
+        let event_type_cstr = CString::new(event_type)
+            .map_err(|_| UbusError::BlobSerializationFailed("invalid event_type".to_string()))?;
+        let ip_cstr = CString::new(ip)
+            .map_err(|_| UbusError::BlobSerializationFailed("invalid ip".to_string()))?;
+        let mac_cstr = CString::new(mac)
+            .map_err(|_| UbusError::BlobSerializationFailed("invalid mac".to_string()))?;
+
+        unsafe {
+            // Add event type
+            let type_key = CString::new("type").unwrap();
+            ubus::blobmsg_add_string(blob_buf_ptr, type_key.as_ptr(), event_type_cstr.as_ptr());
+
+            // Add IP address
+            let ip_key = CString::new("ip").unwrap();
+            ubus::blobmsg_add_string(blob_buf_ptr, ip_key.as_ptr(), ip_cstr.as_ptr());
+
+            // Add MAC address
+            let mac_key = CString::new("mac").unwrap();
+            ubus::blobmsg_add_string(blob_buf_ptr, mac_key.as_ptr(), mac_cstr.as_ptr());
+
+            // Add hostname if present
+            if let Some(hn) = hostname {
+                if let Ok(hn_cstr) = CString::new(hn) {
+                    let hn_key = CString::new("hostname").unwrap();
+                    ubus::blobmsg_add_string(blob_buf_ptr, hn_key.as_ptr(), hn_cstr.as_ptr());
+                }
+            }
+        }
+
+        // Get blob head for notification
+        let blob_head = unsafe { *(blob_buf_ptr as *const *mut ubus::blob_attr) };
+
+        // Build notification type string (e.g., "dhcp.add", "dhcp.old", "dhcp.del")
+        let notify_type = format!("dhcp.{}", event_type);
+        let notify_type_cstr = CString::new(notify_type)
+            .map_err(|_| UbusError::BlobSerializationFailed("invalid notify type".to_string()))?;
+
+        // Send notification to subscribers
+        unsafe {
+            ubus::ubus_notify(ctx, notify_type_cstr.as_ptr(), blob_head)
+                .map_err(|e| UbusError::NotifyFailed(format!("DHCP event: {}", e)))?;
+        }
+
+        trace!("DHCP event broadcast successful");
         Ok(())
     }
 
@@ -655,11 +802,57 @@ impl UbusManager {
     /// * `data` - Key-value pairs for event data
     pub fn broadcast_event(&self, event_type: &str, data: &HashMap<String, String>) -> UbusResult<()> {
         if !self.has_subscribers() {
+            trace!("Skipping event broadcast (no subscribers)");
             return Ok(());
         }
 
         debug!("Broadcasting event: {} with {} fields", event_type, data.len());
 
+        let ctx = self.context.as_ref().ok_or(UbusError::Disconnected)?;
+
+        // Allocate blob buffer
+        let mut blob_buf_storage = vec![0u8; 4096];
+        let blob_buf_ptr = blob_buf_storage.as_mut_ptr() as *mut ubus::blob_buf;
+
+        unsafe {
+            ubus::blob_buf_init(blob_buf_ptr, BLOBMSG_TYPE_TABLE as i32);
+        }
+
+        // Add all data fields to blob
+        for (key, value) in data.iter() {
+            let key_cstr = match CString::new(key.as_str()) {
+                Ok(s) => s,
+                Err(_) => {
+                    warn!("Skipping blob field with invalid key: {}", key);
+                    continue;
+                }
+            };
+
+            let value_cstr = match CString::new(value.as_str()) {
+                Ok(s) => s,
+                Err(_) => {
+                    warn!("Skipping blob field with invalid value for key: {}", key);
+                    continue;
+                }
+            };
+
+            unsafe {
+                ubus::blobmsg_add_string(blob_buf_ptr, key_cstr.as_ptr(), value_cstr.as_ptr());
+            }
+        }
+
+        let blob_head = unsafe { *(blob_buf_ptr as *const *mut ubus::blob_attr) };
+
+        // Send notification
+        let event_type_cstr = CString::new(event_type)
+            .map_err(|_| UbusError::BlobSerializationFailed("invalid event_type".to_string()))?;
+
+        unsafe {
+            ubus::ubus_notify(ctx, event_type_cstr.as_ptr(), blob_head)
+                .map_err(|e| UbusError::NotifyFailed(format!("Event {}: {}", event_type, e)))?;
+        }
+
+        trace!("Event broadcast successful");
         Ok(())
     }
 
@@ -672,13 +865,44 @@ impl UbusManager {
         domain: &str,
     ) -> UbusResult<()> {
         if !self.has_subscribers() {
+            trace!("Skipping connmark refused broadcast (no subscribers)");
             return Ok(());
         }
 
         debug!(
-            "Broadcasting connmark allowlist refused: mark={}, mask={}, domain={}",
+            "Broadcasting connmark allowlist refused: mark={:#x}, mask={:#x}, domain={}",
             mark, mask, domain
         );
+
+        let ctx = self.context.as_ref().ok_or(UbusError::Disconnected)?;
+
+        // Allocate blob buffer
+        let mut blob_buf_storage = vec![0u8; 1024];
+        let blob_buf_ptr = blob_buf_storage.as_mut_ptr() as *mut ubus::blob_buf;
+
+        unsafe {
+            ubus::blob_buf_init(blob_buf_ptr, BLOBMSG_TYPE_TABLE as i32);
+
+            // Add fields
+            let mark_key = CString::new("mark").unwrap();
+            ubus::blobmsg_add_u32(blob_buf_ptr, mark_key.as_ptr(), mark);
+
+            let mask_key = CString::new("mask").unwrap();
+            ubus::blobmsg_add_u32(blob_buf_ptr, mask_key.as_ptr(), mask);
+
+            let domain_key = CString::new("domain").unwrap();
+            let domain_cstr = CString::new(domain)
+                .map_err(|_| UbusError::BlobSerializationFailed("invalid domain".to_string()))?;
+            ubus::blobmsg_add_string(blob_buf_ptr, domain_key.as_ptr(), domain_cstr.as_ptr());
+        }
+
+        let blob_head = unsafe { *(blob_buf_ptr as *const *mut ubus::blob_attr) };
+
+        let event_type = CString::new("connmark.allowlist.refused").unwrap();
+        unsafe {
+            ubus::ubus_notify(ctx, event_type.as_ptr(), blob_head)
+                .map_err(|e| UbusError::NotifyFailed(format!("Connmark refused: {}", e)))?;
+        }
 
         Ok(())
     }
@@ -692,13 +916,44 @@ impl UbusManager {
         domain: &str,
     ) -> UbusResult<()> {
         if !self.has_subscribers() {
+            trace!("Skipping connmark resolved broadcast (no subscribers)");
             return Ok(());
         }
 
         debug!(
-            "Broadcasting connmark allowlist resolved: mark={}, mask={}, domain={}",
+            "Broadcasting connmark allowlist resolved: mark={:#x}, mask={:#x}, domain={}",
             mark, mask, domain
         );
+
+        let ctx = self.context.as_ref().ok_or(UbusError::Disconnected)?;
+
+        // Allocate blob buffer
+        let mut blob_buf_storage = vec![0u8; 1024];
+        let blob_buf_ptr = blob_buf_storage.as_mut_ptr() as *mut ubus::blob_buf;
+
+        unsafe {
+            ubus::blob_buf_init(blob_buf_ptr, BLOBMSG_TYPE_TABLE as i32);
+
+            // Add fields
+            let mark_key = CString::new("mark").unwrap();
+            ubus::blobmsg_add_u32(blob_buf_ptr, mark_key.as_ptr(), mark);
+
+            let mask_key = CString::new("mask").unwrap();
+            ubus::blobmsg_add_u32(blob_buf_ptr, mask_key.as_ptr(), mask);
+
+            let domain_key = CString::new("domain").unwrap();
+            let domain_cstr = CString::new(domain)
+                .map_err(|_| UbusError::BlobSerializationFailed("invalid domain".to_string()))?;
+            ubus::blobmsg_add_string(blob_buf_ptr, domain_key.as_ptr(), domain_cstr.as_ptr());
+        }
+
+        let blob_head = unsafe { *(blob_buf_ptr as *const *mut ubus::blob_attr) };
+
+        let event_type = CString::new("connmark.allowlist.resolved").unwrap();
+        unsafe {
+            ubus::ubus_notify(ctx, event_type.as_ptr(), blob_head)
+                .map_err(|e| UbusError::NotifyFailed(format!("Connmark resolved: {}", e)))?;
+        }
 
         Ok(())
     }
@@ -839,17 +1094,139 @@ pub extern "C" fn ubus_handle_metrics_cb(
 }
 
 /// C callback for handling set_connmark_allowlist method (HAVE_CONNTRACK)
+///
+/// # Safety
+///
+/// This function is called by libubus with valid pointers. The ubus library
+/// guarantees that ctx, obj, req, method, and msg pointers are valid for the
+/// duration of the callback.
 #[cfg(feature = "conntrack")]
 #[no_mangle]
 pub extern "C" fn ubus_handle_set_connmark_allowlist_cb(
-    _ctx: *mut ubus::ubus_context,
+    ctx: *mut ubus::ubus_context,
     _obj: *mut ubus::ubus_object,
-    _req: *mut libc::c_void,
+    req: *mut libc::c_void,
     _method: *const libc::c_char,
-    _msg: *mut ubus::blob_attr,
+    msg: *mut ubus::blob_attr,
 ) -> libc::c_int {
-    // Placeholder implementation
-    // Full implementation would parse blob message and update allowlists
+    // Validate pointers
+    if ctx.is_null() || req.is_null() || msg.is_null() {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    // Access manager from global static
+    let manager_lock = match UBUS_MANAGER.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            // Mutex poisoned, critical error
+            return UBUS_STATUS_UNKNOWN_ERROR;
+        }
+    };
+
+    let manager_arc = match manager_lock.as_ref() {
+        Some(m) => m,
+        None => {
+            // No active manager
+            return UBUS_STATUS_UNKNOWN_ERROR;
+        }
+    };
+
+    // Create temporary UbusContext wrapper (doesn't take ownership)
+    // SAFETY: ctx pointer is valid per libubus contract
+    let ctx_wrapper = UbusContext { ctx };
+
+    // Delegate to safe Rust implementation
+    // We need to recreate a temporary UbusManager-like struct to call the method
+    // For now, inline the implementation
+
+    trace!("Handling set_connmark_allowlist request");
+
+    // Parse blob message parameters
+    let mut parsed_attrs: [*mut ubus::blob_attr; 3] = [ptr::null_mut(); 3];
+
+    let policy = [
+        BlobmsgPolicy {
+            name: b"mark\0".as_ptr() as *const libc::c_char,
+            blobmsg_type: BLOBMSG_TYPE_INT32,
+        },
+        BlobmsgPolicy {
+            name: b"mask\0".as_ptr() as *const libc::c_char,
+            blobmsg_type: BLOBMSG_TYPE_INT32,
+        },
+        BlobmsgPolicy {
+            name: b"patterns\0".as_ptr() as *const libc::c_char,
+            blobmsg_type: BLOBMSG_TYPE_ARRAY,
+        },
+    ];
+
+    let parse_result = unsafe {
+        ubus::blobmsg_parse(
+            policy.as_ptr(),
+            policy.len(),
+            parsed_attrs.as_mut_ptr(),
+            msg,
+        )
+    };
+
+    if parse_result != 0 {
+        error!("Failed to parse set_connmark_allowlist blob message");
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    // Extract and validate parameters
+    let mark_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_MARK];
+    let mask_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_MASK];
+    let patterns_attr = parsed_attrs[SET_CONNMARK_ALLOWLIST_PATTERNS];
+
+    if mark_attr.is_null() || mask_attr.is_null() || patterns_attr.is_null() {
+        error!("set_connmark_allowlist: missing required parameters");
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    let mark = unsafe { ubus::blobmsg_get_u32(mark_attr) };
+    let mask = unsafe { ubus::blobmsg_get_u32(mask_attr) };
+
+    if mark == 0 && mask == 0 {
+        error!("set_connmark_allowlist: invalid mark/mask (both zero)");
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    // Parse patterns array
+    let mut patterns = Vec::new();
+    let mut current_attr = unsafe { ubus::blobmsg_array_first(patterns_attr) };
+
+    while !current_attr.is_null() {
+        let pattern_cstr = unsafe { ubus::blobmsg_get_string(current_attr) };
+        if !pattern_cstr.is_null() {
+            if let Ok(pattern_str) = unsafe { CStr::from_ptr(pattern_cstr) }.to_str() {
+                if is_valid_dns_name_pattern(pattern_str) {
+                    patterns.push(pattern_str.to_string());
+                } else {
+                    warn!("Invalid DNS pattern: {}", pattern_str);
+                }
+            }
+        }
+        current_attr = unsafe { ubus::blobmsg_array_next(current_attr) };
+    }
+
+    if patterns.is_empty() {
+        warn!("set_connmark_allowlist: no valid patterns");
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    // Update allowlists
+    {
+        let mut allowlists = manager_arc.allowlists.lock().unwrap();
+        allowlists.insert((mark, mask), patterns.clone());
+    }
+
+    info!(
+        "Updated connmark allowlist: mark={:#x}, mask={:#x}, {} patterns",
+        mark,
+        mask,
+        patterns.len()
+    );
+
     UBUS_STATUS_OK
 }
 
