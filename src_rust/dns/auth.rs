@@ -57,7 +57,7 @@ use crate::dns::protocol::{
     C_IN, NOERROR, NXDOMAIN, REFUSED, HB3_AA, HB3_TC, HB3_QR, HB4_RA, HB4_AD, QUERY,
 };
 use crate::dns::parser::{extract_name, skip_questions, in_arpa_name_2_addr};
-use crate::dns::serializer::read_u16;
+use crate::dns::serializer::{read_u16, add_resource_record, RDataType};
 use crate::dns::cache::Cache;
 use crate::dns::cache_types::{F_IPV4, F_IPV6};
 use crate::dns::domain::hostname_isequal;
@@ -395,10 +395,10 @@ pub fn answer_auth(
     // Calculate offset of ansp from start of packet
     let ansp = packet.len() - ansp_slice.len();
 
-    let answer_buffer = BytesMut::with_capacity(limit - ansp);
+    let mut answer_buffer = BytesMut::with_capacity(limit - ansp);
     let mut anscount: u16 = 0;
     let mut authcount: u16 = 0;
-    let trunc = false;  // TODO: Implement truncation logic
+    let mut trunc = false;  // Make mutable for add_resource_record
     let mut auth = !local_query;
     let mut nxdomain = true;
     let mut out_of_zone = false;
@@ -556,14 +556,67 @@ pub fn answer_auth(
 
         // Handle A and AAAA queries
         if qtype == T_A || qtype == T_AAAA {
-            let _flag = if qtype == T_A { F_IPV4 } else { F_IPV6 };  // TODO: Use for cache lookup
+            let _flag = if qtype == T_A { F_IPV4 } else { F_IPV6 };
             
-            // TODO: Check interface names for matching records
-            // This requires proper interface_name structure with address lists
-            // Commented out until properly implemented
+            // Check config.dns.host_records for matching entries
+            for host_record in &config.dns.host_records {
+                // Check if any of the hostnames match
+                let name_matches = host_record.names.iter().any(|hn| {
+                    hostname_isequal(&name, hn)
+                });
+                
+                if name_matches {
+                    // Found matching hostname - check if address type matches query type
+                    for addr in &host_record.addresses {
+                        // Convert IpAddr to RDataType and check if type matches
+                        let rdata = match (qtype, addr) {
+                            (T_A, IpAddr::V4(ipv4)) => {
+                                Some(RDataType::A(ipv4.octets()))
+                            },
+                            (T_AAAA, IpAddr::V6(ipv6)) => {
+                                Some(RDataType::AAAA(ipv6.octets()))
+                            },
+                            _ => None,
+                        };
+                        
+                        if let Some(rdata_value) = rdata {
+                            // Record found - mark as not NXDOMAIN
+                            nxdomain = false;
+                            auth = true;
+                            
+                            // Use compression pointer to question name (offset 12 after header)
+                            let name_offset = 12i32;  // Points to question name
+                            
+                            // Add record to answer buffer with 300 second TTL (typical for hosts file)
+                            if let Ok(_bytes_written) = add_resource_record(
+                                &mut answer_buffer,
+                                limit,
+                                &mut trunc,
+                                name_offset,
+                                None,  // No explicit name, using compression pointer
+                                300,   // TTL: 300 seconds (5 minutes)
+                                qtype,
+                                C_IN,
+                                &rdata_value,
+                                None,  // No compression context needed for simple records
+                            ) {
+                                anscount += 1;
+                                trace!("Added {} record for {} -> {}", 
+                                      if qtype == T_A { "A" } else { "AAAA" }, 
+                                      name, 
+                                      addr);
+                            } else {
+                                // Record addition failed (likely buffer full)
+                                warn!("Failed to add record for {}", name);
+                            }
+                        }
+                    }
+                }
+            }
             
-            // Check cache for DHCP/hosts A/AAAA records
-            // Cache lookup would happen here in full implementation
+            // TODO: Check cache for DHCP-assigned A/AAAA records
+            // This would integrate DHCP lease names into authoritative DNS
+            // Cache lookup implementation pending
         }
 
         // Handle MX, SRV, TXT, NAPTR, CNAME queries from configuration
@@ -659,8 +712,22 @@ pub fn answer_auth(
     header[8..10].copy_from_slice(&authcount.to_be_bytes());
     header[10..12].copy_from_slice(&0u16.to_be_bytes()); // arcount
 
+    // Copy answer_buffer into header at ansp position
+    let answer_len = answer_buffer.len();
+    if ansp + answer_len > limit {
+        return Err(AuthError::BufferOverflow {
+            attempted: ansp + answer_len,
+            available: limit,
+        });
+    }
+    
+    // Copy the built answer records into the response buffer
+    if answer_len > 0 && ansp + answer_len <= header.len() {
+        header[ansp..ansp + answer_len].copy_from_slice(&answer_buffer[..]);
+    }
+    
     // Calculate final packet size
-    let response_size = ansp + answer_buffer.len();
+    let response_size = ansp + answer_len;
 
     Ok(response_size)
 }

@@ -783,12 +783,12 @@ impl DnsHeader {
     /// Get transaction ID
     #[must_use] 
     pub fn id(&self) -> u16 {
-        u16::from_be(self.id)
+        self.id
     }
 
     /// Set transaction ID
     pub fn set_id(&mut self, id: u16) {
-        self.id = id.to_be();
+        self.id = id;
     }
 
     /// Get QR (Query/Response) flag
@@ -942,45 +942,45 @@ impl DnsHeader {
     /// Get question count
     #[must_use] 
     pub fn qdcount(&self) -> u16 {
-        u16::from_be(self.qdcount)
+        self.qdcount
     }
 
     /// Set question count
     pub fn set_qdcount(&mut self, count: u16) {
-        self.qdcount = count.to_be();
+        self.qdcount = count;
     }
 
     /// Get answer count
     #[must_use] 
     pub fn ancount(&self) -> u16 {
-        u16::from_be(self.ancount)
+        self.ancount
     }
 
     /// Set answer count
     pub fn set_ancount(&mut self, count: u16) {
-        self.ancount = count.to_be();
+        self.ancount = count;
     }
 
     /// Get authority count
     #[must_use] 
     pub fn nscount(&self) -> u16 {
-        u16::from_be(self.nscount)
+        self.nscount
     }
 
     /// Set authority count
     pub fn set_nscount(&mut self, count: u16) {
-        self.nscount = count.to_be();
+        self.nscount = count;
     }
 
     /// Get additional count
     #[must_use] 
     pub fn arcount(&self) -> u16 {
-        u16::from_be(self.arcount)
+        self.arcount
     }
 
     /// Set additional count
     pub fn set_arcount(&mut self, count: u16) {
-        self.arcount = count.to_be();
+        self.arcount = count;
     }
 }
 

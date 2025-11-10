@@ -483,7 +483,8 @@ impl Cache {
         
         // Scan and free conflicting/expired entries
         let name = record.name().to_string();
-        let query_type = Self::extract_query_type(record.data());
+        // Use rr_type from record directly (handles negative cache entries correctly)
+        let query_type = record.rr_type;
         let key = DomainKey::new(name.clone(), query_type);
         self.scan_free_internal(&name, None, record.flags(), &key);
         
@@ -1063,28 +1064,43 @@ impl Cache {
             }
             visited.insert(current_name.clone());
             
-            // Look up current name
-            let key = DomainKey::new(current_name.clone(), qtype);
-            if let Some(bucket) = self.hash_table.get(&key) {
+            // First try to find a CNAME record for the current name
+            let cname_key = DomainKey::new(current_name.clone(), crate::dns::protocol::T_CNAME);
+            if let Some(bucket) = self.hash_table.get(&cname_key) {
+                let mut found_cname = false;
                 for &record_id in bucket {
                     if let Some(Some(record)) = self.records.get(record_id.get()) {
-                        // Check if type matches or if it's a CNAME
                         if let CacheRecordData::CName(target) = record.data() {
                             // Found a CNAME, follow it
                             results.push(record.clone());
                             current_name = target.clone();
+                            found_cname = true;
                             break;
-                        } else if self.record_matches_type(record, qtype) {
-                            // Found the target record
-                            results.push(record.clone());
+                        }
+                    }
+                }
+                if found_cname {
+                    continue; // Continue following the chain
+                }
+            }
+            
+            // No CNAME found, try to find the requested record type
+            let type_key = DomainKey::new(current_name.clone(), qtype);
+            if let Some(bucket) = self.hash_table.get(&type_key) {
+                for &record_id in bucket {
+                    if let Some(Some(record)) = self.records.get(record_id.get()) {
+                        if self.record_matches_type(record, qtype) {
+                            // Found the target record - insert at beginning for DNS-style response
+                            // (target record first, then CNAME chain)
+                            results.insert(0, record.clone());
                             return results;
                         }
                     }
                 }
-            } else {
-                // No more records found
-                break;
             }
+            
+            // No more records found
+            break;
         }
         
         results
@@ -1443,14 +1459,36 @@ impl Cache {
 /// assert!(!check_for_local_domain("example.com", &local_domains));
 /// ```
 pub fn check_for_local_domain(name: &str, local_domains: &[String]) -> bool {
+    // Check for reserved local domains (RFC 6761 and RFC 6762)
+    const RESERVED_LOCAL: &[&str] = &[
+        "localhost",
+        "localhost.localdomain",
+        "local",      // mDNS .local per RFC 6762
+        "invalid",    // RFC 6761 .invalid
+        "test",       // RFC 6761 .test
+        "example",    // RFC 6761 .example (and example.com, example.net, example.org)
+    ];
+    
+    let name_lower = name.to_lowercase();
+    
+    // Check reserved local domains
+    for &reserved in RESERVED_LOCAL {
+        if name_lower == reserved || name_lower.ends_with(&format!(".{}", reserved)) {
+            return true;
+        }
+    }
+    
+    // Check configured local domains
     for domain in local_domains {
-        if name.ends_with(domain) {
+        if name_lower.ends_with(&domain.to_lowercase()) {
             // Ensure it's a proper suffix (ends with .domain or equals domain)
-            if name.len() == domain.len() || name.as_bytes()[name.len() - domain.len() - 1] == b'.' {
+            if name_lower.len() == domain.len() 
+                || name_lower.as_bytes()[name_lower.len() - domain.len() - 1] == b'.' {
                 return true;
             }
         }
     }
+    
     false
 }
 

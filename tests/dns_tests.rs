@@ -1075,7 +1075,7 @@ mod dns_cache_tests {
             flags: CacheFlags::empty(),
             uid: UID_NONE,
             inserted_at: Some(Instant::now()),
-            ttd: Instant::now() + Duration::from_secs(300),
+            ttd: Instant::now() + Duration::from_secs(1), // Match TTL
         };
         
         cache.insert(record);
@@ -2830,7 +2830,7 @@ mod edge_case_tests {
             flags: CacheFlags::empty(),
             uid: UID_NONE,
             inserted_at: Some(Instant::now()),
-            ttd: Instant::now() + Duration::from_secs(300),
+            ttd: Instant::now(), // Zero-TTL records expire immediately
         };
         
         cache.insert(record);

@@ -1410,8 +1410,48 @@ impl ConfigBuilder {
         // Process NS records - stored for reference but not directly used in config
         // (NS records are typically generated from auth_server in the actual DNS responses)
         
-        // Note: hosts_files and addresses would be added to appropriate config fields
-        // For now, stub implementation for test compilation
+        // Process hosts files - parse and add to host_records
+        for hosts_file in &self.hosts_files {
+            if let Ok(contents) = std::fs::read_to_string(hosts_file) {
+                for line in contents.lines() {
+                    // Skip comments and empty lines
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    
+                    // Parse line: IP address followed by one or more hostnames
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() < 2 {
+                        continue;
+                    }
+                    
+                    // Parse IP address
+                    if let Ok(addr) = parts[0].parse::<IpAddr>() {
+                        // Collect all hostnames
+                        let names: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+                        
+                        // Add to host_records
+                        use dnsmasq::config::types::HostRecord;
+                        config.dns.host_records.push(HostRecord {
+                            names,
+                            addresses: vec![addr],
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Process address mappings (--address option)
+        for (domain, address) in &self.addresses {
+            if let Ok(addr) = address.parse::<IpAddr>() {
+                use dnsmasq::config::types::HostRecord;
+                config.dns.host_records.push(HostRecord {
+                    names: vec![domain.clone()],
+                    addresses: vec![addr],
+                });
+            }
+        }
         
         Ok(config)
     }
