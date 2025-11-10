@@ -498,7 +498,6 @@ pub fn default_process_config() -> ProcessConfig {
         pid_file,                             // RUNFILE from config.h lines 1642-1644
         script_user: None,
         daemonize: true,
-        change_dir: None,
     }
 }
 
@@ -509,15 +508,15 @@ pub fn default_process_config() -> ProcessConfig {
 ///
 /// # Default Behavior
 ///
-/// - Logging to syslog (facility: -1 indicates system default, LOG_DAEMON)
+/// - Logging to syslog (facility: "daemon" for LOG_DAEMON)
 /// - No log file (syslog only)
-/// - No async logging (synchronous syslog calls)
+/// - Async log queue size of 5
 /// - Query logging disabled
-/// - Standard verbosity (not debug mode)
+/// - DHCP logging disabled
 ///
 /// # Syslog Configuration
 ///
-/// The log_fac value of -1 matches C daemon->log_fac initialization from
+/// The log_facility value of Some("daemon") matches C daemon->log_fac initialization from
 /// option.c line 6645, which indicates use of the default syslog facility
 /// (LOG_DAEMON). This can be overridden with --log-facility option.
 ///
@@ -527,18 +526,18 @@ pub fn default_process_config() -> ProcessConfig {
 /// use dnsmasq::config::defaults::default_logging_config;
 ///
 /// let logging = default_logging_config();
-/// assert_eq!(logging.log_fac, -1);
+/// assert_eq!(logging.log_facility, Some("daemon".to_string()));
 /// assert!(logging.log_file.is_none());
 /// assert!(!logging.log_queries);
 /// ```
 #[must_use]
 pub fn default_logging_config() -> LoggingConfig {
     LoggingConfig {
-        log_fac: -1, // Default syslog facility (LOG_DAEMON), from option.c line 6645
+        log_facility: Some("daemon".to_string()), // Default syslog facility (LOG_DAEMON), from option.c line 6645
         log_file: None,
-        log_async: false,
+        log_async_max: Some(5),
         log_queries: false,
-        log_debug: false,
+        log_dhcp: false,
     }
 }
 
@@ -550,8 +549,8 @@ pub fn default_logging_config() -> LoggingConfig {
 ///
 /// # Default Behavior
 ///
-/// - D-Bus: Disabled (enable with --enable-dbus)
-/// - ubus: Disabled (OpenWrt-specific, enable with --enable-ubus)
+/// - D-Bus: No service name configured (enable with --enable-dbus)
+/// - ubus: No service name configured (OpenWrt-specific, enable with --enable-ubus)
 /// - conntrack: Disabled (enable with --conntrack)
 /// - ipset: Empty (no ipset rules configured)
 /// - nftset: Empty (no nftables rules configured)
@@ -568,17 +567,17 @@ pub fn default_logging_config() -> LoggingConfig {
 /// use dnsmasq::config::defaults::default_integration_config;
 ///
 /// let integration = default_integration_config();
-/// assert!(!integration.dbus_enabled);
-/// assert!(!integration.ubus_enabled);
+/// #[cfg(feature = "dbus")]
+/// assert!(integration.dbus_name.is_none());
 /// assert!(integration.ipsets.is_empty());
 /// ```
 #[must_use]
 pub fn default_integration_config() -> IntegrationConfig {
     IntegrationConfig {
-        dbus_enabled: false,
-        dbus_service_name: None,
-        ubus_enabled: false,
-        ubus_socket: None,
+        #[cfg(feature = "dbus")]
+        dbus_name: None,
+        #[cfg(feature = "ubus")]
+        ubus_name: None,
         conntrack_enabled: false,
         ipsets: Vec::new(),
         nftsets: Vec::new(),
