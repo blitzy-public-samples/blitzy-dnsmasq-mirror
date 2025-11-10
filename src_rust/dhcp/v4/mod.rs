@@ -555,7 +555,7 @@ impl From<io::Error> for DhcpError {
 impl From<OptionError> for DhcpError {
     fn from(err: OptionError) -> Self {
         match err {
-            OptionError::InvalidOption(code) => DhcpError::InvalidOption(
+            OptionError::InvalidOption { code, reason: _ } => DhcpError::InvalidOption(
                 OptionCode::from_u8(code).unwrap_or(OptionCode::OPTION_PAD)
             ),
             _ => DhcpError::ConfigError(format!("Option error: {:?}", err)),
