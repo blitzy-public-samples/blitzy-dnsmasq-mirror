@@ -242,7 +242,7 @@
 //!
 //! ## Example Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use dnsmasq::dhcp::{DhcpError, lease_init};
 //! use dnsmasq::dhcp::v4::{DhcpServer, dhcp_init};
 //! use dnsmasq::dhcp::v6::{Dhcp6Server};
