@@ -562,16 +562,24 @@ pub async fn icmp_ping(
 
             // Cross-check with ARP cache if available
             if let Some(arp) = arp_cache {
-                match arp.find_mac(Some(&std::net::IpAddr::V4(addr)), false, &crate::network::platform::create_platform()?).await {
-                    Ok(Some((mac, mac_len))) => {
-                        let mac_str = format_mac(&mac, mac_len);
-                        info!("ICMP ping success for {} confirmed by ARP cache (MAC: {})", addr, mac_str);
-                    }
-                    Ok(None) => {
-                        trace!("ICMP ping success for {} but not in ARP cache (may be transient)", addr);
+                // Create platform object for ARP cache query
+                match crate::network::platform::create_platform() {
+                    Ok(platform) => {
+                        match arp.find_mac(Some(&std::net::IpAddr::V4(addr)), false, platform.as_ref()).await {
+                            Ok(Some((mac, mac_len))) => {
+                                let mac_str = format_mac(&mac, mac_len);
+                                info!("ICMP ping success for {} confirmed by ARP cache (MAC: {})", addr, mac_str);
+                            }
+                            Ok(None) => {
+                                trace!("ICMP ping success for {} but not in ARP cache (may be transient)", addr);
+                            }
+                            Err(e) => {
+                                warn!("Failed to query ARP cache for {}: {}", addr, e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        warn!("Failed to query ARP cache for {}: {}", addr, e);
+                        warn!("Failed to create platform for ARP cache query: {}", e);
                     }
                 }
             }
@@ -669,16 +677,24 @@ async fn receive_icmp_reply(
     // Buffer for receiving ICMP packets
     // IP header (20 bytes) + ICMP header (8 bytes) = 28 bytes minimum
     let mut buf = [0u8; 64];
+    let mut recv_buf: [std::mem::MaybeUninit<u8>; 64] = unsafe {
+        std::mem::MaybeUninit::uninit().assume_init()
+    };
 
     loop {
         // Wait for socket to be readable
         let mut guard = async_socket.readable().await?;
 
         match guard.try_io(|inner| {
-            socket.recv_from(&mut buf)
+            socket.recv_from(&mut recv_buf)
         }) {
             Ok(result) => {
                 let (size, from_addr) = result?;
+
+                // Copy received data to initialized buffer
+                for i in 0..size.min(buf.len()) {
+                    buf[i] = unsafe { recv_buf[i].assume_init() };
+                }
 
                 // Extract source IP from socket address
                 if let std::net::SocketAddr::V4(from) = from_addr.as_socket().ok_or_else(|| {
