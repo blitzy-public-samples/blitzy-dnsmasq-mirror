@@ -3615,7 +3615,7 @@ mod behavioral_parity {
             "offer_reference.bin" => {
                 DhcpMessageBuilder::new()
                     .message_type(MessageType::DHCPOFFER)
-                    .transaction_id(0xPARITY01)
+                    .transaction_id(0xCAFE0001) // Reference transaction ID for comparison tests
                     .client_mac(&[0x52, 0x54, 0x00, 0x12, 0x34, 0x56])
                     .your_ip(Ipv4Addr::new(192, 168, 1, 100))
                     .server_ip(Ipv4Addr::new(192, 168, 1, 1))
