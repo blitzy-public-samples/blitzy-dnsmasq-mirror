@@ -180,6 +180,15 @@ fn detect_library(
     description: &str,
     min_version: Option<&str>,
 ) {
+    // Check if the corresponding Cargo feature is actually enabled
+    let feature_enabled = env::var(format!("CARGO_FEATURE_{}", feature_name.to_uppercase().replace("-", "_")))
+        .is_ok();
+    
+    if !feature_enabled {
+        // Feature not enabled in Cargo.toml, skip detection
+        return;
+    }
+    
     let probe_result = if let Some(version) = min_version {
         pkg_config::Config::new()
             .atleast_version(version)
@@ -190,9 +199,6 @@ fn detect_library(
     
     match probe_result {
         Ok(library) => {
-            // Enable Cargo feature
-            println!("cargo:rustc-cfg=feature=\"{}\"", feature_name);
-            
             // Link the library (pkg-config handles this automatically via rustc-link-lib)
             // The library crate already emits the necessary link directives
             
@@ -203,13 +209,10 @@ fn detect_library(
             );
         }
         Err(e) => {
-            println!(
-                "cargo:warning=✗ {} not found: {}. Feature '{}' disabled.",
-                description, e, feature_name
-            );
-            println!(
-                "cargo:warning=  Install {} development package to enable this feature.",
-                pkg_name
+            // Feature enabled but library not found - this is an error
+            panic!(
+                "Feature '{}' is enabled but {} was not found: {}. Install {} development package or disable the feature.",
+                feature_name, description, e, pkg_name
             );
         }
     }
@@ -226,13 +229,20 @@ fn detect_library(
 /// nettle_libs =   `echo $(COPTS) | $(top)/bld/pkg-wrapper HAVE_DNSSEC $(PKG_CONFIG) --libs 'nettle hogweed' ...`
 /// ```
 fn detect_dnssec_libraries() {
+    // Check if DNSSEC feature is enabled
+    let dnssec_enabled = env::var("CARGO_FEATURE_DNSSEC").is_ok();
+    
+    if !dnssec_enabled {
+        // DNSSEC feature not enabled, skip detection
+        return;
+    }
+    
     let nettle_result = pkg_config::probe_library("nettle");
     let hogweed_result = pkg_config::probe_library("hogweed");
     
     match (nettle_result, hogweed_result) {
         (Ok(nettle), Ok(hogweed)) => {
-            // Both libraries found - enable DNSSEC
-            println!("cargo:rustc-cfg=feature=\"dnssec\"");
+            // Both libraries found - DNSSEC can be used
             println!(
                 "cargo:warning=✓ DNSSEC support enabled (nettle {}, hogweed {})",
                 nettle.version, hogweed.version
@@ -247,12 +257,10 @@ fn detect_dnssec_libraries() {
             }
         }
         (Err(e1), _) => {
-            println!("cargo:warning=✗ DNSSEC disabled: nettle library not found ({})", e1);
-            println!("cargo:warning=  Install libnettle-dev or nettle-devel to enable DNSSEC");
+            panic!("DNSSEC feature enabled but nettle library not found: {}. Install libnettle-dev or nettle-devel, or disable the 'dnssec' feature.", e1);
         }
         (_, Err(e2)) => {
-            println!("cargo:warning=✗ DNSSEC disabled: hogweed library not found ({})", e2);
-            println!("cargo:warning=  Install libhogweed-dev or nettle-devel to enable DNSSEC");
+            panic!("DNSSEC feature enabled but hogweed library not found: {}. Install libhogweed-dev or nettle-devel, or disable the 'dnssec' feature.", e2);
         }
     }
 }
@@ -267,6 +275,16 @@ fn detect_dnssec_libraries() {
 /// Note: ubus uses --copy mode in pkg-wrapper (direct library linking without pkg-config),
 /// so we manually link the libraries if they can be found.
 fn detect_ubus_libraries() {
+    // Check if ubus feature is enabled
+    let ubus_enabled = env::var("CARGO_FEATURE_UBUS").is_ok();
+    
+    if !ubus_enabled {
+        // ubus feature not enabled, skip detection
+        println!("cargo:warning=✗ OpenWrt ubus not found (requires libubus and libubox)");
+        println!("cargo:warning=  This is expected on non-OpenWrt systems");
+        return;
+    }
+    
     // ubus doesn't always provide pkg-config files, so we try pkg-config first,
     // then fall back to direct library detection
     
@@ -276,13 +294,11 @@ fn detect_ubus_libraries() {
         || library_exists("ubox");
     
     if ubus_available && ubox_available {
-        println!("cargo:rustc-cfg=feature=\"ubus\"");
         println!("cargo:rustc-link-lib=dylib=ubus");
         println!("cargo:rustc-link-lib=dylib=ubox");
         println!("cargo:warning=✓ OpenWrt ubus integration enabled");
     } else {
-        println!("cargo:warning=✗ OpenWrt ubus not found (requires libubus and libubox)");
-        println!("cargo:warning=  This is expected on non-OpenWrt systems");
+        panic!("ubus feature enabled but libraries not found. Install libubus and libubox, or disable the 'ubus' feature.");
     }
 }
 

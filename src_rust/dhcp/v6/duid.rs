@@ -496,6 +496,87 @@ impl Duid {
         Ok(Self { duid_type, data })
     }
 
+    /// Create a DUID-LL (Link-Layer) with hardware type and link-layer address
+    ///
+    /// # Arguments
+    ///
+    /// * `hw_type` - Hardware type from IANA ARP Hardware Types (e.g., 1 for Ethernet)
+    /// * `ll_addr` - Link-layer address (e.g., MAC address)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Duid)` if construction succeeds
+    /// - `Err(DuidError::InvalidLength)` if resulting DUID is invalid
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dnsmasq::dhcp::v6::duid::Duid;
+    ///
+    /// // Ethernet MAC 00:11:22:33:44:55
+    /// let duid = Duid::new_ll(1, &[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]).unwrap();
+    /// ```
+    pub fn new_ll(hw_type: u16, ll_addr: &[u8]) -> Result<Self, DuidError> {
+        let mut data = Vec::with_capacity(2 + ll_addr.len());
+        data.extend_from_slice(&hw_type.to_be_bytes());
+        data.extend_from_slice(ll_addr);
+        Self::new(DuidType::Ll, data)
+    }
+
+    /// Create a DUID-LLT (Link-Layer + Time) with hardware type, time, and link-layer address
+    ///
+    /// # Arguments
+    ///
+    /// * `hw_type` - Hardware type from IANA ARP Hardware Types
+    /// * `time` - Time value (seconds since 2000-01-01 00:00:00 UTC)
+    /// * `ll_addr` - Link-layer address
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Duid)` if construction succeeds
+    /// - `Err(DuidError::InvalidLength)` if resulting DUID is invalid
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dnsmasq::dhcp::v6::duid::Duid;
+    ///
+    /// let duid = Duid::new_llt(1, 12345, &[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]).unwrap();
+    /// ```
+    pub fn new_llt(hw_type: u16, time: u32, ll_addr: &[u8]) -> Result<Self, DuidError> {
+        let mut data = Vec::with_capacity(6 + ll_addr.len());
+        data.extend_from_slice(&hw_type.to_be_bytes());
+        data.extend_from_slice(&time.to_be_bytes());
+        data.extend_from_slice(ll_addr);
+        Self::new(DuidType::Llt, data)
+    }
+
+    /// Create a DUID-EN (Enterprise Number) with enterprise number and identifier
+    ///
+    /// # Arguments
+    ///
+    /// * `enterprise_num` - Enterprise number from IANA Private Enterprise Numbers
+    /// * `identifier` - Unique identifier assigned by the enterprise
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Duid)` if construction succeeds
+    /// - `Err(DuidError::InvalidLength)` if resulting DUID is invalid
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dnsmasq::dhcp::v6::duid::Duid;
+    ///
+    /// let duid = Duid::new_en(9, b"unique-identifier").unwrap();
+    /// ```
+    pub fn new_en(enterprise_num: u32, identifier: &[u8]) -> Result<Self, DuidError> {
+        let mut data = Vec::with_capacity(4 + identifier.len());
+        data.extend_from_slice(&enterprise_num.to_be_bytes());
+        data.extend_from_slice(identifier);
+        Self::new(DuidType::En, data)
+    }
+
     /// Get the DUID type
     ///
     /// # Returns

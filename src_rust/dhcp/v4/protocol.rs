@@ -199,14 +199,20 @@ pub enum OptionCode {
     OPTION_NETMASK = 1,
     /// Router/default gateway (3): List of router IPv4 addresses.
     OPTION_ROUTER = 3,
+    /// Time server (4): List of RFC 868 time server IPv4 addresses.
+    OPTION_TIME_SERVER = 4,
     /// Domain name server (6): List of DNS server IPv4 addresses.
     OPTION_DNSSERVER = 6,
     /// Hostname (12): Client's hostname (ASCII string).
     OPTION_HOSTNAME = 12,
     /// Domain name (15): DNS domain name for client (ASCII string).
     OPTION_DOMAINNAME = 15,
+    /// Interface MTU (26): 2-byte interface MTU size.
+    OPTION_MTU = 26,
     /// Broadcast address (28): 4-byte IPv4 broadcast address for subnet.
     OPTION_BROADCAST = 28,
+    /// Network Time Protocol servers (42): List of NTP server IPv4 addresses.
+    OPTION_NTP_SERVER = 42,
     /// Vendor-specific information (43): Vendor-specific data.
     OPTION_VENDOR_CLASS_OPT = 43,
     /// Requested IP address (50): 4-byte IPv4 address client requests.
@@ -271,10 +277,13 @@ impl OptionCode {
             0 => Some(OptionCode::OPTION_PAD),
             1 => Some(OptionCode::OPTION_NETMASK),
             3 => Some(OptionCode::OPTION_ROUTER),
+            4 => Some(OptionCode::OPTION_TIME_SERVER),
             6 => Some(OptionCode::OPTION_DNSSERVER),
             12 => Some(OptionCode::OPTION_HOSTNAME),
             15 => Some(OptionCode::OPTION_DOMAINNAME),
+            26 => Some(OptionCode::OPTION_MTU),
             28 => Some(OptionCode::OPTION_BROADCAST),
+            42 => Some(OptionCode::OPTION_NTP_SERVER),
             43 => Some(OptionCode::OPTION_VENDOR_CLASS_OPT),
             50 => Some(OptionCode::OPTION_REQUESTED_IP),
             51 => Some(OptionCode::OPTION_LEASE_TIME),

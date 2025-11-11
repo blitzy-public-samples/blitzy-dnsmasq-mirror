@@ -486,11 +486,8 @@ impl LeaseManager {
         let expiry_str = fields[0];
         let expires = self.parse_expiry(expiry_str)?;
 
-        // Check if expired
-        if SystemTime::now() > expires {
-            trace!("Skipping expired lease at line {}", line_num);
-            return Ok(None);
-        }
+        // Note: We load expired leases into memory and let lease_prune() clean them up later.
+        // This matches the C implementation behavior and allows proper testing of the pruning mechanism.
 
         // Detect lease type by field count and IP format
         if fields.len() >= 4 && fields[2].contains(':') && fields[2].matches(':').count() >= 5 {
@@ -614,7 +611,9 @@ impl LeaseManager {
                 let remaining = expires_instant - now;
                 Ok(SystemTime::now() + remaining)
             } else {
-                Ok(SystemTime::now())
+                // Expired: calculate how long ago it expired
+                let expired_ago = now - expires_instant;
+                Ok(SystemTime::now() - expired_ago)
             }
         } else {
             // Absolute timestamp
@@ -684,20 +683,20 @@ pub async fn lease_find_by_client(
 ) -> Option<Arc<RwLock<DhcpLease>>> {
     let leases = manager.leases.read().await;
 
-    // First, search by client ID
-    if let Some(lease) = leases.get(client_id) {
-        return Some(Arc::clone(lease));
-    }
-
-    // Fallback: search by hardware address
-    if let Some(hw) = hwaddr {
-        for lease in leases.values() {
-            let lease_guard = lease.read().await;
-            if lease_guard.hwaddr() == hw {
-                drop(lease_guard);
-                return Some(Arc::clone(lease));
-            }
+    // Determine lookup key: use hwaddr if client_id is empty
+    let lookup_key = if client_id.is_empty() {
+        if let Some(hw) = hwaddr {
+            hw
+        } else {
+            return None;
         }
+    } else {
+        client_id
+    };
+
+    // Look up by the determined key
+    if let Some(lease) = leases.get(lookup_key) {
+        return Some(Arc::clone(lease));
     }
 
     None
@@ -765,10 +764,16 @@ pub async fn lease4_allocate(
     }
 
     let expires = SystemTime::now() + Duration::from_secs(u64::from(lease_time));
-    let lease = DhcpLease::new(addr, hwaddr, hwaddr_type, client_id.clone(), hostname, expires);
+    let lease = DhcpLease::new(addr, hwaddr.clone(), hwaddr_type, client_id.clone(), hostname, expires);
     let lease_arc = Arc::new(RwLock::new(lease));
 
-    leases.insert(client_id, Arc::clone(&lease_arc));
+    // Use hwaddr as key if client_id is empty to ensure unique keys per client
+    let lookup_key = if client_id.is_empty() {
+        hwaddr
+    } else {
+        client_id
+    };
+    leases.insert(lookup_key, Arc::clone(&lease_arc));
     *manager.file_dirty.write().await = true;
 
     let hwaddr_hex = lease_arc.read().await.hwaddr

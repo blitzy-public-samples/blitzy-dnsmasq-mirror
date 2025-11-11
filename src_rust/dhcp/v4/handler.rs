@@ -353,6 +353,12 @@ impl DhcpPacket {
         }
     }
 
+    /// Get transaction ID
+    #[must_use]
+    pub fn transaction_id(&self) -> u32 {
+        self.xid
+    }
+
     /// Get message type from options
     #[must_use] 
     pub fn message_type(&self) -> Option<u8> {
