@@ -106,7 +106,7 @@ mostly_clean :
 
 clean : mostly_clean
 	rm -f $(BUILDDIR)/dnsmasq_baseline
-	rm -f core */core
+	rm -f core $(SRC)/core $(PO)/core $(MAN)/core contrib/*/core
 	rm -f *~ contrib/*/*~ */*~
 
 install : all install-common
