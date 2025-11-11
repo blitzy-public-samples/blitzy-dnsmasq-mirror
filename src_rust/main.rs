@@ -185,7 +185,6 @@
 //! kill -USR1 $(cat /var/run/dnsmasq.pid)
 //! ```
 
-use std::env;
 use std::io;
 use std::process;
 use std::sync::Arc;
@@ -201,9 +200,7 @@ use dnsmasq::core::daemon::Daemon;
 use dnsmasq::core::event_loop::run_event_loop;
 use dnsmasq::core::signals::SignalHandler;
 use dnsmasq::config::cli::parse_cli_args;
-use dnsmasq::config::defaults::default_config;
-use dnsmasq::config::parser::parse_config_file;
-use dnsmasq::config::types::Config;
+use dnsmasq::config::types::{Config, DaemonOptions};
 use dnsmasq::config::validator::validate_config;
 use dnsmasq::logging::logger::init_logging;
 use dnsmasq::process::helper::create_helper;
@@ -213,9 +210,9 @@ use dnsmasq::process::privileges::drop_privileges;
 /// Exit codes matching C implementation (dnsmasq.h lines 83-89)
 const EC_GOOD: i32 = 0; // Success
 const EC_BADCONF: i32 = 1; // Configuration error
-const EC_BADNET: i32 = 2; // Network error (socket creation, bind failed)
-const EC_FILE: i32 = 3; // File I/O error
-const EC_NOMEM: i32 = 4; // Memory allocation error (impossible in Rust, but kept for compatibility)
+const _EC_BADNET: i32 = 2; // Network error (socket creation, bind failed)
+const _EC_FILE: i32 = 3; // File I/O error
+const _EC_NOMEM: i32 = 4; // Memory allocation error (impossible in Rust, but kept for compatibility)
 const EC_INIT: i32 = 5; // Initialization error
 const EC_MISC: i32 = 6; // Other errors
 
@@ -263,23 +260,9 @@ async fn main() {
         }
     };
 
-    // Parse configuration file(s) if specified
-    // The CLI parser already handles --conf-file and --conf-dir arguments
-    let mut config = if let Some(ref conf_file) = config_from_cli.conf_file {
-        match parse_config_file(conf_file) {
-            Ok(file_config) => {
-                // Merge CLI args with file config (CLI takes precedence)
-                merge_configs(file_config, config_from_cli)
-            }
-            Err(e) => {
-                eprintln!("Error parsing configuration file '{}': {}", conf_file, e);
-                process::exit(EC_BADCONF);
-            }
-        }
-    } else {
-        // No config file specified, use defaults merged with CLI args
-        merge_configs(default_config(), config_from_cli)
-    };
+    // The parse_cli_args() function already handles --conf-file and --conf-dir arguments
+    // internally and merges them with CLI arguments, so we use the config directly
+    let config = config_from_cli;
 
     // Validate merged configuration for consistency
     if let Err(e) = validate_config(&config) {
@@ -289,7 +272,32 @@ async fn main() {
 
     // PHASE 2: LOGGING INITIALIZATION
     // Initialize logging before any other operations so we can log errors
-    let logger = match init_logging(&config) {
+    use dnsmasq::logging::logger::{LogDestination, LogLevel};
+    
+    let log_destination = if let Some(ref log_file) = config.logging.log_file {
+        LogDestination::File(log_file.clone())
+    } else {
+        LogDestination::Syslog
+    };
+    
+    let log_level = if config.options.contains(DaemonOptions::OPT_DEBUG) {
+        LogLevel::Debug
+    } else {
+        LogLevel::Info
+    };
+    
+    let max_logs = config.logging.log_async_max.unwrap_or(5);
+    let facility = config.logging.log_facility.as_ref()
+        .and_then(|f| f.parse::<i32>().ok())
+        .unwrap_or(libc::LOG_DAEMON);
+    
+    let logger = match init_logging(
+        log_destination,
+        config.logging.log_file.clone(),
+        log_level,
+        max_logs,
+        facility,
+    ).await {
         Ok(log) => log,
         Err(e) => {
             eprintln!("Failed to initialize logging: {}", e);
@@ -311,8 +319,22 @@ async fn main() {
     // Fork helper process BEFORE dropping privileges so it can retain elevated rights
     // for executing lease-change scripts
     #[cfg(feature = "script")]
-    let helper_handle = if config.lease_change_command.is_some() || config.lua_script.is_some() {
-        match create_helper(&config) {
+    let _helper_handle = if let Some(ref script_path) = config.dhcp.dhcp_script {
+        // Convert script_user to Uid if specified
+        let script_uid = if let Some(ref _username) = config.process.script_user {
+            // TODO: Lookup username to get Uid using User::from_name
+            // For now, pass None to use default privileges
+            None
+        } else {
+            None
+        };
+
+        match create_helper(
+            script_path.to_string_lossy().to_string(),
+            script_uid,
+            None, // script_gid - TODO: implement group lookup
+            None, // lua_script - TODO: add to config if lua feature is enabled
+        ).await {
             Ok(helper) => {
                 debug!("Helper process created for script execution");
                 Some(helper)
@@ -330,9 +352,8 @@ async fn main() {
     // Build the main Daemon instance using the builder pattern
     // This creates all sockets that require elevated privileges BEFORE dropping them
     let daemon = match Daemon::builder()
-        .with_config(Arc::new(config.clone()))
+        .with_config(config.clone())
         .build()
-        .await
     {
         Ok(d) => {
             info!("Daemon initialization successful");
@@ -350,25 +371,21 @@ async fn main() {
     // PHASE 5: PRIVILEGE DROPPING
     // Drop privileges to configured user/group (default "nobody")
     // This must happen AFTER socket creation but BEFORE entering event loop
-    if !config.no_daemon && config.user.is_some() {
-        if let Err(e) = drop_privileges(
-            config.user.as_ref().unwrap(),
-            config.group.as_ref(),
-        )
-        .await
-        {
+    if config.process.daemonize && config.process.username.is_some() {
+        let username = config.process.username.as_ref().unwrap();
+        let groupname = config.process.groupname.as_ref().map(|s| s.as_str()).unwrap_or("");
+        let debug_mode = config.options.contains(DaemonOptions::OPT_DEBUG);
+        
+        if let Err(e) = drop_privileges(username, groupname, debug_mode) {
             error!("Failed to drop privileges: {}", e);
             process::exit(EC_INIT);
         }
-        info!(
-            "Privileges dropped to user '{}'",
-            config.user.as_ref().unwrap()
-        );
+        info!("Privileges dropped to user '{}'", username);
     }
 
     // PHASE 6: DAEMONIZATION
     // Fork to background unless --no-daemon or --debug specified
-    if !config.no_daemon && !config.debug_mode {
+    if config.process.daemonize && !config.options.contains(DaemonOptions::OPT_DEBUG) {
         match daemonize() {
             Ok(()) => {
                 info!("Daemonized to background, PID {}", getpid());
@@ -382,18 +399,19 @@ async fn main() {
 
     // PHASE 7: PID FILE CREATION
     // Write PID file for process management
-    if let Some(ref pid_file) = config.pid_file {
-        if let Err(e) = write_pidfile(pid_file).await {
-            warn!("Failed to write PID file '{}': {}", pid_file, e);
+    if let Some(ref pid_file) = config.process.pid_file {
+        let pid_file_str = pid_file.to_string_lossy();
+        if let Err(e) = write_pidfile(&pid_file_str).await {
+            warn!("Failed to write PID file '{}': {}", pid_file_str, e);
             // Non-fatal, continue execution
         } else {
-            info!("PID file written to '{}'", pid_file);
+            info!("PID file written to '{}'", pid_file_str);
         }
     }
 
     // PHASE 8: SIGNAL HANDLER SETUP
     // Install async signal handlers for daemon control
-    let signal_handler = match SignalHandler::new() {
+    let _signal_handler = match SignalHandler::new() {
         Ok(sh) => sh,
         Err(e) => {
             error!("Failed to setup signal handlers: {}", e);
@@ -411,7 +429,8 @@ async fn main() {
     // Enter the main async event loop - this never returns under normal operation
     info!("Entering main event loop");
 
-    if let Err(e) = run_event_loop(daemon_arc.clone(), signal_handler).await {
+    let config_arc = Arc::new(config.clone());
+    if let Err(e) = run_event_loop(daemon_arc.clone(), config_arc, logger.clone()).await {
         error!("Event loop terminated with error: {}", e);
         process::exit(EC_MISC);
     }
@@ -420,10 +439,8 @@ async fn main() {
     info!("Shutting down gracefully");
 
     // Remove PID file
-    if let Some(ref pid_file) = config.pid_file {
-        if let Err(e) = remove_pidfile(pid_file).await {
-            warn!("Failed to remove PID file: {}", e);
-        }
+    if let Some(ref pid_file) = config.process.pid_file {
+        remove_pidfile(pid_file).await;
     }
 
     process::exit(EC_GOOD);
@@ -442,47 +459,52 @@ async fn main() {
 /// # Returns
 ///
 /// Merged configuration with CLI args taking precedence
+#[allow(dead_code)]
 fn merge_configs(mut file_config: Config, cli_config: Config) -> Config {
     // CLI args override file config for all defined fields
     // This implements the same precedence as C's read_opts() function
 
-    if cli_config.port.is_some() {
-        file_config.port = cli_config.port;
+    // Merge DNS config
+    if cli_config.dns.port != file_config.dns.port && cli_config.dns.port != 53 {
+        file_config.dns.port = cli_config.dns.port;
     }
 
-    if cli_config.no_daemon {
-        file_config.no_daemon = true;
+    // Merge daemon options
+    file_config.options |= cli_config.options;
+
+    // Merge process config
+    if !cli_config.process.daemonize {
+        file_config.process.daemonize = false;
     }
 
-    if cli_config.debug_mode {
-        file_config.debug_mode = true;
+    if cli_config.process.username.is_some() {
+        file_config.process.username = cli_config.process.username;
     }
 
-    if cli_config.log_queries {
-        file_config.log_queries = true;
+    if cli_config.process.groupname.is_some() {
+        file_config.process.groupname = cli_config.process.groupname;
     }
 
-    if cli_config.user.is_some() {
-        file_config.user = cli_config.user;
+    if cli_config.process.pid_file.is_some() {
+        file_config.process.pid_file = cli_config.process.pid_file;
     }
 
-    if cli_config.group.is_some() {
-        file_config.group = cli_config.group;
-    }
-
-    if cli_config.pid_file.is_some() {
-        file_config.pid_file = cli_config.pid_file;
+    // Merge logging config
+    if cli_config.logging.log_queries {
+        file_config.logging.log_queries = true;
     }
 
     // Merge upstream servers (CLI servers are appended)
     file_config
+        .dns
         .upstream_servers
-        .extend(cli_config.upstream_servers);
+        .extend(cli_config.dns.upstream_servers);
 
     // Merge listen addresses (CLI addresses are appended)
     file_config
+        .network
         .listen_addresses
-        .extend(cli_config.listen_addresses);
+        .extend(cli_config.network.listen_addresses);
 
     // Additional field merging as needed...
     // All Option<T> fields: CLI Some(_) replaces file config
@@ -623,95 +645,91 @@ async fn write_pidfile(path: &str) -> io::Result<()> {
 /// * `config` - Daemon configuration
 fn log_startup_info(config: &Config) {
     // Log DNS configuration
-    if let Some(port) = config.port {
-        if port == 0 {
-            info!("DNS disabled (port 0)");
-        } else {
-            info!("DNS service on port {}", port);
+    if config.dns.port == 0 {
+        info!("DNS disabled (port 0)");
+    } else {
+        info!("DNS service on port {}", config.dns.port);
 
-            if config.cache_size > 0 {
-                info!("DNS cache size: {} entries", config.cache_size);
-                if config.cache_size > 10000 {
-                    warn!(
-                        "cache size greater than 10000 may cause performance issues, \
-                         and is unlikely to be useful"
-                    );
-                }
-            } else {
-                info!("DNS cache disabled");
+        if config.dns.cache_size > 0 {
+            info!("DNS cache size: {} entries", config.dns.cache_size);
+            if config.dns.cache_size > 10000 {
+                warn!(
+                    "cache size greater than 10000 may cause performance issues, \
+                     and is unlikely to be useful"
+                );
             }
+        } else {
+            info!("DNS cache disabled");
         }
     }
 
     // Log upstream servers
-    if !config.upstream_servers.is_empty() {
+    if !config.dns.upstream_servers.is_empty() {
         info!(
             "Upstream servers: {} configured",
-            config.upstream_servers.len()
+            config.dns.upstream_servers.len()
         );
-    } else if config.port.is_some() && config.port.unwrap() != 0 {
+    } else if config.dns.port != 0 {
         warn!("No upstream servers configured - DNS will not function");
     }
 
     // Log DHCP configuration
     #[cfg(feature = "dhcp")]
-    if config.enable_dhcp {
+    if !config.dhcp.dhcp_ranges.is_empty() {
         info!("DHCP service enabled");
-        if let Some(ref lease_file) = config.dhcp_lease_file {
-            info!("DHCP lease file: {}", lease_file);
-        }
+        info!("DHCP lease file: {}", config.dhcp.lease_file.display());
     }
 
     // Log DHCPv6 configuration
     #[cfg(feature = "dhcp6")]
-    if config.enable_dhcp6 {
+    if !config.dhcp.dhcp6_ranges.is_empty() {
         info!("DHCPv6 service enabled");
     }
 
     // Log Router Advertisement
     #[cfg(feature = "dhcp6")]
-    if config.enable_ra {
+    if config.options.contains(DaemonOptions::OPT_RA) {
         info!("IPv6 router advertisement enabled");
     }
 
     // Log TFTP configuration
     #[cfg(feature = "tftp")]
-    if config.enable_tftp {
+    if config.tftp.tftp_root.is_some() {
         info!("TFTP service enabled");
-        if let Some(ref tftp_root) = config.tftp_root {
-            info!("TFTP root directory: {}", tftp_root);
+        if let Some(ref tftp_root) = config.tftp.tftp_root {
+            info!("TFTP root directory: {}", tftp_root.display());
         }
     }
 
     // Log DNSSEC configuration
     #[cfg(feature = "dnssec")]
-    if config.enable_dnssec {
+    if config.options.contains(DaemonOptions::OPT_DNSSEC_PROXY) {
         info!("DNSSEC validation enabled");
     }
 
     // Log D-Bus configuration
     #[cfg(feature = "dbus")]
-    if config.enable_dbus {
+    if config.integration.dbus_enabled {
         info!("D-Bus support enabled");
     }
 
     // Log ubus configuration
     #[cfg(feature = "ubus")]
-    if config.enable_ubus {
+    if config.integration.ubus_enabled {
         info!("UBus support enabled");
     }
 
     // Log listen addresses
-    if !config.listen_addresses.is_empty() {
+    if !config.network.listen_addresses.is_empty() {
         info!(
             "Listening on {} address(es)",
-            config.listen_addresses.len()
+            config.network.listen_addresses.len()
         );
     }
 
     // Log interface binding
-    if let Some(ref interface) = config.interface {
-        info!("Bound to interface: {}", interface);
+    if !config.network.interfaces.is_empty() {
+        info!("Bound to {} interface(s)", config.network.interfaces.len());
     }
 }
 
