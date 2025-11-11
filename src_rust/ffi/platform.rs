@@ -1161,7 +1161,7 @@ pub mod nftables {
 ///
 /// All ubus context and `blob_buf` lifecycle managed via RAII. String
 /// conversions validated before passing to C.
-#[cfg(all(target_os = "linux", feature = "ubus"))]
+#[cfg(all(target_os = "linux", feature = "ubus", ubus_libraries_available))]
 pub mod ubus {
     use super::{IoResult, IoError, ErrorKind};
     use std::ffi::{CString, CStr};
@@ -1716,7 +1716,7 @@ pub use conntrack::*;
 #[cfg(all(target_os = "linux", feature = "nftset"))]
 pub use nftables::*;
 
-#[cfg(all(target_os = "linux", feature = "ubus"))]
+#[cfg(all(target_os = "linux", feature = "ubus", ubus_libraries_available))]
 pub use ubus::*;
 
 #[cfg(target_os = "solaris")]

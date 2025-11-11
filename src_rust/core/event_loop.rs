@@ -140,7 +140,7 @@ use crate::services::tftp::TftpServer;
 #[cfg(feature = "dbus")]
 use crate::integration::dbus::DbusInterface;
 
-#[cfg(feature = "ubus")]
+#[cfg(all(feature = "ubus", ubus_libraries_available))]
 use crate::integration::ubus::UbusManager;
 
 use crate::network::sockets::create_bound_listeners;
@@ -684,7 +684,7 @@ impl EventLoop {
         }
 
         // Spawn ubus interface task (if feature enabled)
-        #[cfg(feature = "ubus")]
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         {
             let logger_clone = self.logger.clone();
             

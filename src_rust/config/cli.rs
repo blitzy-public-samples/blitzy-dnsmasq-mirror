@@ -1821,14 +1821,12 @@ fn apply_cli_to_config(config: &mut Config, args: &CliArgs) -> Result<(), CliErr
     // Integration configuration
     #[cfg(feature = "dbus")]
     {
-        if args.enable_dbus.is_some() {
-            config.integration.enable_dbus = true;
-        }
+        config.integration.dbus_name = args.enable_dbus.clone();
     }
 
     #[cfg(feature = "conntrack")]
     {
-        config.integration.conntrack = args.conntrack;
+        config.integration.conntrack_enabled = args.conntrack;
     }
 
     Ok(())

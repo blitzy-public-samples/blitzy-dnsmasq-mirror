@@ -49,6 +49,13 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    // Tell Cargo about custom cfg values we emit
+    println!("cargo::rustc-check-cfg=cfg(ubus_libraries_available)");
+    println!("cargo::rustc-check-cfg=cfg(platform_linux)");
+    println!("cargo::rustc-check-cfg=cfg(platform_bsd)");
+    println!("cargo::rustc-check-cfg=cfg(platform_macos)");
+    println!("cargo::rustc-check-cfg=cfg(platform_solaris)");
+    
     // Rebuild if build.rs changes
     println!("cargo:rerun-if-changed=build.rs");
     
@@ -147,7 +154,7 @@ fn detect_optional_libraries() {
     // nftables integration (requires ≥0.9)
     detect_library(
         "libnftables",
-        "nftables",
+        "nftset",
         "nftables integration for packet filtering",
         Some("0.9.0"),
     );
@@ -296,9 +303,13 @@ fn detect_ubus_libraries() {
     if ubus_available && ubox_available {
         println!("cargo:rustc-link-lib=dylib=ubus");
         println!("cargo:rustc-link-lib=dylib=ubox");
+        println!("cargo:rustc-cfg=ubus_libraries_available");
         println!("cargo:warning=✓ OpenWrt ubus integration enabled");
     } else {
-        panic!("ubus feature enabled but libraries not found. Install libubus and libubox, or disable the 'ubus' feature.");
+        println!("cargo:warning=✗ ubus feature enabled but libraries not found");
+        println!("cargo:warning=  This is expected on non-OpenWrt systems");
+        println!("cargo:warning=  ubus integration will be disabled at compile time");
+        // Don't panic - just warn. Source code will check for ubus_libraries_available cfg.
     }
 }
 

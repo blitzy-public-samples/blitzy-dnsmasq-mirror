@@ -249,7 +249,7 @@ pub use platform::netlink;
 /// `OpenWrt` ubus IPC interface (Linux only, optional feature)
 ///
 /// Provides microbus IPC for embedded `OpenWrt` systems.
-#[cfg(all(target_os = "linux", feature = "ubus"))]
+#[cfg(all(target_os = "linux", feature = "ubus", ubus_libraries_available))]
 pub use platform::ubus;
 
 /// Linux connection tracking integration (Linux only, optional feature)

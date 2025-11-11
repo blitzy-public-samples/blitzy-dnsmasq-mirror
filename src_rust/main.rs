@@ -709,13 +709,13 @@ fn log_startup_info(config: &Config) {
 
     // Log D-Bus configuration
     #[cfg(feature = "dbus")]
-    if config.integration.dbus_enabled {
+    if config.integration.dbus_name.is_some() {
         info!("D-Bus support enabled");
     }
 
     // Log ubus configuration
-    #[cfg(feature = "ubus")]
-    if config.integration.ubus_enabled {
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
+    if config.integration.ubus_name.is_some() {
         info!("UBus support enabled");
     }
 

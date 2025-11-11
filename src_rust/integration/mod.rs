@@ -114,10 +114,14 @@ pub mod dbus;
 /// Provides methods for external control via OpenWrt's micro-bus IPC system.
 /// This replaces the C implementation in ubus.c and uses FFI to libubus.
 ///
-/// **Enabled by**: `ubus` feature flag
+/// **Enabled by**: `ubus` feature flag AND ubus_libraries_available cfg
 /// **Platforms**: Linux (OpenWrt specifically)
 /// **C Equivalent**: `HAVE_UBUS` macro, ubus.c
-#[cfg(feature = "ubus")]
+///
+/// **Note**: This module requires both the feature flag and the actual libubus/libubox
+/// libraries to be available. On non-OpenWrt systems, the feature may be enabled but
+/// the module won't compile if the libraries aren't found.
+#[cfg(all(feature = "ubus", ubus_libraries_available))]
 pub mod ubus;
 
 /// Linux connection tracking integration
@@ -195,7 +199,7 @@ pub mod inotify;
 #[cfg(feature = "dbus")]
 pub use dbus::{DbusInterface, DbusError};
 
-#[cfg(feature = "ubus")]
+#[cfg(all(feature = "ubus", ubus_libraries_available))]
 pub use ubus::{UbusManager, UbusError};
 
 #[cfg(all(feature = "conntrack", target_os = "linux"))]
@@ -272,7 +276,7 @@ pub struct IntegrationManager {
     dbus_connection: Option<zbus::Connection>,
 
     /// `OpenWrt` ubus control interface handle (if feature enabled and initialized)
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     ubus_manager: Option<UbusManager>,
 
     /// Linux conntrack integration handle (if feature enabled and initialized)
@@ -421,7 +425,7 @@ impl IntegrationManager {
     ///
     /// `true` if the `ubus` feature is enabled and ubus was successfully initialized,
     /// `false` otherwise.
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     #[must_use] 
     pub fn has_ubus(&self) -> bool {
         self.ubus_manager.is_some()
@@ -572,7 +576,7 @@ impl IntegrationManager {
     /// # Returns
     ///
     /// `Some(&UbusManager)` if ubus is available and initialized, `None` otherwise.
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     #[must_use] 
     pub fn ubus(&self) -> Option<&UbusManager> {
         self.ubus_manager.as_ref()
@@ -647,7 +651,7 @@ impl Debug for IntegrationManager {
         #[cfg(feature = "dbus")]
         debug_struct.field("dbus", &self.has_dbus());
 
-        #[cfg(feature = "ubus")]
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         debug_struct.field("ubus", &self.has_ubus());
 
         #[cfg(all(feature = "conntrack", target_os = "linux"))]
@@ -713,7 +717,7 @@ pub struct IntegrationManagerBuilder {
     enable_dbus: bool,
 
     /// Whether to enable ubus integration (if feature enabled)
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     enable_ubus: bool,
 
     /// Whether to enable conntrack integration (if feature enabled)
@@ -748,11 +752,11 @@ pub struct IntegrationManagerBuilder {
     metrics: Option<Arc<crate::monitoring::metrics::MetricsCollector>>,
 
     /// Logger for integrations that need logging
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     logger: Option<Arc<crate::logging::logger::Logger>>,
 
     /// ubus object name to register
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     ubus_object_name: Option<String>,
 }
 
@@ -804,7 +808,7 @@ impl IntegrationManagerBuilder {
     /// # Returns
     ///
     /// Self for method chaining.
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     #[must_use] 
     pub fn with_ubus(mut self, enable: bool) -> Self {
         self.enable_ubus = enable;
@@ -981,7 +985,7 @@ impl IntegrationManagerBuilder {
     /// # Returns
     ///
     /// Self for method chaining.
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     #[must_use]
     pub fn with_logger(mut self, logger: Arc<crate::logging::logger::Logger>) -> Self {
         self.logger = Some(logger);
@@ -1004,7 +1008,7 @@ impl IntegrationManagerBuilder {
     /// # Returns
     ///
     /// Self for method chaining.
-    #[cfg(feature = "ubus")]
+    #[cfg(all(feature = "ubus", ubus_libraries_available))]
     #[must_use]
     pub fn with_ubus_object_name(mut self, name: impl Into<String>) -> Self {
         self.ubus_object_name = Some(name.into());
@@ -1063,7 +1067,7 @@ impl IntegrationManagerBuilder {
         }
 
         // Initialize ubus if enabled
-        #[cfg(feature = "ubus")]
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         if self.enable_ubus {
             // Check that required dependencies are provided
             if let (Some(metrics), Some(logger), Some(object_name)) = 
@@ -1165,7 +1169,7 @@ impl Debug for IntegrationManagerBuilder {
         #[cfg(feature = "dbus")]
         debug_struct.field("enable_dbus", &self.enable_dbus);
 
-        #[cfg(feature = "ubus")]
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         debug_struct.field("enable_ubus", &self.enable_ubus);
 
         #[cfg(all(feature = "conntrack", target_os = "linux"))]
@@ -1209,6 +1213,7 @@ mod tests {
         let manager = IntegrationManager::new();
         // All integrations should be disabled by default
         assert!(!manager.has_dbus());
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         assert!(!manager.has_ubus());
         assert!(!manager.has_conntrack());
         assert!(!manager.has_ipset());
@@ -1224,6 +1229,7 @@ mod tests {
 
         // All integrations should be disabled with default builder
         assert!(!manager.has_dbus());
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         assert!(!manager.has_ubus());
         assert!(!manager.has_conntrack());
         assert!(!manager.has_ipset());
@@ -1241,9 +1247,19 @@ mod tests {
 
     #[test]
     fn test_builder_method_chaining() {
+        #[cfg(all(feature = "ubus", ubus_libraries_available))]
         let _builder = IntegrationManagerBuilder::new()
             .with_dbus(true)
             .with_ubus(true)
+            .with_conntrack(true)
+            .with_ipset(true)
+            .with_nftset(true)
+            .with_pf_tables(true)
+            .with_inotify(true);
+        
+        #[cfg(not(all(feature = "ubus", ubus_libraries_available)))]
+        let _builder = IntegrationManagerBuilder::new()
+            .with_dbus(true)
             .with_conntrack(true)
             .with_ipset(true)
             .with_nftset(true)
