@@ -173,10 +173,11 @@ impl From<clap::Error> for CliError {
 /// - has_arg=0 (no_argument) → bool with SetTrue action
 /// - has_arg=1 (required_argument) → T or Vec<T> with Set/Append action
 /// - has_arg=2 (optional_argument) → Option<T> with Set action
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser, Debug, Clone, Default)]
 #[command(name = "dnsmasq")]
 #[command(author = "Simon Kelley <simon@thekelleys.org.uk>")]
-#[command(version)]
+#[command(disable_version_flag = true)]
+#[command(disable_help_flag = true)]
 #[command(about = "A lightweight DHCP and caching DNS server")]
 #[command(long_about = "dnsmasq provides network infrastructure for small networks:\nDNS, DHCP, router advertisement and network boot.")]
 #[allow(clippy::struct_excessive_bools)]
@@ -1688,16 +1689,20 @@ fn validate_cli_args(args: &CliArgs) -> Result<(), CliError> {
 ///
 /// Returns CliError::InvalidArgument if argument values are malformed or invalid.
 fn apply_cli_to_config(config: &mut Config, args: &CliArgs) -> Result<(), CliError> {
-    // Core flags
-    config.process.no_daemon = args.no_daemon || args.keep_in_foreground;
-    config.process.debug = args.debug;
+    // Core flags - daemonize is inverted from no_daemon
+    config.process.daemonize = !(args.no_daemon || args.keep_in_foreground);
+    
+    // Debug flag is stored in DaemonOptions bitflags
+    if args.debug {
+        config.options.insert(super::types::DaemonOptions::OPT_DEBUG);
+    }
 
     // DNS configuration
     config.dns.port = args.port;
     config.dns.cache_size = args.cache_size;
     
     if let Some(query_port) = args.query_port {
-        config.dns.query_port = query_port;
+        config.dns.query_port = Some(query_port);
     }
 
     if args.no_resolv {
@@ -1706,9 +1711,18 @@ fn apply_cli_to_config(config: &mut Config, args: &CliArgs) -> Result<(), CliErr
         config.dns.resolv_file = Some(resolv_file.clone());
     }
 
-    config.dns.no_poll = args.no_poll;
-    config.dns.strict_order = args.strict_order;
-    config.dns.all_servers = args.all_servers;
+    // These options are stored as bitflags in DaemonOptions
+    if args.no_poll {
+        config.options.insert(super::types::DaemonOptions::OPT_NO_POLL);
+    }
+    
+    if args.strict_order {
+        config.options.insert(super::types::DaemonOptions::OPT_ORDER);
+    }
+    
+    if args.all_servers {
+        config.options.insert(super::types::DaemonOptions::OPT_ALL_SERVERS);
+    }
     
     if args.no_hosts {
         config.options.insert(super::types::DaemonOptions::OPT_NO_HOSTS);
@@ -1726,7 +1740,7 @@ fn apply_cli_to_config(config: &mut Config, args: &CliArgs) -> Result<(), CliErr
     for interface in &args.interfaces {
         config.network.interfaces.push(super::types::InterfaceName {
             name: interface.clone(),
-            is_wildcard: false,
+            addr: None,
         });
     }
 
@@ -1749,7 +1763,7 @@ fn apply_cli_to_config(config: &mut Config, args: &CliArgs) -> Result<(), CliErr
 
     // TTL configuration
     if let Some(local_ttl) = args.local_ttl {
-        config.dns.local_ttl = local_ttl;
+        config.dns.local_ttl = u64::from(local_ttl);
     }
 
     if args.no_negcache {
@@ -1782,14 +1796,17 @@ fn apply_cli_to_config(config: &mut Config, args: &CliArgs) -> Result<(), CliErr
         config.dhcp.authoritative = args.dhcp_authoritative;
         
         if let Some(ref leasefile) = args.dhcp_leasefile {
-            config.dhcp.lease_file = Some(leasefile.clone());
+            config.dhcp.lease_file = leasefile.clone();
         }
 
         if let Some(lease_max) = args.dhcp_lease_max {
             config.dhcp.lease_max = lease_max;
         }
 
-        config.dhcp.no_ping = args.no_ping;
+        // no_ping is stored as a bitflag in DaemonOptions
+        if args.no_ping {
+            config.options.insert(super::types::DaemonOptions::OPT_NO_PING);
+        }
     }
 
     // DNSSEC configuration
